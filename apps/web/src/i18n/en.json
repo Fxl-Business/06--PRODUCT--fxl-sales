@@ -5,7 +5,50 @@
   "nav": {
     "home": "Home",
     "items": "Items",
-    "config": "Settings"
+    "config": "Settings",
+    "finders": "Finders",
+    "sellers": "Sellers",
+    "links": "My Links",
+    "commissions": "Commissions",
+    "payouts": "Payouts",
+    "deals": "My Deals"
+  },
+  "errors": {
+    "noRole": {
+      "title": "Access not authorized",
+      "body": "Your account does not have a profile assigned on the FXL Finders platform yet. Please contact the administrator.",
+      "signOut": "Sign out"
+    }
+  },
+  "finder": {
+    "dashboard": {
+      "title": "Dashboard",
+      "kpi": {
+        "activeLinks": "Active links",
+        "pendingCommissions": "Pending commissions",
+        "nextPayout": "Next payout"
+      },
+      "banner": "Full dashboard coming soon. Your portal is being configured."
+    },
+    "links": {
+      "comingSoon": "My Links",
+      "comingSoonDesc": "Link generation available in the next phase."
+    },
+    "commissions": {
+      "comingSoon": "Commissions",
+      "comingSoonDesc": "Commission history coming soon."
+    },
+    "payouts": {
+      "comingSoon": "Payouts",
+      "comingSoonDesc": "Payout history coming soon."
+    }
+  },
+  "seller": {
+    "deals": {
+      "title": "My Deals",
+      "comingSoon": "Dashboard coming soon",
+      "comingSoonDesc": "Commission and conversion views will be available in the next phase."
+    }
   },
   "auth": {
     "signIn": "Sign in",
@@ -30,8 +73,43 @@
       "apps": "Apps",
       "products": "Products",
       "finders": "Finders",
+      "sellers": "Sellers",
       "payouts": "Payouts",
       "audit": "Audit"
+    },
+    "finders": {
+      "title": "Finders",
+      "tabs": { "pending": "Pending", "approved": "Approved", "suspended": "Suspended" },
+      "columns": {
+        "name": "Name",
+        "email": "Email",
+        "cpf": "CPF",
+        "pixKey": "PIX key",
+        "createdAt": "Signed up",
+        "status": "Status"
+      },
+      "fields": {
+        "phone": "Phone",
+        "pixKeyType": "PIX key type",
+        "orgId": "Organization (Clerk)",
+        "approvedBy": "Approved by"
+      },
+      "actions": { "view": "View detail", "approve": "Approve", "suspend": "Suspend" },
+      "approveConfirm": "On approval, an invitation email will be sent to the finder.",
+      "suspendLabel": "Suspension reason",
+      "empty": "No finders found",
+      "lgpd": {
+        "essential": "Essential consent",
+        "marketing": "Marketing consent",
+        "version": "LGPD version",
+        "consentedAt": "Consented at"
+      }
+    },
+    "sellers": {
+      "title": "Sellers",
+      "invite": "Invite seller",
+      "fields": { "name": "Name", "email": "Email" },
+      "empty": "No sellers yet"
     },
     "status": {
       "active": "Active",

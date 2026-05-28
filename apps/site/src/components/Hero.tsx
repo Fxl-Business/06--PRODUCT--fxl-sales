@@ -1,9 +1,10 @@
 import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
+import { getT } from '@/i18n';
 import { Button } from './Button';
 
 export function Hero() {
-  const webUrl = process.env.NEXT_PUBLIC_WEB_URL ?? 'http://localhost:5173';
+  const t = getT();
 
   return (
     <section className="relative overflow-hidden border-b">
@@ -11,23 +12,20 @@ export function Hero() {
         <div className="max-w-3xl">
           <span className="inline-flex items-center gap-2 rounded-full border bg-muted px-3 py-1 text-xs font-medium text-muted-foreground">
             <span className="size-1.5 rounded-full bg-primary" />
-            Plataforma FXL
+            {t.hero.badge}
           </span>
           <h1 className="mt-6 text-4xl font-semibold tracking-tight sm:text-6xl">
-            Fxl Finders
+            {t.hero.headline}
           </h1>
-          <p className="mt-6 max-w-xl text-lg text-muted-foreground">
-            Substitua este texto pela proposta de valor do projeto. A landing
-            chega pré-montada com hero, features e timeline — basta editar.
-          </p>
+          <p className="mt-6 max-w-xl text-lg text-muted-foreground">{t.hero.body}</p>
           <div className="mt-10 flex flex-wrap gap-4">
             <Button asChild size="lg">
-              <Link href={webUrl}>
-                Acessar dashboard <ArrowRight className="size-4" />
+              <Link href="/signup">
+                {t.hero.cta} <ArrowRight className="size-4" />
               </Link>
             </Button>
             <Button asChild size="lg" variant="outline">
-              <Link href="#features">Ver recursos</Link>
+              <Link href="#howItWorks">{t.hero.secondary}</Link>
             </Button>
           </div>
         </div>

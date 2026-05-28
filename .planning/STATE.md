@@ -1,7 +1,7 @@
 # State
 
 **Active milestone:** v1.0 — FXL Finders MVP (started 2026-05-28)
-**Active phase:** Phase 02 ✅ EXECUTED + verified + reviewed (2026-05-28). Phase 03 unblocked; Phase 04 unblocked (apps/products/price_bands admin now exists).
+**Active phase:** Phase 03 ✅ EXECUTED + verified + reviewed (2026-05-28). Phase 04 unblocked (finder portal shell + approved-finder users + admin approval queue now exist).
 **Workflow:** /nexo:add-feature with /nexo:autopilot active (single human gate at Phase 0 spec approval was skipped per autopilot rule 4 — choices logged inline in spec § 2)
 **Token tier:** Tier 2 (6 phases)
 
@@ -23,6 +23,16 @@
 - Gates: `pnpm -r type-check` 0 (5/5) · api lint 0 · web lint 0 (6 pre-existing react-refresh warns) · api unit 21/21 · perf:audit ok. All 6 LOCKED grep gates pass (0 real matches). Live integration smoke vs Postgres:5006 (createApp/rotate/upsert/audit/JOIN) green.
 - verify-work → 02-UAT.md = PASS. code-review → 02-REVIEW.md = PASS (1 Critical found+fixed: list/get/create leaked `webhook_signing_secret` + `secret_key_hash` → added `PublicAppRow`/`toPublicApp` projection; verified no leak).
 - Deviations: UI-SPEC produced inline (autopilot, no pause); no toast lib (dialog-close + invalidation + inline "Saved!"); refactored 3 dialogs to keyed-remount (no reset effect) for `react-hooks/set-state-in-effect`; fixed pre-existing apps/web eslint missing devDeps (`@eslint/js`, `typescript-eslint`).
+
+## Phase 03 — Finder onboarding + portal shell (2026-05-28)
+
+- Executed all 14 tasks (T01–T14). Backend: public signup route (`POST /api/v1/finders/signup`, unauthenticated in server.ts, getAdminDb BYPASSRLS, honeypot decision in handler) + admin finders service (list/detail/approve/suspend, getAdminDb, idempotent approve via SELECT…FOR UPDATE, state-guarded suspend, audit_log on every mutation) + admin sellers service (create+invite). All mounted under the Phase-01 `clerkAuthMiddleware`+`requireAdmin` admin group (D-B/C/H/I). LGPD migration (0001) adds 4 consent cols to finders; migrations 0001/0002 drop NOT NULL on `finders.clerk_user_id`/`clerk_org_id`/`sellers.clerk_user_id` (fixes a unique-collision bug — see deviation 1).
+- apps/site: inline getT()+pt-BR JSON i18n (no next-intl), `/signup` (Server Action + useActionState + honeypot + client schema with z.boolean().refine), LGPD legal pages (/legal/privacy 9 sections, /legal/terms 8 sections), landing copy refreshed to FXL Finders. `pnpm build` → 5 routes static.
+- apps/web: RoleGuard + RoleRouter (publicMetadata.role → admin/finder/seller/no-role), AdminFindersPage (status tabs + masked-CPF table) + AdminFinderDetailPage (approve/suspend, LGPD section, RawId font-mono fallback) + AdminSellersPage (list + invite dialog), FinderShell/SellerShell + placeholder pages, NoRolePage. All calls via apiFetch + Clerk getToken() (D-J); approve/suspend invalidate ['admin','finders'] AND […,id]. New i18n keys merged into BOTH pt-BR.json + en.json.
+- TDD: `finder-state-machine.test.ts` (7 tests — pending→approved happy, reject-non-pending, double-approve idempotency, invite-fail retry-safe, suspend guard ×3; clerkClient mocked, live admin DB). `keys-resolve.test.ts` (8 tests — pt-BR/en key-set equality + sampled non-raw resolution).
+- Gates: `pnpm -r type-check` 5/5 · api lint 0 · web lint 0 (14 pre-existing-style react-refresh warns) · site lint 0 · api unit 28/28 · web unit 8/8 · apps/site build 5 routes · perf:audit ok. All LOCKED grep gates clean (db/index 0, setTenantContext real-calls 0, clerkClient-from-@clerk/backend 0, apiClient.get/params 0, findersPublicRouter-in-index.ts 0, z.string().max(0) 0). Live smoke vs Postgres:5006: signup 201 / honeypot silent-201-no-insert / lgpd-false 400 / admin-no-auth 401.
+- verify-work → 03-UAT.md = PASS (26/26). code-review → 03-REVIEW.md = PASS (0 Critical / 0 Warning / 3 Info). Two would-be-Critical bugs caught + fixed during TDD: (a) unique-collision on '' Clerk-ID placeholders → columns made nullable, insert null; (b) plan-A3 getDb() signup insert rejected by FORCE RLS → switched to getAdminDb() per brief KEY reminder.
+- Deviations: clerk_user_id/clerk_org_id nullable (dev. 1); signup/approval writes via getAdminDb not getDb (dev. 2, brief overrides A3); audit_log prev_hash/entry_hash='' placeholders pending Phase 05 hash-chain (dev. 3); apps/web gained a separate `vitest.config.ts` (vitest/config vite-version skew vs build vite@5) + zod added to apps/site; removed pre-existing dup `typescript-eslint` key in web package.json.
 
 ## Phase 2.5 — Adversarial pre-execution plan review (2026-05-28)
 

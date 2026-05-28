@@ -95,3 +95,54 @@ export interface UpsertCommissionRuleBody {
   recurringMonths: number;
   basis: CommissionBasis;
 }
+
+// ─── Phase 03: finders + sellers ────────────────────────────────────────────
+
+export type FinderStatus = 'pending' | 'approved' | 'suspended';
+
+export interface FinderRow {
+  id: string;
+  orgId: string;
+  clerkUserId: string | null;
+  clerkOrgId: string | null;
+  status: FinderStatus;
+  displayName: string;
+  contactEmail: string;
+  cpfMasked: string | null;
+  phone: string | null;
+  pixKey: string | null;
+  pixKeyType: string | null;
+  payoutAddress: unknown;
+  lgpdConsentEssential: boolean;
+  lgpdConsentMarketing: boolean;
+  lgpdConsentVersion: string;
+  lgpdConsentedAt: string | null;
+  approvedAt: string | null;
+  approvedByUserId: string | null;
+  suspendedAt: string | null;
+  suspendedReason: string | null;
+  createdAt: string;
+  updatedAt: string | null;
+}
+
+export interface FinderListResponse {
+  items: FinderRow[];
+  nextCursor: string | null;
+}
+
+export type SellerStatus = 'active' | 'inactive';
+
+export interface SellerRow {
+  id: string;
+  clerkUserId: string | null;
+  displayName: string;
+  contactEmail: string;
+  status: SellerStatus;
+  createdAt: string;
+  updatedAt: string | null;
+}
+
+export interface CreateSellerBody {
+  displayName: string;
+  contactEmail: string;
+}

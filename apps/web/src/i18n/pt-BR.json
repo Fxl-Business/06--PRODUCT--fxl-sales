@@ -5,7 +5,50 @@
   "nav": {
     "home": "Início",
     "items": "Itens",
-    "config": "Configurações"
+    "config": "Configurações",
+    "finders": "Finders",
+    "sellers": "Vendedores",
+    "links": "Meus Links",
+    "commissions": "Comissões",
+    "payouts": "Pagamentos",
+    "deals": "Minhas Vendas"
+  },
+  "errors": {
+    "noRole": {
+      "title": "Acesso não autorizado",
+      "body": "Sua conta ainda não tem um perfil associado na plataforma FXL Finders. Entre em contato com o administrador.",
+      "signOut": "Sair"
+    }
+  },
+  "finder": {
+    "dashboard": {
+      "title": "Dashboard",
+      "kpi": {
+        "activeLinks": "Links ativos",
+        "pendingCommissions": "Comissões pendentes",
+        "nextPayout": "Próximo pagamento"
+      },
+      "banner": "Dashboard completo disponível em breve. Seu portal está sendo configurado."
+    },
+    "links": {
+      "comingSoon": "Meus Links",
+      "comingSoonDesc": "Geração de links disponível na próxima fase."
+    },
+    "commissions": {
+      "comingSoon": "Comissões",
+      "comingSoonDesc": "Histórico de comissões disponível em breve."
+    },
+    "payouts": {
+      "comingSoon": "Pagamentos",
+      "comingSoonDesc": "Histórico de pagamentos disponível em breve."
+    }
+  },
+  "seller": {
+    "deals": {
+      "title": "Minhas Vendas",
+      "comingSoon": "Painel disponível em breve",
+      "comingSoonDesc": "Visualização de comissões e conversões será disponibilizada na próxima fase."
+    }
   },
   "auth": {
     "signIn": "Entrar",
@@ -30,8 +73,43 @@
       "apps": "Apps",
       "products": "Produtos",
       "finders": "Finders",
+      "sellers": "Vendedores",
       "payouts": "Pagamentos",
       "audit": "Auditoria"
+    },
+    "finders": {
+      "title": "Finders",
+      "tabs": { "pending": "Pendentes", "approved": "Aprovados", "suspended": "Suspensos" },
+      "columns": {
+        "name": "Nome",
+        "email": "E-mail",
+        "cpf": "CPF",
+        "pixKey": "Chave PIX",
+        "createdAt": "Cadastro",
+        "status": "Status"
+      },
+      "fields": {
+        "phone": "Telefone",
+        "pixKeyType": "Tipo de chave PIX",
+        "orgId": "Organização (Clerk)",
+        "approvedBy": "Aprovado por"
+      },
+      "actions": { "view": "Ver detalhe", "approve": "Aprovar", "suspend": "Suspender" },
+      "approveConfirm": "Ao aprovar, um e-mail de convite será enviado para o finder.",
+      "suspendLabel": "Motivo da suspensão",
+      "empty": "Nenhum finder encontrado",
+      "lgpd": {
+        "essential": "Consentimento essencial",
+        "marketing": "Consentimento marketing",
+        "version": "Versão LGPD",
+        "consentedAt": "Consentiu em"
+      }
+    },
+    "sellers": {
+      "title": "Vendedores",
+      "invite": "Convidar vendedor",
+      "fields": { "name": "Nome", "email": "E-mail" },
+      "empty": "Nenhum vendedor cadastrado"
     },
     "status": {
       "active": "Ativo",

@@ -1,0 +1,110 @@
+{
+  "app": {
+    "name": "FXL Finders",
+    "tagline": "Indique, venda, receba."
+  },
+  "nav": {
+    "signup": "Quero ser Finder",
+    "login": "Entrar",
+    "privacy": "Privacidade",
+    "terms": "Termos de Uso"
+  },
+  "signup": {
+    "title": "Cadastre-se como Finder",
+    "subtitle": "Preencha os dados abaixo. Nossa equipe revisará sua solicitação em até 48 horas.",
+    "fields": {
+      "displayName": "Nome completo",
+      "contactEmail": "E-mail",
+      "cpf": "CPF",
+      "phone": "Telefone",
+      "pixKey": "Chave PIX",
+      "pixKeyType": "Tipo de chave PIX",
+      "payoutAddress": "Endereço de cobrança"
+    },
+    "placeholders": {
+      "displayName": "Maria da Silva",
+      "contactEmail": "maria@exemplo.com.br",
+      "cpf": "Somente números (11 dígitos)",
+      "phone": "(11) 91234-5678",
+      "pixKey": "Sua chave PIX",
+      "pixKeyTypeSelect": "Selecione o tipo"
+    },
+    "optional": "(opcional)",
+    "pixKeyTypes": {
+      "cpf": "CPF",
+      "email": "E-mail",
+      "phone": "Telefone",
+      "random": "Chave aleatória"
+    },
+    "lgpd": {
+      "essential": "Concordo com o tratamento dos meus dados pessoais para execução dos serviços da plataforma FXL Finders (obrigatório).",
+      "marketing": "Aceito receber comunicações sobre novas oportunidades e atualizações da plataforma (opcional).",
+      "version": "v1.0",
+      "readMore": "Leia nossa Política de Privacidade"
+    },
+    "submit": "Enviar cadastro",
+    "submitting": "Enviando...",
+    "success": {
+      "title": "Cadastro recebido!",
+      "body": "Você receberá um e-mail em breve com as próximas etapas."
+    },
+    "errors": {
+      "required": "Campo obrigatório",
+      "invalidEmail": "E-mail inválido",
+      "invalidCpf": "CPF deve ter 11 dígitos",
+      "lgpdRequired": "Você precisa aceitar os termos essenciais para continuar",
+      "generic": "Ocorreu um erro. Tente novamente."
+    }
+  },
+  "legal": {
+    "privacy": {
+      "title": "Política de Privacidade",
+      "lastUpdated": "Atualizado em: maio de 2026"
+    },
+    "terms": {
+      "title": "Termos de Uso",
+      "lastUpdated": "Atualizado em: maio de 2026"
+    },
+    "back": "← Voltar"
+  },
+  "hero": {
+    "badge": "Plataforma de Afiliados B2B",
+    "headline": "Indique o melhor software do mercado e ganhe comissões recorrentes.",
+    "body": "FXL Finders é a plataforma que conecta indicadores (Finders) às soluções FXL. Gere seu link personalizado, acompanhe cliques e conversões, e receba sua comissão automaticamente.",
+    "cta": "Quero ser Finder",
+    "secondary": "Ver como funciona"
+  },
+  "features": {
+    "title": "Por que ser um Finder?",
+    "items": [
+      {
+        "title": "Links rastreados",
+        "body": "Gere links exclusivos para cada produto. Acompanhe cliques e conversões em tempo real."
+      },
+      {
+        "title": "Comissões transparentes",
+        "body": "Saiba exatamente quanto você vai receber antes mesmo de fechar a venda. Bandas de preço públicas."
+      },
+      {
+        "title": "Pagamento via PIX",
+        "body": "Comissões pagas diretamente na sua chave PIX após o período de garantia."
+      }
+    ]
+  },
+  "howItWorks": {
+    "title": "Como funciona",
+    "steps": [
+      { "title": "Cadastre-se", "body": "Preencha o formulário e aguarde aprovação em até 48 horas." },
+      { "title": "Gere seu link", "body": "No painel, crie links rastreados para os produtos FXL." },
+      { "title": "Compartilhe", "body": "Envie o link para potenciais clientes por qualquer canal." },
+      { "title": "Receba", "body": "Quando o cliente paga, sua comissão é registrada automaticamente." }
+    ]
+  },
+  "footer": {
+    "copy": "© 2026 FXL Finders. Todos os direitos reservados.",
+    "links": {
+      "privacy": "Privacidade",
+      "terms": "Termos"
+    }
+  }
+}

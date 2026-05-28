@@ -44,8 +44,13 @@ export const finders = pgTable(
   {
     id: uuid('id').primaryKey().defaultRandom(),
     orgId: text('org_id').notNull(), // finder's Clerk org_id ('' placeholder pre-approval — NOT NULL satisfied by empty string)
-    clerkUserId: text('clerk_user_id').notNull().unique(),
-    clerkOrgId: text('clerk_org_id').notNull().unique(),
+    // Phase 03: clerk_user_id / clerk_org_id are NULLABLE pre-approval. A finder
+    // has no Clerk account/org at public signup; they are backfilled at approval.
+    // They stay UNIQUE — Postgres allows multiple NULLs in a unique index, so many
+    // pending finders coexist. Inserting '' (the original plan) would violate the
+    // unique constraint on the 2nd pending signup — hence NULL, not ''.
+    clerkUserId: text('clerk_user_id').unique(),
+    clerkOrgId: text('clerk_org_id').unique(),
     status: text('status').notNull(), // 'pending' | 'approved' | 'suspended'
     displayName: text('display_name').notNull(),
     contactEmail: text('contact_email').notNull(),
@@ -54,6 +59,11 @@ export const finders = pgTable(
     pixKey: text('pix_key'),
     pixKeyType: text('pix_key_type'), // 'cpf' | 'email' | 'phone' | 'random'
     payoutAddress: jsonb('payout_address'),
+    // LGPD consent (Phase 03 T01, autopilot A2). version-stamped, granular.
+    lgpdConsentEssential: boolean('lgpd_consent_essential').notNull().default(false),
+    lgpdConsentMarketing: boolean('lgpd_consent_marketing').notNull().default(false),
+    lgpdConsentVersion: text('lgpd_consent_version').notNull().default(''),
+    lgpdConsentedAt: timestamp('lgpd_consented_at', { withTimezone: true }),
     approvedAt: timestamp('approved_at', { withTimezone: true }),
     approvedByUserId: text('approved_by_user_id'), // admin Clerk user_id
     suspendedAt: timestamp('suspended_at', { withTimezone: true }),
@@ -72,7 +82,11 @@ export const finders = pgTable(
 // ─────────────────────────────────────────────────────────────────────────────
 export const sellers = pgTable('sellers', {
   id: uuid('id').primaryKey().defaultRandom(),
-  clerkUserId: text('clerk_user_id').notNull().unique(),
+  // Phase 03: NULLABLE until the Clerk user.created webhook backfills it
+  // (Phase 05). Stays UNIQUE — many invited-but-not-accepted sellers coexist as
+  // NULL (Postgres allows multiple NULLs in a unique index). '' would collide on
+  // the 2nd unaccepted seller.
+  clerkUserId: text('clerk_user_id').unique(),
   displayName: text('display_name').notNull(),
   contactEmail: text('contact_email').notNull(),
   status: text('status').notNull(), // 'active' | 'inactive'

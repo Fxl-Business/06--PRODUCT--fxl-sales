@@ -3,6 +3,8 @@ import { clerkAuthMiddleware } from '../../middleware/auth.js';
 import { requireAdmin } from '../../middleware/require-admin.js';
 import { adminAppsRouter } from './apps/routes.js';
 import { adminProductsRouter } from './products/routes.js';
+import { findersAdminRouter } from '../finders/admin-routes.js';
+import { sellersAdminRouter } from '../sellers/admin-routes.js';
 
 /**
  * Admin router mount point (Phase 02, T02).
@@ -23,3 +25,7 @@ adminRouter.use('*', requireAdmin);
 
 adminRouter.route('/apps', adminAppsRouter);
 adminRouter.route('/products', adminProductsRouter);
+// Phase 03: finders approval queue + sellers admin. finders is FORCE RLS — the
+// service layer uses getAdminDb() (BYPASSRLS) for cross-tenant reads/writes (D-C).
+adminRouter.route('/finders', findersAdminRouter);
+adminRouter.route('/sellers', sellersAdminRouter);

@@ -1,22 +1,20 @@
+import Link from 'next/link';
+import { getT } from '@/i18n';
+
 export function Footer() {
+  const t = getT();
+
   return (
     <footer className="border-t">
       <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-6 py-12 sm:flex-row">
-        <p className="text-sm text-muted-foreground">
-          © {new Date().getFullYear()} Fxl Finders
-        </p>
+        <p className="text-sm text-muted-foreground">{t.footer.copy}</p>
         <nav className="flex gap-6 text-sm text-muted-foreground">
-          <a href="#features" className="hover:text-foreground">
-            Recursos
-          </a>
-          <a
-            href="https://fxlbusinessschool.com.br"
-            className="hover:text-foreground"
-            target="_blank"
-            rel="noreferrer"
-          >
-            FXL
-          </a>
+          <Link href="/legal/privacy" className="hover:text-foreground">
+            {t.footer.links.privacy}
+          </Link>
+          <Link href="/legal/terms" className="hover:text-foreground">
+            {t.footer.links.terms}
+          </Link>
         </nav>
       </div>
     </footer>

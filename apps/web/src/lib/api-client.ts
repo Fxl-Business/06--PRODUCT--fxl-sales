@@ -54,10 +54,16 @@ import type {
   CommissionRule,
   CreateAppBody,
   CreateProductBody,
+  CreateSellerBody,
+  FinderListResponse,
+  FinderRow,
+  FinderStatus,
   PriceBand,
   PriceBandComponent,
   ProductListRow,
   ProductRow,
+  SellerRow,
+  SellerStatus,
   UpdateAppBody,
   UpdateProductBody,
   UpsertCommissionRuleBody,
@@ -136,4 +142,43 @@ export const adminProductsApi = {
       `/api/v1/admin/products/${id}/commission-rule`,
       { method: 'PUT', token, body: JSON.stringify(data) },
     ),
+};
+
+// ─── Phase 03: finders + sellers (D-J — manual URLSearchParams, no `params`) ──
+
+export const adminFindersApi = {
+  list: (status: FinderStatus | undefined, token: string) => {
+    const qs = status ? `?${new URLSearchParams({ status }).toString()}` : '';
+    return apiFetch<FinderListResponse>(`/api/v1/admin/finders${qs}`, { method: 'GET', token });
+  },
+  get: (id: string, token: string) =>
+    apiFetch<{ finder: FinderRow }>(`/api/v1/admin/finders/${id}`, { method: 'GET', token }),
+  approve: (id: string, token: string) =>
+    apiFetch<{ id: string; status: FinderStatus }>(`/api/v1/admin/finders/${id}/approve`, {
+      method: 'POST',
+      token,
+    }),
+  suspend: (id: string, reason: string, token: string) =>
+    apiFetch<{ id: string; status: FinderStatus }>(`/api/v1/admin/finders/${id}/suspend`, {
+      method: 'POST',
+      token,
+      body: JSON.stringify({ reason }),
+    }),
+};
+
+export const adminSellersApi = {
+  list: (token: string) =>
+    apiFetch<{ sellers: SellerRow[] }>('/api/v1/admin/sellers', { method: 'GET', token }),
+  create: (data: CreateSellerBody, token: string) =>
+    apiFetch<{ seller: SellerRow }>('/api/v1/admin/sellers', {
+      method: 'POST',
+      token,
+      body: JSON.stringify(data),
+    }),
+  setStatus: (id: string, status: SellerStatus, token: string) =>
+    apiFetch<{ seller: SellerRow }>(`/api/v1/admin/sellers/${id}/status`, {
+      method: 'PATCH',
+      token,
+      body: JSON.stringify({ status }),
+    }),
 };
