@@ -1,13 +1,20 @@
 # State
 
 **Active milestone:** v1.0 — FXL Finders MVP (started 2026-05-28)
-**Active phase:** All 6 phases planned + adversarially reviewed + patched → GO for execution
+**Active phase:** Phase 01 ✅ EXECUTED + verified + reviewed (2026-05-28). Phases 02 + 03 now unblocked (parallelizable).
 **Workflow:** /nexo:add-feature with /nexo:autopilot active (single human gate at Phase 0 spec approval was skipped per autopilot rule 4 — choices logged inline in spec § 2)
 **Token tier:** Tier 2 (6 phases)
 
 ## Failure list
 
 (none yet)
+
+## Phase 01 — Schema foundation + Clerk auth + RLS (2026-05-28)
+
+- Executed all 17 tasks (T01–T15 + T09b + T11b) + the dispatch-required `require-admin.ts`. 9 foundation tables shipped; migration `0000_fancy_klaw` journaled with role grants + RLS appended (D-F). 3 DB roles created (owner/app/admin BYPASSRLS). `clerkAuthMiddleware` + `setTenantContext(tx,orgId)` + `getAdminDb()` + `clerkClient` singleton + `requireAdmin` all in place (D-B/C/D/H/I).
+- Gates: `pnpm -r type-check` 0 · api lint 0 · unit 0 (passWithNoTests) · RLS integration **4/4 pass** as `fxl_finders_app`. `pg_policies` confirms both `*_tenant_isolation` policies; RLS fails closed (0 rows with no context).
+- verify-work → 01-UAT.md = PASS (19/19). code-review → 01-REVIEW.md = PASS (0 Critical / 0 Warning / 2 Info downstream notes).
+- Deviations (in 01-SUMMARY.md): vitest v2 env-flag split instead of `test.projects` (v3 API); `passWithNoTests`; fixed pre-existing missing eslint devDeps (`@eslint/js`, `typescript-eslint`); added `MIGRATE_DATABASE_URL` to migrate script for role-creating first migrate.
 
 ## Phase 2.5 — Adversarial pre-execution plan review (2026-05-28)
 

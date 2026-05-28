@@ -28,6 +28,9 @@ const schema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
   CORS_ORIGIN: z.string().url().default('http://localhost:5173'),
   DATABASE_URL: emptyToUndefined,
+  // Admin / cross-tenant DB connection (D-C). Authenticates as the BYPASSRLS
+  // role (fxl_finders_admin). Backend-only — NEVER VITE_-prefixed.
+  ADMIN_DATABASE_URL: emptyToUndefined,
   CLERK_SECRET_KEY: emptyToUndefined,
   CLERK_PUBLISHABLE_KEY: emptyToUndefined,
   SENTRY_DSN: emptyToUndefinedUrl,

@@ -10,6 +10,7 @@
     "type-check": "tsc --noEmit",
     "lint": "eslint src/",
     "test": "vitest run",
+    "test:integration": "VITEST_INTEGRATION=1 vitest run",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/migrate.ts",
     "db:studio": "drizzle-kit studio"
@@ -28,12 +29,14 @@
     "zod": "^3.24.2"
   },
   "devDependencies": {
+    "@eslint/js": "^9.21.0",
     "@types/node": "^22.13.5",
     "drizzle-kit": "^0.30.4",
     "eslint": "^9.21.0",
     "tsc-alias": "^1.8.16",
     "tsx": "^4.19.3",
     "typescript": "^5.7.3",
+    "typescript-eslint": "^8.58.0",
     "vitest": "^2.1.9"
   }
 }

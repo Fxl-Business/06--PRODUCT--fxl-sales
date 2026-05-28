@@ -1,7 +1,7 @@
 # Phase 01 — Schema foundation + Clerk auth + RLS
 
 **Milestone:** v1.0 — FXL Finders MVP
-**Status:** ⏳ pending
+**Status:** ✅ complete (executed 2026-05-28 — see 01-SUMMARY.md)
 **Wave:** W1 (foundational — phases 02 + 03 both depend on this)
 **Mode:** backend-only (no UI, no /gsd-ui-phase)
 

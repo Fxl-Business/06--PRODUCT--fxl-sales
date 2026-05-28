@@ -20,8 +20,10 @@ dist/
 .demo/
 .claude/worktrees/
 
-# Drizzle artifacts (drizzle-kit output goes here, ignored in template)
-apps/api/drizzle/meta/
+# Drizzle migration journal + snapshots are the source of truth for which
+# migrations exist and MUST be committed (D-F: RLS lives in the journaled
+# migration; a fresh clone needs meta/_journal.json to run `pnpm db:migrate`).
+# (Previously ignored while the template shipped with zero migrations.)
 
 # Mobile build outputs
 apps/mobile/ios/Pods/
