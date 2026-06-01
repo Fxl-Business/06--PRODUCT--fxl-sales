@@ -60,7 +60,10 @@ export const clerkAuthMiddleware: MiddlewareHandler = async (c, next) => {
     c.set('orgId', orgId);
     c.set('userRole', publicMetadata?.role);
     return next();
-  } catch {
+  } catch (err) {
+    // Surface the real verifyToken failure server-side (clock skew, expired exp,
+    // JWKS fetch, azp mismatch) — the client still gets a generic reason.
+    console.error('[auth] verifyToken failed:', err instanceof Error ? err.message : err);
     return c.json({ error: 'unauthorized', reason: 'invalid_token' }, 401);
   }
 };
