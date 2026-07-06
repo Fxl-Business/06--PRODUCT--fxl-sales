@@ -4,15 +4,15 @@ import { env } from '../../env.js';
 import { CreateLinkSchema, RevokeLinkSchema, createLink, listFinderLinks, revokeLink } from './service.js';
 
 /**
- * Links domain routes (Phase 04, T05). Finder-authed. clerkAuthMiddleware is
+ * Links domain routes (Phase 04, T05). Finder-authed. appAuthMiddleware is
  * applied at the mount in server.ts (NOT re-applied here). All service fns take
- * the Clerk userId and resolve to finders.id internally (resolveFinderId).
+ * the provider account id and resolve to finders.id internally (resolveFinderId).
  */
 export const linksRouter = new Hono();
 
 /**
  * Maps a thrown service Error message to an HTTP status + JSON body. A missing
- * finders row for an authenticated user → 403 finder_not_found (clean, never a
+ * finders row for an authenticated user -> 403 finder_not_found (clean, never a
  * 500/FK crash). Returns null when the error is not a known domain error.
  */
 export function mapLinkError(err: unknown): { status: 403 | 404 | 422; body: { error: string } } | null {

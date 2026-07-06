@@ -1,16 +1,16 @@
-import { useAuth } from '@clerk/clerk-react';
+import { useAccessToken } from '@/auth/react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminFindersApi } from '@/lib/api-client';
 import type { FinderRow, FinderStatus } from '@/admin/types';
 
-/**
+ /**
  * Admin finders TanStack Query hooks (Phase 03 T10). All calls go through
- * apiFetch + Clerk getToken() (D-J). approve/suspend invalidate BOTH the list
+ * apiFetch + useAccessToken() (D-J). approve/suspend invalidate BOTH the list
  * key ['admin','finders'] AND the detail key ['admin','finders', id] (WARN).
  */
 
 export function useFinders(status?: FinderStatus) {
-  const { getToken } = useAuth();
+  const { getToken } = useAccessToken();
   return useQuery({
     queryKey: ['admin', 'finders', status],
     queryFn: async () => adminFindersApi.list(status, (await getToken()) ?? ''),
@@ -19,7 +19,7 @@ export function useFinders(status?: FinderStatus) {
 }
 
 export function useFinder(id: string) {
-  const { getToken } = useAuth();
+  const { getToken } = useAccessToken();
   return useQuery({
     queryKey: ['admin', 'finders', id],
     queryFn: async () => adminFindersApi.get(id, (await getToken()) ?? ''),
@@ -28,7 +28,7 @@ export function useFinder(id: string) {
 }
 
 export function useApproveFinder() {
-  const { getToken } = useAuth();
+  const { getToken } = useAccessToken();
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => adminFindersApi.approve(id, (await getToken()) ?? ''),
@@ -40,7 +40,7 @@ export function useApproveFinder() {
 }
 
 export function useSuspendFinder() {
-  const { getToken } = useAuth();
+  const { getToken } = useAccessToken();
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, reason }: { id: string; reason: string }) =>

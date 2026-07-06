@@ -1,4 +1,4 @@
-# 06--PRODUCT--fxl-finders - Agent Standing Context
+# 06--PRODUCT--fxl-sales - Agent Standing Context
 
 <!-- nexo:managed:start -->
 <!-- Managed by Nexo (/nexo-init, /nexo-doctor). Edit only OUTSIDE these markers. -->

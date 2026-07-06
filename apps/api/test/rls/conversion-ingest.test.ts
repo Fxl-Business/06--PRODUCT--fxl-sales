@@ -8,7 +8,7 @@
  * string rate from numeric), pending status (D-K), audit hash-chain integrity, and the
  * promoteHoldExpired auto path pending→locked.
  *
- * Run: pnpm --filter @fxl-finders/api test:integration
+ * Run: pnpm --filter @fxl-sales/api test:integration
  */
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';

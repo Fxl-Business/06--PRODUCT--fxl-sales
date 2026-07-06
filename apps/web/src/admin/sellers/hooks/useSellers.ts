@@ -1,4 +1,4 @@
-import { useAuth } from '@clerk/clerk-react';
+import { useAccessToken } from '@/auth/react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminSellersApi } from '@/lib/api-client';
 import type { CreateSellerBody, SellerRow } from '@/admin/types';
@@ -9,7 +9,7 @@ import type { CreateSellerBody, SellerRow } from '@/admin/types';
  */
 
 export function useSellers() {
-  const { getToken } = useAuth();
+  const { getToken } = useAccessToken();
   return useQuery({
     queryKey: ['admin', 'sellers'],
     queryFn: async () => adminSellersApi.list((await getToken()) ?? ''),
@@ -18,7 +18,7 @@ export function useSellers() {
 }
 
 export function useInviteSeller() {
-  const { getToken } = useAuth();
+  const { getToken } = useAccessToken();
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (data: CreateSellerBody) =>

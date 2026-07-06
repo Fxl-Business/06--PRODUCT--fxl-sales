@@ -29,7 +29,7 @@ vi.mock('../db', () => {
   };
 });
 
-vi.mock('@fxl-finders/shared-utils/hmac', () => ({
+vi.mock('@fxl-sales/shared-utils/hmac', () => ({
   signReferralUrl: () => 'fxlsig_mocked',
   hashIp: () => 'iphash_mocked',
   dailySalt: () => 'salt_mocked',

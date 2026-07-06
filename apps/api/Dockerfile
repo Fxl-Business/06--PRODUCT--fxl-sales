@@ -21,9 +21,9 @@ COPY --from=deps /app/apps/api/node_modules ./apps/api/node_modules
 COPY --from=deps /app/packages/shared-types/node_modules ./packages/shared-types/node_modules
 COPY --from=deps /app/packages/shared-utils/node_modules ./packages/shared-utils/node_modules
 COPY . .
-RUN pnpm --filter "@fxl-finders/shared-types" build && \
-    pnpm --filter "@fxl-finders/shared-utils" build && \
-    pnpm --filter "@fxl-finders/api" build
+RUN pnpm --filter "@fxl-sales/shared-types" build && \
+    pnpm --filter "@fxl-sales/shared-utils" build && \
+    pnpm --filter "@fxl-sales/api" build
 
 # --- runtime stage ---
 FROM node:20-alpine

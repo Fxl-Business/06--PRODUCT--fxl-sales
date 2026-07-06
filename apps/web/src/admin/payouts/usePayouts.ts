@@ -1,4 +1,4 @@
-import { useAuth } from '@clerk/clerk-react';
+import { useAccessToken } from '@/auth/react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   adminPayoutsApi,
@@ -8,13 +8,13 @@ import {
 
 /**
  * Admin payouts hooks (Phase 06 T09/T10, D-J/D-Q). All calls go through the
- * api-client (apiFetch + Clerk token). Mutations invalidate BOTH the finders-ready
+ * api-client (apiFetch + Bearer token). Mutations invalidate BOTH the finders-ready
  * list and the payouts list (a batch-create empties finders-ready and adds payouts;
  * mark-paid moves a payout to 'paid' and may free reserved commissions).
  */
 
 export function useFindersReady() {
-  const { getToken } = useAuth();
+  const { getToken } = useAccessToken();
   return useQuery({
     queryKey: ['payouts', 'finders-ready'],
     queryFn: async () => adminPayoutsApi.findersReady((await getToken()) ?? ''),
@@ -23,7 +23,7 @@ export function useFindersReady() {
 }
 
 export function usePayoutsList() {
-  const { getToken } = useAuth();
+  const { getToken } = useAccessToken();
   return useQuery({
     queryKey: ['payouts', 'list'],
     queryFn: async () => adminPayoutsApi.list((await getToken()) ?? ''),
@@ -32,7 +32,7 @@ export function usePayoutsList() {
 }
 
 export function useCreatePayoutBatches() {
-  const { getToken } = useAuth();
+  const { getToken } = useAccessToken();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (finderIds: string[]) =>
@@ -45,7 +45,7 @@ export function useCreatePayoutBatches() {
 }
 
 export function useMarkPayoutPaid() {
-  const { getToken } = useAuth();
+  const { getToken } = useAccessToken();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (payoutId: string) =>
@@ -63,7 +63,7 @@ export function useMarkPayoutPaid() {
  * window.location.href navigation (D-J).
  */
 export function useDownloadPayoutCsv() {
-  const { getToken } = useAuth();
+  const { getToken } = useAccessToken();
   return useMutation({
     mutationFn: async (payoutId: string) => {
       const { blob, filename } = await adminPayoutsApi.downloadCsv(payoutId, (await getToken()) ?? '');

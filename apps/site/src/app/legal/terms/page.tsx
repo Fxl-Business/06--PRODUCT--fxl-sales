@@ -25,7 +25,7 @@ export default function TermsPage() {
     <LegalLayout title={t.legal.terms.title} lastUpdated={t.legal.terms.lastUpdated}>
       <Section title="1. Objeto">
         <p>
-          Estes Termos regem o uso da plataforma FXL Finders, um programa de afiliados B2B que
+          Estes Termos regem o uso da plataforma FXL Sales, um programa de afiliados B2B que
           permite a indicadores (Finders) divulgar as soluções FXL e receber comissões pelas vendas
           decorrentes de suas indicações.
         </p>
@@ -71,7 +71,7 @@ export default function TermsPage() {
 
       <Section title="7. Propriedade intelectual">
         <p>
-          Todos os direitos sobre a plataforma, marca e materiais FXL Finders pertencem à FXL. Nada
+          Todos os direitos sobre a plataforma, marca e materiais FXL Sales pertencem à FXL. Nada
           nestes Termos transfere tais direitos ao Finder.
         </p>
       </Section>

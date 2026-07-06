@@ -1,4 +1,4 @@
-# Fxl Finders — mobile
+# Fxl Sales — mobile
 
 Expo Router + React Native + NativeWind + Clerk Expo. **Standalone — not part of the root pnpm workspace.**
 

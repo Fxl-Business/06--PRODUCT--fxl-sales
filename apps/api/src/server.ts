@@ -4,7 +4,7 @@ import { logger } from 'hono/logger';
 import { env } from './env.js';
 import { corsMiddleware } from './middleware/cors.js';
 import { errorMiddleware } from './middleware/error.js';
-import { clerkAuthMiddleware } from './middleware/auth.js';
+import { appAuthMiddleware, createAppAuthBff } from './middleware/app-auth.js';
 import { requireAdmin } from './middleware/require-admin.js';
 import { adminRouter } from './domains/admin/index.js';
 import { findersPublicRouter } from './domains/finders/public-routes.js';
@@ -27,8 +27,13 @@ app.use('*', errorMiddleware);
 
 app.route('/health', healthRouter);
 
-// Public finder signup (Phase 03, D-R). NO auth middleware — a finder has no
-// Clerk account at signup. The handler writes via getAdminDb() (finders is FORCE
+const authBff = createAppAuthBff();
+if (authBff) {
+  app.route('', authBff);
+}
+
+// Public finder signup (Phase 03, D-R). NO auth middleware - a finder has no
+// product account at signup. The handler writes via getAdminDb() (finders is FORCE
 // RLS; org_id='' placeholder is invisible to the tenant policy).
 app.route('/api/v1/finders', findersPublicRouter);
 
@@ -46,10 +51,10 @@ app.use('/api/v1/conversions/refund', hmacVerifyMiddleware);
 app.route('/api/v1/conversions', conversionsRouter);
 
 // Admin conversions reconciliation read (D-C: getAdminDb(); requireAdmin; no HMAC).
-app.use('/api/v1/admin/conversions/*', clerkAuthMiddleware, requireAdmin);
+app.use('/api/v1/admin/conversions/*', appAuthMiddleware, requireAdmin);
 app.route('/api/v1/admin/conversions', conversionsAdminRouter);
 
-// Admin domain (Phase 02 + Phase 03). clerkAuthMiddleware + requireAdmin applied
+// Admin domain (Phase 02 + Phase 03). appAuthMiddleware + requireAdmin applied
 // INSIDE the admin router (D-B). Phase 03 adds /finders and /sellers under it.
 app.route('/api/v1/admin', adminRouter);
 
@@ -57,36 +62,36 @@ app.route('/api/v1/admin', adminRouter);
 // Finder reads: getDb() + setTenantContext (D-D). Admin transitions: getAdminDb()
 // (BYPASSRLS, D-C). requireAdmin gates the admin sub-tree (D-B). NOTE: the admin
 // group is mounted BEFORE the finder group so /admin/* never falls through to it.
-app.use('/api/v1/admin/commissions/*', clerkAuthMiddleware, requireAdmin);
+app.use('/api/v1/admin/commissions/*', appAuthMiddleware, requireAdmin);
 app.route('/api/v1/admin/commissions', commissionsAdminRouter);
-app.use('/api/v1/commissions/*', clerkAuthMiddleware);
+app.use('/api/v1/commissions/*', appAuthMiddleware);
 app.route('/api/v1/commissions', commissionsRouter);
 
 // ── Payouts (Phase 05 T08, D-Q) ──────────────────────────────────────────────
-app.use('/api/v1/admin/payouts/*', clerkAuthMiddleware, requireAdmin);
+app.use('/api/v1/admin/payouts/*', appAuthMiddleware, requireAdmin);
 app.route('/api/v1/admin/payouts', payoutsAdminRouter);
-app.use('/api/v1/payouts/*', clerkAuthMiddleware);
+app.use('/api/v1/payouts/*', appAuthMiddleware);
 app.route('/api/v1/payouts', payoutsRouter);
 
 // ── Audit log viewer (Phase 05 T12) ──────────────────────────────────────────
-app.use('/api/v1/admin/audit/*', clerkAuthMiddleware, requireAdmin);
+app.use('/api/v1/admin/audit/*', appAuthMiddleware, requireAdmin);
 app.route('/api/v1/admin/audit', auditRouter);
 
 // Manual hold-promotion trigger (Phase 05 T09, D-K) lives ON the commissionsAdminRouter
-// as POST /promote-locked → resolves to POST /api/v1/admin/commissions/promote-locked
+// as POST /promote-locked -> resolves to POST /api/v1/admin/commissions/promote-locked
 // (requireAdmin already applied to /api/v1/admin/commissions/* above).
 
 // Finder-authed link generation (Phase 04, T05).
-app.use('/api/v1/links/*', clerkAuthMiddleware);
+app.use('/api/v1/links/*', appAuthMiddleware);
 app.route('/api/v1/links', linksRouter);
 
 // Finder-authed catalog + clicks reads (Phase 04, T05).
-app.use('/api/v1/finder/*', clerkAuthMiddleware);
+app.use('/api/v1/finder/*', appAuthMiddleware);
 app.route('/api/v1/finder', finderRouter);
 
 app.get('/', (c) =>
   c.json({
-    name: 'Fxl Finders API',
+    name: 'Fxl Sales API',
     docs: '/health for liveness, add domain routes under apps/api/src/domains/',
   }),
 );
@@ -97,6 +102,6 @@ app.notFound((c) => c.json({ error: 'not_found', path: c.req.path }, 404));
 setupNightlyJob();
 
 const port = env.PORT;
-console.log(`[fxl-finders-api] listening on http://localhost:${port} (${env.NODE_ENV})`);
+console.log(`[fxl-sales-api] listening on http://localhost:${port} (${env.NODE_ENV})`);
 
 serve({ fetch: app.fetch, port });

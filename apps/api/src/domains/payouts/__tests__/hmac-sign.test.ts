@@ -8,12 +8,12 @@
  */
 import { createHmac } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { verifyHmac } from '@fxl-finders/shared-utils';
+import { verifyHmac } from '@fxl-sales/shared-utils';
 
 const SECRET = 'test-webhook-signing-secret-abc123';
 const TS = '1700000000'; // fixed ts — verifyHmac does NOT enforce the replay window
 
-/** EXACT inline sign that ships in fxl-financiero apps/api/src/lib/fxl-finders-webhook.ts. */
+/** EXACT inline sign that ships in fxl-financiero apps/api/src/lib/fxl-sales-webhook.ts. */
 function signInline(rawBody: string, secret: string, ts: string) {
   const hmac = createHmac('sha256', secret)
     .update(`${ts}.${rawBody}`)

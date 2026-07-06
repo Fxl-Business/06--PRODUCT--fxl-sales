@@ -20,4 +20,4 @@ Do not change application runtime behavior.
 Red was reproduced with `printf '1\n' | make`.
 Green is proven when `printf '1\n' | make` builds shared packages and starts the API on `http://localhost:3006` instead of failing with `ERR_PNPM_IGNORED_BUILDS` or a missing shared package import.
 Gate 2 is proven when `pnpm test` runs the DB-free unit suite without requiring `ADMIN_DATABASE_URL`.
-Integration coverage is proven when `pnpm --filter @fxl-finders/api test:integration` can run against the local Docker DB with default local URLs.
+Integration coverage is proven when `pnpm --filter @fxl-sales/api test:integration` can run against the local Docker DB with default local URLs.

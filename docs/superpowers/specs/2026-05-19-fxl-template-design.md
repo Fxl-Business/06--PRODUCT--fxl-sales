@@ -28,7 +28,7 @@ Past projects (`0-universal-laudos`, `3-gps-comercial`, `7-apice-laudos`) only h
 
 | Decision | Choice | Rationale |
 |---|---|---|
-| Init strategy | Placeholder tokens (`fxl-finders`, `Fxl Finders`, `fxl_finders`, `3006`, `8006`) + `scripts/init-from-template.sh` | Zero ambiguity, auditable, easy for a future agent to follow |
+| Init strategy | Placeholder tokens (`fxl-sales`, `Fxl Sales`, `fxl_finders`, `3006`, `8006`) + `scripts/init-from-template.sh` | Zero ambiguity, auditable, easy for a future agent to follow |
 | Scaffold depth | Full FXL contract pre-wired, layout-only (no data) | User clarification: each app must boot to a visible layout, but no migrations, no seed data, no API data routes |
 | Mobile workspace | Outside pnpm workspace (`'!apps/mobile'`), own `pnpm-lock.yaml` | Matches source — Expo 54 / RN 0.81 / React 19.1 conflict with React 18 in `apps/web` |
 | Git policy | `git init` + one atomic commit per phase, no remote push | Required by `.husky/pre-commit` (perf-audit gate); enables `git diff` between phases |
@@ -61,7 +61,7 @@ fxl-template/
 ├── Makefile             dev / front / site / back / mobile / install / build / ...
 ├── docker-compose.yml   Postgres 16-alpine + named volume
 ├── fxl-doctor.sh        CI health check
-├── package.json         fxlContractVersion: "1.0", fxlAppId: "fxl-finders"
+├── package.json         fxlContractVersion: "1.0", fxlAppId: "fxl-sales"
 ├── pnpm-workspace.yaml  apps/* excluding apps/mobile, packages/*
 ├── tsconfig.base.json   Strict NodeNext, project references
 ├── prettier.config.js
@@ -76,8 +76,8 @@ The rename script does a literal find/replace across the tree (excluding `node_m
 
 | Token | Example value | Used in |
 |---|---|---|
-| `fxl-finders` | `fxl-financeiro` | pnpm scope `@fxl-finders/web`, `.nexo/config.json`, package names |
-| `Fxl Finders` | `FXL Financeiro` | README, CLAUDE.md, page titles, hero copy |
+| `fxl-sales` | `fxl-financeiro` | pnpm scope `@fxl-sales/web`, `.nexo/config.json`, package names |
+| `Fxl Sales` | `FXL Financeiro` | README, CLAUDE.md, page titles, hero copy |
 | `fxl_finders` | `fxl_financeiro` | `docker-compose.yml`, `DATABASE_URL` |
 | `3006` | `3000` | api server, docker-compose, `CORS_ORIGIN`, web `VITE_API_URL` |
 | `8006` | `5173` | vite config, api `CORS_ORIGIN` |
@@ -99,7 +99,7 @@ Script signature: `scripts/init-from-template.sh <slug> "<Name>" <db> [--api-por
 
 ```
 ┌────────────────────────────────────────────────────────────┐
-│  [Logo Fxl Finders]                  [Org switcher] [👤]   │
+│  [Logo Fxl Sales]                  [Org switcher] [👤]   │
 ├──────────┬─────────────────────────────────────────────────┤
 │ Sidebar  │  Dashboard (empty state)                          │
 │ • Home   │                                                   │
@@ -120,10 +120,10 @@ Script signature: `scripts/init-from-template.sh <slug> "<Name>" <db> [--api-por
 ### `apps/site` — http://localhost:3001
 
 Landing page with real visible sections (placeholder copy):
-- Hero: `Fxl Finders` headline + subhead + CTA "Acessar dashboard" → env-driven link
+- Hero: `Fxl Sales` headline + subhead + CTA "Acessar dashboard" → env-driven link
 - Features: 3-column grid (lucide icons + 2-line descriptions)
 - How it works: 4-step timeline
-- Footer: links + copyright `Fxl Finders`
+- Footer: links + copyright `Fxl Sales`
 - Next.js 15 App Router + Tailwind v4 + shadcn-style `Button` only
 - `@vercel/analytics` gated on `NEXT_PUBLIC_VERCEL_ANALYTICS=1`
 
@@ -145,11 +145,11 @@ Landing page with real visible sections (placeholder copy):
 
 ## FXL contract artifacts (verbatim from source where applicable)
 
-- `package.json` has `fxlContractVersion: "1.0"` + `fxlAppId: "fxl-finders"`
+- `package.json` has `fxlContractVersion: "1.0"` + `fxlAppId: "fxl-sales"`
 - `.husky/pre-commit` runs `pnpm run perf:audit` (script is a stub that exits 0 in the template, real audit ships in client projects)
 - `fxl-doctor.sh` runs `pnpm install` check + `pnpm run type-check` + `pnpm run lint` + workspace-version sanity
 - `Makefile` targets: `dev`, `front`, `site`, `back`, `mobile`, `install`, `build`, `lint`, `type-check`, `check`, `migrate`, `db-up`, `db-down`, `db-reset`, `docker-up`, `docker-down`, `clean`, `help`
-- `CLAUDE.md` includes Data & Auth, Code Style, Loading States, API Pattern, Admin & Audit, Performance Budget sections — with `Fxl Finders` placeholders for project-specific phrasing
+- `CLAUDE.md` includes Data & Auth, Code Style, Loading States, API Pattern, Admin & Audit, Performance Budget sections — with `Fxl Sales` placeholders for project-specific phrasing
 - Per-app `AGENTS.md` follows the FXL `per-folder-agents-md` standard
 
 ## Phase plan (Token tier 2)

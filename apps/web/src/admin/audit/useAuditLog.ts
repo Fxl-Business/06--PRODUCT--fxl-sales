@@ -1,4 +1,4 @@
-import { useAuth } from '@clerk/clerk-react';
+import { useAccessToken } from '@/auth/react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { adminAuditApi } from '@/lib/api-client';
 
@@ -8,7 +8,7 @@ import { adminAuditApi } from '@/lib/api-client';
  * (D-R NIT). Both read-only.
  */
 export function useAuditLog(page = 1, action?: string) {
-  const { getToken } = useAuth();
+  const { getToken } = useAccessToken();
   return useQuery({
     queryKey: ['admin', 'audit', page, action],
     queryFn: async () => adminAuditApi.list({ page, action }, (await getToken()) ?? ''),
@@ -16,7 +16,7 @@ export function useAuditLog(page = 1, action?: string) {
 }
 
 export function useVerifyChain() {
-  const { getToken } = useAuth();
+  const { getToken } = useAccessToken();
   return useMutation({
     mutationFn: async () => adminAuditApi.verifyChain((await getToken()) ?? ''),
   });

@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray, lt, sql } from 'drizzle-orm';
 import { ulid } from 'ulidx';
 import { z } from 'zod';
-import { signHmac } from '@fxl-finders/shared-utils';
+import { signHmac } from '@fxl-sales/shared-utils';
 import type { getDb } from '../../db/client.js';
 import { setTenantContext } from '../../middleware/auth.js';
 import { apps, clicks, finders, priceBands, products, referralLinks } from '../../db/schema.js';
@@ -11,9 +11,9 @@ import { apps, clicks, finders, priceBands, products, referralLinks } from '../.
  *
  * referral_links + clicks are tenant-scoped (FORCE RLS). Every tenant-scoped fn
  * wraps its work in `db.transaction(async (tx) => { await setTenantContext(tx,
- * orgId); ... })` (plan-brief D-D — connection-level set_config does not survive
- * pooling). All take the Clerk `userId` string and resolve it to the finders.id
- * UUID via resolveFinderId before touching finder_id (never the raw user_* string).
+ * orgId); ... })` (plan-brief D-D - connection-level set_config does not survive
+ * pooling). All take the verified auth subject and resolve it to the finders.id
+ * UUID via resolveFinderId before touching finder_id.
  */
 
 type Db = ReturnType<typeof getDb>;
@@ -49,8 +49,8 @@ export function validatePriceBand(band: { minBrl: number; maxBrl: number }, quot
 
 /**
  * link.signature (plan-brief D-P): hmac([finderId,productId,setup,monthly].join(":"),
- * webhookSigningSecret). `finderId` MUST be the finders.id UUID — never the raw
- * Clerk user_* string — so the signature is stable and Phase 05-verifiable.
+ * webhookSigningSecret). `finderId` MUST be the finders.id UUID so the signature
+ * is stable and Phase 05-verifiable.
  */
 export function buildLinkSignature(
   finderId: string,
@@ -72,7 +72,7 @@ export function buildLinkCode(): string {
 
 /**
  * Open-redirect defense (D9 / plan-brief WARN): EXACT host equality against the
- * allowed-hosts list. NEVER substring/.includes()/endsWith() — a near-match like
+ * allowed-hosts list. NEVER substring/.includes()/endsWith() - a near-match like
  * `evil-fxl.com.br` or `fxl.com.br.attacker.com` MUST be rejected. Throws if the
  * URL is unparseable.
  */
@@ -82,23 +82,31 @@ export function validateDestinationHost(destinationUrl: string, allowedHosts: st
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// resolveFinderId — Clerk user_* → finders.id UUID
+// resolveFinderId - auth subject/workspace -> finders.id UUID
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Resolves the authenticated Clerk userId to the finders.id UUID. Runs INSIDE
- * the caller's tenant transaction so it is org-isolated. Throws
- * Error('finder_not_found') when no approved finders row matches (route → 403);
- * NEVER returns the raw user_* string (which would FK-violate / mis-scope
- * referral_links.finder_id).
+ * Resolves the authenticated subject to the finders.id UUID. Runs INSIDE
+ * the caller's tenant transaction so it is org-isolated. Hub mode falls back to
+ * the preserved workspace id so org-keyed finder data survives without a re-key.
+ * Throws
+ * Error('finder_not_found') when no approved finders row matches (route -> 403).
  */
-export async function resolveFinderId(tx: Tx, clerkUserId: string): Promise<string> {
+export async function resolveFinderId(tx: Tx, authSubject: string, orgId?: string): Promise<string> {
   const rows = await tx
     .select({ id: finders.id })
     .from(finders)
-    .where(eq(finders.clerkUserId, clerkUserId))
+    .where(eq(finders.clerkUserId, authSubject))
     .limit(1);
-  const row = rows[0];
+  let row = rows[0];
+  if (!row && orgId) {
+    const orgRows = await tx
+      .select({ id: finders.id })
+      .from(finders)
+      .where(eq(finders.orgId, orgId))
+      .limit(1);
+    row = orgRows[0];
+  }
   if (!row) {
     throw new Error('finder_not_found');
   }
@@ -113,13 +121,13 @@ const CANONICAL_PRICING_PATH = '/precos';
 
 export async function createLink(
   db: Db,
-  clerkUserId: string,
+  authSubject: string,
   orgId: string,
   input: CreateLinkInput,
 ): Promise<ReferralLinkRow> {
   return db.transaction(async (tx) => {
     await setTenantContext(tx, orgId);
-    const finderId = await resolveFinderId(tx, clerkUserId);
+    const finderId = await resolveFinderId(tx, authSubject, orgId);
 
     // App must exist + be active. apps/products/price_bands have NO RLS — readable
     // on the app role; reading them inside the tenant tx is harmless.
@@ -196,11 +204,11 @@ export async function createLink(
 export async function listFinderLinks(
   db: Db,
   orgId: string,
-  clerkUserId: string,
+  authSubject: string,
 ): Promise<ReferralLinkRow[]> {
   return db.transaction(async (tx) => {
     await setTenantContext(tx, orgId);
-    const finderId = await resolveFinderId(tx, clerkUserId);
+    const finderId = await resolveFinderId(tx, authSubject, orgId);
     return tx
       .select()
       .from(referralLinks)
@@ -213,12 +221,12 @@ export async function revokeLink(
   db: Db,
   linkId: string,
   orgId: string,
-  clerkUserId: string,
+  authSubject: string,
   reason?: string,
 ): Promise<void> {
   await db.transaction(async (tx) => {
     await setTenantContext(tx, orgId);
-    const finderId = await resolveFinderId(tx, clerkUserId);
+    const finderId = await resolveFinderId(tx, authSubject, orgId);
     const updated = await tx
       .update(referralLinks)
       .set({ status: 'revoked', revokedAt: new Date(), revokedReason: reason ?? null })
@@ -239,11 +247,11 @@ export async function revokeLink(
 export async function getFinderClickStats(
   db: Db,
   orgId: string,
-  clerkUserId: string,
+  authSubject: string,
 ): Promise<{ total: number; unique: number }> {
   return db.transaction(async (tx) => {
     await setTenantContext(tx, orgId);
-    const finderId = await resolveFinderId(tx, clerkUserId);
+    const finderId = await resolveFinderId(tx, authSubject, orgId);
     const rows = await tx
       .select({
         total: sql<number>`count(*)::int`,
@@ -259,12 +267,12 @@ export async function getFinderClickStats(
 export async function listFinderClicks(
   db: Db,
   orgId: string,
-  clerkUserId: string,
+  authSubject: string,
   opts: { linkId?: string; limit?: number; cursor?: string },
 ): Promise<{ clicks: ClickRow[]; nextCursor: string | null }> {
   return db.transaction(async (tx) => {
     await setTenantContext(tx, orgId);
-    const finderId = await resolveFinderId(tx, clerkUserId);
+    const finderId = await resolveFinderId(tx, authSubject, orgId);
     const limit = Math.min(opts.limit ?? 50, 100);
 
     const conditions = [eq(clicks.finderId, finderId)];

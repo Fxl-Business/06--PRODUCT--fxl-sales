@@ -1,4 +1,4 @@
-# Fxl Finders
+# Fxl Sales
 
 Project bootstrapped from `fxl-template` — the FXL canonical monorepo scaffold. After init, fill in stack-specific details and remove this line.
 

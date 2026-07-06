@@ -1,6 +1,6 @@
 {
   "app": {
-    "name": "Fxl Finders"
+    "name": "Fxl Sales"
   },
   "nav": {
     "home": "Home",
@@ -17,7 +17,7 @@
   "errors": {
     "noRole": {
       "title": "Access not authorized",
-      "body": "Your account does not have a profile assigned on the FXL Finders platform yet. Please contact the administrator.",
+      "body": "Your account does not have a profile assigned on the FXL Sales platform yet. Please contact the administrator.",
       "signOut": "Sign out"
     }
   },

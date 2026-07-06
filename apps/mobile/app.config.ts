@@ -2,24 +2,24 @@ import type { ExpoConfig, ConfigContext } from 'expo/config';
 
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
-  name: 'Fxl Finders',
-  slug: 'fxl-finders-mobile',
+  name: 'Fxl Sales',
+  slug: 'fxl-sales-mobile',
   version: '1.0.0',
   orientation: 'portrait',
   icon: './assets/icon.png',
-  scheme: 'fxl-finders',
+  scheme: 'fxl-sales',
   userInterfaceStyle: 'automatic',
   newArchEnabled: true,
   ios: {
     supportsTablet: true,
-    bundleIdentifier: 'com.fxl.fxl-finders',
+    bundleIdentifier: 'com.fxl.fxl-sales',
   },
   android: {
     adaptiveIcon: {
       foregroundImage: './assets/adaptive-icon.png',
       backgroundColor: '#ffffff',
     },
-    package: 'com.fxl.fxl-finders',
+    package: 'com.fxl.fxl-sales',
   },
   web: {
     bundler: 'metro',

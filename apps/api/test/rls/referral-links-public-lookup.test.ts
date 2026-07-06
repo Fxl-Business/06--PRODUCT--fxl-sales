@@ -12,7 +12,7 @@
  * leak org A's links into org B's dashboard.
  *
  * Connects as fxl_finders_app per D-G (postgres/admin BYPASS RLS → prove nothing).
- * Run with: pnpm --filter @fxl-finders/api test:integration
+ * Run with: pnpm --filter @fxl-sales/api test:integration
  */
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';

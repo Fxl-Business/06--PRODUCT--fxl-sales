@@ -35,6 +35,14 @@ const schema = z.object({
   CLERK_PUBLISHABLE_KEY: emptyToUndefined,
   // Clerk webhook (svix) signing secret for the user.created seller backfill (Phase 05 T07).
   CLERK_WEBHOOK_SIGNING_SECRET: emptyToUndefined,
+  AUTH_PROVIDER: z.enum(['clerk', 'hub']).default('clerk'),
+  FXL_HUB_API_URL: emptyToUndefinedUrl,
+  FXL_HUB_PUBLISHABLE_KEY: emptyToUndefined,
+  FXL_HUB_SECRET_KEY: emptyToUndefined,
+  FXL_HUB_AUDIENCE: emptyToUndefined,
+  FXL_HUB_REDIRECT_URI: emptyToUndefinedUrl,
+  FXL_HUB_POST_LOGIN_REDIRECT: emptyToUndefinedUrl,
+  FXL_HUB_POST_LOGIN_ERROR_REDIRECT: emptyToUndefinedUrl,
   SENTRY_DSN: emptyToUndefinedUrl,
   // Public site origin used to build the referral fullUrl (`/r/<code>`). Phase 04.
   SITE_URL: emptyToUndefinedUrl,

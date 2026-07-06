@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { ulid } from 'ulidx';
-import { dailySalt, hashIp, signReferralUrl } from '@fxl-finders/shared-utils/hmac';
+import { dailySalt, hashIp, signReferralUrl } from '@fxl-sales/shared-utils/hmac';
 import { apps, clicks, getDb, referralLinks } from './db';
 import { classifyUa } from './ua-family';
 

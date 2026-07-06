@@ -1,4 +1,4 @@
-import { useAuth } from '@clerk/clerk-react';
+import { useAccessToken } from '@/auth/react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminProductsApi } from '@/lib/api-client';
 import type {
@@ -12,11 +12,11 @@ import type {
 
 /**
  * Admin products / price-bands / commission-rules hooks (Phase 02, T07). Token
- * resolved via useAuth().getToken(), threaded into adminProductsApi (D-J).
+ * resolved via useAccessToken(), threaded into adminProductsApi (D-J).
  */
 
 export function useAdminProducts(appId?: string) {
-  const { getToken } = useAuth();
+  const { getToken } = useAccessToken();
   return useQuery({
     queryKey: ['admin', 'products', appId ?? 'all'],
     queryFn: async () => adminProductsApi.list(appId, (await getToken()) ?? ''),
@@ -25,7 +25,7 @@ export function useAdminProducts(appId?: string) {
 }
 
 export function useAdminProduct(id: string) {
-  const { getToken } = useAuth();
+  const { getToken } = useAccessToken();
   return useQuery({
     queryKey: ['admin', 'products', id],
     queryFn: async () => adminProductsApi.get(id, (await getToken()) ?? ''),
@@ -34,7 +34,7 @@ export function useAdminProduct(id: string) {
 }
 
 export function useCreateProduct() {
-  const { getToken } = useAuth();
+  const { getToken } = useAccessToken();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (data: CreateProductBody) =>
@@ -46,7 +46,7 @@ export function useCreateProduct() {
 }
 
 export function useUpdateProduct() {
-  const { getToken } = useAuth();
+  const { getToken } = useAccessToken();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, data }: { id: string; data: UpdateProductBody }) =>
@@ -59,7 +59,7 @@ export function useUpdateProduct() {
 }
 
 export function useUpsertPriceBand(productId: string) {
-  const { getToken } = useAuth();
+  const { getToken } = useAccessToken();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({
@@ -76,7 +76,7 @@ export function useUpsertPriceBand(productId: string) {
 }
 
 export function useUpsertCommissionRule(productId: string) {
-  const { getToken } = useAuth();
+  const { getToken } = useAccessToken();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (data: UpsertCommissionRuleBody) =>

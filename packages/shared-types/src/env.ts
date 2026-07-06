@@ -12,6 +12,10 @@ export const sharedServerEnv = z.object({
 
 export const sharedClientEnv = z.object({
   VITE_CLERK_PUBLISHABLE_KEY: z.string().min(1).optional(),
+  VITE_AUTH_PROVIDER: z.enum(['clerk', 'hub']).default('clerk'),
+  VITE_FXL_HUB_API_URL: z.string().url().optional(),
+  VITE_FXL_HUB_PUBLISHABLE_KEY: z.string().min(1).optional(),
+  VITE_FXL_HUB_AUDIENCE: z.string().optional(),
   VITE_SENTRY_DSN: z.string().url().optional(),
 });
 

@@ -44,11 +44,11 @@ function mapError(message: string): { status: 404 | 422; body: { error: string }
 // ── Finder route (getDb() + setTenantContext, D-D) ───────────────────────────
 payoutsRouter.get('/', async (c) => {
   const orgId = c.get('orgId');
-  const clerkUserId = c.get('userId');
+  const authSubject = c.get('userId');
   try {
     const rows = await getDb().transaction(async (tx) => {
       await setTenantContext(tx as never, orgId);
-      const finderId = await resolveFinderId(tx, clerkUserId);
+      const finderId = await resolveFinderId(tx, authSubject, orgId);
       return tx.select().from(payouts).where(eq(payouts.finderId, finderId));
     });
     return c.json({ payouts: rows });

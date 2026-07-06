@@ -1,4 +1,4 @@
-import { useAuth } from '@clerk/clerk-react';
+import { useAccessToken } from '@/auth/react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { finderCatalogApi, finderClicksApi, finderLinksApi } from '@/lib/api-client';
 import type {
@@ -10,14 +10,14 @@ import type {
 } from '@/finder/types';
 
 /**
- * Finder links TanStack Query hooks (Phase 04, T08). Each resolves the Clerk
- * token via useAuth().getToken() and threads it into the apiFetch call (D-J).
- * App/product selectors use the FIRST-CLASS finder routes (NOT admin hooks —
+ * Finder links TanStack Query hooks (Phase 04, T08). Each resolves the active auth
+ * token and threads it into the apiFetch call (D-J).
+ * App/product selectors use the FIRST-CLASS finder routes (NOT admin hooks -
  * admin routes are requireAdmin-gated; a finder JWT would 403).
  */
 
 export function useFinderLinks() {
-  const { getToken } = useAuth();
+  const { getToken } = useAccessToken();
   return useQuery({
     queryKey: ['finder', 'links'],
     queryFn: async () => finderLinksApi.list((await getToken()) ?? ''),
@@ -26,7 +26,7 @@ export function useFinderLinks() {
 }
 
 export function useFinderApps() {
-  const { getToken } = useAuth();
+  const { getToken } = useAccessToken();
   return useQuery({
     queryKey: ['finder', 'apps'],
     queryFn: async () => finderCatalogApi.listApps((await getToken()) ?? ''),
@@ -35,7 +35,7 @@ export function useFinderApps() {
 }
 
 export function useFinderProducts(appId?: string) {
-  const { getToken } = useAuth();
+  const { getToken } = useAccessToken();
   return useQuery({
     queryKey: ['finder', 'apps', appId, 'products'],
     queryFn: async () => finderCatalogApi.listProducts(appId!, (await getToken()) ?? ''),
@@ -45,7 +45,7 @@ export function useFinderProducts(appId?: string) {
 }
 
 export function useCreateLink() {
-  const { getToken } = useAuth();
+  const { getToken } = useAccessToken();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (data: CreateLinkBody) => finderLinksApi.create(data, (await getToken()) ?? ''),
@@ -56,7 +56,7 @@ export function useCreateLink() {
 }
 
 export function useRevokeLink() {
-  const { getToken } = useAuth();
+  const { getToken } = useAccessToken();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ linkId, reason }: { linkId: string; reason?: string }) =>
@@ -68,7 +68,7 @@ export function useRevokeLink() {
 }
 
 export function useFinderClickStats() {
-  const { getToken } = useAuth();
+  const { getToken } = useAccessToken();
   return useQuery({
     queryKey: ['finder', 'clicks', 'stats'],
     queryFn: async (): Promise<ClickStats> => finderClicksApi.getStats((await getToken()) ?? ''),

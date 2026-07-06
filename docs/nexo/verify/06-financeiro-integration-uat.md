@@ -7,21 +7,21 @@ os casos abaixo são complementares e cobrem o fluxo entre os dois apps.
 
 ## Pré-condições
 
-- fxl-financiero rodando localmente com a branch `feat/fxl-finders-integration`
+- fxl-financiero rodando localmente com a branch `feat/fxl-sales-integration`
   (aplicar o patch `docs/nexo/cross-repo/06-financeiro-integration.patch` + migration `063`).
-- FXL Finders API rodando localmente (porta `3006`) + Postgres em `5006`.
-- FXL Finders DB migrado (`pnpm --filter @fxl-finders/api db:migrate`) — a migration
+- FXL Sales API rodando localmente (porta `3006`) + Postgres em `5006`.
+- FXL Sales DB migrado (`pnpm --filter @fxl-sales/api db:migrate`) — a migration
   `0006_fxl_financiero_seed` cria o app `fxl-financiero` (slug …ci**e**ro).
 - Em fxl-financiero `.env`: `FXL_FINDERS_API_URL=http://localhost:3006` +
   `FXL_FINDERS_WEBHOOK_SECRET=<segredo-de-teste-local>`.
-- No FXL Finders DB, ajustar o `apps.webhook_signing_secret` do slug `fxl-financiero`
+- No FXL Sales DB, ajustar o `apps.webhook_signing_secret` do slug `fxl-financiero`
   para o MESMO `<segredo-de-teste-local>` (o seed gera um segredo aleatório; rotacionar
   para o valor de teste no UAT):
   ```sql
   UPDATE apps SET webhook_signing_secret = '<segredo-de-teste-local>'
   WHERE slug = 'fxl-financiero';
   ```
-- Um finder aprovado no FXL Finders com `cpf` + `pix_key` preenchidos, e um referral_link
+- Um finder aprovado no FXL Sales com `cpf` + `pix_key` preenchidos, e um referral_link
   ativo apontando para o app `fxl-financiero`.
 
 ## Casos de teste
@@ -36,7 +36,7 @@ Cada caso: passos → resultado esperado → [ ] pass / [ ] fail.
 
 - **TC02 — Webhook na marcação de first_paid_at**
   Passos: admin (fxl-financiero) marca `first_paid_at` da org (`POST /partners/orgs/:orgId/first-paid`).
-  Esperado: FXL Finders recebe o webhook em `POST /api/v1/conversions`; uma linha
+  Esperado: FXL Sales recebe o webhook em `POST /api/v1/conversions`; uma linha
   `webhook_events` com `source='fxl-financiero'`; o body inclui os campos PII
   (`customer_name`/`customer_phone`/`customer_cpf`). [ ] pass [ ] fail
 
@@ -78,7 +78,7 @@ Cada caso: passos → resultado esperado → [ ] pass / [ ] fail.
 
 - **TC10 — Assinatura inválida → 401 genérico (D-O)**
   Passos: enviar o webhook com `FXL_FINDERS_WEBHOOK_SECRET` errado.
-  Esperado: FXL Finders rejeita com `401 { error: 'unauthorized' }` (sem revelar se a
+  Esperado: FXL Sales rejeita com `401 { error: 'unauthorized' }` (sem revelar se a
   `source` existe). [ ] pass [ ] fail
 
 - **TC11 — Trilha de auditoria**
@@ -90,5 +90,5 @@ Cada caso: passos → resultado esperado → [ ] pass / [ ] fail.
 
 - `fxl_sig` é PERSISTIDO no fxl-financiero mas NÃO é verificado em v1.0 (D-P).
 - `finder_code` é enviado como `null` pelo fxl-financiero (a tabela `referral_links`
-  vive no FXL Finders); a atribuição resolve por `click_id` (D-M).
+  vive no FXL Sales); a atribuição resolve por `click_id` (D-M).
 - Aprovação por duas pessoas está DIFERIDA para v1.1 (D6) — sem badge de aprovação em v1.0.

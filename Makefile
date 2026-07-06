@@ -24,13 +24,13 @@ dev: ## Interactive app selector — pick one of api/web/site/mobile to run
 	esac
 
 front: ## Run only the frontend
-	pnpm --filter @fxl-finders/web dev
+	pnpm --filter @fxl-sales/web dev
 
 site: ## Run only the landing page (apps/site)
-	pnpm --filter @fxl-finders/site dev
+	pnpm --filter @fxl-sales/site dev
 
 back: build-shared ## Run only the API
-	pnpm --filter @fxl-finders/api dev
+	pnpm --filter @fxl-sales/api dev
 
 # --- Setup ---
 
@@ -46,21 +46,21 @@ setup-no-db: ## Same as `setup` but skips starting Postgres (use when Docker isn
 # --- Build ---
 
 build: build-shared ## Build everything
-	pnpm --filter @fxl-finders/api build
-	pnpm --filter @fxl-finders/web build
+	pnpm --filter @fxl-sales/api build
+	pnpm --filter @fxl-sales/web build
 
 build-shared: ## Build shared workspace packages
-	pnpm --filter @fxl-finders/shared-types build
-	pnpm --filter @fxl-finders/shared-utils build
+	pnpm --filter @fxl-sales/shared-types build
+	pnpm --filter @fxl-sales/shared-utils build
 
 build-web: ## Build frontend
-	pnpm --filter @fxl-finders/web build
+	pnpm --filter @fxl-sales/web build
 
 build-api: build-shared ## Build API
-	pnpm --filter @fxl-finders/api build
+	pnpm --filter @fxl-sales/api build
 
 build-site: ## Build landing page
-	pnpm --filter @fxl-finders/site build
+	pnpm --filter @fxl-sales/site build
 
 # --- Quality ---
 
@@ -82,7 +82,7 @@ doctor: ## Run the FXL health check
 # --- Database ---
 
 migrate: ## Run database migrations
-	pnpm --filter @fxl-finders/api db:migrate
+	pnpm --filter @fxl-sales/api db:migrate
 
 db-up: ## Start PostgreSQL only
 	docker compose up db -d
@@ -122,7 +122,7 @@ mobile-ios: ## Build and run mobile on a connected iOS device
 # --- Misc ---
 
 preview: ## Preview production build locally
-	pnpm --filter @fxl-finders/web preview
+	pnpm --filter @fxl-sales/web preview
 
 clean: ## Remove all node_modules and build artifacts
 	rm -rf node_modules apps/*/node_modules packages/*/node_modules

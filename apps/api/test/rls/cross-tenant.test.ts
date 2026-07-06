@@ -3,7 +3,7 @@
  *
  * Requires Docker Postgres running + migrations applied (vitest globalSetup —
  * see test/rls/global-setup.ts).
- * Run with: pnpm --filter @fxl-finders/api test:integration
+ * Run with: pnpm --filter @fxl-sales/api test:integration
  *
  * CRITICAL (D-G): the test connection authenticates as fxl_finders_app, NOT the
  * postgres superuser. The postgres superuser and the fxl_finders_admin BYPASSRLS

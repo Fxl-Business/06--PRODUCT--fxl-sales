@@ -26,8 +26,8 @@ The setup script replaces these tokens across all files:
 
 | Token | Example | Used in |
 |---|---|---|
-| `fxl-finders` | `fxl-financeiro` | pnpm scope `@<slug>/web`, package names, `.nexo/config.json` |
-| `Fxl Finders` | `FXL Financeiro` | README, CLAUDE.md, page titles |
+| `fxl-sales` | `fxl-financeiro` | pnpm scope `@<slug>/web`, package names, `.nexo/config.json` |
+| `Fxl Sales` | `FXL Financeiro` | README, CLAUDE.md, page titles |
 | `fxl_finders` | `fxl_financeiro` | docker-compose, `DATABASE_URL` |
 | `3006` | `3003` | api server, CORS, web `VITE_API_URL` |
 | `8006` | `8003` | vite, api `CORS_ORIGIN` |

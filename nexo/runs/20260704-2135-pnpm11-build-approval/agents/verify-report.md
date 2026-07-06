@@ -12,10 +12,10 @@ Ended: `2026-07-04T21:38:14-03:00`.
 
 - `pnpm install` exited 0 with pnpm `11.5.0`.
 - No `ERR_PNPM_IGNORED_BUILDS` error was observed.
-- `printf '1\n' | make` built `@fxl-finders/shared-types` and `@fxl-finders/shared-utils`.
-- The API watcher started and printed `[fxl-finders-api] listening on http://localhost:3006 (development)`.
+- `printf '1\n' | make` built `@fxl-sales/shared-types` and `@fxl-sales/shared-utils`.
+- The API watcher started and printed `[fxl-sales-api] listening on http://localhost:3006 (development)`.
 - While the watcher was running, `curl -fsS -i http://localhost:3006/health` returned `HTTP/1.1 200 OK` with `content-type: application/json`.
-- The health body was `{"ok":true,"service":"fxl-finders-api","env":"development","version":"1.0.0","timestamp":"2026-07-05T00:37:23.684Z"}`.
+- The health body was `{"ok":true,"service":"fxl-sales-api","env":"development","version":"1.0.0","timestamp":"2026-07-05T00:37:23.684Z"}`.
 - The watcher was stopped with Ctrl-C after the successful health response.
 - The Ctrl-C exit was treated as expected for the long-running watcher.
 

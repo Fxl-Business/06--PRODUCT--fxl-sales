@@ -1,5 +1,5 @@
 {
-  "name": "@fxl-finders/site",
+  "name": "@fxl-sales/site",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -11,7 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@fxl-finders/shared-utils": "workspace:*",
+    "@fxl-sales/shared-utils": "workspace:*",
     "@radix-ui/react-slot": "^1.2.4",
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.38.0",

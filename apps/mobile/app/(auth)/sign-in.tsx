@@ -29,7 +29,7 @@ export default function SignInScreen() {
   return (
     <SafeAreaView className="flex-1 bg-background">
       <View className="flex-1 justify-center px-8">
-        <Text className="text-3xl font-semibold text-foreground">Fxl Finders</Text>
+        <Text className="text-3xl font-semibold text-foreground">Fxl Sales</Text>
         <Text className="mt-2 text-base text-muted-foreground">Entre com sua conta</Text>
 
         <View className="mt-10 gap-4">

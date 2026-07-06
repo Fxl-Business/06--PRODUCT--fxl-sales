@@ -4,8 +4,8 @@
  * Usage with TanStack Query:
  *   useQuery({ queryKey: ['items'], queryFn: () => apiFetch<Item[]>('/items') })
  *
- * Auth: pass the Clerk session token via getToken() — wire that up per project.
- * In the template, no pages call this — left here as the canonical helper to extend.
+ * Auth: pass the active provider access token via getToken().
+ * In the template, no pages call this - left here as the canonical helper to extend.
  */
 
 const baseUrl = import.meta.env.VITE_API_URL ?? 'http://localhost:3006';
@@ -44,7 +44,7 @@ export async function apiFetch<T>(
 }
 
 /**
- * Blob variant of apiFetch (Phase 06 — CSV download, D-J). Goes through the SAME
+ * Blob variant of apiFetch (Phase 06 - CSV download, D-J). Goes through the SAME
  * base URL + Bearer token as apiFetch (NEVER a token-less window.location.href).
  * Returns the Blob + the Content-Disposition filename (if the server set one).
  */
@@ -76,8 +76,8 @@ export async function apiFetchBlob(
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Admin API clients (Phase 02, D-J). Every call goes through apiFetch (NEVER a
-// bare relative fetch, NEVER apiClient.get). Each call takes a Clerk token the
-// hook resolved via useAuth().getToken().
+// bare relative fetch, NEVER apiClient.get). Each call takes the active provider
+// token resolved by useAccessToken().
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type {
@@ -183,7 +183,7 @@ export const adminProductsApi = {
     ),
 };
 
-// ─── Phase 03: finders + sellers (D-J — manual URLSearchParams, no `params`) ──
+// ─── Phase 03: finders + sellers (D-J - manual URLSearchParams, no `params`) ──
 
 export const adminFindersApi = {
   list: (status: FinderStatus | undefined, token: string) => {
@@ -222,7 +222,7 @@ export const adminSellersApi = {
     }),
 };
 
-// ─── Phase 04: finder links + catalog + clicks (D-J — apiFetch + Clerk token) ──
+// ─── Phase 04: finder links + catalog + clicks (D-J - apiFetch + Bearer token) ──
 // FIRST-CLASS finder-authed endpoints — NOT admin-route reuse (admin routes are
 // requireAdmin-gated; a finder JWT would 403).
 
@@ -271,7 +271,7 @@ export const finderClicksApi = {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Phase 05 — admin reconciliation reads (conversions, commissions, audit). All via
-// apiFetch + Clerk token (D-J). Responses carry resolved display names (no raw UUIDs).
+// apiFetch + Bearer token (D-J). Responses carry resolved display names (no raw UUIDs).
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type CommissionStatus = 'pending' | 'approved' | 'locked' | 'paid' | 'reversed';
@@ -375,7 +375,7 @@ export const adminAuditApi = {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Admin payouts API (Phase 06, D-J / D-Q). finders-ready, batch create, CSV
-// download, list, mark-paid — all through apiFetch / apiFetchBlob (+ Clerk token).
+// download, list, mark-paid - all through apiFetch / apiFetchBlob (+ Bearer token).
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type FinderCommissionSummary = {

@@ -6,6 +6,6 @@
     }
   },
   "framework": "nextjs",
-  "buildCommand": "cd ../.. && pnpm --filter @fxl-finders/site build",
+  "buildCommand": "cd ../.. && pnpm --filter @fxl-sales/site build",
   "installCommand": "cd ../.. && pnpm install"
 }

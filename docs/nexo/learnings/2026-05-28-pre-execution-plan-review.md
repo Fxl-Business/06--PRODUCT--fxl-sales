@@ -1,6 +1,6 @@
 # Learning: adversarial pre-execution plan review catches cross-phase blockers cheaply
 
-> Captured 2026-05-28 from the FXL Finders v1.0 run (/nexo:add-feature + /nexo:autopilot, ultracode).
+> Captured 2026-05-28 from the FXL Sales v1.0 run (/nexo:add-feature + /nexo:autopilot, ultracode).
 > **NOT yet submitted to nexo-forge.** Run `/nexo:learn` yourself to open the PR (autopilot does not push).
 
 ## Context

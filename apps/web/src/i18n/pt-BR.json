@@ -1,6 +1,6 @@
 {
   "app": {
-    "name": "Fxl Finders"
+    "name": "Fxl Sales"
   },
   "nav": {
     "home": "Início",
@@ -17,7 +17,7 @@
   "errors": {
     "noRole": {
       "title": "Acesso não autorizado",
-      "body": "Sua conta ainda não tem um perfil associado na plataforma FXL Finders. Entre em contato com o administrador.",
+      "body": "Sua conta ainda não tem um perfil associado na plataforma FXL Sales. Entre em contato com o administrador.",
       "signOut": "Sair"
     }
   },

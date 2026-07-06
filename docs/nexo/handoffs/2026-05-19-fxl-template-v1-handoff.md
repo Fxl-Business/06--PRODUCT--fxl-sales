@@ -47,7 +47,7 @@ fxl-template/
 Full design: `docs/superpowers/specs/2026-05-19-fxl-template-design.md`.
 
 Five locked decisions (all user-approved during brainstorm):
-1. Init strategy: placeholder tokens (`fxl-finders`, `Fxl Finders`, `fxl_finders`, `3006`, `8006`, `4006`) + `scripts/init-from-template.sh`
+1. Init strategy: placeholder tokens (`fxl-sales`, `Fxl Sales`, `fxl_finders`, `3006`, `8006`, `4006`) + `scripts/init-from-template.sh`
 2. Scaffold depth: full FXL contract pre-wired, layout-only (no migrations, no seed data, no TanStack queries in pages)
 3. Mobile: outside pnpm workspace, standalone Expo (React 19 vs web React 18)
 4. Git: `git init` + atomic commit per phase, no remote push

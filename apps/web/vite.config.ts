@@ -17,5 +17,19 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: true,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined;
+          if (id.includes('/@tanstack/')) {
+            return 'vendor-query';
+          }
+          if (id.includes('/@radix-ui/')) {
+            return 'vendor-radix';
+          }
+          return 'vendor';
+        },
+      },
+    },
   },
 });

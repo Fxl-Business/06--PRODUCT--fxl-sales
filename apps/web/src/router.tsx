@@ -1,11 +1,12 @@
+/* eslint-disable react-refresh/only-export-components */
 import { lazy } from 'react';
 import { createBrowserRouter, Navigate, type RouteObject } from 'react-router-dom';
-import { SignedIn, SignedOut, RedirectToSignIn } from '@clerk/clerk-react';
 import { AdminShell } from './admin/layout/AdminShell';
 import { FinderShell } from './components/layout/FinderShell';
 import { SellerShell } from './components/layout/SellerShell';
 import { RoleGuard, RoleRouter } from './components/auth/RoleGuard';
 import { NoRolePage } from './pages/errors/NoRolePage';
+import { Protected } from './auth/react';
 
 // Lazy-loaded pages — low traffic, keeps the initial bundle small.
 const AppsPage = lazy(() => import('./admin/apps/AppsPage').then((m) => ({ default: m.AppsPage })));
@@ -64,15 +65,6 @@ const SellerDealsPlaceholderPage = lazy(() =>
   import('./seller/deals/SellerDealsPlaceholderPage').then((m) => ({
     default: m.SellerDealsPlaceholderPage,
   })),
-);
-
-const Protected = ({ children }: { children: React.ReactNode }) => (
-  <>
-    <SignedIn>{children}</SignedIn>
-    <SignedOut>
-      <RedirectToSignIn />
-    </SignedOut>
-  </>
 );
 
 const routes: RouteObject[] = [

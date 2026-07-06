@@ -75,7 +75,7 @@ VITE_SENTRY_DSN=
 
 **`apps/site/.env.dev.example`:**
 ```dotenv
-NEXT_PUBLIC_APP_NAME=Fxl Finders
+NEXT_PUBLIC_APP_NAME=Fxl Sales
 NEXT_PUBLIC_WEB_URL=http://localhost:8006
 NEXT_PUBLIC_VERCEL_ANALYTICS=
 ```

@@ -6,7 +6,7 @@
     }
   },
   "framework": "vite",
-  "buildCommand": "pnpm --filter @fxl-finders/web build",
+  "buildCommand": "pnpm --filter @fxl-sales/web build",
   "outputDirectory": "apps/web/dist",
   "installCommand": "pnpm install",
   "rewrites": [

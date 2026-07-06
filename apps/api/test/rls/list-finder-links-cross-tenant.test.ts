@@ -8,7 +8,7 @@
  * transaction wrapping + RLS are validated end-to-end.
  *
  * Connects via getDb() pointed at fxl_finders_app (D-G). Run with:
- *   pnpm --filter @fxl-finders/api test:integration
+ *   pnpm --filter @fxl-sales/api test:integration
  */
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';

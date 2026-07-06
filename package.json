@@ -1,11 +1,11 @@
 {
-  "name": "fxl-finders",
+  "name": "fxl-sales",
   "version": "1.0.0",
   "private": true,
   "fxlContractVersion": "1.0",
-  "fxlAppId": "fxl-finders",
+  "fxlAppId": "fxl-sales",
   "scripts": {
-    "build": "pnpm --filter @fxl-finders/shared-types build && pnpm --filter @fxl-finders/shared-utils build && pnpm --filter @fxl-finders/api build && pnpm --filter @fxl-finders/web build",
+    "build": "pnpm --filter @fxl-sales/shared-types build && pnpm --filter @fxl-sales/shared-utils build && pnpm --filter @fxl-sales/api build && pnpm --filter @fxl-sales/web build",
     "type-check": "pnpm -r type-check",
     "lint": "pnpm -r lint",
     "test": "pnpm -r --if-present test",

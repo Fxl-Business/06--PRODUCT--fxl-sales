@@ -1,4 +1,4 @@
-# FXL Finders v1.0 — Design Spec
+# FXL Sales v1.0 — Design Spec
 
 **Date:** 2026-05-28
 **Status:** Draft (under autopilot — `/nexo:autopilot` active; user-review gate skipped per autopilot rule 4)
@@ -15,11 +15,11 @@ FXL operates a portfolio of SaaS products (fxl-financiero, gps-comercial, aluga-
 2. Attribution is single-product (financeiro only); no concept of a cross-portfolio Finder
 3. Checkout setup fee is hard-coded; Finder cannot quote a price within an admin-defined band
 
-FXL Finders v1.0 builds the standalone Finders platform and wires the first cross-product integration (fxl-financiero) so commission data flows end-to-end on day one.
+FXL Sales v1.0 builds the standalone Finders platform and wires the first cross-product integration (fxl-financiero) so commission data flows end-to-end on day one.
 
 ### In scope (v1.0)
 
-- Standalone FXL Finders SaaS (apps/api, apps/web finder+admin portal, apps/site public)
+- Standalone FXL Sales SaaS (apps/api, apps/web finder+admin portal, apps/site public)
 - Finder onboarding (public signup → admin approval → Clerk invite)
 - Seller entity (FXL employees, first-class with read-only dashboard)
 - Apps registry + per-app webhook secrets (fxl-support dual-key pattern)
@@ -60,7 +60,7 @@ FXL Finders v1.0 builds the standalone Finders platform and wires the first cros
 | Sale-close trigger | Reuse fxl-financiero's `first_paid_at` | Autopilot. Minimal new business logic in financeiro repo |
 | Commission rate model | Per-product flat `(setup_rate_pct, recurring_rate_pct, recurring_months)` | Autopilot. Finder tiers deferred |
 | Attribution window | 30-day last-touch (per-app configurable) | Autopilot. Affiliate-industry default |
-| Webhook direction | Push (sibling app → FXL Finders), HMAC-signed | Autopilot. Real-time, matches fxl-support direction |
+| Webhook direction | Push (sibling app → FXL Sales), HMAC-signed | Autopilot. Real-time, matches fxl-support direction |
 | Apps split | api=backend, web=finder+admin, site=public+`/r/:code`, mobile=defer | Autopilot. Matches template scaffold |
 
 ---
@@ -69,7 +69,7 @@ FXL Finders v1.0 builds the standalone Finders platform and wires the first cros
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                        FXL Finders v1.0                             │
+│                        FXL Sales v1.0                             │
 │                                                                     │
 │  apps/site (Next.js)        apps/web (Vite + React)                │
 │  ─────────────────────      ──────────────────────                 │
@@ -116,7 +116,7 @@ FXL Finders v1.0 builds the standalone Finders platform and wires the first cros
 
 ## 4. Data model (Drizzle)
 
-All tables include `id uuid PK`, `created_at timestamptz NOT NULL DEFAULT now()`, `updated_at timestamptz`. RLS enforced via `FORCE ROW LEVEL SECURITY` and `current_setting('app.current_org_id')` on every tenant-scoped table. Tenant scoping notes are per-table below — note that "tenant" for FXL Finders is the **finder's own org**, and admin/seller tables sit outside that scope with a `BYPASSRLS`-equivalent role.
+All tables include `id uuid PK`, `created_at timestamptz NOT NULL DEFAULT now()`, `updated_at timestamptz`. RLS enforced via `FORCE ROW LEVEL SECURITY` and `current_setting('app.current_org_id')` on every tenant-scoped table. Tenant scoping notes are per-table below — note that "tenant" for FXL Sales is the **finder's own org**, and admin/seller tables sit outside that scope with a `BYPASSRLS`-equivalent role.
 
 ### `finders`
 Finder record. One per Clerk user. Tenant-scoped by `org_id` (finder's own org).
@@ -351,7 +351,7 @@ anonymized_at timestamptz  -- when set, name/email/phone/cpf NULLed; row preserv
 
 ## 5. Service-to-service auth
 
-### Inbound webhook (sibling app → FXL Finders)
+### Inbound webhook (sibling app → FXL Sales)
 
 `POST /api/v1/conversions` and `POST /api/v1/conversions/refund`.
 
@@ -369,7 +369,7 @@ Verification (in Hono middleware, runs on raw body before JSON parse):
 
 Source identity = `apps.slug`; signing secret = `apps.webhook_signing_secret`. Each sibling app has its own secret. Rotation: dual-secret cutover via a `apps.webhook_signing_secret_previous` column with a 7-day overlap (deferred to a follow-up if needed — v1.0 ships single-secret with manual rotation note in admin UI).
 
-### Outbound from FXL Finders
+### Outbound from FXL Sales
 
 None in v1.0. (Future: notify sibling apps when a commission is reversed so they can flag the customer record. Defer.)
 
@@ -428,7 +428,7 @@ Standard Clerk JWT in `Authorization: Bearer`. Hono middleware extracts `org_id`
       realized_monthly_brl: 10700,
       closed_at: "2026-06-15T..."
     }
-11. FXL Finders /api/v1/conversions:
+11. FXL Sales /api/v1/conversions:
     - HMAC verify on raw body
     - Insert webhook_events ON CONFLICT DO NOTHING → if dupe, 200 + skip
     - Parse body → resolve link by click_id (within 30-day window) → resolve finder_id, app_id, product_id
@@ -459,7 +459,7 @@ Tier 2: 6 phases. `/nexo:plan-all` spawns ≤3 planner agents.
 | 03 | **Finder onboarding + portal shell** | apps/site /signup public form. apps/web finder portal layout + auth-gated dashboard skeleton. apps/web admin approval queue (pending → approved → Clerk invite sent). Seller invite UI. | W2 (parallel with 02; both depend only on 01) |
 | 04 | **Referral links + signed redirect + click telemetry** | apps/web finder portal: link generator (validates band, computes signature). apps/api links service. apps/site /r/:code handler with click insert + rate limit + redirect. Clicks dashboard for finder. | W3 (after 02, 03) |
 | 05 | **Conversion ingestion + commission ledger + audit** | apps/api /conversions HMAC webhook handler with idempotency. Commission row creation. State machine + nightly hold-promotion job. audit_log hash-chain. Admin reconciliation views. | W4 (after 04) |
-| 06 | **fxl-financiero integration + payout CSV** | Cross-repo: fxl-financiero accepts ?ref + ?fxl_sig, persists click_id on checkout_attempts + org_attribution. Outbound webhook on first_paid_at. FXL Finders payout batch UI + CSV export. | W5 (after 05) |
+| 06 | **fxl-financiero integration + payout CSV** | Cross-repo: fxl-financiero accepts ?ref + ?fxl_sig, persists click_id on checkout_attempts + org_attribution. Outbound webhook on first_paid_at. FXL Sales payout batch UI + CSV export. | W5 (after 05) |
 
 **Cross-repo work (Phase 06):** outside this repo. The phase plan will include explicit instructions to clone/branch fxl-financiero, make changes there, type-check both repos, and call out the cross-repo nature in the audit + handoff. No automated commit to fxl-financiero — surface a diff for human review.
 
@@ -471,7 +471,7 @@ Tier 2: 6 phases. `/nexo:plan-all` spawns ≤3 planner agents.
 - **Drizzle schema + RLS:** integration tests against the Docker Postgres in `apps/api/test/rls/*.test.ts`. Cross-tenant assertions on every tenant-scoped table — set context to org A, attempt to read org B's row, assert 0 rows. Run in CI on every PR.
 - **API routes:** Hono test client + Supertest pattern.
 - **Frontend:** smoke-level Playwright E2E for the finder happy path (signup → approval → log in → generate link → see commission appear after simulated webhook).
-- **Cross-repo integration (Phase 06):** end-to-end manual test scripted in `docs/nexo/verify/06-financeiro-integration-uat.md`. Run fxl-financiero local + FXL Finders local + Docker Postgres for each, simulate full referral → checkout → commission flow.
+- **Cross-repo integration (Phase 06):** end-to-end manual test scripted in `docs/nexo/verify/06-financeiro-integration-uat.md`. Run fxl-financiero local + FXL Sales local + Docker Postgres for each, simulate full referral → checkout → commission flow.
 
 ---
 
@@ -516,4 +516,4 @@ After milestone completion, the handoff (per nexo:add-feature Phase 4 + handoff-
 1. The cross-repo change in fxl-financiero (Phase 06). Provide the diff path and the type-check verification log.
 2. Operational TODOs: production sa-east-1 deploy, Clerk Restricted mode toggle, Cloudflare Turnstile setup, two-person approval rollout.
 3. Sequence for v1.1 / v2.0: add gps-comercial integration, then aluga-flow, then finder commission rate tiers, then Asaas payouts, then DSAR UI.
-4. Reset of `.planning/PROJECT.md` from `fxl-template` → `fxl-finders` (part of Phase 0 in this workflow, called out in handoff so future operators know the milestone history).
+4. Reset of `.planning/PROJECT.md` from `fxl-template` → `fxl-sales` (part of Phase 0 in this workflow, called out in handoff so future operators know the milestone history).

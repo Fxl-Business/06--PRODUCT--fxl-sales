@@ -8,7 +8,7 @@ export default function HomeTab() {
     <SafeAreaView className="flex-1 bg-background" edges={['left', 'right']}>
       <ScrollView contentContainerClassName="p-6 gap-4">
         <View>
-          <Text className="text-2xl font-semibold text-foreground">Fxl Finders</Text>
+          <Text className="text-2xl font-semibold text-foreground">Fxl Sales</Text>
           <Text className="mt-1 text-sm text-muted-foreground">
             Bem-vindo de volta. Comece configurando integrações.
           </Text>

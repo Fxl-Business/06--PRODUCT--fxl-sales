@@ -1,4 +1,4 @@
-import { useAuth } from '@clerk/clerk-react';
+import { useAccessToken } from '@/auth/react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   adminCommissionsApi,
@@ -12,7 +12,7 @@ import {
  * Both mutations invalidate ['admin','commissions'] on success.
  */
 export function useAdminCommissions(filters?: { status?: CommissionStatus; finderId?: string }) {
-  const { getToken } = useAuth();
+  const { getToken } = useAccessToken();
   return useQuery({
     queryKey: ['admin', 'commissions', filters],
     queryFn: async () => adminCommissionsApi.list(filters, (await getToken()) ?? ''),
@@ -21,7 +21,7 @@ export function useAdminCommissions(filters?: { status?: CommissionStatus; finde
 }
 
 export function useLockCommission() {
-  const { getToken } = useAuth();
+  const { getToken } = useAccessToken();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (commissionId: string) =>
@@ -33,7 +33,7 @@ export function useLockCommission() {
 }
 
 export function useReverseCommission() {
-  const { getToken } = useAuth();
+  const { getToken } = useAccessToken();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ commissionId, reason }: { commissionId: string; reason: string }) =>

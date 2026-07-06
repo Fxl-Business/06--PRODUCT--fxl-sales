@@ -2,6 +2,7 @@ import { and, desc, eq, lt, sql } from 'drizzle-orm';
 import { clerkClient } from '../../lib/clerk.js';
 import { getAdminDb } from '../../db/client.js';
 import { auditLog, finders } from '../../db/schema.js';
+import { getAuthProviderName } from '../../middleware/app-auth.js';
 
 /**
  * Admin finders service (Phase 03 T03).
@@ -111,14 +112,23 @@ export async function approveFinder(
       throw new FinderStateError('invalid_state'); // e.g. suspended → approve not allowed
     }
 
-    // Create Clerk org ONLY if missing (idempotency).
+    const authProvider = getAuthProviderName();
+
+    // Create Clerk org ONLY if missing (idempotency). In Hub mode, provisioning
+    // is operator-owned; use a deterministic workspace id the operator can
+    // preserve in the Hub.
     let clerkOrgId = finder.clerkOrgId;
-    if (!clerkOrgId) {
+    const hubWorkspaceId = finder.orgId || finder.id;
+    if (authProvider === 'clerk' && !clerkOrgId) {
       const org = await clerkClient.organizations.createOrganization({
         name: finder.displayName,
         createdBy: adminUserId,
       });
       clerkOrgId = org.id;
+    }
+    const approvedOrgId = authProvider === 'hub' ? hubWorkspaceId : clerkOrgId;
+    if (!approvedOrgId) {
+      throw new FinderStateError('invalid_state');
     }
 
     await tx
@@ -126,7 +136,7 @@ export async function approveFinder(
       .set({
         status: 'approved',
         clerkOrgId,
-        orgId: clerkOrgId, // backfill org_id with the real Clerk org id
+        orgId: approvedOrgId,
         approvedAt: new Date(),
         approvedByUserId: adminUserId,
         updatedAt: new Date(),
@@ -138,16 +148,31 @@ export async function approveFinder(
       action: 'finder.approved',
       entityType: 'finder',
       entityId: finder.id,
-      afterJsonb: { clerkOrgId },
+      afterJsonb:
+        authProvider === 'hub'
+          ? { hubWorkspaceId, provisioning: 'operator_owned' }
+          : { clerkOrgId },
       prevHash: sql`''`,
       entryHash: sql`''`,
     });
 
-    return { finder: { ...finder, clerkOrgId }, alreadyApproved: false as const };
+    return {
+      finder: {
+        ...finder,
+        clerkOrgId,
+        orgId: approvedOrgId,
+      },
+      alreadyApproved: false as const,
+      authProvider,
+    };
   });
 
   // Already approved → idempotent no-op, no second invite.
   if (result.alreadyApproved) {
+    return { id: result.finder.id, status: 'approved' };
+  }
+
+  if (result.authProvider === 'hub') {
     return { id: result.finder.id, status: 'approved' };
   }
 

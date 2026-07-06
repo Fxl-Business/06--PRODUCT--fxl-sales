@@ -2,8 +2,8 @@ import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
   transpilePackages: [
-    '@fxl-finders/shared-types',
-    '@fxl-finders/shared-utils',
+    '@fxl-sales/shared-types',
+    '@fxl-sales/shared-utils',
   ],
 };
 

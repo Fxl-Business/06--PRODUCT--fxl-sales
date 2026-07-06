@@ -9,7 +9,7 @@ const publishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
 if (!publishableKey) {
   console.warn(
-    '[fxl-finders-mobile] EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY not set. Edit apps/mobile/.env.',
+    '[fxl-sales-mobile] EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY not set. Edit apps/mobile/.env.',
   );
 }
 

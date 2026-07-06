@@ -11,7 +11,7 @@
  * Runs in the integration project (test/rls/** + global-setup migrations, which
  * include the T01 seed). source = 'fxl-financiero' (D-A, …ciero).
  *
- * Run: pnpm --filter @fxl-finders/api test:integration
+ * Run: pnpm --filter @fxl-sales/api test:integration
  */
 import { createHmac } from 'node:crypto';
 import { Hono } from 'hono';

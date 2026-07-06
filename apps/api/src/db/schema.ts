@@ -1,5 +1,5 @@
 /**
- * Drizzle schema — FXL Finders v1.0 foundation (Phase 01).
+ * Drizzle schema — FXL Sales v1.0 foundation (Phase 01).
  *
  * 9 foundation tables: finders, sellers, apps, products, price_bands,
  * commission_rules, audit_log, webhook_events, leads.

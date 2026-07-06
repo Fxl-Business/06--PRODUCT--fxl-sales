@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { eq, and } from 'drizzle-orm';
 import type { MiddlewareHandler } from 'hono';
-import { verifyHmac } from '@fxl-finders/shared-utils';
+import { verifyHmac } from '@fxl-sales/shared-utils';
 import { getDb } from '../../db/client.js';
 import { apps } from '../../db/schema.js';
 
@@ -30,7 +30,7 @@ declare module 'hono' {
 
 const REPLAY_WINDOW_SECONDS = 300;
 const SIGNATURE_HEADER = 'X-FXL-Signature';
-const DUMMY_SECRET = 'fxl-finders-dummy-secret-for-constant-time-compare';
+const DUMMY_SECRET = 'fxl-sales-dummy-secret-for-constant-time-compare';
 
 function unauthorized(c: Parameters<MiddlewareHandler>[0]) {
   return c.json({ error: 'unauthorized' }, 401);

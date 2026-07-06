@@ -15,11 +15,11 @@ import {
 /**
  * Commissions domain routes (Phase 05 T08).
  *
- * Finder routes: clerkAuthMiddleware (mounted in server.ts) → getDb() + tx-scoped
- * setTenantContext (D-D). Admin routes: clerkAuthMiddleware + requireAdmin (mounted
- * in server.ts) → getAdminDb() (BYPASSRLS, D-C); every mutation writes audit_log in
- * the service's tx. There is NO /approve endpoint — D-K replaces it with /lock
- * (pending→locked fast-track). The `approved` state is never produced in v1.0.
+ * Finder routes: appAuthMiddleware (mounted in server.ts) -> getDb() + tx-scoped
+ * setTenantContext (D-D). Admin routes: appAuthMiddleware + requireAdmin (mounted
+ * in server.ts) -> getAdminDb() (BYPASSRLS, D-C); every mutation writes audit_log in
+ * the service's tx. There is NO /approve endpoint - D-K replaces it with /lock
+ * (pending -> locked fast-track). The `approved` state is never produced in v1.0.
  */
 export const commissionsRouter = new Hono();
 export const commissionsAdminRouter = new Hono();
@@ -38,11 +38,11 @@ function mapError(message: string): { status: 404 | 409; body: { error: string }
 // ── Finder route (getDb() + setTenantContext, D-D) ───────────────────────────
 commissionsRouter.get('/', async (c) => {
   const orgId = c.get('orgId');
-  const clerkUserId = c.get('userId');
+  const authSubject = c.get('userId');
   try {
     const rows = await getDb().transaction(async (tx) => {
       await setTenantContext(tx as never, orgId);
-      const finderId = await resolveFinderId(tx, clerkUserId);
+      const finderId = await resolveFinderId(tx, authSubject, orgId);
       return tx
         .select()
         .from(commissions)
@@ -66,7 +66,7 @@ commissionsAdminRouter.get('/', async (c) => {
   return c.json({ commissions: rows });
 });
 
-// Manual nightly-job trigger (D-K) — promotes pending→locked WHERE hold_until < now().
+// Manual nightly-job trigger (D-K) - promotes pending -> locked WHERE hold_until < now().
 // Registered before /:commissionId/lock; 'promote-locked' is a single segment so it
 // never collides with the two-segment :commissionId/lock route.
 commissionsAdminRouter.post('/promote-locked', async (c) => {

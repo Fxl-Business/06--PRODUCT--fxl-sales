@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildLinkCode,
   buildLinkSignature,
+  resolveFinderId,
   validateDestinationHost,
   validatePriceBand,
 } from '../service.js';
@@ -54,7 +55,7 @@ describe('buildLinkSignature (D-P link.signature)', () => {
   });
 
   it('uses the exact ":" join order [finderId,productId,setup,monthly] (D-P)', async () => {
-    const { signHmac } = await import('@fxl-finders/shared-utils');
+    const { signHmac } = await import('@fxl-sales/shared-utils');
     const expected = signHmac(secret, ['f', 'p', '100', '200'].join(':'));
     expect(buildLinkSignature('f', 'p', 100, 200, secret)).toBe(expected);
   });
@@ -105,5 +106,24 @@ describe('validateDestinationHost (EXACT equality — open-redirect defense)', (
 
   it('returns false for an empty allowed-hosts list', () => {
     expect(validateDestinationHost('https://app.fxl.com.br/x', [])).toBe(false);
+  });
+});
+
+describe('resolveFinderId', () => {
+  it('falls back to preserved orgId when Hub accountId does not match legacy clerk_user_id', async () => {
+    const calls: Array<Array<{ id: string }>> = [[], [{ id: 'finder-by-org' }]];
+    const tx = {
+      select: () => ({
+        from: () => ({
+          where: () => ({
+            limit: async () => calls.shift() ?? [],
+          }),
+        }),
+      }),
+    };
+
+    await expect(resolveFinderId(tx as never, 'hub-account-id', 'org_existing_1')).resolves.toBe(
+      'finder-by-org',
+    );
   });
 });

@@ -1,6 +1,6 @@
 {
   "app": {
-    "name": "FXL Finders",
+    "name": "FXL Sales",
     "tagline": "Indique, venda, receba."
   },
   "nav": {
@@ -37,7 +37,7 @@
       "random": "Chave aleatória"
     },
     "lgpd": {
-      "essential": "Concordo com o tratamento dos meus dados pessoais para execução dos serviços da plataforma FXL Finders (obrigatório).",
+      "essential": "Concordo com o tratamento dos meus dados pessoais para execução dos serviços da plataforma FXL Sales (obrigatório).",
       "marketing": "Aceito receber comunicações sobre novas oportunidades e atualizações da plataforma (opcional).",
       "version": "v1.0",
       "readMore": "Leia nossa Política de Privacidade"
@@ -70,7 +70,7 @@
   "hero": {
     "badge": "Plataforma de Afiliados B2B",
     "headline": "Indique o melhor software do mercado e ganhe comissões recorrentes.",
-    "body": "FXL Finders é a plataforma que conecta indicadores (Finders) às soluções FXL. Gere seu link personalizado, acompanhe cliques e conversões, e receba sua comissão automaticamente.",
+    "body": "FXL Sales é a plataforma que conecta indicadores (Finders) às soluções FXL. Gere seu link personalizado, acompanhe cliques e conversões, e receba sua comissão automaticamente.",
     "cta": "Quero ser Finder",
     "secondary": "Ver como funciona"
   },
@@ -101,7 +101,7 @@
     ]
   },
   "footer": {
-    "copy": "© 2026 FXL Finders. Todos os direitos reservados.",
+    "copy": "© 2026 FXL Sales. Todos os direitos reservados.",
     "links": {
       "privacy": "Privacidade",
       "terms": "Termos"

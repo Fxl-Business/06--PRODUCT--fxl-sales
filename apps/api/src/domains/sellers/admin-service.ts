@@ -2,6 +2,7 @@ import { desc, eq } from 'drizzle-orm';
 import { clerkClient } from '../../lib/clerk.js';
 import { getAdminDb } from '../../db/client.js';
 import { sellers } from '../../db/schema.js';
+import { getAuthProviderName } from '../../middleware/app-auth.js';
 
 /**
  * Admin sellers service (Phase 03 T04).
@@ -40,11 +41,13 @@ export async function createSellerAndInvite(
 
   if (!seller) throw new Error('seller_insert_failed');
 
-  await clerkClient.invitations.createInvitation({
-    emailAddress: input.contactEmail,
-    publicMetadata: { role: 'seller', sellerId: seller.id },
-    redirectUrl: process.env.CLERK_SELLER_REDIRECT_URL ?? 'http://localhost:8006/seller/deals',
-  });
+  if (getAuthProviderName() === 'clerk') {
+    await clerkClient.invitations.createInvitation({
+      emailAddress: input.contactEmail,
+      publicMetadata: { role: 'seller', sellerId: seller.id },
+      redirectUrl: process.env.CLERK_SELLER_REDIRECT_URL ?? 'http://localhost:8006/seller/deals',
+    });
+  }
 
   return seller;
 }

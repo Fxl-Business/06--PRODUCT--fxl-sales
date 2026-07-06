@@ -54,7 +54,7 @@ export default function PrivacyPage() {
         <p>Os dados são tratados para as seguintes finalidades:</p>
         <ul className="list-disc pl-6">
           <li>Pagamento de comissões de indicação</li>
-          <li>Operação e manutenção da plataforma FXL Finders</li>
+          <li>Operação e manutenção da plataforma FXL Sales</li>
           <li>Prevenção a fraudes e abusos</li>
         </ul>
       </Section>
