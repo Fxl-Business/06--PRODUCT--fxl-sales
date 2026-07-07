@@ -1,16 +1,20 @@
 import {
   CalendarDays,
   Check,
+  ChevronDown,
   ChevronLeft,
   ChevronsLeft,
   ChevronsRight,
-  CircleDollarSign,
   Edit3,
   Filter,
+  Folder,
+  LayoutGrid,
+  ListChecks,
   Loader2,
   LogOut,
   Plus,
   Save,
+  Settings,
   Trash2,
   UserRound,
 } from 'lucide-react';
@@ -87,6 +91,24 @@ const tableHeadClass =
 const tableCellClass = 'px-4 py-3 text-[13.5px] text-[#57575f]';
 const iconButtonClass =
   'inline-flex h-8 w-8 items-center justify-center rounded-[9px] border border-[#dcdce2] bg-white text-[#57575f] transition hover:border-[#eaa81a] hover:bg-[#f5f2ea] hover:text-[#9c7210]';
+const formInputClass =
+  'h-11 rounded-[10px] border-[#dcdce2] bg-[#fafafb] px-3 text-sm text-[#201f24] shadow-none outline-none ring-0 transition focus-visible:border-[#eaa81a] focus-visible:ring-0 focus-visible:ring-offset-0 disabled:bg-[#f4f4f6] disabled:text-[#9b9ba3] disabled:opacity-100';
+const formSelectClass =
+  'h-11 appearance-none rounded-[10px] border-[#dcdce2] bg-[#fafafb] px-3 pr-9 text-sm font-medium text-[#201f24] outline-none transition focus:border-[#eaa81a] disabled:cursor-not-allowed disabled:opacity-60';
+const productTypeOptions = ['SaaS', 'Custom', 'Advisor', 'Visual'];
+
+const workspaceVisuals: Record<
+  SalesOpsWorkspace,
+  {
+    icon: typeof LayoutGrid;
+    tileBg: string;
+    tileColor: string;
+  }
+> = {
+  tatico: { icon: LayoutGrid, tileBg: '#eaa81a', tileColor: '#18181b' },
+  operacional: { icon: ListChecks, tileBg: '#3f7cc4', tileColor: '#fff' },
+  config: { icon: Settings, tileBg: '#5a9166', tileColor: '#fff' },
+};
 
 type ModalState =
   | { kind: 'product'; product?: SalesOpsProduct }
@@ -430,6 +452,8 @@ export function SalesOpsApp() {
   const createSale = useCreateSalesOpsSale();
   const saveSettings = useSaveSalesOpsSettings();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
+  const [roleMenuOpen, setRoleMenuOpen] = useState(false);
   const [selectedRoleView, setSelectedRoleView] = useState<SalesOpsRoleView | null>(null);
   const [workspaceState, setWorkspaceState] = useState<SalesOpsWorkspace>('tatico');
   const [viewState, setViewState] = useState<SalesOpsView>('dashboard');
@@ -453,18 +477,21 @@ export function SalesOpsApp() {
   const userName = profile.name ?? (roleView === 'finder' ? 'Finder' : 'FXL');
 
   function setWorkspace(next: SalesOpsWorkspace) {
+    setWorkspaceMenuOpen(false);
     setWorkspaceState(next);
     setViewState((current) => resolveInitialSalesOpsView(next, roleView, current));
   }
 
   function setRole(next: SalesOpsRoleView) {
     const nextWorkspace = next === 'equipe' ? workspace : workspace === 'config' ? 'tatico' : workspace;
+    setRoleMenuOpen(false);
     setSelectedRoleView(next);
     setWorkspaceState(nextWorkspace);
     setViewState((current) => resolveInitialSalesOpsView(nextWorkspace, next, current));
   }
 
   function go(next: SalesOpsView) {
+    setWorkspaceMenuOpen(false);
     setWorkspaceState(workspaceForView(next, roleView));
     setViewState(next);
   }
@@ -501,18 +528,53 @@ export function SalesOpsApp() {
             : view === 'finders'
               ? 'Novo finder'
               : 'Nova venda';
+  const availableWorkspaces = salesOpsWorkspaces.filter(
+    (item) => roleView === 'equipe' || item.id !== 'config',
+  );
+  const activeWorkspaceMeta = salesOpsWorkspaces.find((item) => item.id === workspace);
+  const activeWorkspaceVisual = workspaceVisuals[workspace];
+  const ActiveWorkspaceIcon = activeWorkspaceVisual.icon;
+  const roleOptions: Array<{
+    id: SalesOpsRoleView;
+    name: string;
+    description: string;
+    initials: string;
+  }> = [
+    {
+      id: 'equipe',
+      name: 'Equipe',
+      description: 'Acesso total ao negócio',
+      initials: initials(userName),
+    },
+    {
+      id: 'vendedor',
+      name: 'Vendedor',
+      description: 'Só os próprios dados',
+      initials: 'VD',
+    },
+    {
+      id: 'finder',
+      name: 'Finder',
+      description: 'Só as próprias indicações',
+      initials: 'FN',
+    },
+  ];
 
   return (
     <div className="sales-ops flex h-screen w-full gap-0 bg-[#e8e8eb] p-[10px] text-[#201f24]">
       <aside
         className={`flex flex-none flex-col overflow-hidden rounded-[20px] bg-[#18181b] px-4 py-[22px] transition-all duration-200 ${sidebarCollapsed ? 'w-[76px]' : 'w-[244px]'}`}
       >
-        <div className={`flex items-center ${sidebarCollapsed ? 'justify-center' : 'gap-[11px] px-1 pb-4'}`}>
-          <div className="flex h-[34px] w-[34px] flex-none items-center justify-center rounded-[9px] bg-[#eaa81a]">
-            <CircleDollarSign className="h-[19px] w-[19px] text-[#18181b]" />
-          </div>
+        <div
+          className={`flex items-center ${
+            sidebarCollapsed ? 'justify-center pb-[14px]' : 'gap-[11px] px-[6px] pb-4 pl-2'
+          }`}
+        >
           {!sidebarCollapsed ? (
             <>
+              <div className="flex h-[34px] w-[34px] flex-none items-center justify-center rounded-[9px] bg-[#eaa81a]">
+                <Folder className="h-[18px] w-[18px] text-[#18181b]" />
+              </div>
               <div className="min-w-0 flex-1 leading-none">
                 <div className="sales-ops-num text-[19px] font-bold text-[#f3f3f5]">FXL</div>
                 <div className="mt-1 text-[10.5px] font-bold uppercase tracking-[0.14em] text-[#8b8b92]">
@@ -531,7 +593,7 @@ export function SalesOpsApp() {
           ) : (
             <button
               aria-label="Expandir menu"
-              className="mt-12 flex h-10 w-10 items-center justify-center rounded-[11px] border border-[#343439] bg-[#242428] text-[#a2a2aa] transition hover:bg-[#2c2c31] hover:text-[#eaa81a]"
+              className="flex h-10 w-10 items-center justify-center rounded-[11px] border border-[#343439] bg-[#242428] text-[#a2a2aa] transition hover:bg-[#2c2c31] hover:text-[#eaa81a]"
               onClick={() => setSidebarCollapsed(false)}
               type="button"
             >
@@ -540,78 +602,132 @@ export function SalesOpsApp() {
           )}
         </div>
 
-        <div className="mt-1 flex flex-col gap-2">
+        <div className="relative mb-4">
           {!sidebarCollapsed ? (
-            <>
-              <div className="rounded-[14px] border border-[#343439] bg-[#242428] p-2">
-                <div className="mb-2 px-1 text-[10px] font-bold uppercase tracking-[0.16em] text-[#8b8b92]">
+            <button
+              aria-expanded={workspaceMenuOpen}
+              className="flex w-full items-center gap-[11px] rounded-[14px] border border-[#343439] bg-[#242428] p-2 text-left transition hover:bg-[#2c2c31]"
+              onClick={() => setWorkspaceMenuOpen((open) => !open)}
+              title="Trocar workspace"
+              type="button"
+            >
+              <span
+                className="flex h-9 w-9 flex-none items-center justify-center rounded-[10px]"
+                style={{
+                  backgroundColor: activeWorkspaceVisual.tileBg,
+                  color: activeWorkspaceVisual.tileColor,
+                }}
+              >
+                <ActiveWorkspaceIcon className="h-[18px] w-[18px]" />
+              </span>
+              <span className="min-w-0 flex-1 leading-[1.2]">
+                <span className="block text-[10px] font-bold uppercase tracking-[0.16em] text-[#8b8b92]">
                   Workspace
+                </span>
+                <span className="sales-ops-num block truncate text-[15px] font-bold text-[#f3f3f5]">
+                  {activeWorkspaceMeta?.label ?? 'Tático'}
+                </span>
+              </span>
+              <ChevronDown className="h-[15px] w-[15px] flex-none text-[#8b8b92]" />
+            </button>
+          ) : (
+            <button
+              aria-label={`Workspace: ${activeWorkspaceMeta?.label ?? 'Tático'}`}
+              className="mx-auto flex h-10 w-10 items-center justify-center rounded-[11px]"
+              onClick={() => setSidebarCollapsed(false)}
+              style={{
+                backgroundColor: activeWorkspaceVisual.tileBg,
+                color: activeWorkspaceVisual.tileColor,
+              }}
+              type="button"
+            >
+              <ActiveWorkspaceIcon className="h-[19px] w-[19px]" />
+            </button>
+          )}
+          {workspaceMenuOpen && !sidebarCollapsed ? (
+            <>
+              <button
+                aria-label="Fechar workspaces"
+                className="fixed inset-0 z-[55] cursor-default"
+                onClick={() => setWorkspaceMenuOpen(false)}
+                type="button"
+              />
+              <div className="absolute left-0 right-0 top-[58px] z-[60] rounded-[14px] border border-[#e5e5ea] bg-white p-[7px] shadow-[0_20px_48px_rgba(0,0,0,.32)]">
+                <div className="px-2.5 pb-[5px] pt-[7px] text-[10px] font-bold uppercase tracking-[0.1em] text-[#9b9ba3]">
+                  Workspaces
                 </div>
-                <div className="grid gap-1">
-                  {salesOpsWorkspaces
-                    .filter((item) => roleView === 'equipe' || item.id !== 'config')
-                    .map((item) => (
-                      <button
-                        className={`rounded-[10px] px-3 py-2 text-left text-[13px] font-bold transition ${
-                          workspace === item.id
-                            ? 'bg-[#eaa81a] text-[#18181b]'
-                            : 'text-[#c9c9d0] hover:bg-[#2c2c31]'
-                        }`}
-                        key={item.id}
-                        onClick={() => setWorkspace(item.id)}
-                        type="button"
-                      >
-                        {item.label}
-                      </button>
-                    ))}
-                </div>
-              </div>
-              <nav className="flex flex-col gap-1">
-                {navItems.map((item) => {
-                  const Icon = item.icon;
-                  const active = view === item.id;
+                {availableWorkspaces.map((item) => {
+                  const itemVisual = workspaceVisuals[item.id];
+                  const ItemIcon = itemVisual.icon;
+                  const active = workspace === item.id;
                   return (
                     <button
-                      className={`flex items-center gap-[13px] rounded-xl px-[13px] py-[11px] text-left text-sm font-semibold transition ${
-                        active
-                          ? 'bg-[#eaa81a] text-[#18181b]'
-                          : 'text-[#c9c9d0] hover:bg-white/5 hover:text-white'
+                      className={`flex w-full items-center gap-[9px] rounded-[10px] px-2.5 py-[9px] text-left transition hover:bg-[#f5f5f7] ${
+                        active ? 'bg-[#eaa81a]' : 'bg-transparent'
                       }`}
                       key={item.id}
-                      onClick={() => go(item.id)}
+                      onClick={() => setWorkspace(item.id)}
                       type="button"
                     >
-                      <Icon className="h-[18px] w-[18px] flex-none" />
-                      <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                      <span className="flex h-[15px] w-[15px] flex-none items-center justify-center text-[#18181b]">
+                        {active ? <Check className="h-[15px] w-[15px]" /> : null}
+                      </span>
+                      <ItemIcon
+                        className="h-4 w-4 flex-none"
+                        style={{ color: active ? '#18181b' : '#84848c' }}
+                      />
+                      <span
+                        className={`min-w-0 flex-1 truncate text-[13.5px] ${
+                          active ? 'font-bold text-[#18181b]' : 'font-semibold text-[#201f24]'
+                        }`}
+                      >
+                        {item.label}
+                      </span>
                     </button>
                   );
                 })}
-              </nav>
+              </div>
             </>
-          ) : (
-            <nav className="mt-5 flex flex-col items-center gap-2">
-              {navItems.map((item) => {
-                const Icon = item.icon;
-                return (
-                  <button
-                    aria-label={item.label}
-                    className={`flex h-10 w-10 items-center justify-center rounded-[11px] transition ${
-                      view === item.id
-                        ? 'bg-[#eaa81a] text-[#18181b]'
-                        : 'text-[#c9c9d0] hover:bg-white/5 hover:text-white'
-                    }`}
-                    key={item.id}
-                    onClick={() => go(item.id)}
-                    title={item.label}
-                    type="button"
-                  >
-                    <Icon className="h-[18px] w-[18px]" />
-                  </button>
-                );
-              })}
-            </nav>
-          )}
+          ) : null}
         </div>
+
+        <nav
+          className={`flex flex-col gap-1 ${
+            sidebarCollapsed ? 'mt-1 items-center gap-2' : ''
+          }`}
+        >
+          {navItems.map((item) => {
+            const Icon = item.icon;
+            const active = view === item.id;
+            const openPayablesCount = bootstrap.payables.filter((payable) => payable.status === 'open').length;
+            return (
+              <button
+                aria-label={item.label}
+                className={`flex items-center gap-[13px] rounded-xl text-left text-sm font-semibold transition ${
+                  sidebarCollapsed
+                    ? 'h-10 w-10 justify-center'
+                    : 'px-[13px] py-[11px]'
+                } ${active ? 'bg-[#f3f3f5] text-[#18181b]' : 'text-[#b3b3bb] hover:bg-white/5 hover:text-white'}`}
+                key={item.id}
+                onClick={() => go(item.id)}
+                title={item.label}
+                type="button"
+              >
+                <Icon className="h-[18px] w-[18px] flex-none" />
+                {!sidebarCollapsed ? <span className="min-w-0 flex-1 truncate">{item.label}</span> : null}
+                {!sidebarCollapsed && item.id === 'comissoes' && roleView === 'equipe' && openPayablesCount > 0 ? (
+                  <span
+                    className={`sales-ops-num rounded-full px-2 py-0.5 text-[11px] font-bold ${
+                      active ? 'bg-[#e2b53a] text-[#18181b]' : 'bg-[#3a372b] text-[#eaa81a]'
+                    }`}
+                  >
+                    {openPayablesCount}
+                  </span>
+                ) : null}
+              </button>
+            );
+          })}
+        </nav>
 
         <div className="mt-auto flex flex-col gap-3">
           {!sidebarCollapsed ? (
@@ -658,24 +774,72 @@ export function SalesOpsApp() {
             <div className="hidden items-center gap-2 rounded-xl border border-[#dcdce2] bg-white px-[14px] py-[9px] text-sm font-semibold text-[#57575f] xl:flex">
               <CalendarDays className="h-[15px] w-[15px] text-[#9c7210]" />
               Julho 2026
+              <ChevronDown className="h-[13px] w-[13px] text-[#8b8b92]" />
             </div>
-            <NativeSelect
-              className="w-[150px] bg-white"
-              onChange={(value) => setRole(value as SalesOpsRoleView)}
-              value={roleView}
-            >
-              <option value="equipe">Equipe</option>
-              <option value="vendedor">Vendedor</option>
-              <option value="finder">Finder</option>
-            </NativeSelect>
-            <div className="hidden items-center gap-2 rounded-xl px-2 py-1 transition hover:bg-[#ededf0] lg:flex">
-              <div className="sales-ops-num flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-[#eaa81a] to-[#9c7210] text-[15px] font-bold text-white">
-                {initials(userName)}
-              </div>
-              <div className="leading-tight">
-                <div className="max-w-[150px] truncate text-sm font-bold">{userName}</div>
-                <div className="text-xs text-[#8b8b92]">{roleLabel}</div>
-              </div>
+            <div className="relative hidden lg:block">
+              <button
+                aria-expanded={roleMenuOpen}
+                className="flex items-center gap-2 rounded-xl py-1 pl-1 pr-2 transition hover:bg-[#ededf0]"
+                onClick={() => setRoleMenuOpen((open) => !open)}
+                title="Trocar visualização"
+                type="button"
+              >
+                <span className="sales-ops-num flex h-10 w-10 flex-none items-center justify-center rounded-full bg-gradient-to-br from-[#eaa81a] to-[#9c7210] text-[15px] font-bold text-white">
+                  {initials(userName)}
+                </span>
+                <span className="min-w-0 text-left leading-tight">
+                  <span className="block max-w-[150px] truncate text-sm font-bold">{userName}</span>
+                  <span className="flex items-center gap-1 text-xs text-[#8b8b92]">
+                    {roleLabel}
+                    <ChevronDown className="h-3 w-3" />
+                  </span>
+                </span>
+              </button>
+              {roleMenuOpen ? (
+                <>
+                  <button
+                    aria-label="Fechar visualização"
+                    className="fixed inset-0 z-[55] cursor-default"
+                    onClick={() => setRoleMenuOpen(false)}
+                    type="button"
+                  />
+                  <div className="absolute right-0 top-[54px] z-[60] w-[288px] rounded-2xl border border-[#e5e5ea] bg-white p-2 shadow-[0_18px_44px_rgba(0,0,0,.16)]">
+                    <div className="px-2.5 pb-1.5 pt-2 text-[11px] font-bold uppercase tracking-[0.08em] text-[#9b9ba3]">
+                      Nível de visualização
+                    </div>
+                    {roleOptions.map((option) => {
+                      const active = roleView === option.id;
+                      return (
+                        <button
+                          className={`flex w-full items-center gap-[11px] rounded-[11px] px-2.5 py-[9px] text-left transition hover:bg-[#f5f5f7] ${
+                            active ? 'bg-[#eef0f3]' : 'bg-transparent'
+                          }`}
+                          key={option.id}
+                          onClick={() => setRole(option.id)}
+                          type="button"
+                        >
+                          <span
+                            className={`sales-ops-num flex h-[34px] w-[34px] flex-none items-center justify-center rounded-[9px] text-[13px] font-bold ${
+                              active ? 'bg-[#eaa81a] text-white' : 'bg-[#ececf1] text-[#84848c]'
+                            }`}
+                          >
+                            {option.initials}
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-[13.5px] font-bold text-[#201f24]">
+                              {option.name}
+                            </span>
+                            <span className="block truncate text-[11.5px] text-[#8b8b92]">
+                              {option.description}
+                            </span>
+                          </span>
+                          {active ? <Check className="h-[17px] w-[17px] flex-none text-[#2f7d4b]" /> : null}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
+              ) : null}
             </div>
             <button
               aria-label="Sair"
@@ -1600,6 +1764,128 @@ function productForm(product?: SalesOpsProduct): ProductForm {
   };
 }
 
+function ReferenceToggle({
+  checked,
+  onChange,
+  label,
+  description,
+  className = 'bg-[#fafafb] border-[#ececf1]',
+  badge,
+}: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  label: string;
+  description?: string;
+  className?: string;
+  badge?: string;
+}) {
+  return (
+    <button
+      className={`flex items-center justify-between gap-4 rounded-xl border px-[14px] py-3 text-left ${className}`}
+      onClick={() => onChange(!checked)}
+      type="button"
+    >
+      <span className="min-w-0">
+        <span className="flex flex-wrap items-center gap-[7px] text-[13.5px] font-semibold text-[#201f24]">
+          {label}
+          {badge ? (
+            <span className="rounded-md bg-[#eaa81a] px-1.5 py-0.5 text-[10px] font-extrabold uppercase tracking-[0.03em] text-[#18181b]">
+              {badge}
+            </span>
+          ) : null}
+        </span>
+        {description ? <span className="mt-0.5 block text-xs text-[#8b8b92]">{description}</span> : null}
+      </span>
+      <span
+        className={`relative h-[25px] w-11 flex-none rounded-full transition ${checked ? 'bg-[#eaa81a]' : 'bg-[#d2d2d8]'}`}
+      >
+        <span
+          className={`absolute top-[2.5px] h-5 w-5 rounded-full bg-white transition ${checked ? 'right-[2.5px]' : 'left-[2.5px]'}`}
+        />
+      </span>
+    </button>
+  );
+}
+
+function CommissionModeButton({
+  active,
+  children,
+  onClick,
+}: {
+  active: boolean;
+  children: ReactNode;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      className={`flex-1 rounded-lg px-3 py-[9px] text-[13px] font-bold transition ${
+        active ? 'bg-[#201f24] text-white' : 'bg-transparent text-[#84848c] hover:text-[#201f24]'
+      }`}
+      onClick={onClick}
+      type="button"
+    >
+      {children}
+    </button>
+  );
+}
+
+function UnitToggle({
+  value,
+  active,
+  onClick,
+}: {
+  value: '%' | 'R$';
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      className={`w-[42px] rounded-md px-0 py-2 text-[13px] font-bold transition ${
+        active ? 'bg-[#201f24] text-white' : 'bg-transparent text-[#84848c] hover:text-[#201f24]'
+      }`}
+      onClick={onClick}
+      type="button"
+    >
+      {value}
+    </button>
+  );
+}
+
+function UnitInput({
+  value,
+  onChange,
+  unit,
+  disabled,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  unit: '%' | 'R$';
+  disabled?: boolean;
+}) {
+  return (
+    <div className="relative flex-1">
+      <Input
+        className={`sales-ops-num ${formInputClass} pr-11`}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+        type="number"
+        value={value}
+      />
+      <span className="pointer-events-none absolute right-[13px] top-1/2 -translate-y-1/2 text-[13px] font-bold text-[#9b9ba3]">
+        {unit}
+      </span>
+    </div>
+  );
+}
+
+function DefinedOnSaleNotice() {
+  return (
+    <div className="flex h-11 items-center rounded-[10px] border border-dashed border-[#dcc98f] bg-[#fbf6ea] px-3 text-[13px] font-semibold text-[#9c7210]">
+      Definido na venda
+    </div>
+  );
+}
+
 function ProductDialog(props: {
   modal: Extract<ModalState, { kind: 'product' }> | null;
   collaborators: SalesOpsPerson[];
@@ -1678,242 +1964,394 @@ function ProductDialogBody({
 
   return (
     <Dialog onOpenChange={(open) => (!open ? onClose() : undefined)} open>
-      <DialogContent className="max-h-[92vh] max-w-[620px] overflow-y-auto rounded-[20px] border-none bg-white p-0">
-        <DialogHeader className="border-b border-[#e8e8ec] px-6 py-5 text-left">
-          <DialogTitle className="sales-ops-num text-[19px]">Produto</DialogTitle>
-          <DialogDescription>Catálogo, preço, código e comissionamento.</DialogDescription>
+      <DialogContent
+        className="flex h-[92vh] max-h-[92vh] w-[calc(100vw-48px)] max-w-[560px] flex-col gap-0 overflow-hidden rounded-[20px] border-none bg-white p-0 shadow-[0_30px_80px_rgba(0,0,0,.3)] sm:rounded-[20px] [&>button:last-child]:hidden"
+        onOpenAutoFocus={(event) => event.preventDefault()}
+      >
+        <DialogHeader className="flex-row items-start justify-between space-y-0 border-b border-[#e8e8ec] px-6 py-5 text-left">
+          <div>
+            <DialogTitle className="sales-ops-num text-[19px] font-bold text-[#201f24]">
+              {activeModal.product ? 'Editar produto' : 'Novo produto'}
+            </DialogTitle>
+            <DialogDescription className="mt-1 text-[13px] text-[#8b8b92]">
+              Catálogo, valores e comissões padrão
+            </DialogDescription>
+          </div>
+          <button
+            aria-label="Fechar"
+            className="flex h-9 w-9 flex-none items-center justify-center rounded-[10px] border border-[#dcdce2] bg-white text-[#201f24] transition hover:bg-[#f2f2f4]"
+            onClick={onClose}
+            type="button"
+          >
+            <span className="relative block h-4 w-4">
+              <span className="absolute left-1/2 top-1/2 h-0.5 w-4 -translate-x-1/2 -translate-y-1/2 rotate-45 rounded bg-current" />
+              <span className="absolute left-1/2 top-1/2 h-0.5 w-4 -translate-x-1/2 -translate-y-1/2 -rotate-45 rounded bg-current" />
+            </span>
+          </button>
         </DialogHeader>
-        <form className="flex flex-col gap-4 px-6 py-5" onSubmit={submit}>
-          <Field label="Nome" required>
-            <Input
-              className="bg-[#fafafb]"
-              onChange={(event) => set('name', event.target.value)}
-              value={form.name}
-            />
-          </Field>
-          <div className="grid gap-3 md:grid-cols-2">
-            <Field label="Tipo">
+        <form className="flex min-h-0 flex-1 flex-col" onSubmit={submit}>
+          <div className="flex min-h-0 flex-1 flex-col gap-[15px] overflow-y-auto px-6 py-[22px]">
+            <Field label="Nome" required>
               <Input
-                className="bg-[#fafafb]"
-                onChange={(event) => set('type', event.target.value)}
-                value={form.type}
+                className={formInputClass}
+                onChange={(event) => set('name', event.target.value)}
+                placeholder="Nome"
+                required
+                value={form.name}
               />
             </Field>
-            <Field label="Final do código">
-              <Input
-                className="sales-ops-num bg-[#fafafb]"
-                inputMode="numeric"
-                maxLength={2}
-                onChange={(event) => set('codeSuffix', event.target.value)}
-                value={form.codeSuffix}
-              />
-            </Field>
-          </div>
-          <Toggle
-            checked={form.openPrice}
-            description="Valor definido diretamente na venda"
-            label="Preço em aberto"
-            onChange={(value) => set('openPrice', value)}
-          />
-          <div className="grid gap-3 md:grid-cols-2">
-            <Field label="Setup (R$)">
-              <Input
-                className="sales-ops-num bg-[#fafafb]"
-                disabled={form.openPrice}
-                onChange={(event) => set('setupBrl', event.target.value)}
-                value={form.setupBrl}
-              />
-            </Field>
-            <Field label="Mensalidade (R$)">
-              <Input
-                className="sales-ops-num bg-[#fafafb]"
-                disabled={form.openPrice || !form.hasMonthly}
-                onChange={(event) => set('monthlyBrl', event.target.value)}
-                value={form.monthlyBrl}
-              />
-            </Field>
-          </div>
-          <Toggle
-            checked={form.hasMonthly}
-            description="Cobrança recorrente além do setup"
-            label="Possui mensalidade"
-            onChange={(value) => set('hasMonthly', value)}
-          />
-          <Toggle
-            checked={form.recurringCommission}
-            description="Aplicar comissão também na mensalidade"
-            label="Incide sobre recorrente"
-            onChange={(value) => set('recurringCommission', value)}
-          />
-          <div className="grid gap-3 md:grid-cols-2">
-            <Field label="Comissão vendedor">
-              <div className="flex gap-2">
-                <NativeSelect
-                  className="w-[86px]"
-                  onChange={(value) => set('sellerCommissionType', value as 'pct' | 'fix')}
-                  value={form.sellerCommissionType}
-                >
-                  <option value="pct">%</option>
-                  <option value="fix">R$</option>
-                </NativeSelect>
-                <Input
-                  className="sales-ops-num bg-[#fafafb]"
-                  onChange={(event) => set('sellerCommissionValue', event.target.value)}
-                  value={form.sellerCommissionValue}
-                />
-              </div>
-            </Field>
-            <Field label="Comissão finder">
-              <div className="flex gap-2">
-                <NativeSelect
-                  className="w-[86px]"
-                  disabled={!form.hasFinderCommission}
-                  onChange={(value) => set('finderCommissionType', value as 'pct' | 'fix')}
-                  value={form.finderCommissionType}
-                >
-                  <option value="pct">%</option>
-                  <option value="fix">R$</option>
-                </NativeSelect>
-                <Input
-                  className="sales-ops-num bg-[#fafafb]"
-                  disabled={!form.hasFinderCommission}
-                  onChange={(event) => set('finderCommissionValue', event.target.value)}
-                  value={form.finderCommissionValue}
-                />
-              </div>
-            </Field>
-          </div>
-          <Toggle
-            checked={form.hasFinderCommission}
-            description="Habilita comissão para quem indicou"
-            label="Vendedor + Finder"
-            onChange={(value) => set('hasFinderCommission', value)}
-          />
 
-          <ListEditor
-            addLabel="Adicionar módulo"
-            empty="Nenhum módulo adicionado"
-            onAdd={() =>
-              set('modules', [...form.modules, { name: '', type: 'Upsell', valueBrl: '0.00' }])
-            }
-            title="Módulos"
-          >
-            {form.modules.map((module, index) => (
-              <div className="grid gap-2 rounded-xl border border-[#ececf1] bg-[#fafafb] p-3 md:grid-cols-[1fr_120px_120px_34px]" key={index}>
-                <Input
-                  className="bg-white"
-                  onChange={(event) => {
-                    const next = [...form.modules];
-                    next[index] = { ...module, name: event.target.value };
-                    set('modules', next);
-                  }}
-                  placeholder="Nome"
-                  value={module.name}
-                />
-                <Input
-                  className="bg-white"
-                  onChange={(event) => {
-                    const next = [...form.modules];
-                    next[index] = { ...module, type: event.target.value };
-                    set('modules', next);
-                  }}
-                  placeholder="Tipo"
-                  value={module.type}
-                />
-                <Input
-                  className="sales-ops-num bg-white"
-                  onChange={(event) => {
-                    const next = [...form.modules];
-                    next[index] = { ...module, valueBrl: event.target.value };
-                    set('modules', next);
-                  }}
-                  placeholder="0.00"
-                  value={module.valueBrl}
-                />
-                <button
-                  className={iconButtonClass}
-                  onClick={() => set('modules', form.modules.filter((_, itemIndex) => itemIndex !== index))}
-                  type="button"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-[#dfe8f2] bg-[#f3f6fa] px-[14px] py-[13px]">
+              <div className="min-w-0 flex-1">
+                <div className="text-[13.5px] font-semibold text-[#201f24]">
+                  Final do código da venda
+                </div>
+                <div className="mt-0.5 text-xs text-[#8b8b92]">
+                  Todo código gerado para vendas deste produto termina neste número
+                </div>
               </div>
-            ))}
-          </ListEditor>
-
-          <ListEditor
-            addLabel="Adicionar prestador"
-            empty="Nenhum prestador vinculado"
-            onAdd={() =>
-              set('providers', [
-                ...form.providers,
-                {
-                  personName: collaborators[0]?.displayName ?? '',
-                  commissionType: 'pct',
-                  commissionValue: '0',
-                },
-              ])
-            }
-            title="Prestadores de serviço"
-          >
-            {form.providers.map((provider, index) => (
-              <div className="grid gap-2 rounded-xl border border-[#ececf1] bg-[#fafafb] p-3 md:grid-cols-[1fr_92px_120px_34px]" key={index}>
-                <Input
-                  className="bg-white"
-                  list="sales-ops-collaborators"
-                  onChange={(event) => {
-                    const next = [...form.providers];
-                    next[index] = { ...provider, personName: event.target.value };
-                    set('providers', next);
-                  }}
-                  placeholder="Nome"
-                  value={provider.personName}
-                />
-                <NativeSelect
-                  className="bg-white"
-                  onChange={(value) => {
-                    const next = [...form.providers];
-                    next[index] = { ...provider, commissionType: value as 'pct' | 'fix' };
-                    set('providers', next);
-                  }}
-                  value={provider.commissionType}
-                >
-                  <option value="pct">%</option>
-                  <option value="fix">R$</option>
-                </NativeSelect>
-                <Input
-                  className="sales-ops-num bg-white"
-                  onChange={(event) => {
-                    const next = [...form.providers];
-                    next[index] = { ...provider, commissionValue: event.target.value };
-                    set('providers', next);
-                  }}
-                  value={provider.commissionValue}
-                />
-                <button
-                  className={iconButtonClass}
-                  onClick={() =>
-                    set('providers', form.providers.filter((_, itemIndex) => itemIndex !== index))
+              <div className="sales-ops-num flex flex-none items-center rounded-[10px] border border-[#dcdce2] bg-white py-2 pl-[13px] pr-1.5 text-[15px] font-bold tracking-[0.06em] text-[#b0b0b8]">
+                0000-
+                <input
+                  className="sales-ops-num w-10 border-none bg-transparent px-0.5 text-center text-[15px] font-bold text-[#3f6ea3] outline-none"
+                  inputMode="numeric"
+                  maxLength={2}
+                  onChange={(event) =>
+                    set('codeSuffix', event.target.value.replace(/\D/g, '').slice(0, 2))
                   }
+                  placeholder="0"
+                  type="text"
+                  value={form.codeSuffix}
+                />
+              </div>
+            </div>
+
+            <ReferenceToggle
+              badge="Sob demanda"
+              checked={form.openPrice}
+              className="border-[#f0e2bd] bg-[#fbf3e0]"
+              description="Valor definido na venda - para sistemas personalizados"
+              label="Preço em aberto"
+              onChange={(value) => set('openPrice', value)}
+            />
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <Field label="Tipo">
+                <div className="relative">
+                  <NativeSelect
+                    className={`${formSelectClass} w-full`}
+                    onChange={(value) => set('type', value)}
+                    value={form.type}
+                  >
+                    {productTypeOptions.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </NativeSelect>
+                  <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-[13px] w-[13px] -translate-y-1/2 text-[#8b8b92]" />
+                </div>
+              </Field>
+              <Field label="Setup (R$)">
+                {form.openPrice ? (
+                  <DefinedOnSaleNotice />
+                ) : (
+                  <Input
+                    className={`sales-ops-num ${formInputClass}`}
+                    onChange={(event) => set('setupBrl', event.target.value)}
+                    type="number"
+                    value={form.setupBrl}
+                  />
+                )}
+              </Field>
+            </div>
+
+            <div className="rounded-xl border border-[#ececf1] bg-[#fafafb]">
+              <div className="flex items-center justify-between gap-4 px-[14px] py-3">
+                <div>
+                  <div className="text-[13.5px] font-semibold text-[#201f24]">Possui mensalidade</div>
+                  <div className="text-xs text-[#8b8b92]">Cobrança recorrente além do setup</div>
+                </div>
+                <button
+                  className={`relative h-[25px] w-11 flex-none rounded-full transition ${form.hasMonthly ? 'bg-[#2f7d4b]' : 'bg-[#d2d2d8]'}`}
+                  onClick={() => set('hasMonthly', !form.hasMonthly)}
                   type="button"
                 >
-                  <Trash2 className="h-4 w-4" />
+                  <span
+                    className={`absolute top-[2.5px] h-5 w-5 rounded-full bg-white transition ${form.hasMonthly ? 'right-[2.5px]' : 'left-[2.5px]'}`}
+                  />
                 </button>
               </div>
-            ))}
-          </ListEditor>
-          <datalist id="sales-ops-collaborators">
-            {collaborators.map((person) => (
-              <option key={person.id} value={person.displayName} />
-            ))}
-          </datalist>
+              {form.hasMonthly ? (
+                <div className="flex flex-col gap-[11px] px-[14px] pb-[14px]">
+                  <Field label="Valor da mensalidade (R$)">
+                    {form.openPrice ? (
+                      <DefinedOnSaleNotice />
+                    ) : (
+                      <Input
+                        className={`sales-ops-num bg-white ${formInputClass}`}
+                        onChange={(event) => set('monthlyBrl', event.target.value)}
+                        type="number"
+                        value={form.monthlyBrl}
+                      />
+                    )}
+                  </Field>
+                  <div className="flex items-center justify-between gap-4 rounded-[11px] border border-[#ececf1] bg-white px-[13px] py-[11px]">
+                    <div>
+                      <div className="text-[13px] font-semibold text-[#201f24]">
+                        Incide sobre recorrente
+                      </div>
+                      <div className="text-[11.5px] text-[#8b8b92]">
+                        Aplicar comissão também na mensalidade
+                      </div>
+                    </div>
+                    <button
+                      className={`relative h-[25px] w-11 flex-none rounded-full transition ${form.recurringCommission ? 'bg-[#2f7d4b]' : 'bg-[#d2d2d8]'}`}
+                      onClick={() => set('recurringCommission', !form.recurringCommission)}
+                      type="button"
+                    >
+                      <span
+                        className={`absolute top-[2.5px] h-5 w-5 rounded-full bg-white transition ${form.recurringCommission ? 'right-[2.5px]' : 'left-[2.5px]'}`}
+                      />
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
 
-          <div className="flex justify-end gap-3 border-t border-[#e8e8ec] pt-4">
-            <SecondaryButton onClick={onClose}>Cancelar</SecondaryButton>
-            <PrimaryButton disabled={saving || !form.name.trim()} type="submit">
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              Salvar
-            </PrimaryButton>
+            <div>
+              <div className="mb-[9px] text-[11px] font-bold uppercase tracking-[0.06em] text-[#9b9ba3]">
+                Comissionamento
+              </div>
+              <div className="mb-[14px] flex gap-[5px] rounded-[11px] bg-[#f2f2f4] p-1">
+                <CommissionModeButton
+                  active={!form.hasFinderCommission}
+                  onClick={() => set('hasFinderCommission', false)}
+                >
+                  Somente vendedor
+                </CommissionModeButton>
+                <CommissionModeButton
+                  active={form.hasFinderCommission}
+                  onClick={() => set('hasFinderCommission', true)}
+                >
+                  Vendedor + Finder
+                </CommissionModeButton>
+              </div>
+
+              <div className="mb-3">
+                <div className="mb-1.5 text-xs font-semibold text-[#8b8b92]">Comissão do vendedor</div>
+                <div className="flex gap-[9px]">
+                  <div className="flex flex-none gap-[3px] rounded-[9px] bg-[#f2f2f4] p-[3px]">
+                    <UnitToggle
+                      active={form.sellerCommissionType === 'pct'}
+                      onClick={() => set('sellerCommissionType', 'pct')}
+                      value="%"
+                    />
+                    <UnitToggle
+                      active={form.sellerCommissionType === 'fix'}
+                      onClick={() => set('sellerCommissionType', 'fix')}
+                      value="R$"
+                    />
+                  </div>
+                  <UnitInput
+                    onChange={(value) => set('sellerCommissionValue', value)}
+                    unit={form.sellerCommissionType === 'fix' ? 'R$' : '%'}
+                    value={form.sellerCommissionValue}
+                  />
+                </div>
+              </div>
+
+              {form.hasFinderCommission ? (
+                <div>
+                  <div className="mb-1.5 text-xs font-semibold text-[#8b8b92]">Comissão do finder</div>
+                  <div className="flex gap-[9px]">
+                    <div className="flex flex-none gap-[3px] rounded-[9px] bg-[#f2f2f4] p-[3px]">
+                      <UnitToggle
+                        active={form.finderCommissionType === 'pct'}
+                        onClick={() => set('finderCommissionType', 'pct')}
+                        value="%"
+                      />
+                      <UnitToggle
+                        active={form.finderCommissionType === 'fix'}
+                        onClick={() => set('finderCommissionType', 'fix')}
+                        value="R$"
+                      />
+                    </div>
+                    <UnitInput
+                      onChange={(value) => set('finderCommissionValue', value)}
+                      unit={form.finderCommissionType === 'fix' ? 'R$' : '%'}
+                      value={form.finderCommissionValue}
+                    />
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
+            <ListEditor
+              addLabel="Adicionar"
+              empty="Nenhum módulo adicionado"
+              onAdd={() =>
+                set('modules', [...form.modules, { name: '', type: 'Upsell', valueBrl: '0.00' }])
+              }
+              subtitle="Upsell, downsell e complementos"
+              title="Módulos"
+            >
+              {form.modules.map((module, index) => (
+                <div className="rounded-xl border border-[#ececf1] bg-[#fafafb] p-[11px]" key={index}>
+                  <div className="mb-2 flex items-center gap-2">
+                    <Input
+                      className={`bg-white ${formInputClass}`}
+                      onChange={(event) => {
+                        const next = [...form.modules];
+                        next[index] = { ...module, name: event.target.value };
+                        set('modules', next);
+                      }}
+                      placeholder="Nome do módulo"
+                      value={module.name}
+                    />
+                    <button
+                      aria-label="Remover módulo"
+                      className="flex h-[34px] w-[34px] flex-none items-center justify-center rounded-[9px] border border-[#e6d3d0] bg-white text-[#b23a22] transition hover:bg-[#fbf0ee]"
+                      onClick={() => set('modules', form.modules.filter((_, itemIndex) => itemIndex !== index))}
+                      type="button"
+                    >
+                      <Trash2 className="h-[15px] w-[15px]" />
+                    </button>
+                  </div>
+                  <div className="flex gap-2">
+                    <NativeSelect
+                      className={`${formSelectClass} flex-[0_0_132px] bg-white`}
+                      onChange={(value) => {
+                        const next = [...form.modules];
+                        next[index] = { ...module, type: value };
+                        set('modules', next);
+                      }}
+                      value={module.type}
+                    >
+                      {['Módulo', 'Upsell', 'Downsell', 'Cross-sell', 'Add-on'].map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </NativeSelect>
+                    <div className="relative flex-1">
+                      <span className="pointer-events-none absolute left-[11px] top-1/2 -translate-y-1/2 text-[12.5px] font-bold text-[#9b9ba3]">
+                        R$
+                      </span>
+                      <Input
+                        className={`sales-ops-num bg-white pl-8 ${formInputClass}`}
+                        onChange={(event) => {
+                          const next = [...form.modules];
+                          next[index] = { ...module, valueBrl: event.target.value };
+                          set('modules', next);
+                        }}
+                        placeholder="0"
+                        type="number"
+                        value={module.valueBrl}
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </ListEditor>
+
+            <ListEditor
+              addLabel="Adicionar"
+              empty="Nenhum prestador vinculado"
+              onAdd={() =>
+                set('providers', [
+                  ...form.providers,
+                  {
+                    personName: collaborators[0]?.displayName ?? '',
+                    commissionType: 'pct',
+                    commissionValue: '0',
+                  },
+                ])
+              }
+              subtitle="Vinculados a este produto"
+              title="Prestadores de serviço"
+            >
+              {form.providers.map((provider, index) => (
+                <div className="rounded-xl border border-[#ececf1] bg-[#fafafb] p-[11px]" key={index}>
+                  <div className="mb-2 flex items-center gap-2">
+                    <Input
+                      className={`bg-white ${formInputClass}`}
+                      list="sales-ops-collaborators"
+                      onChange={(event) => {
+                        const next = [...form.providers];
+                        next[index] = { ...provider, personName: event.target.value };
+                        set('providers', next);
+                      }}
+                      placeholder="Nome"
+                      value={provider.personName}
+                    />
+                    <button
+                      aria-label="Remover prestador"
+                      className="flex h-[34px] w-[34px] flex-none items-center justify-center rounded-[9px] border border-[#e6d3d0] bg-white text-[#b23a22] transition hover:bg-[#fbf0ee]"
+                      onClick={() =>
+                        set('providers', form.providers.filter((_, itemIndex) => itemIndex !== index))
+                      }
+                      type="button"
+                    >
+                      <Trash2 className="h-[15px] w-[15px]" />
+                    </button>
+                  </div>
+                  <div className="flex gap-2">
+                    <div className="flex flex-none gap-[3px] rounded-[9px] bg-[#f2f2f4] p-[3px]">
+                      <UnitToggle
+                        active={provider.commissionType === 'pct'}
+                        onClick={() => {
+                          const next = [...form.providers];
+                          next[index] = { ...provider, commissionType: 'pct' };
+                          set('providers', next);
+                        }}
+                        value="%"
+                      />
+                      <UnitToggle
+                        active={provider.commissionType === 'fix'}
+                        onClick={() => {
+                          const next = [...form.providers];
+                          next[index] = { ...provider, commissionType: 'fix' };
+                          set('providers', next);
+                        }}
+                        value="R$"
+                      />
+                    </div>
+                    <UnitInput
+                      onChange={(value) => {
+                        const next = [...form.providers];
+                        next[index] = { ...provider, commissionValue: value };
+                        set('providers', next);
+                      }}
+                      unit={provider.commissionType === 'fix' ? 'R$' : '%'}
+                      value={provider.commissionValue}
+                    />
+                  </div>
+                </div>
+              ))}
+            </ListEditor>
+            <datalist id="sales-ops-collaborators">
+              {collaborators.map((person) => (
+                <option key={person.id} value={person.displayName} />
+              ))}
+            </datalist>
+          </div>
+
+          <div className="flex flex-none justify-end gap-2.5 border-t border-[#e8e8ec] bg-[#fafafb] px-6 py-4">
+            <button
+              className="min-h-11 rounded-[11px] border border-[#dcdce2] bg-white px-5 text-sm font-semibold text-[#201f24] transition hover:bg-[#f2f2f4]"
+              onClick={onClose}
+              type="button"
+            >
+              Cancelar
+            </button>
+            <button
+              className="min-h-11 rounded-[11px] bg-[#201f24] px-[22px] text-sm font-bold text-white transition hover:bg-[#33333a] disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={saving}
+              type="submit"
+            >
+              {saving ? 'Salvando' : activeModal.product ? 'Salvar alterações' : 'Adicionar'}
+            </button>
           </div>
         </form>
       </DialogContent>
@@ -1923,12 +2361,14 @@ function ProductDialogBody({
 
 function ListEditor({
   title,
+  subtitle,
   empty,
   addLabel,
   onAdd,
   children,
 }: {
   title: string;
+  subtitle?: string;
   empty: string;
   addLabel: string;
   onAdd: () => void;
@@ -1937,19 +2377,30 @@ function ListEditor({
   const hasChildren = Array.isArray(children) ? children.length > 0 : Boolean(children);
   return (
     <div className="border-t border-[#ececf1] pt-4">
-      <div className="mb-3 flex items-center justify-between">
+      <div className="mb-2.5 flex items-center justify-between">
         <div>
           <div className="text-[11px] font-bold uppercase tracking-[0.06em] text-[#9b9ba3]">
             {title}
           </div>
+          {subtitle ? <div className="mt-0.5 text-[11.5px] text-[#b0b0b8]">{subtitle}</div> : null}
         </div>
-        <SecondaryButton onClick={onAdd}>
-          <Plus className="h-4 w-4" />
+        <button
+          className="flex items-center gap-1 rounded-[9px] border border-[#dcdce2] bg-white px-[11px] py-[7px] text-[12.5px] font-bold text-[#57575f] transition hover:border-[#eaa81a] hover:bg-[#f2f2f4] hover:text-[#9c7210]"
+          onClick={onAdd}
+          type="button"
+        >
+          <Plus className="h-[13px] w-[13px]" />
           {addLabel}
-        </SecondaryButton>
+        </button>
       </div>
       <div className="flex flex-col gap-2">
-        {hasChildren ? children : <div className="rounded-xl border border-dashed border-[#dcdce2] p-4 text-center text-[12.5px] text-[#a0a0a8]">{empty}</div>}
+        {hasChildren ? (
+          children
+        ) : (
+          <div className="rounded-[11px] border border-dashed border-[#dcdce2] p-[15px] text-center text-[12.5px] text-[#a0a0a8]">
+            {empty}
+          </div>
+        )}
       </div>
     </div>
   );

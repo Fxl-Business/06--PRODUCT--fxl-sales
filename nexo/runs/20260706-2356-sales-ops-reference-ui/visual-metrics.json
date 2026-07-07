@@ -1,0 +1,103 @@
+{
+  "pageTitle": "Produtos",
+  "sidebar": {
+    "x": 10,
+    "y": 10,
+    "w": 244,
+    "h": 1013
+  },
+  "workspaceButton": {
+    "x": 26,
+    "y": 82,
+    "w": 212,
+    "h": 54
+  },
+  "activeNav": {
+    "text": "Produtos",
+    "bg": "rgb(243, 243, 245)",
+    "color": "rgb(24, 24, 27)"
+  },
+  "dialog": {
+    "x": 744,
+    "y": 41,
+    "w": 560,
+    "h": 950
+  },
+  "dialogStyle": {
+    "background": "rgb(255, 255, 255)",
+    "backdropFilter": "none",
+    "borderRadius": "20px"
+  },
+  "overlay": {
+    "background": "rgba(18, 18, 22, 0.55)",
+    "backdropFilter": "blur(3px)",
+    "borderRadius": "0px"
+  },
+  "modalText": "Novo produtoCatálogo, valores e comissões padrãoNome *Final do código da vendaTodo código gerado para vendas deste produto termina neste núm",
+  "footer": {
+    "x": 744,
+    "y": 915,
+    "w": 560,
+    "h": 77
+  },
+  "body": {
+    "x": 744,
+    "y": 134,
+    "w": 560,
+    "h": 780
+  },
+  "location": "http://127.0.0.1:8016/",
+  "bodyText": "FXLVendasWorkspaceConfiguraçõesProdutosClientesGeralA pagar este mêsR$ 3.8201 itens em abertoNova vendaProdutosCatálogo, valores, códigos e regras de comissãoNovo produtoJulho 2026GFGestao FXLEquipe · AdminNomeTipoCód.SetupMensalidadeCom. vend.Com. finderRecor",
+  "html": "<span data-radix-focus-guard=\"\" tabindex=\"0\" data-aria-hidden=\"true\" aria-hidden=\"true\" style=\"outline: none; opacity: 0; position: fixed; pointer-events: none;\"></span>\n    <div id=\"root\" data-aria-hidden=\"true\" aria-hidden=\"true\"><div class=\"sales-ops flex h-screen w-full gap-0 bg-[#e8e8eb] p-[10px] text-[#201f24]\"><aside class=\"flex flex-none flex-col overflow-hidden rounded-[20px] bg-[#18181b] px-4 py-[22px] transition-all duration-200 w-[244px]\"><div class=\"flex items-center gap-[11px] px-[6px] pb-4 pl-2\"><div class=\"flex h-[34px] w-[34px] flex-none items-center justify-center rounded-[9p",
+  "pageEvents": [
+    {
+      "method": "Runtime.consoleAPICalled",
+      "type": "debug",
+      "args": [
+        "[vite] connecting..."
+      ]
+    },
+    {
+      "method": "Runtime.consoleAPICalled",
+      "type": "info",
+      "args": [
+        "%cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools",
+        "font-weight:bold"
+      ]
+    },
+    {
+      "method": "Runtime.consoleAPICalled",
+      "type": "warning",
+      "args": [
+        "⚠️ React Router Future Flag Warning: React Router will begin wrapping state updates in `React.startTransition` in v7. You can use the `v7_startTransition` future flag to opt-in early. For more information, see https://reactrouter.com/v6/upgrading/future#v7_starttransition."
+      ]
+    },
+    {
+      "method": "Runtime.consoleAPICalled",
+      "type": "debug",
+      "args": [
+        "[vite] connected."
+      ]
+    }
+  ],
+  "sidebarBeforeModal": {
+    "pageTitle": "Produtos",
+    "sidebar": {
+      "x": 10,
+      "y": 10,
+      "w": 244,
+      "h": 1013
+    },
+    "workspaceButton": {
+      "x": 26,
+      "y": 82,
+      "w": 212,
+      "h": 54
+    },
+    "activeNav": {
+      "text": "Produtos",
+      "bg": "rgb(243, 243, 245)",
+      "color": "rgb(24, 24, 27)"
+    }
+  }
+}
