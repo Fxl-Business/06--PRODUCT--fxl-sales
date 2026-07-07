@@ -31,3 +31,4 @@ First separate verifier failed because root `pnpm test` and `pnpm type-check` co
 The root cause was that shared workspace packages export `dist/*`, while the root test and typecheck scripts did not build those packages first.
 `package.json` now runs `build:packages` before root `test` and `type-check`.
 Final separate verifier passed at `nexo/runs/20260707-1807-optimistic-product-create/agents/verify4-01-optimistic-product-create.result.json`.
+Post-merge wave verifier passed on `master` at `nexo/runs/20260707-1807-optimistic-product-create/agents/wave-verify-optimistic-product-create.result.json`.
