@@ -1,8 +1,8 @@
 import {
+  AlertTriangle,
   CalendarDays,
   Check,
   ChevronDown,
-  ChevronLeft,
   ChevronsLeft,
   ChevronsRight,
   Edit3,
@@ -13,7 +13,9 @@ import {
   Loader2,
   LogOut,
   Plus,
+  RotateCcw,
   Save,
+  Search,
   Settings,
   Trash2,
   UserRound,
@@ -66,7 +68,13 @@ import type {
   SalesOpsSettings,
   SalesOpsStatus,
 } from './types';
-import { buildDashboardModel, buildSalePayload, formatMoneyBrl, initials } from './calculations';
+import {
+  buildDashboardModel,
+  buildSalePayload,
+  formatMoneyBrl,
+  initials,
+  parseCurrencyInputToCents,
+} from './calculations';
 import type {
   SaveClientPayload,
   SavePersonPayload,
@@ -197,20 +205,24 @@ function displayDate(value: string) {
   return `${day}/${month}/${year}`;
 }
 
+function addMonthsToIsoDate(value: string, months: number) {
+  const [year, month, day] = dateOnly(value).split('-').map(Number);
+  if (!year || !month || !day) return value;
+  const date = new Date(year, month - 1 + months, day);
+  return date.toISOString().slice(0, 10);
+}
+
 function inputDateToday() {
   return new Date().toISOString().slice(0, 10);
 }
 
 function parseCurrencyToCents(value: string | number | undefined): number {
-  if (typeof value === 'number') return Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0;
-  if (!value) return 0;
-  const normalized = value.replace(/\./g, '').replace(',', '.').trim();
-  const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? Math.max(0, Math.round(parsed * 100)) : 0;
+  return parseCurrencyInputToCents(value);
 }
 
 function centsToInput(cents: number | undefined): string {
-  return ((cents ?? 0) / 100).toFixed(2);
+  const value = (cents ?? 0) / 100;
+  return Number.isInteger(value) ? String(value) : value.toFixed(2);
 }
 
 function parseDecimal(value: string | number | undefined, fallback = 0): number {
@@ -2614,7 +2626,7 @@ type ProfessionalForm = {
   costBrl: string;
 };
 
-function SaleWizardDialog(props: {
+export function SaleWizardDialog(props: {
   open: boolean;
   bootstrap: SalesOpsBootstrap;
   onClose: () => void;
@@ -2677,6 +2689,9 @@ function SaleWizardDialogBody({
     String(settings.defaultFinderCommissionPct ?? 3),
   );
   const [otherCostsBrl, setOtherCostsBrl] = useState('0.00');
+  const [wizardStep, setWizardStep] = useState<1 | 2 | 3>(1);
+  const [finderVisible, setFinderVisible] = useState(false);
+  const [sellerIsFinder, setSellerIsFinder] = useState(false);
   const [items, setItems] = useState<SaleItemForm[]>(() =>
     firstProduct
       ? [
@@ -2693,16 +2708,20 @@ function SaleWizardDialogBody({
   const [professionals, setProfessionals] = useState<ProfessionalForm[]>([]);
 
   const canSave = Boolean(clientName.trim() && sellerPersonId && items.length > 0);
+  const installmentCount =
+    condition === 'cash' ? 1 : Math.max(1, Math.floor(Number(installments) || 1));
   const totalCents = items.reduce(
     (sum, item) => sum + Math.max(1, Number(item.quantity) || 1) * parseCurrencyToCents(item.unitBrl),
     0,
   );
+  const canSaveBasics = canSave && totalCents > 0 && Boolean(paymentMethod);
   const professionalCents = professionals.reduce(
     (sum, professional) => sum + parseCurrencyToCents(professional.costBrl),
     0,
   );
   const sellerCommissionCents = Math.floor((totalCents * parseDecimal(sellerCommissionPct, 0)) / 100);
-  const finderCommissionCents = finderPersonId
+  const hasFinderForSale = finderVisible && (sellerIsFinder || Boolean(finderPersonId));
+  const finderCommissionCents = hasFinderForSale
     ? Math.floor((totalCents * parseDecimal(finderCommissionPct, 0)) / 100)
     : 0;
   const taxCents = Math.floor((totalCents * parseDecimal(taxPct, 0)) / 100);
@@ -2710,6 +2729,75 @@ function SaleWizardDialogBody({
   const marginCents =
     totalCents - professionalCents - sellerCommissionCents - finderCommissionCents - taxCents - otherCents;
   const marginPct = totalCents > 0 ? Math.round((marginCents / totalCents) * 1000) / 10 : 0;
+  const primaryItemProduct = selectedProduct(items[0] ?? { productId: '', quantity: '1', unitBrl: '0' });
+  const recurringLine =
+    primaryItemProduct?.hasMonthly && primaryItemProduct.monthlyBrl > 0
+      ? `Mensalidade de ${formatMoneyBrl(primaryItemProduct.monthlyBrl, {
+          maximumFractionDigits: 0,
+        })} a partir de ${displayDate(baseDate)}, recorrente`
+      : null;
+  const paymentRows = Array.from({ length: installmentCount }, (_, index) => {
+    const baseValue = Math.floor(totalCents / installmentCount);
+    const value = index === installmentCount - 1 ? totalCents - baseValue * index : baseValue;
+    return {
+      index: index + 1,
+      dueDate: displayDate(addMonthsToIsoDate(baseDate, index)),
+      value,
+    };
+  });
+  const selectedSeller = sellers.find((person) => person.id === sellerPersonId);
+  const selectedFinder = sellerIsFinder
+    ? selectedSeller
+    : finders.find((person) => person.id === finderPersonId);
+  const payablesPreview = [
+    {
+      label: `Comissão - ${selectedSeller?.displayName ?? 'vendedor'}`,
+      type: 'Comissão vendedor',
+      date: displayDate(addMonthsToIsoDate(baseDate, 1)),
+      value: sellerCommissionCents,
+      className: 'bg-[#fdf0cf] text-[#9c7210]',
+    },
+    ...(hasFinderForSale
+      ? [
+          {
+            label: `Comissão - ${selectedFinder?.displayName ?? 'finder'} (finder)`,
+            type: 'Comissão finder',
+            date: displayDate(addMonthsToIsoDate(baseDate, 1)),
+            value: finderCommissionCents,
+            className: 'bg-[#fdf0cf] text-[#9c7210]',
+          },
+        ]
+      : []),
+    ...professionals.map((professional) => ({
+      label: `Alocação - ${professional.personName || 'prestador'}`,
+      type: 'Custo profissional',
+      date: displayDate(baseDate),
+      value: parseCurrencyToCents(professional.costBrl),
+      className: 'bg-[#e6edf4] text-[#3f6ea3]',
+    })),
+    ...(taxCents > 0
+      ? [
+          {
+            label: `Imposto sobre a venda (${taxPct}%)`,
+            type: 'Imposto',
+            date: displayDate(addMonthsToIsoDate(baseDate, 1)),
+            value: taxCents,
+            className: 'bg-[#f6e3dd] text-[#b23a22]',
+          },
+        ]
+      : []),
+    ...(otherCents > 0
+      ? [
+          {
+            label: 'Outros custos do projeto',
+            type: 'Outro',
+            date: displayDate(baseDate),
+            value: otherCents,
+            className: 'bg-[#ececf1] text-[#84848c]',
+          },
+        ]
+      : []),
+  ];
 
   function selectedProduct(item: SaleItemForm) {
     return bootstrap.products.find((product) => product.id === item.productId) ?? firstProduct;
@@ -2744,15 +2832,58 @@ function SaleWizardDialogBody({
     ]);
   }
 
+  function handleSellerChange(value: string) {
+    setSellerPersonId(value);
+    if (sellerIsFinder) {
+      setFinderPersonId(value);
+    }
+  }
+
+  function showFinder() {
+    setFinderVisible(true);
+    setFinderPersonId((current) => current || finders[0]?.id || sellerPersonId);
+  }
+
+  function hideFinder() {
+    setFinderVisible(false);
+    setSellerIsFinder(false);
+    setFinderPersonId('');
+  }
+
+  function toggleSellerIsFinder() {
+    setSellerIsFinder((current) => {
+      const next = !current;
+      setFinderPersonId(next ? sellerPersonId : finders[0]?.id ?? '');
+      return next;
+    });
+  }
+
+  function advanceWizard() {
+    if (wizardStep === 1 && !canSaveBasics) return;
+    if (wizardStep < 3) {
+      setWizardStep((current) => (current === 1 ? 2 : 3));
+      return;
+    }
+    submit('closed');
+  }
+
+  function goBack() {
+    setWizardStep((current) => (current === 3 ? 2 : 1));
+  }
+
   function createPayload(status: SalesOpsStatus): CreateSalePayload {
-    const seller = sellers.find((person) => person.id === sellerPersonId);
-    const finder = finders.find((person) => person.id === finderPersonId);
+    const seller = selectedSeller;
+    const finder = selectedFinder;
     const draft: SaleDraft = {
       clientId,
       clientName,
       sellerPersonId,
       sellerName: seller?.displayName ?? '',
-      finderPersonId: finderPersonId || undefined,
+      finderPersonId: hasFinderForSale
+        ? sellerIsFinder
+          ? sellerPersonId
+          : finderPersonId || undefined
+        : undefined,
       finderName: finder?.displayName,
       status,
       paymentMethod,
@@ -2789,371 +2920,736 @@ function SaleWizardDialogBody({
     onSave(createPayload(status));
   }
 
+  const wizardSteps: Array<{ step: 1 | 2 | 3; label: string }> = [
+    { step: 1, label: 'Registro da venda' },
+    { step: 2, label: 'Custos e margem' },
+    { step: 3, label: 'Revisão' },
+  ];
+  const primaryLabel = wizardStep < 3 ? 'Avançar' : 'Confirmar venda';
+
   return (
     <Dialog onOpenChange={(nextOpen) => (!nextOpen ? onClose() : undefined)} open>
-      <DialogContent className="max-h-[92vh] max-w-[940px] overflow-hidden rounded-[22px] border-none bg-[#f4f4f6] p-0">
-        <DialogHeader className="border-b border-[#e8e8ec] bg-white px-[26px] py-5 text-left">
-          <DialogTitle className="sales-ops-num text-[19px]">Fechamento da venda</DialogTitle>
-          <DialogDescription>
-            Cliente, itens, responsáveis, pagamento e margem calculados a partir do formulário.
+      <DialogContent className="max-h-[92vh] w-[calc(100vw-48px)] max-w-[940px] gap-0 overflow-hidden rounded-[22px] border-none bg-[#f4f4f6] p-0 shadow-[0_30px_80px_rgba(0,0,0,.3)] sm:rounded-[22px] [&>button]:right-[26px] [&>button]:top-[31px] [&>button]:flex [&>button]:h-9 [&>button]:w-9 [&>button]:items-center [&>button]:justify-center [&>button]:rounded-[10px] [&>button]:border [&>button]:border-[#dcdce2] [&>button]:bg-white [&>button]:opacity-100 [&>button]:shadow-none">
+        <DialogHeader className="border-b border-[#e8e8ec] bg-white px-[26px] py-5 pr-[78px] text-left">
+          <DialogTitle className="sales-ops-num text-[19px] font-bold text-[#201f24]">
+            Fechamento da venda
+          </DialogTitle>
+          <DialogDescription className="text-[13px] text-[#8b8b92]">
+            Cliente, itens e pagamento - só o primeiro passo é obrigatório
           </DialogDescription>
         </DialogHeader>
-        <div className="max-h-[calc(92vh-152px)] overflow-y-auto px-[26px] py-6">
+
+        <div className="flex items-center gap-1 overflow-x-auto border-b border-[#e8e8ec] bg-white px-[26px] py-4">
+          {wizardSteps.map((item, index) => {
+            const done = item.step < wizardStep;
+            const active = item.step === wizardStep;
+            return (
+              <div className="flex flex-none items-center gap-1" key={item.step}>
+                <button
+                  className="flex items-center gap-[9px] focus-visible:outline-none"
+                  disabled={item.step > 1 && !canSaveBasics}
+                  onClick={() => setWizardStep(item.step)}
+                  type="button"
+                >
+                  <span
+                    className={`sales-ops-num flex h-[26px] w-[26px] items-center justify-center rounded-full text-[12.5px] font-bold ${
+                      done
+                        ? 'bg-[#2f7d4b] text-white'
+                        : active
+                          ? 'bg-[#eaa81a] text-white'
+                          : 'bg-[#ececf1] text-[#9b9ba3]'
+                    }`}
+                  >
+                    {done ? <Check className="h-[13px] w-[13px]" /> : item.step}
+                  </span>
+                  <span
+                    className={`whitespace-nowrap text-[13px] font-semibold ${
+                      active || done ? 'text-[#201f24]' : 'text-[#9b9ba3]'
+                    }`}
+                  >
+                    {item.label}
+                  </span>
+                </button>
+                {index < wizardSteps.length - 1 ? (
+                  <span className="mx-1 h-0.5 w-[22px] flex-none bg-[#e7e2d6]" />
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="max-h-[calc(92vh-210px)] overflow-y-auto px-[26px] py-6">
           {bootstrap.products.length === 0 || sellers.length === 0 ? (
             <EmptyPanel
               text="Cadastre pelo menos um produto e um vendedor para registrar uma venda real."
               title="Cadastro incompleto"
             />
           ) : (
-            <div className="grid gap-[18px]">
-              <div className={`${panelClass} grid gap-4 p-4`}>
-                <div className="text-[13px] font-bold">Cliente e responsáveis</div>
-                <div className="grid gap-4 md:grid-cols-3">
-                  <Field label="Cliente" required>
-                    <NativeSelect
-                      onChange={(value) => {
-                        const client = bootstrap.clients.find((candidate) => candidate.id === value);
-                        setClientId(value);
-                        setClientName(client?.name ?? '');
-                      }}
-                      value={clientId}
-                    >
-                      <option value="">Selecionar cliente</option>
-                      {bootstrap.clients.map((client) => (
-                        <option key={client.id} value={client.id}>
-                          {client.name}
-                        </option>
-                      ))}
-                    </NativeSelect>
-                  </Field>
-                  <Field label="Novo cliente">
-                    <Input
-                      className="bg-[#fafafb]"
-                      onChange={(event) => {
-                        setClientName(event.target.value);
-                        setClientId('');
-                      }}
-                      placeholder="Ou digite um novo nome"
-                      value={clientId ? '' : clientName}
-                    />
-                  </Field>
-                  <Field label="Vendedor" required>
-                    <NativeSelect onChange={setSellerPersonId} value={sellerPersonId}>
-                      {sellers.map((person) => (
-                        <option key={person.id} value={person.id}>
-                          {person.displayName}
-                        </option>
-                      ))}
-                    </NativeSelect>
-                  </Field>
-                  <Field label="Finder">
-                    <NativeSelect onChange={setFinderPersonId} value={finderPersonId}>
-                      <option value="">Sem finder</option>
-                      {finders.map((person) => (
-                        <option key={person.id} value={person.id}>
-                          {person.displayName}
-                        </option>
-                      ))}
-                    </NativeSelect>
-                  </Field>
-                </div>
-              </div>
-
-              <div className={`${panelClass} p-4`}>
-                <div className="mb-3 flex items-center justify-between">
-                  <div className="text-[13px] font-bold">Itens</div>
-                  <SecondaryButton onClick={addItem}>
-                    <Plus className="h-4 w-4" />
-                    Item
-                  </SecondaryButton>
-                </div>
-                <div className="grid gap-2">
-                  {items.map((item, index) => {
-                    const product = selectedProduct(item);
-                    return (
-                      <div
-                        className="grid gap-2 md:grid-cols-[1fr_76px_140px_118px_34px]"
-                        key={`${item.productId}-${index}`}
-                      >
-                        <NativeSelect
-                          onChange={(value) => setItem(index, { productId: value })}
-                          value={item.productId}
-                        >
-                          {bootstrap.products.map((candidate) => (
-                            <option key={candidate.id} value={candidate.id}>
-                              {candidate.name}
-                            </option>
-                          ))}
-                        </NativeSelect>
+            <>
+              {wizardStep === 1 ? (
+                <div className="flex flex-col gap-[18px]">
+                  <div className="rounded-[14px] border border-[#e8e8ec] bg-white p-4">
+                    <div className="mb-4 text-[13px] font-bold">Cliente e responsáveis</div>
+                    <Field label="Cliente" required>
+                      <div className="relative">
                         <Input
-                          className="sales-ops-num bg-[#fafafb] text-center"
-                          min={1}
-                          onChange={(event) => setItem(index, { quantity: event.target.value })}
-                          type="number"
-                          value={item.quantity}
-                        />
-                        <Input
-                          className="sales-ops-num bg-[#fafafb] text-right"
-                          onChange={(event) => setItem(index, { unitBrl: event.target.value })}
-                          value={item.unitBrl}
-                        />
-                        <div className="sales-ops-num flex h-10 items-center justify-end text-[13.5px] font-bold">
-                          {formatMoneyBrl(
-                            Math.max(1, Number(item.quantity) || 1) * parseCurrencyToCents(item.unitBrl),
-                            { maximumFractionDigits: 0 },
-                          )}
-                        </div>
-                        <button
-                          className={iconButtonClass}
-                          onClick={() => setItems((current) => current.filter((_, itemIndex) => itemIndex !== index))}
-                          type="button"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                        {product?.openPrice ? (
-                          <div className="md:col-span-5 text-[11.5px] font-semibold text-[#9c7210]">
-                            Produto com preço em aberto. Informe o valor negociado.
-                          </div>
-                        ) : null}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className={`${panelClass} grid gap-4 p-4`}>
-                <div className="text-[13px] font-bold">Pagamento e recebimento</div>
-                <div className="grid gap-3 md:grid-cols-4">
-                  <Field label="Forma" required>
-                    <NativeSelect
-                      onChange={(value) => setPaymentMethod(value as PaymentMethod)}
-                      value={paymentMethod}
-                    >
-                      <option value="pix">Pix</option>
-                      <option value="card">Cartão</option>
-                      <option value="boleto">Boleto</option>
-                      <option value="transfer">Transferência</option>
-                    </NativeSelect>
-                  </Field>
-                  <Field label="Condição">
-                    <NativeSelect
-                      onChange={(value) => setCondition(value as PaymentCondition)}
-                      value={condition}
-                    >
-                      <option value="cash">À vista</option>
-                      <option value="installments">Parcelado</option>
-                      <option value="recurring">Recorrente</option>
-                    </NativeSelect>
-                  </Field>
-                  <Field label="Parcelas / ciclos">
-                    <Input
-                      className="sales-ops-num bg-[#fafafb]"
-                      min={1}
-                      onChange={(event) => setInstallments(event.target.value)}
-                      type="number"
-                      value={installments}
-                    />
-                  </Field>
-                  <Field label="Data-base">
-                    <Input
-                      className="sales-ops-num bg-[#fafafb]"
-                      onChange={(event) => setBaseDate(event.target.value)}
-                      type="date"
-                      value={baseDate}
-                    />
-                  </Field>
-                </div>
-              </div>
-
-              <div className={`${panelClass} p-4`}>
-                <div className="mb-3 flex items-center justify-between">
-                  <div className="text-[13px] font-bold">Custos, margem e prestadores</div>
-                  <SecondaryButton
-                    onClick={() =>
-                      setProfessionals((current) => [
-                        ...current,
-                        {
-                          personId: collaborators[0]?.id ?? '',
-                          personName: collaborators[0]?.displayName ?? '',
-                          role: 'Operacional',
-                          costBrl: '0.00',
-                        },
-                      ])
-                    }
-                  >
-                    <Plus className="h-4 w-4" />
-                    Prestador
-                  </SecondaryButton>
-                </div>
-                <div className="mb-4 grid gap-3 md:grid-cols-4">
-                  <Field label="Outros custos (R$)">
-                    <Input
-                      className="sales-ops-num bg-[#fafafb]"
-                      onChange={(event) => setOtherCostsBrl(event.target.value)}
-                      value={otherCostsBrl}
-                    />
-                  </Field>
-                  <Field label="Com. vendedor %">
-                    <Input
-                      className="sales-ops-num bg-[#fafafb]"
-                      onChange={(event) => setSellerCommissionPct(event.target.value)}
-                      value={sellerCommissionPct}
-                    />
-                  </Field>
-                  <Field label="Com. finder %">
-                    <Input
-                      className="sales-ops-num bg-[#fafafb]"
-                      onChange={(event) => setFinderCommissionPct(event.target.value)}
-                      value={finderCommissionPct}
-                    />
-                  </Field>
-                  <Field label="Imposto %">
-                    <Input
-                      className="sales-ops-num bg-[#fafafb]"
-                      onChange={(event) => setTaxPct(event.target.value)}
-                      value={taxPct}
-                    />
-                  </Field>
-                </div>
-                {professionals.length > 0 ? (
-                  <div className="mb-4 grid gap-2">
-                    {professionals.map((professional, index) => (
-                      <div
-                        className="grid gap-2 md:grid-cols-[1fr_150px_130px_34px]"
-                        key={`${professional.personId}-${index}`}
-                      >
-                        <NativeSelect
-                          onChange={(value) => {
-                            const person = collaborators.find((candidate) => candidate.id === value);
-                            setProfessionals((current) =>
-                              current.map((item, itemIndex) =>
-                                itemIndex === index
-                                  ? {
-                                      ...item,
-                                      personId: value,
-                                      personName: person?.displayName ?? '',
-                                    }
-                                  : item,
-                              ),
-                            );
+                          className={`pr-10 ${formInputClass}`}
+                          list="sales-ops-client-options"
+                          onChange={(event) => {
+                            const value = event.target.value;
+                            const client = bootstrap.clients.find((candidate) => candidate.name === value);
+                            setClientName(value);
+                            setClientId(client?.id ?? '');
                           }}
-                          value={professional.personId}
+                          placeholder="Buscar ou digitar um novo cliente..."
+                          value={clientName}
+                        />
+                        <Search className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#96969e]" />
+                        <datalist id="sales-ops-client-options">
+                          {bootstrap.clients.map((client) => (
+                            <option key={client.id} value={client.name} />
+                          ))}
+                        </datalist>
+                      </div>
+                    </Field>
+
+                    <div className="mt-4 grid gap-4 md:grid-cols-2">
+                      <Field label="Vendedor" required>
+                        <NativeSelect
+                          className="h-11 rounded-[10px]"
+                          onChange={handleSellerChange}
+                          value={sellerPersonId}
                         >
-                          <option value="">Digite manualmente</option>
-                          {collaborators.map((person) => (
+                          {sellers.map((person) => (
                             <option key={person.id} value={person.id}>
                               {person.displayName}
                             </option>
                           ))}
                         </NativeSelect>
-                        <Input
-                          className="bg-[#fafafb]"
-                          onChange={(event) =>
-                            setProfessionals((current) =>
-                              current.map((item, itemIndex) =>
-                                itemIndex === index ? { ...item, role: event.target.value } : item,
-                              ),
-                            )
-                          }
-                          value={professional.role}
-                        />
-                        <Input
-                          className="sales-ops-num bg-[#fafafb]"
-                          onChange={(event) =>
-                            setProfessionals((current) =>
-                              current.map((item, itemIndex) =>
-                                itemIndex === index
-                                  ? { ...item, costBrl: event.target.value }
-                                  : item,
-                              ),
-                            )
-                          }
-                          value={professional.costBrl}
-                        />
+                      </Field>
+
+                      {finderVisible ? (
+                        <div>
+                          <div className="mb-[6px] flex items-center justify-between">
+                            <span className="text-xs font-semibold text-[#8b8b92]">Finder</span>
+                            <button
+                              className="text-xs font-semibold text-[#b23a22]"
+                              onClick={hideFinder}
+                              type="button"
+                            >
+                              remover
+                            </button>
+                          </div>
+                          <NativeSelect
+                            className="h-11 rounded-[10px]"
+                            disabled={sellerIsFinder}
+                            onChange={setFinderPersonId}
+                            value={finderPersonId}
+                          >
+                            {finders.length === 0 ? <option value="">Sem finder cadastrado</option> : null}
+                            {finders.map((person) => (
+                              <option key={person.id} value={person.id}>
+                                {person.displayName}
+                              </option>
+                            ))}
+                          </NativeSelect>
+                          {settings.sellerCanBeFinder ? (
+                            <button
+                              className="mt-[9px] flex items-center gap-2 text-[13px] text-[#57575f]"
+                              onClick={toggleSellerIsFinder}
+                              type="button"
+                            >
+                              <span
+                                className={`flex h-[18px] w-[18px] items-center justify-center rounded-[5px] border ${
+                                  sellerIsFinder
+                                    ? 'border-[#eaa81a] bg-[#eaa81a]'
+                                    : 'border-[#c9c3b4] bg-white'
+                                }`}
+                              >
+                                {sellerIsFinder ? <Check className="h-3 w-3 text-white" /> : null}
+                              </span>
+                              Vendedor é o finder desta venda
+                            </button>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <div>
+                          <div className="mb-[6px] text-xs font-semibold text-transparent">.</div>
+                          <button
+                            className="flex h-11 w-full items-center justify-center gap-2 rounded-[10px] border border-dashed border-[#d8cdb0] bg-[#fafafb] px-3 text-[13.5px] font-semibold text-[#9c7210] transition hover:bg-[#f4efe2]"
+                            onClick={showFinder}
+                            type="button"
+                          >
+                            <Plus className="h-[15px] w-[15px]" />
+                            Essa venda teve um finder
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="rounded-[14px] border border-[#e8e8ec] bg-white p-4">
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <div className="text-[13px] font-bold">Itens</div>
+                      <div className="flex items-center gap-2">
                         <button
-                          className={iconButtonClass}
-                          onClick={() =>
-                            setProfessionals((current) =>
-                              current.filter((_, itemIndex) => itemIndex !== index),
-                            )
-                          }
+                          className="rounded-[9px] border border-[#dcdce2] bg-white px-3 py-[7px] text-[12.5px] font-semibold text-[#9c7210] transition hover:bg-[#f2f2f4]"
                           type="button"
                         >
-                          <Trash2 className="h-4 w-4" />
+                          Cadastrar produto
+                        </button>
+                        <button
+                          className="rounded-[9px] bg-[#201f24] px-3 py-[7px] text-[12.5px] font-semibold text-white transition hover:bg-[#33333a]"
+                          onClick={addItem}
+                          type="button"
+                        >
+                          + item
                         </button>
                       </div>
-                    ))}
+                    </div>
+                    <div className="grid grid-cols-[minmax(0,1fr)_70px_130px_120px_36px] gap-[9px] px-0.5 pb-[7px] text-[11px] font-bold uppercase tracking-[0.05em] text-[#9b9ba3]">
+                      <span>Produto / serviço</span>
+                      <span className="text-center">Qtd.</span>
+                      <span className="text-right">Valor unit.</span>
+                      <span className="text-right">Subtotal</span>
+                      <span />
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      {items.map((item, index) => {
+                        const product = selectedProduct(item);
+                        const subtotal =
+                          Math.max(1, Number(item.quantity) || 1) * parseCurrencyToCents(item.unitBrl);
+                        return (
+                          <div className="flex flex-col gap-[5px]" key={`${item.productId}-${index}`}>
+                            <div className="grid grid-cols-[minmax(0,1fr)_70px_130px_120px_36px] items-center gap-[9px]">
+                              <NativeSelect
+                                className="h-10 rounded-[9px] text-[13.5px]"
+                                onChange={(value) => setItem(index, { productId: value })}
+                                value={item.productId}
+                              >
+                                {bootstrap.products.map((candidate) => (
+                                  <option key={candidate.id} value={candidate.id}>
+                                    {candidate.name}
+                                  </option>
+                                ))}
+                              </NativeSelect>
+                              <Input
+                                className={`sales-ops-num h-10 rounded-[9px] text-center ${formInputClass}`}
+                                min={1}
+                                onChange={(event) => setItem(index, { quantity: event.target.value })}
+                                type="number"
+                                value={item.quantity}
+                              />
+                              <Input
+                                className={`sales-ops-num h-10 rounded-[9px] text-right ${formInputClass}`}
+                                onChange={(event) => setItem(index, { unitBrl: event.target.value })}
+                                value={item.unitBrl}
+                              />
+                              <div className="sales-ops-num text-right text-[13.5px] font-bold">
+                                {formatMoneyBrl(subtotal, { maximumFractionDigits: 0 })}
+                              </div>
+                              <button
+                                className="flex h-8 w-8 items-center justify-center rounded-[8px] border border-[#f0dcd5] bg-[#fbeee9] text-[#b23a22] transition hover:bg-[#f6e0d9]"
+                                onClick={() =>
+                                  setItems((current) => current.filter((_, itemIndex) => itemIndex !== index))
+                                }
+                                type="button"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                            {product?.openPrice ? (
+                              <div className="flex items-center gap-1.5 pl-0.5 text-[11.5px] font-semibold text-[#9c7210]">
+                                <AlertTriangle className="h-[13px] w-[13px]" />
+                                Sistema personalizado - informe o valor negociado
+                              </div>
+                            ) : null}
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
-                ) : null}
-                <div className="rounded-2xl bg-[#18181b] p-5 text-[#f3f3f5]">
-                  <div className="flex items-end justify-between gap-4">
-                    <div>
-                      <div className="text-[13px] font-semibold text-[#9b9ba3]">Margem líquida</div>
-                      <div className="mt-1 flex items-baseline gap-3">
+
+                  <div className="rounded-[14px] border border-[#e8e8ec] bg-white p-4">
+                    <div className="mb-4 text-[13px] font-bold">Pagamento e recebimento</div>
+                    <div className="grid gap-3 md:grid-cols-4">
+                      <Field label="Forma de pagamento" required>
+                        <NativeSelect
+                          className="h-11 rounded-[10px]"
+                          onChange={(value) => setPaymentMethod(value as PaymentMethod)}
+                          value={paymentMethod}
+                        >
+                          <option value="pix">Pix</option>
+                          <option value="card">Cartão</option>
+                          <option value="boleto">Boleto</option>
+                          <option value="transfer">Transferência</option>
+                        </NativeSelect>
+                      </Field>
+                      <Field label="Condição">
+                        <NativeSelect
+                          className="h-11 rounded-[10px]"
+                          onChange={(value) => setCondition(value as PaymentCondition)}
+                          value={condition}
+                        >
+                          <option value="cash">À vista</option>
+                          <option value="installments">Parcelado</option>
+                          <option value="recurring">Recorrente</option>
+                        </NativeSelect>
+                      </Field>
+                      <Field label="Nº parcelas / ciclos">
+                        <Input
+                          className={`sales-ops-num ${formInputClass}`}
+                          min={1}
+                          onChange={(event) => setInstallments(event.target.value)}
+                          type="number"
+                          value={installments}
+                        />
+                      </Field>
+                      <Field label="Data-base">
+                        <Input
+                          className={`sales-ops-num ${formInputClass}`}
+                          onChange={(event) => setBaseDate(event.target.value)}
+                          type="date"
+                          value={baseDate}
+                        />
+                      </Field>
+                    </div>
+                    {recurringLine ? (
+                      <div className="mt-[14px] flex items-center gap-2.5 rounded-[11px] border border-[#cfe4cf] bg-[#e2efe2] px-[14px] py-[11px] text-[13px] font-semibold text-[#2f7d4b]">
+                        <RotateCcw className="h-4 w-4 flex-none" />
+                        {recurringLine}
+                      </div>
+                    ) : null}
+                    <div className="mt-[14px] overflow-hidden rounded-[12px] border border-[#ececf1]">
+                      <div className="flex items-center justify-between border-b border-[#eeeef1] bg-[#fafafb] px-[14px] py-[11px]">
+                        <div className="text-[12.5px] font-bold">Parcelas a receber</div>
+                        <div className="text-[12.5px] text-[#8b8b92]">
+                          Soma ·{' '}
+                          <span className="sales-ops-num font-bold text-[#9c7210]">
+                            {formatMoneyBrl(totalCents)}
+                          </span>
+                        </div>
+                      </div>
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className={tableHeadClass}>Parcela</TableHead>
+                            <TableHead className={tableHeadClass}>Vencimento</TableHead>
+                            <TableHead className={`${tableHeadClass} text-right`}>Valor</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {paymentRows.map((row) => (
+                            <TableRow key={row.index}>
+                              <TableCell className="sales-ops-num px-[14px] py-2.5 text-[13px] font-semibold">
+                                {row.index}
+                              </TableCell>
+                              <TableCell className="sales-ops-num px-3 py-2.5 text-[13px] text-[#57575f]">
+                                {row.dueDate}
+                              </TableCell>
+                              <TableCell className="sales-ops-num px-[14px] py-2.5 text-right text-[13px] font-bold">
+                                {formatMoneyBrl(row.value)}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
+
+                  <Field label="Observações">
+                    <textarea
+                      className="min-h-[74px] rounded-[10px] border border-[#dcdce2] bg-white px-3 py-2 text-sm outline-none transition focus:border-[#eaa81a]"
+                      onChange={(event) => setNotes(event.target.value)}
+                      placeholder="Notas internas sobre a venda..."
+                      value={notes}
+                    />
+                  </Field>
+
+                  <div className="flex items-baseline justify-end gap-2.5 rounded-[12px] border border-[#e8e8ec] bg-white px-[18px] py-[14px]">
+                    <span className="text-[13px] font-semibold text-[#8b8b92]">Total da venda</span>
+                    <span className="sales-ops-num text-2xl font-bold text-[#9c7210]">
+                      {formatMoneyBrl(totalCents, { maximumFractionDigits: 0 })}
+                    </span>
+                  </div>
+                </div>
+              ) : null}
+
+              {wizardStep === 2 ? (
+                <div className="flex flex-col gap-[18px]">
+                  <div className="rounded-[11px] border border-[#f0dfae] bg-[#fdf0cf] px-[14px] py-[11px] text-[13px] text-[#57575f]">
+                    Aloque os profissionais do projeto e ajuste os percentuais - a margem líquida e as comissões são calculadas em tempo real.
+                  </div>
+
+                  <div className="rounded-[14px] border border-[#e8e8ec] bg-white p-4">
+                    <div className="mb-3 flex items-center justify-between">
+                      <div className="text-[13px] font-bold">Profissionais alocados</div>
+                      <button
+                        className="rounded-[9px] bg-[#201f24] px-3 py-[7px] text-[12.5px] font-semibold text-white transition hover:bg-[#33333a]"
+                        onClick={() =>
+                          setProfessionals((current) => [
+                            ...current,
+                            {
+                              personId: collaborators[0]?.id ?? '',
+                              personName: collaborators[0]?.displayName ?? '',
+                              role: 'Operacional',
+                              costBrl: '0.00',
+                            },
+                          ])
+                        }
+                        type="button"
+                      >
+                        + profissional
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_150px_36px] gap-[9px] px-0.5 pb-[7px] text-[11px] font-bold uppercase tracking-[0.05em] text-[#9b9ba3]">
+                      <span>Profissional</span>
+                      <span>Função no projeto</span>
+                      <span className="text-right">Custo alocado</span>
+                      <span />
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      {professionals.length === 0 ? (
+                        <div className="rounded-[10px] border border-dashed border-[#dcdce2] px-4 py-5 text-center text-[13px] font-semibold text-[#9b9ba3]">
+                          Nenhum profissional alocado
+                        </div>
+                      ) : null}
+                      {professionals.map((professional, index) => (
+                        <div
+                          className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_150px_36px] items-center gap-[9px]"
+                          key={`${professional.personId}-${index}`}
+                        >
+                          <NativeSelect
+                            className="h-10 rounded-[9px] text-[13.5px]"
+                            onChange={(value) => {
+                              const person = collaborators.find((candidate) => candidate.id === value);
+                              setProfessionals((current) =>
+                                current.map((item, itemIndex) =>
+                                  itemIndex === index
+                                    ? {
+                                        ...item,
+                                        personId: value,
+                                        personName: person?.displayName ?? '',
+                                      }
+                                    : item,
+                                ),
+                              );
+                            }}
+                            value={professional.personId}
+                          >
+                            <option value="">Digite manualmente</option>
+                            {collaborators.map((person) => (
+                              <option key={person.id} value={person.id}>
+                                {person.displayName}
+                              </option>
+                            ))}
+                          </NativeSelect>
+                          <Input
+                            className={formInputClass}
+                            onChange={(event) =>
+                              setProfessionals((current) =>
+                                current.map((item, itemIndex) =>
+                                  itemIndex === index ? { ...item, role: event.target.value } : item,
+                                ),
+                              )
+                            }
+                            value={professional.role}
+                          />
+                          <Input
+                            className={`sales-ops-num text-right ${formInputClass}`}
+                            onChange={(event) =>
+                              setProfessionals((current) =>
+                                current.map((item, itemIndex) =>
+                                  itemIndex === index
+                                    ? { ...item, costBrl: event.target.value }
+                                    : item,
+                                ),
+                              )
+                            }
+                            value={professional.costBrl}
+                          />
+                          <button
+                            className="flex h-8 w-8 items-center justify-center rounded-[8px] border border-[#f0dcd5] bg-[#fbeee9] text-[#b23a22] transition hover:bg-[#f6e0d9]"
+                            onClick={() =>
+                              setProfessionals((current) =>
+                                current.filter((_, itemIndex) => itemIndex !== index),
+                              )
+                            }
+                            type="button"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-4">
+                    <Field label="Outros custos (R$)">
+                      <Input
+                        className={`sales-ops-num bg-white ${formInputClass}`}
+                        onChange={(event) => setOtherCostsBrl(event.target.value)}
+                        value={otherCostsBrl}
+                      />
+                    </Field>
+                    <Field label="Comissão vendedor %">
+                      <Input
+                        className={`sales-ops-num bg-white ${formInputClass}`}
+                        onChange={(event) => setSellerCommissionPct(event.target.value)}
+                        value={sellerCommissionPct}
+                      />
+                    </Field>
+                    <Field label="Comissão finder %">
+                      <Input
+                        className={`sales-ops-num bg-white ${formInputClass}`}
+                        onChange={(event) => setFinderCommissionPct(event.target.value)}
+                        value={finderCommissionPct}
+                      />
+                    </Field>
+                    <Field label="Imposto %">
+                      <Input
+                        className={`sales-ops-num bg-white ${formInputClass}`}
+                        onChange={(event) => setTaxPct(event.target.value)}
+                        value={taxPct}
+                      />
+                    </Field>
+                  </div>
+
+                  <div className="rounded-2xl bg-[#18181b] px-[22px] py-5 text-[#f3f3f5]">
+                    <div className="mb-[14px] flex items-end justify-between gap-4">
+                      <div>
+                        <div className="text-[13px] font-semibold text-[#9b9ba3]">Margem líquida</div>
+                        <div className="mt-1 flex items-baseline gap-[11px]">
+                          <span
+                            className={`sales-ops-num text-[30px] font-bold ${marginCents >= 0 ? 'text-[#8fd19e]' : 'text-[#f08b72]'}`}
+                          >
+                            {formatMoneyBrl(marginCents, { maximumFractionDigits: 0 })}
+                          </span>
+                          <span
+                            className={`sales-ops-num text-[17px] font-bold ${marginCents >= 0 ? 'text-[#8fd19e]' : 'text-[#f08b72]'}`}
+                          >
+                            ({marginPct}%)
+                          </span>
+                        </div>
+                      </div>
+                      <div className="text-right text-[12.5px] leading-[1.9] text-[#c9c9d0]">
+                        <div>
+                          Comissão vendedor ·{' '}
+                          <span className="sales-ops-num font-semibold text-[#f3f3f5]">
+                            {formatMoneyBrl(sellerCommissionCents, { maximumFractionDigits: 0 })}
+                          </span>
+                        </div>
+                        {hasFinderForSale ? (
+                          <div>
+                            Comissão finder ·{' '}
+                            <span className="sales-ops-num font-semibold text-[#f3f3f5]">
+                              {formatMoneyBrl(finderCommissionCents, { maximumFractionDigits: 0 })}
+                            </span>
+                          </div>
+                        ) : null}
+                        <div>
+                          Custos profissionais ·{' '}
+                          <span className="sales-ops-num font-semibold text-[#f3f3f5]">
+                            {formatMoneyBrl(professionalCents, { maximumFractionDigits: 0 })}
+                          </span>
+                        </div>
+                        <div>
+                          Imposto ·{' '}
+                          <span className="sales-ops-num font-semibold text-[#f3f3f5]">
+                            {formatMoneyBrl(taxCents, { maximumFractionDigits: 0 })}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="h-2 overflow-hidden rounded-[5px] bg-[#33333a]">
+                      <div
+                        className={`h-full rounded-[5px] ${marginCents >= 0 ? 'bg-[#8fd19e]' : 'bg-[#f08b72]'}`}
+                        style={{ width: `${Math.max(0, Math.min(100, marginPct))}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {wizardStep === 3 ? (
+                <div className="flex flex-col gap-[14px]">
+                  <div className="grid gap-[14px] md:grid-cols-2">
+                    <div className="rounded-[14px] border border-[#e8e8ec] bg-white p-[17px]">
+                      <div className="mb-[11px] flex items-center justify-between">
+                        <div className="text-[13px] font-bold">Dados da venda</div>
+                        <button
+                          className="text-xs font-semibold text-[#9c7210]"
+                          onClick={() => setWizardStep(1)}
+                          type="button"
+                        >
+                          editar
+                        </button>
+                      </div>
+                      <div className="flex flex-col gap-[7px] text-[13.5px]">
+                        <div className="flex justify-between gap-4">
+                          <span className="text-[#8b8b92]">Cliente</span>
+                          <span className="font-semibold">{clientName || 'Sem cliente'}</span>
+                        </div>
+                        <div className="flex justify-between gap-4">
+                          <span className="text-[#8b8b92]">Produto(s)</span>
+                          <span className="font-semibold">
+                            {items.map((item) => selectedProduct(item)?.name).filter(Boolean).join(', ')}
+                          </span>
+                        </div>
+                        <div className="flex justify-between gap-4">
+                          <span className="text-[#8b8b92]">Vendedor</span>
+                          <span className="font-semibold">{selectedSeller?.displayName ?? '-'}</span>
+                        </div>
+                        <div className="flex justify-between gap-4">
+                          <span className="text-[#8b8b92]">Finder</span>
+                          <span className="font-semibold">{selectedFinder?.displayName ?? 'Sem finder'}</span>
+                        </div>
+                        <div className="flex justify-between gap-4">
+                          <span className="text-[#8b8b92]">Condição</span>
+                          <span className="font-semibold">{conditionLabel(condition, installmentCount)}</span>
+                        </div>
+                        <div className="mt-0.5 flex justify-between gap-4 border-t border-[#eeeef1] pt-2">
+                          <span className="text-[#8b8b92]">Total</span>
+                          <span className="sales-ops-num text-[15px] font-bold text-[#9c7210]">
+                            {formatMoneyBrl(totalCents)}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col rounded-[14px] bg-[#18181b] p-[17px] text-[#f3f3f5]">
+                      <div className="flex items-center justify-between">
+                        <div className="text-[13px] font-bold">Margem líquida</div>
+                        <button
+                          className="text-xs font-semibold text-[#eaa81a]"
+                          onClick={() => setWizardStep(2)}
+                          type="button"
+                        >
+                          editar
+                        </button>
+                      </div>
+                      <div className="mt-2.5">
                         <span
                           className={`sales-ops-num text-[30px] font-bold ${marginCents >= 0 ? 'text-[#8fd19e]' : 'text-[#f08b72]'}`}
                         >
                           {formatMoneyBrl(marginCents, { maximumFractionDigits: 0 })}
-                        </span>
+                        </span>{' '}
                         <span
-                          className={`sales-ops-num text-[17px] font-bold ${marginCents >= 0 ? 'text-[#8fd19e]' : 'text-[#f08b72]'}`}
+                          className={`sales-ops-num text-[15px] font-bold ${marginCents >= 0 ? 'text-[#8fd19e]' : 'text-[#f08b72]'}`}
                         >
                           ({marginPct}%)
                         </span>
                       </div>
-                    </div>
-                    <div className="text-right text-[12.5px] leading-7 text-[#c9c9d0]">
-                      <div>
-                        Comissão vendedor ·{' '}
-                        <span className="sales-ops-num font-semibold text-[#f3f3f5]">
-                          {formatMoneyBrl(sellerCommissionCents, { maximumFractionDigits: 0 })}
-                        </span>
-                      </div>
-                      <div>
-                        Comissão finder ·{' '}
-                        <span className="sales-ops-num font-semibold text-[#f3f3f5]">
-                          {formatMoneyBrl(finderCommissionCents, { maximumFractionDigits: 0 })}
-                        </span>
-                      </div>
-                      <div>
-                        Custos + imposto ·{' '}
-                        <span className="sales-ops-num font-semibold text-[#f3f3f5]">
-                          {formatMoneyBrl(professionalCents + taxCents + otherCents, {
-                            maximumFractionDigits: 0,
-                          })}
-                        </span>
+                      <div className="mt-3 text-[12.5px] leading-[1.9] text-[#c9c9d0]">
+                        <div className="flex justify-between gap-4">
+                          <span>Comissão vendedor</span>
+                          <span className="sales-ops-num font-semibold text-[#f3f3f5]">
+                            {formatMoneyBrl(sellerCommissionCents)}
+                          </span>
+                        </div>
+                        <div className="flex justify-between gap-4">
+                          <span>Comissão finder</span>
+                          <span className="sales-ops-num font-semibold text-[#f3f3f5]">
+                            {formatMoneyBrl(finderCommissionCents)}
+                          </span>
+                        </div>
+                        <div className="flex justify-between gap-4">
+                          <span>Custos + imposto</span>
+                          <span className="sales-ops-num font-semibold text-[#f3f3f5]">
+                            {formatMoneyBrl(professionalCents + taxCents + otherCents)}
+                          </span>
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
-              </div>
 
-              <Field label="Observações">
-                <textarea
-                  className="min-h-[74px] rounded-md border border-[#dcdce2] bg-white px-3 py-2 text-sm outline-none transition focus:border-[#eaa81a]"
-                  onChange={(event) => setNotes(event.target.value)}
-                  value={notes}
-                />
-              </Field>
-            </div>
+                  <div className="overflow-hidden rounded-[14px] border border-[#e8e8ec] bg-white">
+                    <div className="flex items-center justify-between border-b border-[#eeeef1] px-4 py-[13px]">
+                      <div className="text-[13px] font-bold">Contas a pagar geradas</div>
+                      <button
+                        className="text-xs font-semibold text-[#9c7210]"
+                        onClick={() => setWizardStep(2)}
+                        type="button"
+                      >
+                        editar custos
+                      </button>
+                    </div>
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="bg-[#fafafb]">
+                          <TableHead className={tableHeadClass}>Descrição</TableHead>
+                          <TableHead className={tableHeadClass}>Tipo</TableHead>
+                          <TableHead className={tableHeadClass}>Vencimento</TableHead>
+                          <TableHead className={`${tableHeadClass} text-right`}>Valor</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {payablesPreview.map((payable, index) => (
+                          <TableRow key={`${payable.label}-${index}`}>
+                            <TableCell className="px-4 py-3 text-[13.5px] font-semibold">
+                              {payable.label}
+                            </TableCell>
+                            <TableCell className="px-3 py-3">
+                              <span
+                                className={`rounded-full px-[9px] py-[3px] text-[11.5px] font-bold ${payable.className}`}
+                              >
+                                {payable.type}
+                              </span>
+                            </TableCell>
+                            <TableCell className="sales-ops-num px-3 py-3 text-[13px] text-[#57575f]">
+                              {payable.date}
+                            </TableCell>
+                            <TableCell className="sales-ops-num px-4 py-3 text-right text-[13.5px] font-bold">
+                              {formatMoneyBrl(payable.value)}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                        <TableRow className="border-t-2 border-[#e8e8ec] bg-[#fafafb]">
+                          <TableCell className="px-4 py-[13px] text-[13.5px] font-bold" colSpan={3}>
+                            Total a pagar
+                          </TableCell>
+                          <TableCell className="sales-ops-num px-4 py-[13px] text-right text-base font-bold text-[#b23a22]">
+                            {formatMoneyBrl(payablesPreview.reduce((sum, item) => sum + item.value, 0))}
+                          </TableCell>
+                        </TableRow>
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+              ) : null}
+            </>
           )}
         </div>
+
         <div className="flex items-center justify-between border-t border-[#e8e8ec] bg-white px-[26px] py-4">
-          <SecondaryButton onClick={onClose}>
-            <ChevronLeft className="h-4 w-4" />
-            Fechar
-          </SecondaryButton>
+          <button
+            className={`rounded-[11px] border border-[#dcdce2] bg-white px-5 py-[11px] text-sm font-semibold text-[#57575f] transition hover:bg-[#f2f2f4] ${wizardStep === 1 ? 'invisible' : ''}`}
+            onClick={goBack}
+            type="button"
+          >
+            Voltar
+          </button>
           <div className="flex items-center gap-3">
-            <span className="sales-ops-num text-[24px] font-bold text-[#9c7210]">
-              {formatMoneyBrl(totalCents, { maximumFractionDigits: 0 })}
+            <span className="text-[13px] text-[#9b9ba3]">
+              Passo {wizardStep} de 3
             </span>
-            <SecondaryButton disabled={!canSave || saving} onClick={() => submit('draft')}>
+            <button
+              className="rounded-[11px] border border-[#dcdce2] bg-white px-[18px] py-[11px] text-sm font-semibold text-[#57575f] transition hover:bg-[#f2f2f4] disabled:cursor-not-allowed disabled:opacity-45"
+              disabled={!canSaveBasics || saving}
+              onClick={() => submit('draft')}
+              title="Salvar com os dados básicos preenchidos"
+              type="button"
+            >
               Salvar incompleto
-            </SecondaryButton>
-            <PrimaryButton disabled={!canSave || saving} onClick={() => submit('closed')}>
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-              Salvar venda
-            </PrimaryButton>
+            </button>
+            <button
+              className="rounded-[11px] bg-[#201f24] px-[22px] py-[11px] text-sm font-bold text-white transition hover:bg-[#33333a] disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={(wizardStep === 1 && !canSaveBasics) || saving}
+              onClick={advanceWizard}
+              type="button"
+            >
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : primaryLabel}
+            </button>
           </div>
         </div>
       </DialogContent>

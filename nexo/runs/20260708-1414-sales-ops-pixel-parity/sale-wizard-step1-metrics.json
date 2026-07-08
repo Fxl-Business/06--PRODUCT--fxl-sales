@@ -1,0 +1,78 @@
+{
+  "url": "http://127.0.0.1:8006/sale-wizard-harness.html",
+  "dialog": {
+    "x": 554,
+    "y": 41,
+    "w": 940,
+    "h": 950
+  },
+  "dialogStyle": {
+    "background": "rgb(244, 244, 246)",
+    "borderRadius": "22px",
+    "color": "rgb(15, 23, 42)",
+    "fontSize": "16px"
+  },
+  "textSample": "Fechamento da vendaCliente, itens e pagamento - só o primeiro passo é obrigatório1Registro da venda2Custos e margem3RevisãoCliente e responsáveisCliente *Vendedor *Ana Martins.Essa venda teve um finderItensCadastrar produto+ itemProduto / serviçoQtd.Valor unit.SubtotalFXL FinanceR$ 8.000Pagamento e recebimentoForma de pagamento *PixCartãoBoletoTransferênciaCondiçãoÀ vistaParceladoRecorrenteNº parcelas / ciclosData-baseMensalidade de R$ 1.200 a partir de 08/07/2026, recorrenteParcelas a receberSoma · R$ 8.000,00ParcelaVencimentoValor108/07/2026R$ 8.000,00ObservaçõesTotal da vendaR$ 8.000VoltarPasso 1 de 3Salvar incompletoAvançarClose",
+  "unitInput": "8000",
+  "hasTitle": true,
+  "hasSubtitle": true,
+  "hasStepper": true,
+  "hasFinderButton": true,
+  "hasItemHeaders": true,
+  "hasRecurringLine": true,
+  "hasFooter": true,
+  "hasForbiddenSaveSale": false,
+  "hasCorrectTotal": true,
+  "hasCompactUnitInput": true,
+  "buttons": [
+    "1Registro da venda",
+    "2Custos e margem",
+    "3Revisão",
+    "Essa venda teve um finder",
+    "Cadastrar produto",
+    "+ item",
+    "Voltar",
+    "Salvar incompleto",
+    "Avançar",
+    "Close"
+  ],
+  "footer": {
+    "x": 554,
+    "y": 936,
+    "w": 940,
+    "h": 77
+  },
+  "stepper": {
+    "x": 554,
+    "y": 136,
+    "w": 940,
+    "h": 59
+  },
+  "body": {
+    "x": 554,
+    "y": 195,
+    "w": 940,
+    "h": 740
+  },
+  "pageEvents": [
+    {
+      "type": "debug",
+      "args": [
+        "[vite] connecting..."
+      ]
+    },
+    {
+      "type": "debug",
+      "args": [
+        "[vite] connected."
+      ]
+    },
+    {
+      "type": "info",
+      "args": [
+        "%cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools",
+        "font-weight:bold"
+      ]
+    }
+  ]
+}

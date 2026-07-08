@@ -1,11 +1,24 @@
 import { describe, expect, it } from 'vitest';
-import { buildDashboardModel, buildSalePayload, formatMoneyBrl } from '../calculations';
+import {
+  buildDashboardModel,
+  buildSalePayload,
+  formatMoneyBrl,
+  parseCurrencyInputToCents,
+} from '../calculations';
 import type { SalesOpsBootstrap } from '../types';
 
 describe('sales operations web calculations', () => {
   it('formats integer cents as BRL without leaking floating point math', () => {
     expect(formatMoneyBrl(4250000, { maximumFractionDigits: 0 })).toBe('R$ 42.500');
     expect(formatMoneyBrl(382000)).toBe('R$ 3.820,00');
+  });
+
+  it('parses Brazilian and decimal currency inputs into cents', () => {
+    expect(parseCurrencyInputToCents('8000')).toBe(800000);
+    expect(parseCurrencyInputToCents('8000.00')).toBe(800000);
+    expect(parseCurrencyInputToCents('8.000,00')).toBe(800000);
+    expect(parseCurrencyInputToCents('1.200')).toBe(120000);
+    expect(parseCurrencyInputToCents('1200,50')).toBe(120050);
   });
 
   it('builds an empty dashboard model from empty API data without prototype seed rows', () => {
@@ -63,4 +76,3 @@ describe('sales operations web calculations', () => {
     expect(payload.items[0]?.quantity).toBe(1);
   });
 });
-

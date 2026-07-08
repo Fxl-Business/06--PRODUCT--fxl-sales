@@ -20,6 +20,32 @@ function cleanId(value: string | undefined): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
+export function parseCurrencyInputToCents(value: string | number | undefined): number {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0;
+  }
+  const trimmed = value?.trim();
+  if (!trimmed) return 0;
+
+  const hasComma = trimmed.includes(',');
+  const hasDot = trimmed.includes('.');
+  let normalized = trimmed;
+
+  if (hasComma) {
+    normalized = trimmed.replace(/\./g, '').replace(',', '.');
+  } else if (hasDot) {
+    const parts = trimmed.split('.');
+    const lastPart = parts.at(-1) ?? '';
+    normalized =
+      lastPart.length > 0 && lastPart.length <= 2
+        ? trimmed.replace(/,/g, '')
+        : trimmed.replace(/\./g, '');
+  }
+
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? Math.max(0, Math.round(parsed * 100)) : 0;
+}
+
 export function formatMoneyBrl(
   cents: number,
   options?: { minimumFractionDigits?: number; maximumFractionDigits?: number },
