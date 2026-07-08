@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { getSalesOpsNavigation, resolveInitialSalesOpsView } from '../navigation';
+import {
+  getSalesOpsNavigation,
+  getSalesOpsRoleViews,
+  resolveInitialSalesOpsView,
+} from '../navigation';
 
 describe('sales operations navigation', () => {
   it('shows tactical dashboard only to the team role', () => {
@@ -33,5 +37,16 @@ describe('sales operations navigation', () => {
     expect(resolveInitialSalesOpsView('config', 'equipe', 'vendas')).toBe('produtos');
     expect(resolveInitialSalesOpsView('tatico', 'finder', 'dashboard')).toBe('finders');
     expect(resolveInitialSalesOpsView('operacional', 'vendedor', 'comissoes')).toBe('comissoes');
+  });
+
+  it('limits the visual role switcher to Hub-granted app roles', () => {
+    expect(getSalesOpsRoleViews(['admin', 'seller', 'finder'])).toEqual([
+      'equipe',
+      'vendedor',
+      'finder',
+    ]);
+    expect(getSalesOpsRoleViews(['seller', 'finder'])).toEqual(['vendedor', 'finder']);
+    expect(getSalesOpsRoleViews(['seller'])).toEqual(['vendedor']);
+    expect(getSalesOpsRoleViews([])).toEqual([]);
   });
 });

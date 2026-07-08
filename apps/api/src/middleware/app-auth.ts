@@ -13,11 +13,38 @@ export type MinimalHubAuthContext = {
       modules: string[];
     };
     roles: {
+      productRoles?: unknown;
       workspace: string;
     };
     isSuperAdmin?: boolean;
   };
 };
+
+type AppRole = 'admin' | 'seller' | 'finder';
+
+const fullAccessRoles: AppRole[] = ['admin', 'seller', 'finder'];
+const productRoleOrder: AppRole[] = ['seller', 'finder'];
+
+function readProductRoles(value: unknown): Set<string> {
+  if (!Array.isArray(value)) {
+    return new Set();
+  }
+  return new Set(value.filter((role): role is string => typeof role === 'string'));
+}
+
+export function getAppRolesFromHubClaims(auth: MinimalHubAuthContext): AppRole[] {
+  const workspaceRole = auth.claims.roles.workspace;
+  if (auth.claims.isSuperAdmin || workspaceRole === 'owner' || workspaceRole === 'admin') {
+    return fullAccessRoles;
+  }
+
+  const productRoles = readProductRoles(auth.claims.roles.productRoles);
+  if (productRoles.has('admin')) {
+    return fullAccessRoles;
+  }
+
+  return productRoleOrder.filter((role) => productRoles.has(role));
+}
 
 declare module 'hono' {
   interface ContextVariableMap {
@@ -39,17 +66,16 @@ export function getHubLegacyAuthContext(auth: MinimalHubAuthContext): {
   userId: string;
   orgId: string;
   userRole: string | undefined;
+  userRoles: AppRole[];
 } {
-  const workspaceRole = auth.claims.roles.workspace;
-  const userRole =
-    auth.claims.isSuperAdmin || workspaceRole === 'owner' || workspaceRole === 'admin'
-      ? 'admin'
-      : 'finder';
+  const userRoles = getAppRolesFromHubClaims(auth);
+  const userRole = userRoles[0];
 
   return {
     userId: auth.accountId,
     orgId: auth.workspaceId,
     userRole,
+    userRoles,
   };
 }
 
@@ -122,6 +148,7 @@ export const appAuthMiddleware: MiddlewareHandler = async (c, next) => {
     c.set('userId', legacy.userId);
     c.set('orgId', legacy.orgId);
     c.set('userRole', legacy.userRole);
+    c.set('userRoles', legacy.userRoles);
     await next();
   });
   return blockedResponse ?? authResponse;

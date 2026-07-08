@@ -21,6 +21,7 @@ import {
   UserRound,
 } from 'lucide-react';
 import { useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { Navigate } from 'react-router-dom';
 import { useAuthProfile, useLogout } from '@/auth/react';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -49,6 +50,7 @@ import {
 } from './hooks';
 import {
   getSalesOpsNavigation,
+  getSalesOpsRoleViews,
   resolveInitialSalesOpsView,
   salesOpsWorkspaces,
   workspaceForView,
@@ -123,12 +125,6 @@ type ModalState =
   | { kind: 'client'; client?: SalesOpsClient }
   | { kind: 'person'; person?: SalesOpsPerson; roleHint: 'seller' | 'finder' | 'collaborator' }
   | null;
-
-function roleFromProfile(role?: string): SalesOpsRoleView {
-  if (role === 'seller') return 'vendedor';
-  if (role === 'finder') return 'finder';
-  return 'equipe';
-}
 
 function titleForView(view: SalesOpsView, role: SalesOpsRoleView) {
   const map: Record<SalesOpsView, { title: string; subtitle: string }> = {
@@ -473,28 +469,38 @@ export function SalesOpsApp() {
   const [modal, setModal] = useState<ModalState>(null);
   const [saleWizardOpen, setSaleWizardOpen] = useState(false);
 
-  const roleView = selectedRoleView ?? roleFromProfile(profile.role);
+  const availableRoleViews = useMemo(() => getSalesOpsRoleViews(profile.roles), [profile.roles]);
+  const roleView =
+    selectedRoleView && availableRoleViews.includes(selectedRoleView)
+      ? selectedRoleView
+      : availableRoleViews[0];
+  const activeRoleView = roleView ?? 'finder';
   const workspace: SalesOpsWorkspace =
-    workspaceState === 'config' && roleView !== 'equipe' ? 'tatico' : workspaceState;
-  const view = resolveInitialSalesOpsView(workspace, roleView, viewState);
+    workspaceState === 'config' && activeRoleView !== 'equipe' ? 'tatico' : workspaceState;
+  const view = resolveInitialSalesOpsView(workspace, activeRoleView, viewState);
   const bootstrap = bootstrapQuery.data ?? emptyBootstrap;
   const dashboard = useMemo(() => buildDashboardModel(bootstrap), [bootstrap]);
-  const navItems = getSalesOpsNavigation(workspace, roleView);
-  const title = titleForView(view, roleView);
+  const navItems = getSalesOpsNavigation(workspace, activeRoleView);
+  const title = titleForView(view, activeRoleView);
   const payableBrl = bootstrap.payables
     .filter((payable) => payable.status === 'open')
     .reduce((sum, payable) => sum + payable.amountBrl, 0);
   const roleLabel =
-    roleView === 'equipe' ? 'Equipe · Admin' : roleView === 'vendedor' ? 'Vendedor' : 'Finder';
-  const userName = profile.name ?? (roleView === 'finder' ? 'Finder' : 'FXL');
+    activeRoleView === 'equipe'
+      ? 'Equipe · Admin'
+      : activeRoleView === 'vendedor'
+        ? 'Vendedor'
+        : 'Finder';
+  const userName = profile.name ?? (activeRoleView === 'finder' ? 'Finder' : 'FXL');
 
   function setWorkspace(next: SalesOpsWorkspace) {
     setWorkspaceMenuOpen(false);
     setWorkspaceState(next);
-    setViewState((current) => resolveInitialSalesOpsView(next, roleView, current));
+    setViewState((current) => resolveInitialSalesOpsView(next, activeRoleView, current));
   }
 
   function setRole(next: SalesOpsRoleView) {
+    if (!availableRoleViews.includes(next)) return;
     const nextWorkspace = next === 'equipe' ? workspace : workspace === 'config' ? 'tatico' : workspace;
     setRoleMenuOpen(false);
     setSelectedRoleView(next);
@@ -504,7 +510,7 @@ export function SalesOpsApp() {
 
   function go(next: SalesOpsView) {
     setWorkspaceMenuOpen(false);
-    setWorkspaceState(workspaceForView(next, roleView));
+    setWorkspaceState(workspaceForView(next, activeRoleView));
     setViewState(next);
   }
 
@@ -541,7 +547,7 @@ export function SalesOpsApp() {
               ? 'Novo finder'
               : 'Nova venda';
   const availableWorkspaces = salesOpsWorkspaces.filter(
-    (item) => roleView === 'equipe' || item.id !== 'config',
+    (item) => activeRoleView === 'equipe' || item.id !== 'config',
   );
   const activeWorkspaceMeta = salesOpsWorkspaces.find((item) => item.id === workspace);
   const activeWorkspaceVisual = workspaceVisuals[workspace];
@@ -551,26 +557,37 @@ export function SalesOpsApp() {
     name: string;
     description: string;
     initials: string;
-  }> = [
-    {
-      id: 'equipe',
-      name: 'Equipe',
-      description: 'Acesso total ao negócio',
-      initials: initials(userName),
-    },
-    {
-      id: 'vendedor',
-      name: 'Vendedor',
-      description: 'Só os próprios dados',
-      initials: 'VD',
-    },
-    {
-      id: 'finder',
-      name: 'Finder',
-      description: 'Só as próprias indicações',
-      initials: 'FN',
-    },
-  ];
+  }> = (
+    [
+      {
+        id: 'equipe',
+        name: 'Equipe',
+        description: 'Acesso total ao negócio',
+        initials: initials(userName),
+      },
+      {
+        id: 'vendedor',
+        name: 'Vendedor',
+        description: 'Só os próprios dados',
+        initials: 'VD',
+      },
+      {
+        id: 'finder',
+        name: 'Finder',
+        description: 'Só as próprias indicações',
+        initials: 'FN',
+      },
+    ] satisfies Array<{
+      id: SalesOpsRoleView;
+      name: string;
+      description: string;
+      initials: string;
+    }>
+  ).filter((option) => availableRoleViews.includes(option.id));
+
+  if (!roleView) {
+    return <Navigate to="/no-role" replace />;
+  }
 
   return (
     <div className="sales-ops flex h-screen w-full gap-0 bg-[#e8e8eb] p-[10px] text-[#201f24]">
@@ -727,7 +744,10 @@ export function SalesOpsApp() {
               >
                 <Icon className="h-[18px] w-[18px] flex-none" />
                 {!sidebarCollapsed ? <span className="min-w-0 flex-1 truncate">{item.label}</span> : null}
-                {!sidebarCollapsed && item.id === 'comissoes' && roleView === 'equipe' && openPayablesCount > 0 ? (
+                {!sidebarCollapsed &&
+                item.id === 'comissoes' &&
+                activeRoleView === 'equipe' &&
+                openPayablesCount > 0 ? (
                   <span
                     className={`sales-ops-num rounded-full px-2 py-0.5 text-[11px] font-bold ${
                       active ? 'bg-[#e2b53a] text-[#18181b]' : 'bg-[#3a372b] text-[#eaa81a]'
@@ -820,7 +840,7 @@ export function SalesOpsApp() {
                       Nível de visualização
                     </div>
                     {roleOptions.map((option) => {
-                      const active = roleView === option.id;
+                      const active = activeRoleView === option.id;
                       return (
                         <button
                           className={`flex w-full items-center gap-[11px] rounded-[11px] px-2.5 py-[9px] text-left transition hover:bg-[#f5f5f7] ${

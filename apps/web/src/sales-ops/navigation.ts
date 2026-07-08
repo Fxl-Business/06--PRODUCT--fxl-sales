@@ -9,6 +9,7 @@ import {
   UsersRound,
   type LucideIcon,
 } from 'lucide-react';
+import type { AppRole } from '@/auth/claims';
 
 export type SalesOpsWorkspace = 'tatico' | 'operacional' | 'config';
 export type SalesOpsRoleView = 'equipe' | 'vendedor' | 'finder';
@@ -72,6 +73,15 @@ export function getSalesOpsNavigation(
   if (role === 'vendedor') return tacticalSeller;
   if (role === 'finder') return tacticalFinder;
   return tacticalTeam;
+}
+
+export function getSalesOpsRoleViews(roles: readonly AppRole[]): SalesOpsRoleView[] {
+  const roleSet = new Set(roles);
+  const views: SalesOpsRoleView[] = [];
+  if (roleSet.has('admin')) views.push('equipe');
+  if (roleSet.has('seller')) views.push('vendedor');
+  if (roleSet.has('finder')) views.push('finder');
+  return views;
 }
 
 export function resolveInitialSalesOpsView(

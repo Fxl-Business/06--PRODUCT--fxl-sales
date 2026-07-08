@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getRoleFromHubClaims, parseJwtPayload } from '../claims';
+import { getRoleFromHubClaims, getRolesFromHubClaims, parseJwtPayload } from '../claims';
 
 describe('getRoleFromHubClaims', () => {
   it('maps Hub super-admins to admin', () => {
@@ -12,8 +12,30 @@ describe('getRoleFromHubClaims', () => {
     expect(getRoleFromHubClaims({ roles: { workspace: 'admin' } })).toBe('admin');
   });
 
-  it('maps ordinary Hub workspace members to finder', () => {
-    expect(getRoleFromHubClaims({ roles: { workspace: 'member' } })).toBe('finder');
+  it('maps product admin roles to full sales access', () => {
+    expect(
+      getRolesFromHubClaims({ roles: { workspace: 'member', productRoles: ['admin'] } }),
+    ).toEqual(['admin', 'seller', 'finder']);
+  });
+
+  it('maps product seller and finder roles independently', () => {
+    expect(
+      getRolesFromHubClaims({
+        roles: { workspace: 'member', productRoles: ['seller', 'finder'] },
+      }),
+    ).toEqual(['seller', 'finder']);
+  });
+
+  it('does not grant a sales role to ordinary Hub workspace members without product roles', () => {
+    expect(getRoleFromHubClaims({ roles: { workspace: 'member' } })).toBeUndefined();
+  });
+
+  it('ignores unknown product roles from display claims', () => {
+    expect(
+      getRolesFromHubClaims({
+        roles: { workspace: 'member', productRoles: ['billing', 'seller'] },
+      }),
+    ).toEqual(['seller']);
   });
 });
 

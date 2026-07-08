@@ -11,13 +11,14 @@ import {
   type ReactNode,
 } from 'react';
 import { Skeleton } from '@/components/ui/skeleton';
-import { getRoleFromHubClaims, parseJwtPayload, type AppRole } from './claims';
+import { getRoleFromHubClaims, getRolesFromHubClaims, parseJwtPayload, type AppRole } from './claims';
 import { getHubBffBasePath, loadHubBrowserConfig } from './provider';
 
 type AuthProfile = {
   isLoaded: boolean;
   isSignedIn: boolean;
   role?: AppRole;
+  roles: AppRole[];
   name?: string;
   email?: string;
   avatarUrl?: string;
@@ -70,11 +71,12 @@ function profileFromToken(token: string | null): Omit<AuthProfile, 'isLoaded' | 
 } {
   const claims = token ? parseJwtPayload(token) : null;
   if (!claims) {
-    return { workspaces: [] };
+    return { roles: [], workspaces: [] };
   }
 
   return {
     role: getRoleFromHubClaims(claims),
+    roles: getRolesFromHubClaims(claims),
     name: readString(claims.name),
     email: readString(claims.email),
     avatarUrl: readString(claims.avatarUrl),
@@ -104,6 +106,7 @@ function HubAuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<AuthProfile>({
     isLoaded: false,
     isSignedIn: false,
+    roles: [],
   });
   const [workspaces, setWorkspaces] = useState<HubWorkspacePreview[]>([]);
 
@@ -114,6 +117,7 @@ function HubAuthProvider({ children }: { children: ReactNode }) {
       isLoaded: true,
       isSignedIn: token !== null,
       role: next.role,
+      roles: next.roles,
       name: next.name,
       email: next.email,
       avatarUrl: next.avatarUrl,
@@ -195,9 +199,9 @@ function useHubAccessToken() {
 }
 
 function useHubProfile(): AuthProfile {
-  const { isLoaded, isSignedIn, role, name, email, avatarUrl, workspaceName } =
+  const { isLoaded, isSignedIn, role, roles, name, email, avatarUrl, workspaceName } =
     useHubAuthContext();
-  return { isLoaded, isSignedIn, role, name, email, avatarUrl, workspaceName };
+  return { isLoaded, isSignedIn, role, roles, name, email, avatarUrl, workspaceName };
 }
 
 function useHubLogout(): () => Promise<void> {

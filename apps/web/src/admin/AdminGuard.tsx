@@ -11,13 +11,13 @@ import { useAuthProfile } from '@/auth/react';
  * from every /api/v1/admin/* call.
  */
 export function AdminGuard({ children }: { children: React.ReactNode }) {
-  const { isLoaded, role } = useAuthProfile();
+  const { isLoaded, roles } = useAuthProfile();
 
   if (!isLoaded) {
     return <Skeleton className="h-screen w-full" />;
   }
 
-  if (role !== 'admin') {
+  if (!roles.includes('admin')) {
     return <Navigate to="/" replace />;
   }
 

@@ -22,7 +22,8 @@ describe('getHubLegacyAuthContext', () => {
     expect(getHubLegacyAuthContext(baseHubAuth)).toEqual({
       userId: 'hub-account-1',
       orgId: 'org_existing_1',
-      userRole: 'finder',
+      userRole: undefined,
+      userRoles: [],
     });
   });
 
@@ -48,6 +49,43 @@ describe('getHubLegacyAuthContext', () => {
         },
       }).userRole,
     ).toBe('admin');
+  });
+
+  it('maps product admin roles to the existing admin guard role', () => {
+    expect(
+      getHubLegacyAuthContext({
+        ...baseHubAuth,
+        claims: {
+          ...baseHubAuth.claims,
+          roles: { workspace: 'member', productRoles: ['admin'] },
+        },
+      }),
+    ).toMatchObject({
+      userRole: 'admin',
+      userRoles: ['admin', 'seller', 'finder'],
+    });
+  });
+
+  it('preserves multiple product roles for downstream app authorization', () => {
+    expect(
+      getHubLegacyAuthContext({
+        ...baseHubAuth,
+        claims: {
+          ...baseHubAuth.claims,
+          roles: { workspace: 'member', productRoles: ['seller', 'finder'] },
+        },
+      }),
+    ).toMatchObject({
+      userRole: 'seller',
+      userRoles: ['seller', 'finder'],
+    });
+  });
+
+  it('does not invent a role for ordinary members without product roles', () => {
+    expect(getHubLegacyAuthContext(baseHubAuth)).toMatchObject({
+      userRole: undefined,
+      userRoles: [],
+    });
   });
 });
 

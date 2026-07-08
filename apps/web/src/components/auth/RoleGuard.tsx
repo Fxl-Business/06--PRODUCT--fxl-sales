@@ -10,11 +10,11 @@ type Role = 'admin' | 'finder' | 'seller';
  * /no-role. UX-only - the backend requireAdmin / RLS are authoritative.
  */
 export function RoleGuard({ role, children }: { role: Role; children: React.ReactNode }) {
-  const { role: userRole, isLoaded } = useAuthProfile();
+  const { isLoaded, roles } = useAuthProfile();
 
   if (!isLoaded) return <Skeleton className="h-screen w-full" />;
 
-  if (userRole !== role) {
+  if (!roles.includes(role)) {
     return <Navigate to="/no-role" replace />;
   }
 
@@ -25,10 +25,10 @@ export function RoleGuard({ role, children }: { role: Role; children: React.Reac
  * Root redirect (Phase 03 T09). Sends a signed-in user to their role's home.
  */
 export function RoleRouter() {
-  const { role, isLoaded } = useAuthProfile();
+  const { isLoaded, roles } = useAuthProfile();
   if (!isLoaded) return <Skeleton className="h-screen w-full" />;
-  if (role === 'admin') return <Navigate to="/admin/finders" replace />;
-  if (role === 'finder') return <Navigate to="/finder/dashboard" replace />;
-  if (role === 'seller') return <Navigate to="/seller/deals" replace />;
+  if (roles.includes('admin')) return <Navigate to="/admin/finders" replace />;
+  if (roles.includes('seller')) return <Navigate to="/seller/deals" replace />;
+  if (roles.includes('finder')) return <Navigate to="/finder/dashboard" replace />;
   return <Navigate to="/no-role" replace />;
 }

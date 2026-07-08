@@ -5,6 +5,7 @@ declare module 'hono' {
     userId: string;
     orgId: string;
     userRole: string | undefined;
+    userRoles: Array<'admin' | 'seller' | 'finder'>;
   }
 }
 
