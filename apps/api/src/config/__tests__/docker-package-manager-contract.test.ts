@@ -15,3 +15,16 @@ describe('Docker package manager contract', () => {
     expect(rootPackageJson.packageManager).toBe('pnpm@10.17.1');
   });
 });
+
+describe('Docker runtime dependency layout contract', () => {
+  it('preserves the pnpm workspace layout for runtime node_modules resolution', () => {
+    const dockerfile = readFileSync(resolve(repoRoot, 'apps/api/Dockerfile'), 'utf8');
+
+    expect(dockerfile).toContain('COPY --from=build /app/node_modules ./node_modules');
+    expect(dockerfile).toContain(
+      'COPY --from=build /app/apps/api/node_modules ./apps/api/node_modules',
+    );
+    expect(dockerfile).toContain('WORKDIR /app/apps/api');
+    expect(dockerfile).not.toContain('COPY --from=build /app/apps/api/node_modules ./node_modules');
+  });
+});
