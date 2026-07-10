@@ -2,6 +2,7 @@
   "name": "fxl-sales",
   "version": "1.0.0",
   "private": true,
+  "packageManager": "pnpm@10.17.1",
   "fxlContractVersion": "1.0",
   "fxlAppId": "fxl-sales",
   "scripts": {

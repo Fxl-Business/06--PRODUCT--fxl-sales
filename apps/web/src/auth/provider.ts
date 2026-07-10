@@ -20,5 +20,5 @@ export function loadHubBrowserConfig(env: EnvLike): BrowserHubConfig {
 }
 
 export function getHubBffBasePath(env: EnvLike): string {
-  return (env.VITE_AUTH_BFF_BASE_PATH ?? '').replace(/\/+$/, '');
+  return (env.VITE_AUTH_BFF_BASE_PATH ?? env.VITE_API_URL ?? '').replace(/\/+$/, '');
 }

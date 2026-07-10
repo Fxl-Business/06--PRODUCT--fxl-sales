@@ -21,8 +21,10 @@ describe('loadHubBrowserConfig', () => {
 });
 
 describe('getHubBffBasePath', () => {
-  it('uses same-origin auth routes by default', () => {
-    expect(getHubBffBasePath({ VITE_API_URL: 'http://localhost:3006/' })).toBe('');
+  it('uses the API origin for auth routes when configured', () => {
+    expect(getHubBffBasePath({ VITE_API_URL: 'http://localhost:3006/' })).toBe(
+      'http://localhost:3006',
+    );
   });
 
   it('uses an explicit Hub BFF base path when configured', () => {
