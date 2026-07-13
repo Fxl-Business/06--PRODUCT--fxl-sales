@@ -21,7 +21,7 @@ import {
   UserRound,
 } from 'lucide-react';
 import { useMemo, useState, type FormEvent, type ReactNode } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { useAuthProfile, useLogout } from '@/auth/react';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -49,9 +49,11 @@ import {
   useSaveSalesOpsSettings,
 } from './hooks';
 import {
+  buildSalesOpsPath,
+  getDefaultSalesOpsRoute,
   getSalesOpsNavigation,
   getSalesOpsRoleViews,
-  resolveInitialSalesOpsView,
+  resolveSalesOpsRoute,
   salesOpsWorkspaces,
   workspaceForView,
   type SalesOpsRoleView,
@@ -118,7 +120,7 @@ const workspaceVisuals: Record<
 > = {
   tatico: { icon: LayoutGrid, tileBg: '#eaa81a', tileColor: '#18181b' },
   operacional: { icon: ListChecks, tileBg: '#3f7cc4', tileColor: '#fff' },
-  config: { icon: Settings, tileBg: '#5a9166', tileColor: '#fff' },
+  cadastros: { icon: Settings, tileBg: '#5a9166', tileColor: '#fff' },
 };
 
 type ModalState =
@@ -452,6 +454,8 @@ function LoadingPanel() {
 }
 
 export function SalesOpsApp() {
+  const navigate = useNavigate();
+  const routeParams = useParams();
   const profile = useAuthProfile();
   const logout = useLogout();
   const bootstrapQuery = useSalesOpsBootstrap();
@@ -464,8 +468,6 @@ export function SalesOpsApp() {
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
   const [roleMenuOpen, setRoleMenuOpen] = useState(false);
   const [selectedRoleView, setSelectedRoleView] = useState<SalesOpsRoleView | null>(null);
-  const [workspaceState, setWorkspaceState] = useState<SalesOpsWorkspace>('tatico');
-  const [viewState, setViewState] = useState<SalesOpsView>('dashboard');
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [modal, setModal] = useState<ModalState>(null);
   const [saleWizardOpen, setSaleWizardOpen] = useState(false);
@@ -476,9 +478,8 @@ export function SalesOpsApp() {
       ? selectedRoleView
       : availableRoleViews[0];
   const activeRoleView = roleView ?? 'finder';
-  const workspace: SalesOpsWorkspace =
-    workspaceState === 'config' && activeRoleView !== 'equipe' ? 'tatico' : workspaceState;
-  const view = resolveInitialSalesOpsView(workspace, activeRoleView, viewState);
+  const resolution = resolveSalesOpsRoute(routeParams, activeRoleView);
+  const { workspace, view } = resolution.route;
   const bootstrap = bootstrapQuery.data ?? emptyBootstrap;
   const dashboard = useMemo(() => buildDashboardModel(bootstrap), [bootstrap]);
   const navItems = getSalesOpsNavigation(workspace, activeRoleView);
@@ -496,23 +497,24 @@ export function SalesOpsApp() {
 
   function setWorkspace(next: SalesOpsWorkspace) {
     setWorkspaceMenuOpen(false);
-    setWorkspaceState(next);
-    setViewState((current) => resolveInitialSalesOpsView(next, activeRoleView, current));
+    navigate(buildSalesOpsPath(getDefaultSalesOpsRoute(activeRoleView, next)));
   }
 
   function setRole(next: SalesOpsRoleView) {
     if (!availableRoleViews.includes(next)) return;
-    const nextWorkspace = next === 'equipe' ? workspace : workspace === 'config' ? 'tatico' : workspace;
+    const nextResolution = resolveSalesOpsRoute(routeParams, next);
     setRoleMenuOpen(false);
     setSelectedRoleView(next);
-    setWorkspaceState(nextWorkspace);
-    setViewState((current) => resolveInitialSalesOpsView(nextWorkspace, next, current));
+    if (nextResolution.redirect) {
+      navigate(nextResolution.path, { replace: true });
+    }
   }
 
   function go(next: SalesOpsView) {
     setWorkspaceMenuOpen(false);
-    setWorkspaceState(workspaceForView(next, activeRoleView));
-    setViewState(next);
+    navigate(
+      buildSalesOpsPath({ workspace: workspaceForView(next, activeRoleView), view: next }),
+    );
   }
 
   function runHeaderAction() {
@@ -548,7 +550,7 @@ export function SalesOpsApp() {
               ? 'Novo finder'
               : 'Nova venda';
   const availableWorkspaces = salesOpsWorkspaces.filter(
-    (item) => activeRoleView === 'equipe' || item.id !== 'config',
+    (item) => activeRoleView === 'equipe' || item.id !== 'cadastros',
   );
   const activeWorkspaceMeta = salesOpsWorkspaces.find((item) => item.id === workspace);
   const activeWorkspaceVisual = workspaceVisuals[workspace];
@@ -588,6 +590,10 @@ export function SalesOpsApp() {
 
   if (!roleView) {
     return <Navigate to="/no-role" replace />;
+  }
+
+  if (resolution.redirect) {
+    return <Navigate to={resolution.path} replace />;
   }
 
   return (
