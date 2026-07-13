@@ -1,0 +1,1 @@
+{"status":"PASS","report":"nexo/runs/20260713-ship-v2.0.4/agents/release-verify-report.md","summary":"Exact release commit verified; 213 tests, lint, typecheck, build, production audit, diff check, secret review, and migration/config review all passed.","done":true,"started":"2026-07-13T13:52:19Z","ended":"2026-07-13T13:53:51Z","ts":"2026-07-13T13:53:51Z"}
