@@ -144,6 +144,14 @@ const routes: RouteObject[] = [
       </Protected>
     ),
   },
+  {
+    path: '/:workspace/:view',
+    element: (
+      <Protected>
+        <SalesOpsApp />
+      </Protected>
+    ),
+  },
   { path: '*', element: <Navigate to="/" replace /> },
 ];
 
