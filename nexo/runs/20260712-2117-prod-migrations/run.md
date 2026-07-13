@@ -5,7 +5,7 @@
 Hotfix autopilot.
 Gate 1 was skipped because the user explicitly approved autopilot.
 Gate 2 was performed by a separate verifier.
-Gate 3 remains human-gated and has not run.
+Gate 3 was explicitly approved by the user on 2026-07-13.
 
 ## Symptom
 
@@ -64,4 +64,6 @@ Unrelated user files under `.vscode/` and `nexo/knowledge/doubts/20260707-missin
 
 ## Delivery State
 
-Verified on fix branch, awaiting orchestrator commit/merge.
+Fix commit `60e333a` was merged to `master` as `6ef8792` and pushed.
+Release `v2.0.3` tags `6ef8792`.
+The same commit was fast-forwarded to `production` and then `staging`.
