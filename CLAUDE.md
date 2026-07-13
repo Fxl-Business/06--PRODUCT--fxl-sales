@@ -38,6 +38,12 @@ Keep the repository folder name unchanged until the editor session can safely mo
 - Use display helpers such as `userLabel` and `orgLabel`.
 - When a raw fallback is unavoidable for an operator screen, style it as muted monospace text.
 
+## Sales Ops Routing
+
+- Canonical Sales Ops routes are `tatico/dashboard|vendedores|finders`, `operacional/vendas|comissoes`, and `cadastros/produtos|clientes|geral`.
+- The URL is the single source of truth for the active Sales Ops workspace and page.
+- Keep the static legacy route trees `/admin/*`, `/finder/*`, `/seller/*`, and `/no-role` unchanged.
+
 ## Environments
 
 | Level | Hub Client | Postgres | Secrets |

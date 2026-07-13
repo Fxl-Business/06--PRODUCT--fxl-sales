@@ -1,0 +1,10 @@
+{
+  "agent": "plan",
+  "slice": "01-canonical-workspace-routes",
+  "status": "PASS",
+  "report": "nexo/plans/20260713-canonical-sales-ops-routing/01-canonical-workspace-routes.md",
+  "summary": "Revised the executable contract to mount one post-legacy dynamic Sales Ops route, make Cadastros inaccessible to non-team roles, lock deterministic role-switch and dashboard navigation behavior, and require repository-wide tests, build checks, dependency audit, and diff validation.",
+  "done": true,
+  "started_at": "2026-07-13T18:29:00Z",
+  "completed_at": "2026-07-13T18:40:13Z"
+}

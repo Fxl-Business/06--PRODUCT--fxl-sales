@@ -1,0 +1,37 @@
+{
+  "agent": "mutation",
+  "slice": "canonical-sales-ops-routing-mutation",
+  "status": "PASS",
+  "report": "nexo/runs/20260713-1529-canonical-sales-ops-routing/mutation-verify.md",
+  "summary": "The workspace-segment removal mutation was killed by 20 expected canonical path failures across both locked focused test files, and the disposable detached worktree was restored and removed.",
+  "evidence": {
+    "master_head": "b4c37f91c0d605c8a7aabf390d366e70ee51fc26",
+    "mutation_file": "apps/web/src/sales-ops/navigation.ts",
+    "mutation": "buildSalesOpsPath returned /${route.view} instead of /${route.workspace}/${route.view}",
+    "test_command": "pnpm --filter @fxl-sales/web exec vitest run src/sales-ops/__tests__/navigation.test.ts src/sales-ops/__tests__/routing.test.tsx",
+    "test_command_runs": 1,
+    "test_exit_code": 1,
+    "test_files_failed": 2,
+    "test_files_total": 2,
+    "tests_failed": 20,
+    "tests_passed": 70,
+    "tests_total": 90,
+    "navigation_tests_failed": 15,
+    "routing_tests_failed": 5,
+    "offline_packages_reused": 413,
+    "offline_packages_downloaded": 0
+  },
+  "mutation_killed": true,
+  "cleanup": {
+    "mutation_restored": true,
+    "worktree_clean_before_removal": true,
+    "worktree_removed": true,
+    "worktree_metadata_pruned": true,
+    "temporary_branch_created": false,
+    "matching_processes_remaining": 0
+  },
+  "done": true,
+  "started": "2026-07-13T18:55:31Z",
+  "ended": "2026-07-13T18:56:20Z",
+  "ts": "2026-07-13T18:56:20Z"
+}

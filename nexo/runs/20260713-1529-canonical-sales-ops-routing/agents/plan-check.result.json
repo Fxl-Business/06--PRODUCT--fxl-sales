@@ -1,0 +1,11 @@
+{
+  "agent": "plan-check",
+  "slice": "01-canonical-workspace-routes",
+  "status": "PASS",
+  "report": "nexo/runs/20260713-1529-canonical-sales-ops-routing/plan-check.md",
+  "summary": "The revision resolves the route-parameter, Cadastros authorization and labeling, rendered role-switch and dashboard navigation, and full Gate 2 command blockers; the single slice is ready for execution.",
+  "done": true,
+  "started": "2026-07-13T18:39:00Z",
+  "ended": "2026-07-13T18:41:13Z",
+  "ts": "2026-07-13T18:41:13Z"
+}

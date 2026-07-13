@@ -1,0 +1,25 @@
+{
+  "task": "verify-01-canonical-workspace-routes",
+  "slice": "01-canonical-workspace-routes",
+  "base": "c871144",
+  "head": "9048035bda32526326c88b0f964316b5981e247c",
+  "objective_verdict": "PASS",
+  "spec_compliance_verdict": "PASS",
+  "code_quality_verdict": "PASS",
+  "prior_blocker": "B1 resolved",
+  "findings": [],
+  "evidence": {
+    "focused_tests": "PASS: 2 files, 92 tests, 85 pure and 7 rendered",
+    "direct_canonical_replace_history": "PASS and push-sensitive",
+    "role_switch_replace_history": "PASS and push-sensitive",
+    "web_lint": "PASS",
+    "web_type_check": "PASS",
+    "web_build": "PASS: 1807 modules transformed",
+    "feature_diff_check": "PASS",
+    "repair_diff_check": "PASS",
+    "security_scope_review": "PASS",
+    "browser_audit": "MANUAL: no signed-in app session or running authenticated API/backend was available"
+  },
+  "report": "nexo/runs/20260713-1529-canonical-sales-ops-routing/verify-01.md",
+  "done": true
+}

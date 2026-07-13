@@ -1,0 +1,44 @@
+{
+  "agent": "wave-verify",
+  "slice": "01-canonical-workspace-routes",
+  "status": "PASS",
+  "report": "nexo/runs/20260713-1529-canonical-sales-ops-routing/wave-01-verify.md",
+  "summary": "Integrated Gate 2 PASS: 320/320 repository tests and 92/92 canonical route oracles passed, all required checks passed, B1 is resolved, and zero findings remain open.",
+  "base": "c87114469210ab2cc35f32585e1c53b673f3c6e2",
+  "head": "368fa58e0b5d6bfa0bce1b6911150180538ba766",
+  "totals": {
+    "test_files_passed": 32,
+    "tests_passed": 320,
+    "tests_failed": 0,
+    "shared_utils_test_files_passed": 1,
+    "shared_utils_tests_passed": 17,
+    "api_test_files_passed": 19,
+    "api_tests_passed": 162,
+    "web_test_files_passed": 12,
+    "web_tests_passed": 141,
+    "focused_route_test_files_passed": 2,
+    "focused_route_tests_passed": 92,
+    "pure_navigation_tests_passed": 85,
+    "rendered_routing_tests_passed": 7
+  },
+  "checks": {
+    "CI=true pnpm test": "PASS",
+    "pnpm lint": "PASS",
+    "pnpm type-check": "PASS",
+    "pnpm build": "PASS",
+    "pnpm audit --audit-level high": "PASS",
+    "git diff --check c871144..HEAD": "PASS"
+  },
+  "blockers": {
+    "B1": "RESOLVED"
+  },
+  "findings": {
+    "opened": 0,
+    "open": 0
+  },
+  "browser_audit": "MANUAL_NOT_RUN",
+  "started": "2026-07-13T20:17:00Z",
+  "ended": "2026-07-13T20:20:09Z",
+  "ts": "2026-07-13T20:20:09Z",
+  "done": true
+}

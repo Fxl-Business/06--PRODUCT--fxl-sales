@@ -1,0 +1,8 @@
+{
+  "agent": "capture",
+  "slice": "01-canonical-workspace-routes",
+  "status": "PASS",
+  "report": "nexo/runs/20260713-1529-canonical-sales-ops-routing/run.md",
+  "summary": "Capture completed with plan statuses closed, the full delivery and verification ledger recorded, active_run removed while delivery configuration was preserved, and the canonical Sales Ops routing convention added to CLAUDE.md.",
+  "done": true
+}
