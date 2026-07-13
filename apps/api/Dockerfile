@@ -31,9 +31,10 @@ WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/apps/api/dist ./apps/api/dist
+COPY --from=build /app/apps/api/drizzle ./apps/api/drizzle
 COPY --from=build /app/apps/api/package.json ./apps/api/package.json
 COPY --from=build /app/apps/api/node_modules ./apps/api/node_modules
 COPY --from=build /app/packages ./packages
 WORKDIR /app/apps/api
 EXPOSE 3006
-CMD ["node", "dist/server.js"]
+CMD ["sh", "-c", "node dist/db/migrate.js && exec node dist/server.js"]

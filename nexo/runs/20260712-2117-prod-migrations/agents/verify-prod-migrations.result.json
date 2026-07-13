@@ -1,0 +1,1 @@
+{"agent":"verify","slice":"prod-migrations","status":"PASS","report":"nexo/runs/20260712-2117-prod-migrations/agents/verify-report.md","summary":"All required checks passed; Docker fresh-DB E2E was conditionally skipped because the daemon was unavailable.","done":true,"started":"2026-07-13T00:23:30Z","ended":"2026-07-13T00:26:51Z","ts":"2026-07-13T00:26:51Z"}
