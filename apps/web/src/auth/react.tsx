@@ -13,6 +13,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { getRoleFromHubClaims, getRolesFromHubClaims, parseJwtPayload, type AppRole } from './claims';
 import { getHubBffBasePath, loadHubBrowserConfig } from './provider';
+import { createHubAccessTokenCache } from './token';
 
 type AuthProfile = {
   isLoaded: boolean;
@@ -103,6 +104,7 @@ function HubAuthProvider({ children }: { children: ReactNode }) {
       }),
     [],
   );
+  const tokenCache = useMemo(() => createHubAccessTokenCache(client), [client]);
   const [profile, setProfile] = useState<AuthProfile>({
     isLoaded: false,
     isSignedIn: false,
@@ -126,29 +128,31 @@ function HubAuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const getToken = useCallback(async () => {
-    const token = await client.getToken();
+    const token = await tokenCache.getToken();
     applyToken(token);
     return token;
-  }, [applyToken, client]);
+  }, [applyToken, tokenCache]);
 
   const login = useCallback(() => client.login(), [client]);
 
   const logout = useCallback(async () => {
-    await client.logout();
+    tokenCache.clear();
     applyToken(null);
-  }, [applyToken, client]);
+    await client.logout();
+  }, [applyToken, client, tokenCache]);
 
   const setActive = useCallback(
     async (workspaceId: string) => {
       const result = await client.setActive(workspaceId);
+      tokenCache.seed(result.accessToken, result.expiresIn);
       applyToken(result.accessToken);
     },
-    [applyToken, client],
+    [applyToken, client, tokenCache],
   );
 
   useEffect(() => {
     let active = true;
-    void client
+    void tokenCache
       .getToken()
       .then((token) => {
         if (active) applyToken(token);
@@ -159,7 +163,7 @@ function HubAuthProvider({ children }: { children: ReactNode }) {
     return () => {
       active = false;
     };
-  }, [applyToken, client]);
+  }, [applyToken, tokenCache]);
 
   const value = useMemo(
     () => ({
