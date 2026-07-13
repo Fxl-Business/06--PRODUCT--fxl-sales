@@ -1,0 +1,1 @@
+{"agent":"execute","slice":"prod-migrations","status":"PASS","report":"nexo/runs/20260712-2117-prod-migrations/execute.md","summary":"Production image now includes Drizzle migrations and fails fast through the compiled migrator before API startup.","done":true,"started":"2026-07-13T00:20:00Z","ended":"2026-07-13T00:23:26Z","ts":"2026-07-13T00:23:26Z"}

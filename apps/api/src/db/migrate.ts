@@ -14,7 +14,7 @@ if (!url) {
 const client = postgres(url, { max: 1 });
 const db = drizzle(client);
 
-console.log('Running migrations from ./drizzle …');
+console.log('Running migrations from ./drizzle');
 await migrate(db, { migrationsFolder: './drizzle' });
 console.log('Done.');
 

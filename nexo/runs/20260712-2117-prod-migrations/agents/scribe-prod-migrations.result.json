@@ -1,0 +1,1 @@
+{"agent":"scribe","slice":"prod-migrations","status":"PASS","report":"nexo/runs/20260712-2117-prod-migrations/run.md","summary":"Captured the verified migration-before-startup hotfix, Gate 2 evidence, Docker E2E limitation, and pending delivery state.","done":true,"started":"2026-07-13T00:27:00Z","ended":"2026-07-13T00:28:29Z","ts":"2026-07-13T00:28:29Z"}
