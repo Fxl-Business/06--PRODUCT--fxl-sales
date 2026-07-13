@@ -1,0 +1,10 @@
+{
+  "agent": "verify",
+  "slice": "wave-02",
+  "status": "PASS",
+  "report": "nexo/runs/20260713-1144-product-commission-scenarios/wave-02-verify.md",
+  "summary": "All required checks passed: 227 tests across 30 files, lint, type-check, build, diff-check, and security review.",
+  "done": true,
+  "started_at": "2026-07-13T17:35:39Z",
+  "completed_at": "2026-07-13T17:37:35Z"
+}

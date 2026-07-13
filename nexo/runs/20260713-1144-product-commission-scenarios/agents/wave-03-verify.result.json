@@ -1,0 +1,61 @@
+{
+  "agent": "wave-03-verify",
+  "status": "PASS",
+  "head": "cb65cccd3871cabd0237f8968a2fa0f0aafde14f",
+  "base": "a723f363f9d83feb4b27114e42bd544576eec21f",
+  "totals": {
+    "testFiles": 39,
+    "tests": 259,
+    "failures": 0,
+    "lintErrors": 0,
+    "typeErrors": 0,
+    "buildErrors": 0,
+    "diffFiles": 14,
+    "insertions": 4191,
+    "deletions": 32,
+    "diffCheckErrors": 0,
+    "blockingFindings": 0,
+    "manualAuditItems": 1
+  },
+  "checks": [
+    {
+      "command": "CI=true pnpm test",
+      "status": "PASS",
+      "testFiles": 31,
+      "tests": 232
+    },
+    {
+      "command": "CI=true pnpm --filter @fxl-sales/api test:integration",
+      "status": "PASS",
+      "testFiles": 8,
+      "tests": 27
+    },
+    {
+      "command": "CI=true pnpm lint",
+      "status": "PASS"
+    },
+    {
+      "command": "CI=true pnpm type-check",
+      "status": "PASS"
+    },
+    {
+      "command": "CI=true pnpm build",
+      "status": "PASS"
+    },
+    {
+      "command": "git diff --check origin/master..HEAD",
+      "status": "PASS"
+    }
+  ],
+  "requiredBehavior": {
+    "independentProductScenarios": "PASS",
+    "independentEditorPersistence": "PASS",
+    "primaryProductSaleSnapshot": "PASS",
+    "rlsSafeLegacyBackfill": "PASS"
+  },
+  "securityAudit": "PASS",
+  "manualAudit": [
+    "Live browser and pixel-level visual QA remains manual because the browser backend is unavailable."
+  ],
+  "report": "nexo/runs/20260713-1144-product-commission-scenarios/wave-03-verify.md"
+}

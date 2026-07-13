@@ -1,0 +1,11 @@
+{
+  "agent": "execute",
+  "slice": "03-product-aware-sale-defaults",
+  "status": "PASS",
+  "report": "nexo/runs/20260713-1144-product-commission-scenarios/execute-03.md",
+  "summary": "Applied primary-product commission defaults to seller-only and finder sale snapshots with independent fallback behavior.",
+  "done": true,
+  "started": "2026-07-13T17:36:00Z",
+  "ended": "2026-07-13T17:46:00Z",
+  "ts": "2026-07-13T17:46:00Z"
+}

@@ -1,0 +1,21 @@
+{
+  "agent": "capture",
+  "run": "20260713-1144-product-commission-scenarios",
+  "status": "PASS",
+  "head": "cb65cccd3871cabd0237f8968a2fa0f0aafde14f",
+  "summary": "Marked the three-slice feature complete, captured final verification and merge evidence, recorded the pending real-browser sale-wizard audit, and cleared the active run pointer while preserving delivery configuration.",
+  "updated": [
+    "nexo/plans/20260713-product-commission-scenarios/00-OVERVIEW.md",
+    "nexo/plans/20260713-product-commission-scenarios/03-product-aware-sale-defaults.md",
+    "nexo/runs/20260713-1144-product-commission-scenarios/run.md",
+    "nexo/runs/20260713-1144-product-commission-scenarios/AUDIT.md",
+    "nexo/state.json",
+    "nexo/runs/20260713-1144-product-commission-scenarios/agents/capture.result.json"
+  ],
+  "knowledge": {
+    "added": false,
+    "reason": "No non-duplicative durable guidance was identified; the commission behavior and migration details are feature-specific and already preserved in the plan, run, verification reports, and locked tests."
+  },
+  "done": true,
+  "completed_at": "2026-07-13T14:58:48-03:00"
+}

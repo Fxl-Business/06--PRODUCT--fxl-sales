@@ -1,0 +1,21 @@
+{
+  "agent": "verify",
+  "slice": "product-commission-scenarios-mutation",
+  "status": "PASS",
+  "report": "nexo/runs/20260713-1144-product-commission-scenarios/mutation-verify.md",
+  "summary": "The seller-only-to-seller-with-finder mutation was killed by 3 expected failures across both locked focused test files; the detached worktree was restored and removed.",
+  "evidence": {
+    "master_head": "cb65cccd3871cabd0237f8968a2fa0f0aafde14f",
+    "test_command_runs": 1,
+    "test_exit_code": 1,
+    "test_files_failed": 2,
+    "tests_failed": 3,
+    "tests_passed": 6,
+    "tests_total": 9,
+    "mutation_killed": true,
+    "worktree_removed": true,
+    "temporary_branch_created": false
+  },
+  "done": true,
+  "completed_at": "2026-07-13T17:52:16Z"
+}

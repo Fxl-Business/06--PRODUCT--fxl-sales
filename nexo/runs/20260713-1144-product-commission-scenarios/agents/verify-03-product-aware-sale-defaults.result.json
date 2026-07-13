@@ -1,0 +1,11 @@
+{
+  "agent": "verify",
+  "slice": "03-product-aware-sale-defaults",
+  "status": "PASS",
+  "report": "verify-03.md",
+  "summary": "Both oracle files, all 53 web tests, web lint, workspace typecheck, web build, diff hygiene, behavior, scope, and security checks pass; live browser visual QA remains manual.",
+  "done": true,
+  "started": "2026-07-13T17:47:22Z",
+  "ended": "2026-07-13T17:48:48Z",
+  "ts": "2026-07-13T17:48:48Z"
+}

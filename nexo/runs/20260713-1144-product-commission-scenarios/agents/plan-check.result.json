@@ -1,0 +1,1 @@
+{"agent":"plan-check","slice":"feature","status":"PASS","report":"nexo/runs/20260713-1144-product-commission-scenarios/plan-check.md","summary":"Plan set passes after correcting wave-parser list syntax and strengthening migration, fixed-value, and per-side fallback contracts.","done":true,"started":"2026-07-13T15:00:28Z","ended":"2026-07-13T15:07:16Z","ts":"2026-07-13T15:07:16Z"}

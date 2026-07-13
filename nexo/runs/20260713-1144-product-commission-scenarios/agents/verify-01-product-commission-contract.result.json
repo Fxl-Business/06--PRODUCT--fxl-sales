@@ -1,0 +1,11 @@
+{
+  "agent": "verify",
+  "slice": "01-product-commission-contract",
+  "status": "PASS",
+  "report": "verify-01.md",
+  "summary": "Transaction-local admin context now covers the populated-row backfill, and every available oracle passes.",
+  "done": true,
+  "started": "2026-07-13T17:14:00Z",
+  "ended": "2026-07-13T17:16:01Z",
+  "ts": "2026-07-13T17:16:01Z"
+}
