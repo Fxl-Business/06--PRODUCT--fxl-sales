@@ -76,6 +76,7 @@ import {
   formatMoneyBrl,
   initials,
   parseCurrencyInputToCents,
+  resolveSaleCommissionDefaults,
 } from './calculations';
 import type {
   SaveClientPayload,
@@ -2713,6 +2714,25 @@ type ProfessionalForm = {
   costBrl: string;
 };
 
+function commissionDefaultsSourceKey(
+  product: SalesOpsProduct | undefined,
+  hasFinder: boolean,
+  settings: SalesOpsSettings | null,
+) {
+  return JSON.stringify([
+    product?.id,
+    product?.sellerCommissionType,
+    product?.sellerCommissionValue,
+    product?.sellerWithFinderCommissionType,
+    product?.sellerWithFinderCommissionValue,
+    product?.finderCommissionType,
+    product?.finderCommissionValue,
+    hasFinder,
+    settings?.defaultSellerCommissionPct,
+    settings?.defaultFinderCommissionPct,
+  ]);
+}
+
 export function SaleWizardDialog(props: {
   open: boolean;
   bootstrap: SalesOpsBootstrap;
@@ -2759,6 +2779,11 @@ function SaleWizardDialogBody({
   const firstProduct = bootstrap.products[0];
   const firstClient = bootstrap.clients[0];
   const firstSeller = sellers[0];
+  const initialCommissionDefaults = resolveSaleCommissionDefaults(
+    firstProduct,
+    false,
+    bootstrap.settings,
+  );
   const [clientId, setClientId] = useState(firstClient?.id ?? '');
   const [clientName, setClientName] = useState(firstClient?.name ?? '');
   const [sellerPersonId, setSellerPersonId] = useState(firstSeller?.id ?? '');
@@ -2770,10 +2795,13 @@ function SaleWizardDialogBody({
   const [notes, setNotes] = useState('');
   const [taxPct, setTaxPct] = useState(String(settings.defaultTaxPct ?? 6));
   const [sellerCommissionPct, setSellerCommissionPct] = useState(
-    String(settings.defaultSellerCommissionPct ?? 10),
+    String(initialCommissionDefaults.sellerCommissionPct),
   );
   const [finderCommissionPct, setFinderCommissionPct] = useState(
-    String(settings.defaultFinderCommissionPct ?? 3),
+    String(initialCommissionDefaults.finderCommissionPct),
+  );
+  const [commissionDefaultsSource, setCommissionDefaultsSource] = useState(() =>
+    commissionDefaultsSourceKey(firstProduct, false, bootstrap.settings),
   );
   const [otherCostsBrl, setOtherCostsBrl] = useState('0.00');
   const [wizardStep, setWizardStep] = useState<1 | 2 | 3>(1);
@@ -2793,6 +2821,26 @@ function SaleWizardDialogBody({
       : [],
   );
   const [professionals, setProfessionals] = useState<ProfessionalForm[]>([]);
+  const primaryItemProduct = bootstrap.products.find(
+    (product) => product.id === items[0]?.productId,
+  );
+  const hasFinderForSale = finderVisible && (sellerIsFinder || Boolean(finderPersonId));
+  const currentCommissionDefaultsSource = commissionDefaultsSourceKey(
+    primaryItemProduct,
+    hasFinderForSale,
+    bootstrap.settings,
+  );
+
+  if (commissionDefaultsSource !== currentCommissionDefaultsSource) {
+    const defaults = resolveSaleCommissionDefaults(
+      primaryItemProduct,
+      hasFinderForSale,
+      bootstrap.settings,
+    );
+    setCommissionDefaultsSource(currentCommissionDefaultsSource);
+    setSellerCommissionPct(String(defaults.sellerCommissionPct));
+    setFinderCommissionPct(String(defaults.finderCommissionPct));
+  }
 
   const canSave = Boolean(clientName.trim() && sellerPersonId && items.length > 0);
   const installmentCount =
@@ -2807,7 +2855,6 @@ function SaleWizardDialogBody({
     0,
   );
   const sellerCommissionCents = Math.floor((totalCents * parseDecimal(sellerCommissionPct, 0)) / 100);
-  const hasFinderForSale = finderVisible && (sellerIsFinder || Boolean(finderPersonId));
   const finderCommissionCents = hasFinderForSale
     ? Math.floor((totalCents * parseDecimal(finderCommissionPct, 0)) / 100)
     : 0;
@@ -2816,7 +2863,6 @@ function SaleWizardDialogBody({
   const marginCents =
     totalCents - professionalCents - sellerCommissionCents - finderCommissionCents - taxCents - otherCents;
   const marginPct = totalCents > 0 ? Math.round((marginCents / totalCents) * 1000) / 10 : 0;
-  const primaryItemProduct = selectedProduct(items[0] ?? { productId: '', quantity: '1', unitBrl: '0' });
   const recurringLine =
     primaryItemProduct?.hasMonthly && primaryItemProduct.monthlyBrl > 0
       ? `Mensalidade de ${formatMoneyBrl(primaryItemProduct.monthlyBrl, {

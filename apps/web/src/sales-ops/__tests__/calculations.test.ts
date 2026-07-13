@@ -4,10 +4,25 @@ import {
   buildSalePayload,
   formatMoneyBrl,
   parseCurrencyInputToCents,
+  resolveSaleCommissionDefaults,
+  type SaleCommissionDefaultsProduct,
 } from '../calculations';
 import type { SalesOpsBootstrap } from '../types';
 
 describe('sales operations web calculations', () => {
+  const commissionProduct: SaleCommissionDefaultsProduct = {
+    sellerCommissionType: 'pct',
+    sellerCommissionValue: '10',
+    sellerWithFinderCommissionType: 'pct',
+    sellerWithFinderCommissionValue: '7',
+    finderCommissionType: 'pct',
+    finderCommissionValue: '3',
+  };
+  const organizationDefaults = {
+    defaultSellerCommissionPct: '9',
+    defaultFinderCommissionPct: '2',
+  };
+
   it('formats integer cents as BRL without leaking floating point math', () => {
     expect(formatMoneyBrl(4250000, { maximumFractionDigits: 0 })).toBe('R$ 42.500');
     expect(formatMoneyBrl(382000)).toBe('R$ 3.820,00');
@@ -74,5 +89,48 @@ describe('sales operations web calculations', () => {
     expect(payload.notes).toBeNull();
     expect(payload.otherCostsBrl).toBe(60000);
     expect(payload.items[0]?.quantity).toBe(1);
+  });
+
+  it('resolves seller-only product percentage without applying the product finder rate', () => {
+    expect(resolveSaleCommissionDefaults(commissionProduct, false, organizationDefaults)).toEqual({
+      sellerCommissionPct: 10,
+      finderCommissionPct: 2,
+    });
+  });
+
+  it('resolves seller-with-finder and finder percentages when a finder participates', () => {
+    expect(resolveSaleCommissionDefaults(commissionProduct, true, organizationDefaults)).toEqual({
+      sellerCommissionPct: 7,
+      finderCommissionPct: 3,
+    });
+  });
+
+  it('falls back per side for missing products and fixed product commissions', () => {
+    expect(resolveSaleCommissionDefaults(undefined, true, organizationDefaults)).toEqual({
+      sellerCommissionPct: 9,
+      finderCommissionPct: 2,
+    });
+    expect(
+      resolveSaleCommissionDefaults(
+        {
+          ...commissionProduct,
+          sellerCommissionType: 'fix',
+          sellerWithFinderCommissionType: 'fix',
+          finderCommissionType: 'fix',
+        },
+        true,
+        organizationDefaults,
+      ),
+    ).toEqual({ sellerCommissionPct: 9, finderCommissionPct: 2 });
+    expect(
+      resolveSaleCommissionDefaults(
+        { ...commissionProduct, sellerWithFinderCommissionType: 'fix' },
+        true,
+        organizationDefaults,
+      ),
+    ).toEqual({ sellerCommissionPct: 9, finderCommissionPct: 3 });
+    expect(
+      resolveSaleCommissionDefaults({ ...commissionProduct, sellerCommissionValue: '0' }, false, null),
+    ).toEqual({ sellerCommissionPct: 0, finderCommissionPct: 3 });
   });
 });

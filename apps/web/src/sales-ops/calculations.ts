@@ -1,9 +1,12 @@
 import type {
+  CommissionType,
   CreateSalePayload,
   DashboardModel,
   SaleDraft,
   SalesOpsBootstrap,
+  SalesOpsProduct,
   SalesOpsSale,
+  SalesOpsSettings,
 } from './types';
 
 const closedStatuses = new Set(['closed', 'completed']);
@@ -13,6 +16,65 @@ function toNumber(value: string | number | undefined, fallback = 0): number {
   if (typeof value !== 'string') return fallback;
   const parsed = Number(value.replace(',', '.'));
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+export type SaleCommissionDefaultsProduct = Pick<
+  SalesOpsProduct,
+  | 'sellerCommissionType'
+  | 'sellerCommissionValue'
+  | 'sellerWithFinderCommissionType'
+  | 'sellerWithFinderCommissionValue'
+  | 'finderCommissionType'
+  | 'finderCommissionValue'
+>;
+
+export type SaleCommissionDefaults = {
+  sellerCommissionPct: number;
+  finderCommissionPct: number;
+};
+
+function percentageOrFallback(
+  type: CommissionType | undefined,
+  value: string | number | undefined,
+  fallback: number,
+): number {
+  return type === 'pct' ? toNumber(value, fallback) : fallback;
+}
+
+export function resolveSaleCommissionDefaults(
+  product: SaleCommissionDefaultsProduct | undefined,
+  hasFinder: boolean,
+  settings: Pick<
+    SalesOpsSettings,
+    'defaultSellerCommissionPct' | 'defaultFinderCommissionPct'
+  > | null,
+): SaleCommissionDefaults {
+  const sellerFallback = toNumber(settings?.defaultSellerCommissionPct, 10);
+  const finderFallback = toNumber(settings?.defaultFinderCommissionPct, 3);
+
+  if (!hasFinder) {
+    return {
+      sellerCommissionPct: percentageOrFallback(
+        product?.sellerCommissionType,
+        product?.sellerCommissionValue,
+        sellerFallback,
+      ),
+      finderCommissionPct: finderFallback,
+    };
+  }
+
+  return {
+    sellerCommissionPct: percentageOrFallback(
+      product?.sellerWithFinderCommissionType,
+      product?.sellerWithFinderCommissionValue,
+      sellerFallback,
+    ),
+    finderCommissionPct: percentageOrFallback(
+      product?.finderCommissionType,
+      product?.finderCommissionValue,
+      finderFallback,
+    ),
+  };
 }
 
 function cleanId(value: string | undefined): string | undefined {
