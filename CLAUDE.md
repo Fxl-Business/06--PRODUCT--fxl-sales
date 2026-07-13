@@ -51,14 +51,9 @@ Required API vars:
 FXL_HUB_API_URL=http://localhost:9016
 FXL_HUB_PUBLISHABLE_KEY=pk_fxl-sales_VzQ9-LUONCnlKllxCRLffN3nw6Z9PQl2
 FXL_HUB_SECRET_KEY=<operator-issued-secret>
-# Generate once with: openssl rand -hex 32
-FXL_HUB_SESSION_ENCRYPTION_KEY=
 FXL_HUB_REDIRECT_URI=http://localhost:8006/auth/callback
 PUBLIC_LINK_BASE_URL=http://localhost:3006
 ```
-
-Keep `FXL_HUB_SESSION_ENCRYPTION_KEY` stable across API restarts so persisted Hub refresh tokens remain decryptable.
-The API stores those tokens only as authenticated ciphertext and hydrates BFF sessions before listening.
 
 Required web vars:
 

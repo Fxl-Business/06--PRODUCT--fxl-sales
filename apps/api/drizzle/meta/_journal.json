@@ -64,13 +64,6 @@
       "when": 1783438414060,
       "tag": "0008_single_role_rls_context",
       "breakpoints": true
-    },
-    {
-      "idx": 9,
-      "version": "7",
-      "when": 1783946102897,
-      "tag": "0009_durable_bff_sessions",
-      "breakpoints": true
     }
   ]
 }

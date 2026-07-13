@@ -22,16 +22,6 @@ const emptyToUndefinedUrl = z.preprocess(
   (v) => (typeof v === 'string' && v === '' ? undefined : v),
   z.string().url().optional(),
 );
-const emptyToUndefinedEncryptionKey = z.preprocess(
-  (v) => (typeof v === 'string' && v === '' ? undefined : v),
-  z
-    .string()
-    .regex(
-      /^[0-9a-fA-F]{64}$/,
-      'FXL_HUB_SESSION_ENCRYPTION_KEY must be 64 hexadecimal characters. Generate it with: openssl rand -hex 32',
-    )
-    .optional(),
-);
 
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -43,7 +33,6 @@ const schema = z.object({
   FXL_HUB_API_URL: emptyToUndefinedUrl,
   FXL_HUB_PUBLISHABLE_KEY: emptyToUndefined,
   FXL_HUB_SECRET_KEY: emptyToUndefined,
-  FXL_HUB_SESSION_ENCRYPTION_KEY: emptyToUndefinedEncryptionKey,
   FXL_HUB_AUDIENCE: emptyToUndefined,
   FXL_HUB_REDIRECT_URI: emptyToUndefinedUrl,
   FXL_HUB_POST_LOGIN_REDIRECT: emptyToUndefinedUrl,

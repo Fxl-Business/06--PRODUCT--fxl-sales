@@ -1,14 +1,7 @@
 import type { HubSdkConfig } from '@fxl-business/hub-sdk';
 import { createHubBff, requireHubAuth } from '@fxl-business/hub-sdk/server';
-import { Hono, type MiddlewareHandler } from 'hono';
-import { deleteCookie } from 'hono/cookie';
+import type { MiddlewareHandler } from 'hono';
 import { tryLoadHubAuthConfig } from '../config/auth-provider.js';
-import { env } from '../env.js';
-import { createDrizzleHubSessionPersistence } from '../lib/hub-session-persistence.js';
-import {
-  DurableHubSessionStore,
-  type HubSessionPersistence,
-} from '../lib/hub-session-store.js';
 
 type EnvLike = Record<string, string | undefined>;
 
@@ -161,52 +154,14 @@ export const appAuthMiddleware: MiddlewareHandler = async (c, next) => {
   return blockedResponse ?? authResponse;
 };
 
-export type CreateAppAuthBffOptions = {
-  persistence?: HubSessionPersistence;
-  fetchImpl?: typeof fetch;
-};
-
-export async function createAppAuthBff(options: CreateAppAuthBffOptions = {}) {
+export function createAppAuthBff() {
   if (!hubSdkConfig) {
     return null;
   }
 
-  const persistence =
-    options.persistence ??
-    createDrizzleHubSessionPersistence(env.FXL_HUB_SESSION_ENCRYPTION_KEY);
-  const sessionStore = new DurableHubSessionStore(persistence);
-  await sessionStore.hydrate();
-
-  const sdkBff = createHubBff(hubSdkConfig, {
-    sessionStore,
-    fetchImpl: options.fetchImpl,
+  return createHubBff(hubSdkConfig, {
     redirectUri: resolveHubRedirectUri(process.env),
     postLoginRedirect: resolveHubPostLoginRedirect(process.env),
     postLoginErrorRedirect: resolveHubPostLoginErrorRedirect(process.env),
   });
-  const app = new Hono();
-  app.use('/auth/*', async (c, next) => {
-    await next();
-    try {
-      await sessionStore.whenIdle();
-    } catch {
-      console.warn('Hub session persistence failed');
-      const secure = process.env.NODE_ENV === 'production';
-      c.res = Response.json(
-        { error: 'unavailable', code: 'session_persistence_failed' },
-        { status: 503 },
-      );
-      c.header('location', undefined);
-      c.header('set-cookie', undefined);
-      deleteCookie(c, secure ? '__Host-fxl_hub_session' : 'fxl_hub_session', {
-        httpOnly: true,
-        sameSite: 'Lax',
-        path: '/',
-        secure,
-      });
-      return c.res;
-    }
-  });
-  app.route('', sdkBff);
-  return app;
 }

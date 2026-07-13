@@ -36,16 +36,6 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 
-// Global server-side Hub BFF sessions. Refresh tokens are stored only as
-// authenticated ciphertext and keyed by the opaque browser session id.
-export const hubSessions = pgTable('hub_sessions', {
-  id: text('id').primaryKey(),
-  encryptedRefreshToken: text('encrypted_refresh_token').notNull(),
-  accountId: text('account_id'),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
-});
-
 // ─────────────────────────────────────────────────────────────────────────────
 // finders - tenant-scoped by org_id (RLS). One finder = one Hub workspace.
 // ─────────────────────────────────────────────────────────────────────────────
