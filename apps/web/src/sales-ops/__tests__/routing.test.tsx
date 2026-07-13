@@ -128,6 +128,26 @@ async function renderRoute(path: string, roles: AppRole[]) {
   await flushReact();
 }
 
+async function renderHistory(entries: string[], roles: AppRole[]) {
+  if (root) {
+    await act(async () => root?.unmount());
+  }
+  profileRoles = [...roles];
+  root = createRoot(container);
+  await act(async () => {
+    root?.render(
+      <MemoryRouter initialEntries={entries} initialIndex={entries.length - 1}>
+        <Routes>
+          <Route element={<SalesOpsApp />} path="/" />
+          <Route element={<SalesOpsApp />} path="/:workspace/:view" />
+        </Routes>
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+  });
+  await flushReact();
+}
+
 async function flushReact() {
   await act(async () => Promise.resolve());
 }
@@ -243,6 +263,17 @@ describe('Sales Ops canonical routing', () => {
     expectHeading('Meu painel');
   });
 
+  it('does not restore a role-forbidden route after canonical replacement', async () => {
+    await renderHistory(['/operacional/vendas', '/cadastros/produtos'], ['seller']);
+    expect(pathname()).toBe('/tatico/vendedores');
+    expectHeading('Meu painel');
+
+    await click(buttonByText('Back'));
+    expect(pathname()).toBe('/operacional/vendas');
+    expectHeading('Minhas vendas');
+    expectWorkspace('Operacional');
+  });
+
   it('preserves or replaces the route when the active role changes', async () => {
     const roles: AppRole[] = ['admin', 'seller', 'finder'];
     await renderRoute('/operacional/vendas', roles);
@@ -256,6 +287,20 @@ describe('Sales Ops canonical routing', () => {
     await click(roleOptionByIdentity('Finder', 'Só as próprias indicações'));
     expect(pathname()).toBe('/tatico/finders');
     expectHeading('Meu painel');
+  });
+
+  it('does not restore forbidden Cadastros after a role-switch replacement', async () => {
+    const roles: AppRole[] = ['admin', 'seller', 'finder'];
+    await renderHistory(['/operacional/vendas', '/cadastros/produtos'], roles);
+    await click(roleButton());
+    await click(roleOptionByIdentity('Finder', 'Só as próprias indicações'));
+    expect(pathname()).toBe('/tatico/finders');
+    expectHeading('Meu painel');
+
+    await click(buttonByText('Back'));
+    expect(pathname()).toBe('/operacional/vendas');
+    expectHeading('Minhas indicações');
+    expectWorkspace('Operacional');
   });
 
   it('navigates from the dashboard sales card to operational sales', async () => {
