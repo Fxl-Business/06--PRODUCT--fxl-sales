@@ -6,6 +6,104 @@ import {
 } from '../service.js';
 
 describe('sales operations sale ledger', () => {
+  it('preserves ordered custom labels as snapshots while retaining the shared product id', () => {
+    const sharedProductId = '44444444-4444-4444-8444-444444444444';
+    const parsed = CreateSaleSchema.parse({
+      clientId: '11111111-1111-4111-8111-111111111111',
+      clientName: 'SegPro',
+      sellerPersonId: '22222222-2222-4222-8222-222222222222',
+      sellerName: 'Ana Martins',
+      status: 'closed',
+      paymentMethod: 'pix',
+      condition: 'cash',
+      installments: 1,
+      baseDate: '2026-07-14',
+      sellerCommissionPct: 10,
+      finderCommissionPct: 3,
+      taxPct: 6,
+      otherCostsBrl: 0,
+      items: [
+        {
+          productId: sharedProductId,
+          productName: '  Módulo Vendas  ',
+          productType: 'Custom',
+          quantity: 1,
+          unitBrl: 400000,
+        },
+        {
+          productId: sharedProductId,
+          productName: 'Módulo RH',
+          productType: 'Custom',
+          quantity: 1,
+          unitBrl: 900000,
+        },
+      ],
+      professionals: [],
+    });
+
+    const ledger = buildSaleLedger(parsed);
+
+    expect(ledger.items).toEqual([
+      {
+        productId: sharedProductId,
+        productNameSnapshot: 'Módulo Vendas',
+        productTypeSnapshot: 'Custom',
+        quantity: 1,
+        unitBrl: 400000,
+        subtotalBrl: 400000,
+      },
+      {
+        productId: sharedProductId,
+        productNameSnapshot: 'Módulo RH',
+        productTypeSnapshot: 'Custom',
+        quantity: 1,
+        unitBrl: 900000,
+        subtotalBrl: 900000,
+      },
+    ]);
+  });
+
+  it('rejects blank and overlong sale item names at the API boundary', () => {
+    const payload = {
+      clientId: '11111111-1111-4111-8111-111111111111',
+      clientName: 'SegPro',
+      sellerPersonId: '22222222-2222-4222-8222-222222222222',
+      sellerName: 'Ana Martins',
+      status: 'closed',
+      paymentMethod: 'pix',
+      condition: 'cash',
+      installments: 1,
+      baseDate: '2026-07-14',
+      sellerCommissionPct: 10,
+      finderCommissionPct: 3,
+      taxPct: 6,
+      otherCostsBrl: 0,
+      items: [
+        {
+          productId: '44444444-4444-4444-8444-444444444444',
+          productName: 'FXL Custom',
+          productType: 'Custom',
+          quantity: 1,
+          unitBrl: 400000,
+        },
+      ],
+      professionals: [],
+    };
+
+    expect(
+      CreateSaleSchema.safeParse({
+        ...payload,
+        items: [{ ...payload.items[0], productName: '   ' }],
+      }).success,
+    ).toBe(false);
+    expect(
+      CreateSaleSchema.safeParse({
+        ...payload,
+        items: [{ ...payload.items[0], productName: 'x'.repeat(141) }],
+      }).success,
+    ).toBe(false);
+  });
+
   it('creates receivables and payables from a complete sale payload', () => {
     const parsed = CreateSaleSchema.parse({
       clientId: '11111111-1111-4111-8111-111111111111',

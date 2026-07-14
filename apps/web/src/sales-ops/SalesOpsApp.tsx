@@ -40,6 +40,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { cn } from '@/lib/utils';
 import {
   useCreateSalesOpsSale,
   useSalesOpsBootstrap,
@@ -382,15 +383,18 @@ function NativeSelect({
   children,
   className = '',
   disabled,
+  'aria-label': ariaLabel,
 }: {
   value: string;
   onChange: (value: string) => void;
   children: ReactNode;
   className?: string;
   disabled?: boolean;
+  'aria-label'?: string;
 }) {
   return (
     <select
+      aria-label={ariaLabel}
       className={`h-10 rounded-md border border-[#dcdce2] bg-[#fafafb] px-3 text-sm font-medium text-[#201f24] outline-none transition focus:border-[#eaa81a] disabled:cursor-not-allowed disabled:opacity-60 ${className}`}
       disabled={disabled}
       onChange={(event) => onChange(event.target.value)}
@@ -2709,6 +2713,7 @@ function RoleToggle({
 
 type SaleItemForm = {
   productId: string;
+  customLabel: string;
   quantity: string;
   unitBrl: string;
 };
@@ -2811,6 +2816,7 @@ function SaleWizardDialogBody({
   );
   const [otherCostsBrl, setOtherCostsBrl] = useState('0.00');
   const [wizardStep, setWizardStep] = useState<1 | 2 | 3>(1);
+  const [showCustomItemErrors, setShowCustomItemErrors] = useState(false);
   const [finderVisible, setFinderVisible] = useState(false);
   const [sellerIsFinder, setSellerIsFinder] = useState(false);
   const [items, setItems] = useState<SaleItemForm[]>(() =>
@@ -2818,6 +2824,7 @@ function SaleWizardDialogBody({
       ? [
           {
             productId: firstProduct.id,
+            customLabel: '',
             quantity: '1',
             unitBrl: centsToInput(
               firstProduct.openPrice ? 0 : firstProduct.setupBrl || firstProduct.monthlyBrl,
@@ -2856,6 +2863,14 @@ function SaleWizardDialogBody({
     0,
   );
   const canSaveBasics = canSave && totalCents > 0 && Boolean(paymentMethod);
+  const customItemsValid = items.every((item) => {
+    const product = selectedProduct(item);
+    return (
+      !product?.openPrice ||
+      (Boolean(item.customLabel.trim()) && parseCurrencyToCents(item.unitBrl) > 0)
+    );
+  });
+  const canAdvanceStepOne = canSaveBasics && customItemsValid;
   const professionalCents = professionals.reduce(
     (sum, professional) => sum + parseCurrencyToCents(professional.costBrl),
     0,
@@ -2942,12 +2957,20 @@ function SaleWizardDialogBody({
     return bootstrap.products.find((product) => product.id === item.productId) ?? firstProduct;
   }
 
+  function saleItemDisplayName(item: SaleItemForm): string {
+    const product = selectedProduct(item);
+    if (!product) return 'Produto';
+    if (!product.openPrice) return product.name;
+    return item.customLabel.trim() || product.name;
+  }
+
   function setItem(index: number, patch: Partial<SaleItemForm>) {
     setItems((current) =>
       current.map((item, itemIndex) => {
         if (itemIndex !== index) return item;
         const next = { ...item, ...patch };
-        if (patch.productId) {
+        if (patch.productId && patch.productId !== item.productId) {
+          next.customLabel = '';
           const product = bootstrap.products.find((candidate) => candidate.id === patch.productId);
           if (product) {
             next.unitBrl = centsToInput(product.openPrice ? 0 : product.setupBrl || product.monthlyBrl);
@@ -2965,6 +2988,7 @@ function SaleWizardDialogBody({
       ...current,
       {
         productId: product.id,
+        customLabel: '',
         quantity: '1',
         unitBrl: centsToInput(product.openPrice ? 0 : product.setupBrl || product.monthlyBrl),
       },
@@ -2998,7 +3022,10 @@ function SaleWizardDialogBody({
   }
 
   function advanceWizard() {
-    if (wizardStep === 1 && !canSaveBasics) return;
+    if (wizardStep === 1) {
+      setShowCustomItemErrors(true);
+      if (!canAdvanceStepOne) return;
+    }
     if (wizardStep < 3) {
       setWizardStep((current) => (current === 1 ? 2 : 3));
       return;
@@ -3038,7 +3065,7 @@ function SaleWizardDialogBody({
         const product = selectedProduct(item);
         return {
           productId: product?.id,
-          productName: product?.name ?? 'Produto',
+          productName: saleItemDisplayName(item),
           productType: product?.type ?? 'SaaS',
           quantity: item.quantity,
           unitBrl: parseCurrencyToCents(item.unitBrl),
@@ -3086,7 +3113,7 @@ function SaleWizardDialogBody({
               <div className="flex flex-none items-center gap-1" key={item.step}>
                 <button
                   className="flex items-center gap-[9px] focus-visible:outline-none"
-                  disabled={item.step > 1 && !canSaveBasics}
+                  disabled={item.step > 1 && !canAdvanceStepOne}
                   onClick={() => setWizardStep(item.step)}
                   type="button"
                 >
@@ -3256,12 +3283,19 @@ function SaleWizardDialogBody({
                     <div className="flex flex-col gap-2">
                       {items.map((item, index) => {
                         const product = selectedProduct(item);
+                        const customLabelValid = Boolean(item.customLabel.trim());
+                        const customUnitValid = parseCurrencyToCents(item.unitBrl) > 0;
+                        const showCustomLabelError =
+                          Boolean(product?.openPrice) && showCustomItemErrors && !customLabelValid;
+                        const showCustomUnitError =
+                          Boolean(product?.openPrice) && showCustomItemErrors && !customUnitValid;
                         const subtotal =
                           Math.max(1, Number(item.quantity) || 1) * parseCurrencyToCents(item.unitBrl);
                         return (
                           <div className="flex flex-col gap-[5px]" key={`${item.productId}-${index}`}>
                             <div className="grid grid-cols-[minmax(0,1fr)_70px_130px_120px_36px] items-center gap-[9px]">
                               <NativeSelect
+                                aria-label={`Produto / serviço do item ${index + 1}`}
                                 className="h-10 rounded-[9px] text-[13.5px]"
                                 onChange={(value) => setItem(index, { productId: value })}
                                 value={item.productId}
@@ -3273,6 +3307,7 @@ function SaleWizardDialogBody({
                                 ))}
                               </NativeSelect>
                               <Input
+                                aria-label={`Quantidade do item ${index + 1}`}
                                 className={`sales-ops-num h-10 rounded-[9px] text-center ${formInputClass}`}
                                 min={1}
                                 onChange={(event) => setItem(index, { quantity: event.target.value })}
@@ -3280,7 +3315,13 @@ function SaleWizardDialogBody({
                                 value={item.quantity}
                               />
                               <Input
-                                className={`sales-ops-num h-10 rounded-[9px] text-right ${formInputClass}`}
+                                aria-invalid={showCustomUnitError}
+                                aria-label={`Valor unitário do item ${index + 1}`}
+                                className={cn(
+                                  'sales-ops-num h-10 rounded-[9px] text-right',
+                                  formInputClass,
+                                  showCustomUnitError && 'border-destructive',
+                                )}
                                 onChange={(event) => setItem(index, { unitBrl: event.target.value })}
                                 value={item.unitBrl}
                               />
@@ -3288,6 +3329,7 @@ function SaleWizardDialogBody({
                                 {formatMoneyBrl(subtotal, { maximumFractionDigits: 0 })}
                               </div>
                               <button
+                                aria-label={`Remover item ${index + 1}`}
                                 className="flex h-8 w-8 items-center justify-center rounded-[8px] border border-[#f0dcd5] bg-[#fbeee9] text-[#b23a22] transition hover:bg-[#f6e0d9]"
                                 onClick={() =>
                                   setItems((current) => current.filter((_, itemIndex) => itemIndex !== index))
@@ -3298,9 +3340,44 @@ function SaleWizardDialogBody({
                               </button>
                             </div>
                             {product?.openPrice ? (
-                              <div className="flex items-center gap-1.5 pl-0.5 text-[11.5px] font-semibold text-[#9c7210]">
-                                <AlertTriangle className="h-[13px] w-[13px]" />
-                                Sistema personalizado - informe o valor negociado
+                              <div className="grid grid-cols-[minmax(0,1fr)_70px_130px_120px_36px] gap-[9px]">
+                                <label className="flex min-w-0 flex-col gap-[6px]">
+                                  <span className="text-xs font-semibold text-[#8b8b92]">
+                                    Nome / descrição do item
+                                  </span>
+                                  <Input
+                                    aria-invalid={showCustomLabelError}
+                                    aria-label={`Nome / descrição do item ${index + 1}`}
+                                    className={cn(
+                                      'h-10 rounded-[9px]',
+                                      formInputClass,
+                                      showCustomLabelError && 'border-destructive',
+                                    )}
+                                    maxLength={140}
+                                    onChange={(event) =>
+                                      setItem(index, { customLabel: event.target.value })
+                                    }
+                                    placeholder="Ex.: Módulo Vendas"
+                                    value={item.customLabel}
+                                  />
+                                  {showCustomItemErrors ? (
+                                    <span className="flex flex-col gap-1 text-[11.5px] font-semibold text-destructive">
+                                      {showCustomLabelError ? (
+                                        <span>
+                                          Informe o nome ou a descrição deste item personalizado.
+                                        </span>
+                                      ) : null}
+                                      {showCustomUnitError ? (
+                                        <span>Informe um valor negociado maior que zero.</span>
+                                      ) : null}
+                                    </span>
+                                  ) : (
+                                    <span className="flex items-center gap-1.5 pl-0.5 text-[11.5px] font-semibold text-[#9c7210]">
+                                      <AlertTriangle className="h-[13px] w-[13px]" />
+                                      Sistema personalizado - informe um nome/descrição e o valor negociado
+                                    </span>
+                                  )}
+                                </label>
                               </div>
                             ) : null}
                           </div>
@@ -3632,7 +3709,7 @@ function SaleWizardDialogBody({
                         <div className="flex justify-between gap-4">
                           <span className="text-[#8b8b92]">Produto(s)</span>
                           <span className="font-semibold">
-                            {items.map((item) => selectedProduct(item)?.name).filter(Boolean).join(', ')}
+                            {items.map(saleItemDisplayName).join(', ')}
                           </span>
                         </div>
                         <div className="flex justify-between gap-4">
@@ -3783,7 +3860,7 @@ function SaleWizardDialogBody({
             </button>
             <button
               className="rounded-[11px] bg-[#201f24] px-[22px] py-[11px] text-sm font-bold text-white transition hover:bg-[#33333a] disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={(wizardStep === 1 && !canSaveBasics) || saving}
+              disabled={saving || (wizardStep === 1 && !canSave)}
               onClick={advanceWizard}
               type="button"
             >

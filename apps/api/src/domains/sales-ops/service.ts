@@ -106,7 +106,7 @@ export const SettingsSchema = z.object({
 
 export const SaleItemSchema = z.object({
   productId: uuid.optional(),
-  productName: z.string().min(1),
+  productName: z.string().trim().min(1).max(140),
   productType: z.string().min(1).default('SaaS'),
   quantity: z.number().int().positive(),
   unitBrl: money,
