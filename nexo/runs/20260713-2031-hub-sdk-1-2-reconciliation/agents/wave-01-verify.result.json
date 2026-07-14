@@ -1,0 +1,10 @@
+{
+  "agent": "verify",
+  "slice": "wave-01",
+  "status": "FAIL",
+  "report": "/Users/cauetpinciara/Documents/fxl/projects/06--PRODUCT--fxl-sales/nexo/runs/20260713-2031-hub-sdk-1-2-reconciliation/agents/wave-01-verify-report.md",
+  "summary": "FAIL: the production web build cannot bundle Hub SDK 1.2.0 because its browser import graph reaches Node crypto.randomUUID.",
+  "done": true,
+  "started_at": "2026-07-14T00:41:00Z",
+  "completed_at": "2026-07-14T00:50:28Z"
+}

@@ -1,0 +1,10 @@
+{
+  "agent": "verify",
+  "slice": "01-sdk-contract-baseline",
+  "status": "PASS",
+  "report": "nexo/runs/20260713-2031-hub-sdk-1-2-reconciliation/agents/verify-retry1-01-sdk-contract-baseline-report.md",
+  "summary": "PASS: focused SDK oracles, strict anti-any compilation, lint, type checks, dependency integrity, auth guards, audit, and diff hygiene are green.",
+  "done": true,
+  "startedAt": "2026-07-14T00:33:00Z",
+  "completedAt": "2026-07-14T00:42:13Z"
+}

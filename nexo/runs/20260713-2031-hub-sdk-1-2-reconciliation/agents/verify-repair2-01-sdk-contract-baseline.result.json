@@ -1,0 +1,11 @@
+{
+  "agent": "verify",
+  "slice": "01-sdk-contract-baseline",
+  "status": "FAIL",
+  "report": "nexo/runs/20260713-2031-hub-sdk-1-2-reconciliation/agents/verify-repair2-01-sdk-contract-baseline-report.md",
+  "summary": "FAIL: browser config still parses the publishable key locally, its oracle does not prove SDK delegation, and AppHubAuthContext is not derived from the SDK verifier type.",
+  "done": true,
+  "started": "2026-07-13T21:58:30-03:00",
+  "ended": "2026-07-13T22:07:25-03:00",
+  "ts": "2026-07-13T22:07:25-03:00"
+}

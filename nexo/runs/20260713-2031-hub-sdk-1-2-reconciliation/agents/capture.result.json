@@ -1,0 +1,16 @@
+{
+  "agent": "scribe",
+  "slice": "hub-sdk-1-2-reconciliation",
+  "status": "PASS",
+  "report": "nexo/runs/20260713-2031-hub-sdk-1-2-reconciliation/agents/capture-report.md",
+  "summary": "Captured the parked SDK 1.2.0 blockers and proved the append-only revert restored the baseline master tree.",
+  "done": true,
+  "started": "2026-07-14T01:11:26Z",
+  "ended": "2026-07-14T01:13:14Z",
+  "ts": "2026-07-14T01:13:14Z",
+  "paths": [
+    "nexo/runs/20260713-2031-hub-sdk-1-2-reconciliation/run.md",
+    "nexo/runs/20260713-2031-hub-sdk-1-2-reconciliation/agents/capture-report.md",
+    "nexo/knowledge/doubts/20260713-hub-sdk-1-2-packaging-blockers.md"
+  ]
+}

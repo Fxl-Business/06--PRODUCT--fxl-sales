@@ -1,0 +1,11 @@
+{
+  "agent": "plan",
+  "slice": "01-sdk-contract-baseline",
+  "status": "PASS",
+  "report": "nexo/runs/20260713-2031-hub-sdk-1-2-reconciliation/agents/plan-01-sdk-contract-baseline-report.md",
+  "summary": "Mechanical SDK 1.2.0 baseline plan written with locked RED oracles and operator ownership boundaries.",
+  "done": true,
+  "started": "2026-07-13T23:34:48Z",
+  "ended": "2026-07-13T23:43:03Z",
+  "ts": "2026-07-13T23:43:03Z"
+}
