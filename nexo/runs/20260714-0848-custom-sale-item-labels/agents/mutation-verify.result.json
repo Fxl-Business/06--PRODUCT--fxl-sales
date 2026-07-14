@@ -1,0 +1,1 @@
+{"agent":"mutation-verify","slice":"feature-boundary","status":"PASS","report":"nexo/runs/20260714-0848-custom-sale-item-labels/mutation-verify.md","summary":"Both feature-boundary mutants were killed, restored tests passed, and the feature worktree remained clean.","done":true,"started":"2026-07-14T12:27:04Z","ended":"2026-07-14T12:28:22Z","ts":"2026-07-14T12:28:22Z"}

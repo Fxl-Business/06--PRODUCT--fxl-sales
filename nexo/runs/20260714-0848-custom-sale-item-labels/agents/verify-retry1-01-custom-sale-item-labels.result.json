@@ -1,0 +1,1 @@
+{"agent":"verify","slice":"01-custom-sale-item-labels","status":"PASS","report":"nexo/runs/20260714-0848-custom-sale-item-labels/verify-retry1-01.md","summary":"All requested checks and acceptance items pass, including unique tested quantity labels.","done":true,"started":"2026-07-14T12:16:09Z","ended":"2026-07-14T12:17:20Z","ts":"2026-07-14T12:17:20Z"}

@@ -1,0 +1,1 @@
+{"agent":"execute","slice":"01-custom-sale-item-labels","status":"PASS","report":"nexo/runs/20260714-0848-custom-sale-item-labels/execute-retry1-01.md","summary":"Added unique accessible names for repeated quantity controls with focused RED-GREEN coverage.","done":true,"started":"2026-07-14T12:13:30Z","ended":"2026-07-14T12:15:10Z","ts":"2026-07-14T12:15:10Z"}

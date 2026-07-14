@@ -42,6 +42,7 @@ Keep the repository folder name unchanged until the editor session can safely mo
 
 - Canonical Sales Ops routes are `tatico/dashboard|vendedores|finders`, `operacional/vendas|comissoes`, and `cadastros/produtos|clientes|geral`.
 - The URL is the single source of truth for the active Sales Ops workspace and page.
+- Open-price sale item labels use the existing `items[].productName` to `productNameSnapshot` path while preserving the original `productId`, so do not add a parallel description field or migration.
 - Keep the static legacy route trees `/admin/*`, `/finder/*`, `/seller/*`, and `/no-role` unchanged.
 
 ## Environments

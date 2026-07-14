@@ -1,0 +1,1 @@
+{"agent":"verify","slice":"01-custom-sale-item-labels","status":"FAIL","report":"nexo/runs/20260714-0848-custom-sale-item-labels/verify-01.md","summary":"Requested checks pass, but repeated quantity inputs have no accessible name.","done":true,"started":"2026-07-14T12:10:39Z","ended":"2026-07-14T12:12:51Z","ts":"2026-07-14T12:12:51Z"}
