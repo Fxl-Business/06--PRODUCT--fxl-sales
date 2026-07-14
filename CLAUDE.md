@@ -21,9 +21,12 @@ Keep the repository folder name unchanged until the editor session can safely mo
 - `requireHubAuth` verifies access tokens and exposes `c.get('hubAuth')`.
 - `userId` is the Hub account id.
 - `orgId` is the active Hub workspace id.
-- Feature gates check `auth.claims.entitlements.modules`.
+- API feature gates check only the verifier-guaranteed `auth.entitlements.modules` field.
+- API workspace privilege checks only the verifier-guaranteed `auth.roles.workspace` field.
+- Optional decoded claims such as super-admin or product-role fields are never API authorization inputs.
 - The core module for this product is `sales.core`.
 - Browser Hub access tokens are memory-only, cached until JWT `exp` minus 30 seconds, and concurrent `getToken()` calls share one in-flight refresh per provider; logout and workspace generation guards reject late responses.
+- The canonical operator ownership and deployment contract is `docs/deployment/hub-sdk-integration.md`.
 
 ## Tenancy
 

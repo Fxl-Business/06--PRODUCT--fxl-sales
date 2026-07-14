@@ -1,68 +1,50 @@
-import type { HubSdkConfig } from '@fxl-business/hub-sdk';
-import { createHubBff, requireHubAuth } from '@fxl-business/hub-sdk/server';
+import {
+  createHubBff,
+  requireHubAuth,
+  type CreateHubBffOptions,
+  type RequireHubAuthOptions,
+} from '@fxl-business/hub-sdk/server';
 import type { MiddlewareHandler } from 'hono';
+import type { Hono } from 'hono';
 import { tryLoadHubAuthConfig } from '../config/auth-provider.js';
 
 type EnvLike = Record<string, string | undefined>;
 
-export type MinimalHubAuthContext = {
+/**
+ * Product authorization boundary for fields populated by the SDK verifier.
+ * Optional decoded claims remain outside this type and cannot grant product access.
+ */
+export type AppHubAuthContext = {
   accountId: string;
   workspaceId: string;
-  claims: {
-    entitlements: {
-      modules: string[];
-    };
-    roles: {
-      productRoles?: unknown;
-      workspace: string;
-    };
-    isSuperAdmin?: boolean;
+  entitlements: {
+    modules: string[];
+  };
+  roles: {
+    workspace: string;
   };
 };
 
 type AppRole = 'admin' | 'seller' | 'finder';
 
 const fullAccessRoles: AppRole[] = ['admin', 'seller', 'finder'];
-const productRoleOrder: AppRole[] = ['seller', 'finder'];
 
-function readProductRoles(value: unknown): Set<string> {
-  if (!Array.isArray(value)) {
-    return new Set();
-  }
-  return new Set(value.filter((role): role is string => typeof role === 'string'));
-}
-
-export function getAppRolesFromHubClaims(auth: MinimalHubAuthContext): AppRole[] {
-  const workspaceRole = auth.claims.roles.workspace;
-  if (auth.claims.isSuperAdmin || workspaceRole === 'owner' || workspaceRole === 'admin') {
+export function getAppRolesFromHubClaims(auth: AppHubAuthContext): AppRole[] {
+  const workspaceRole = auth.roles.workspace;
+  if (workspaceRole === 'owner' || workspaceRole === 'admin') {
     return fullAccessRoles;
   }
 
-  const productRoles = readProductRoles(auth.claims.roles.productRoles);
-  if (productRoles.has('admin')) {
-    return fullAccessRoles;
-  }
-
-  return productRoleOrder.filter((role) => productRoles.has(role));
+  return [];
 }
 
 declare module 'hono' {
   interface ContextVariableMap {
-    hubAuth?: MinimalHubAuthContext;
+    hubAuth?: AppHubAuthContext;
   }
 }
 
-const hubAuthConfig = tryLoadHubAuthConfig(process.env);
-const hubSdkConfig: HubSdkConfig | null = hubAuthConfig
-  ? {
-      apiUrl: hubAuthConfig.apiUrl,
-      publishableKey: hubAuthConfig.publishableKey,
-      secretKey: hubAuthConfig.secretKey,
-      audience: hubAuthConfig.audience,
-    }
-  : null;
-
-export function getHubLegacyAuthContext(auth: MinimalHubAuthContext): {
+export function getHubLegacyAuthContext(auth: AppHubAuthContext): {
   userId: string;
   orgId: string;
   userRole: string | undefined;
@@ -79,8 +61,8 @@ export function getHubLegacyAuthContext(auth: MinimalHubAuthContext): {
   };
 }
 
-export function hasHubCoreEntitlement(auth: MinimalHubAuthContext, coreModule: string): boolean {
-  return auth.claims.entitlements.modules.includes(coreModule);
+export function hasHubCoreEntitlement(auth: AppHubAuthContext, coreModule: string): boolean {
+  return auth.entitlements.modules.includes(coreModule);
 }
 
 export function resolveHubRedirectUri(envBag: EnvLike): string | undefined {
@@ -118,50 +100,62 @@ export function resolveHubPostLoginErrorRedirect(envBag: EnvLike): string {
 }
 
 export function getHubSdkConfig() {
-  return hubSdkConfig;
+  return tryLoadHubAuthConfig(process.env)?.sdk ?? null;
 }
 
-const hubAuthMiddleware =
-  hubSdkConfig && hubAuthConfig
-    ? requireHubAuth(hubSdkConfig, { audience: hubAuthConfig.audience })
-    : null;
+export function createAppAuthMiddleware(
+  envBag: EnvLike = process.env,
+  options?: Pick<RequireHubAuthOptions, 'fetchImpl'>,
+): MiddlewareHandler {
+  const config = tryLoadHubAuthConfig(envBag);
+  const hubAuthMiddleware = config ? requireHubAuth(config.sdk, options) : null;
 
-export const appAuthMiddleware: MiddlewareHandler = async (c, next) => {
-  if (!hubAuthMiddleware || !hubSdkConfig) {
-    return c.json({ error: 'unavailable', code: 'hub_auth_not_configured' }, 503);
-  }
-
-  let blockedResponse: Response | undefined;
-  const authResponse = await hubAuthMiddleware(c, async () => {
-    const hubAuth = c.get('hubAuth');
-    if (!hubAuth) {
-      blockedResponse = c.json({ error: 'unauthorized', code: 'missing_hub_context' }, 401);
-      return;
+  return async (c, next) => {
+    if (!hubAuthMiddleware || !config) {
+      return c.json({ error: 'unavailable', code: 'hub_auth_not_configured' }, 503);
     }
 
-    if (!hubAuthConfig || !hasHubCoreEntitlement(hubAuth, hubAuthConfig.coreModule)) {
-      blockedResponse = c.json({ error: 'payment_required', code: 'missing_entitlement' }, 402);
-      return;
-    }
+    let blockedResponse: Response | undefined;
+    const authResponse = await hubAuthMiddleware(c, async () => {
+      const hubAuth = c.get('hubAuth');
+      if (!hubAuth) {
+        blockedResponse = c.json({ error: 'unauthorized', code: 'missing_hub_context' }, 401);
+        return;
+      }
 
-    const legacy = getHubLegacyAuthContext(hubAuth);
-    c.set('userId', legacy.userId);
-    c.set('orgId', legacy.orgId);
-    c.set('userRole', legacy.userRole);
-    c.set('userRoles', legacy.userRoles);
-    await next();
-  });
-  return blockedResponse ?? authResponse;
-};
+      if (!hasHubCoreEntitlement(hubAuth, config.coreModule)) {
+        blockedResponse = c.json({ error: 'payment_required', code: 'missing_entitlement' }, 402);
+        return;
+      }
 
-export function createAppAuthBff() {
-  if (!hubSdkConfig) {
+      const legacy = getHubLegacyAuthContext(hubAuth);
+      c.set('userId', legacy.userId);
+      c.set('orgId', legacy.orgId);
+      c.set('userRole', legacy.userRole);
+      c.set('userRoles', legacy.userRoles);
+      await next();
+    });
+    return blockedResponse ?? authResponse;
+  };
+}
+
+export const appAuthMiddleware: MiddlewareHandler = createAppAuthMiddleware();
+
+export type AppAuthBffOptions = Pick<CreateHubBffOptions, 'fetchImpl' | 'sessionStore'>;
+
+export function createAppAuthBff(
+  envBag: EnvLike = process.env,
+  options?: AppAuthBffOptions,
+): Hono | null {
+  const config = tryLoadHubAuthConfig(envBag);
+  if (!config) {
     return null;
   }
 
-  return createHubBff(hubSdkConfig, {
-    redirectUri: resolveHubRedirectUri(process.env),
-    postLoginRedirect: resolveHubPostLoginRedirect(process.env),
-    postLoginErrorRedirect: resolveHubPostLoginErrorRedirect(process.env),
+  return createHubBff(config.sdk, {
+    ...options,
+    redirectUri: resolveHubRedirectUri(envBag),
+    postLoginRedirect: resolveHubPostLoginRedirect(envBag),
+    postLoginErrorRedirect: resolveHubPostLoginErrorRedirect(envBag),
   });
 }
