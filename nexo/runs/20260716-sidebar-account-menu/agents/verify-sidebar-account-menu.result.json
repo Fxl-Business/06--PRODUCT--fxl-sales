@@ -1,0 +1,1 @@
+{"agent":"verify","slice":"sidebar-account-menu","status":"PASS","report":"nexo/runs/20260716-sidebar-account-menu/verify.md","summary":"All acceptance criteria and the full local machine gate passed; collapsed-state automated coverage is the only non-blocking gap.","done":true,"started":"2026-07-17T01:53:58Z","ended":"2026-07-17T01:58:16Z","ts":"2026-07-17T01:58:16Z"}
