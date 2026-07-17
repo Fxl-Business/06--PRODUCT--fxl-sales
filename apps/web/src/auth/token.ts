@@ -1,4 +1,5 @@
 import type { HubClient } from '@fxl-business/hub-sdk/client';
+import { parseJwtPayload } from './claims';
 
 export const ACCESS_TOKEN_EXPIRY_SKEW_MS = 30_000;
 
@@ -9,19 +10,11 @@ export type HubAccessTokenCache = {
 };
 
 function readJwtExpiry(accessToken: string): number | null {
-  const [, payload] = accessToken.split('.');
-  if (!payload) return null;
-
-  try {
-    const base64 = payload.replace(/-/g, '+').replace(/_/g, '/');
-    const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, '=');
-    const claims = JSON.parse(atob(padded)) as Record<string, unknown>;
-    if (typeof claims.exp !== 'number' || !Number.isFinite(claims.exp)) return null;
-    const expiresAt = claims.exp * 1_000;
-    return Number.isFinite(expiresAt) ? expiresAt : null;
-  } catch {
-    return null;
-  }
+  const claims = parseJwtPayload(accessToken);
+  if (!claims) return null;
+  if (typeof claims.exp !== 'number' || !Number.isFinite(claims.exp)) return null;
+  const expiresAt = claims.exp * 1_000;
+  return Number.isFinite(expiresAt) ? expiresAt : null;
 }
 
 function readServerExpiry(expiresInSeconds: number): number | null {

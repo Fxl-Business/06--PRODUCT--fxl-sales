@@ -45,7 +45,9 @@ export function parseJwtPayload(token: string): Record<string, unknown> | null {
   try {
     const base64 = payload.replace(/-/g, '+').replace(/_/g, '/');
     const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, '=');
-    return JSON.parse(atob(padded)) as Record<string, unknown>;
+    const bytes = Uint8Array.from(atob(padded), (char) => char.charCodeAt(0));
+    const json = new TextDecoder().decode(bytes);
+    return JSON.parse(json) as Record<string, unknown>;
   } catch {
     return null;
   }

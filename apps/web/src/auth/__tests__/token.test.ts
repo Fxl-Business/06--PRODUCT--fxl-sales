@@ -76,6 +76,19 @@ describe('createHubAccessTokenCache', () => {
     expect(getToken).toHaveBeenCalledTimes(2);
   });
 
+  it('reads JWT expiry from a token carrying multibyte display claims', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW_MS);
+    const token = jwtWithExpiry(NOW_MS + 120_000, { name: 'Gestão FXL' });
+    const getToken = vi.fn<HubClient['getToken']>().mockResolvedValue(token);
+    const cache = createHubAccessTokenCache(fakeClient(getToken));
+
+    await expect(cache.getToken()).resolves.toBe(token);
+    vi.setSystemTime(NOW_MS + 120_000 - ACCESS_TOKEN_EXPIRY_SKEW_MS - 1);
+    await expect(cache.getToken()).resolves.toBe(token);
+    expect(getToken).toHaveBeenCalledTimes(1);
+  });
+
   it('does not cache a normal refresh token without a valid JWT expiry', async () => {
     const getToken = vi.fn<HubClient['getToken']>().mockResolvedValue('opaque-token');
     const cache = createHubAccessTokenCache(fakeClient(getToken));

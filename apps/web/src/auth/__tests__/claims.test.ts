@@ -50,4 +50,15 @@ describe('parseJwtPayload', () => {
       workspaceId: 'org_1',
     });
   });
+
+  it('decodes multibyte UTF-8 claims as correct UTF-8, not Latin-1 mojibake', () => {
+    const payload = Buffer.from(
+      JSON.stringify({ name: 'Gestão FXL', workspaceName: 'Café ☕' }),
+    ).toString('base64url');
+
+    expect(parseJwtPayload(`header.${payload}.signature`)).toMatchObject({
+      name: 'Gestão FXL',
+      workspaceName: 'Café ☕',
+    });
+  });
 });
