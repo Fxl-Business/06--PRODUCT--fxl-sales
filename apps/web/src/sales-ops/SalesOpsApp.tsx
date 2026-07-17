@@ -511,6 +511,11 @@ export function SalesOpsApp() {
     workspace === 'cadastros' &&
     (view === 'vendedores' || view === 'finders') &&
     profile.roles.includes('admin');
+  const personModalMatchesRoute =
+    canManagePeople &&
+    modal?.kind === 'person' &&
+    ((view === 'vendedores' && modal.roleHint === 'seller') ||
+      (view === 'finders' && modal.roleHint === 'finder'));
 
   useEffect(() => {
     mountedRef.current = true;
@@ -520,7 +525,7 @@ export function SalesOpsApp() {
   }, []);
 
   useEffect(() => {
-    if (canManagePeople || modal?.kind !== 'person') return;
+    if (modal?.kind !== 'person' || personModalMatchesRoute) return;
 
     const departedModal = modal;
     queueMicrotask(() => {
@@ -528,7 +533,7 @@ export function SalesOpsApp() {
         setModal((current) => (current === departedModal ? null : current));
       }
     });
-  }, [canManagePeople, modal]);
+  }, [modal, personModalMatchesRoute]);
 
   const payableBrl = bootstrap.payables
     .filter((payable) => payable.status === 'open')
@@ -1002,7 +1007,7 @@ export function SalesOpsApp() {
         saving={saveClient.isPending}
       />
       <PersonDialog
-        modal={canManagePeople && modal?.kind === 'person' ? modal : null}
+        modal={personModalMatchesRoute && modal?.kind === 'person' ? modal : null}
         onClose={() => setModal(null)}
         onSave={(payload) => {
           savePerson.mutate(payload, { onSuccess: () => setModal(null) });

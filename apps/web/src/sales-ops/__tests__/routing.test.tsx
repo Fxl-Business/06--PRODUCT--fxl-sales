@@ -472,6 +472,36 @@ describe('Sales Ops canonical routing', () => {
     expect(buttonByTextOrNull('Salvar')).toBeNull();
   });
 
+  it('closes route-specific people dialogs when history switches people pages', async () => {
+    await renderHistory(['/cadastros/finders', '/cadastros/vendedores'], ['admin']);
+    await click(buttonByText('Novo vendedor'));
+    expect(container.querySelector('h2')?.textContent).toBe('Pessoa');
+
+    await click(buttonByText('Back'));
+    expect(pathname()).toBe('/cadastros/finders');
+    expectHeading('Finders');
+    expect(container.querySelector('h2')).toBeNull();
+    expect(buttonByTextOrNull('Salvar')).toBeNull();
+
+    await click(buttonByText('Forward'));
+    expect(pathname()).toBe('/cadastros/vendedores');
+    expect(container.querySelector('h2')).toBeNull();
+
+    await click(buttonByText('Back'));
+    await click(buttonByText('Novo finder'));
+    expect(container.querySelector('h2')?.textContent).toBe('Pessoa');
+
+    await click(buttonByText('Forward'));
+    expect(pathname()).toBe('/cadastros/vendedores');
+    expectHeading('Vendedores');
+    expect(container.querySelector('h2')).toBeNull();
+    expect(buttonByTextOrNull('Salvar')).toBeNull();
+
+    await click(buttonByText('Back'));
+    expect(pathname()).toBe('/cadastros/finders');
+    expect(container.querySelector('h2')).toBeNull();
+  });
+
   it('irrevocably clears people dialogs during rapid browser history transitions', async () => {
     await renderHistory(['/tatico/dashboard', '/cadastros/vendedores'], ['admin'], false);
     await click(buttonByText('Novo vendedor'));
