@@ -74,7 +74,7 @@ Convention files detected (existence only - not content):
   README.md present
   package.json present
   Makefile present
-  package.json scripts present: build lint test 
+  package.json scripts present: build lint test
 
 ## Entry points / key files
 

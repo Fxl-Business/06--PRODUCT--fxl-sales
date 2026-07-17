@@ -1,0 +1,11 @@
+{
+  "agent": "verify",
+  "slice": "wave-01",
+  "status": "FAIL",
+  "report": "nexo/runs/20260717-admin-seller-finder-management/wave-01-verify.md",
+  "summary": "Repository tests, lint, type-check, build, dependency audit, and security inspection pass, but the integrated range diff guard fails on trailing whitespace in context-pack.md line 77; mutation testing is not configured and authenticated visual review was not run.",
+  "done": true,
+  "started": "2026-07-17T04:31:45Z",
+  "ended": "2026-07-17T04:35:04Z",
+  "ts": "2026-07-17T04:35:04Z"
+}
