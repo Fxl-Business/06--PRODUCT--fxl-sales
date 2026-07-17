@@ -3,6 +3,7 @@ import {
   CalendarDays,
   Check,
   ChevronDown,
+  ChevronUp,
   ChevronsLeft,
   ChevronsRight,
   Edit3,
@@ -32,6 +33,15 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import {
   Table,
   TableBody,
@@ -481,6 +491,7 @@ export function SalesOpsApp() {
   const saveSettings = useSaveSalesOpsSettings();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [modal, setModal] = useState<ModalState>(null);
   const [saleWizardOpen, setSaleWizardOpen] = useState(false);
@@ -751,6 +762,84 @@ export function SalesOpsApp() {
             <Plus className="h-4 w-4" />
             {!sidebarCollapsed ? <span>Nova venda</span> : null}
           </AccentButton>
+          <DropdownMenu onOpenChange={setAccountMenuOpen} open={accountMenuOpen}>
+            <DropdownMenuTrigger asChild>
+              <button
+                aria-label="Abrir menu da conta"
+                className={cn(
+                  'flex items-center rounded-[14px] border border-[#343439] bg-[#242428] transition hover:border-[#46464d] hover:bg-[#2c2c31] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#eaa81a] focus-visible:ring-offset-2 focus-visible:ring-offset-[#18181b]',
+                  sidebarCollapsed
+                    ? 'mx-auto size-11 justify-center'
+                    : 'w-full gap-[11px] p-2 text-left',
+                )}
+                onClick={(event) => {
+                  if (event.detail === 0) setAccountMenuOpen(true);
+                }}
+                title="Conta"
+                type="button"
+              >
+                <span className="sales-ops-num flex size-10 flex-none items-center justify-center rounded-[11px] bg-[#eaa81a] text-[14px] font-bold text-[#18181b]">
+                  {initials(userName)}
+                </span>
+                {!sidebarCollapsed ? (
+                  <>
+                    <span className="min-w-0 flex-1 leading-[1.2]">
+                      <span className="block truncate text-[14px] font-bold text-[#f3f3f5]">
+                        {userName}
+                      </span>
+                      <span className="mt-0.5 block truncate text-[11.5px] text-[#8b8b92]">
+                        {roleLabel}
+                      </span>
+                      {profile.email ? <span className="sr-only">{profile.email}</span> : null}
+                    </span>
+                    <ChevronUp className="size-4 flex-none text-[#8b8b92]" />
+                  </>
+                ) : null}
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent
+              align="start"
+              className="w-[220px] rounded-2xl border-[#e5e5ea] bg-white p-2 text-[#201f24] shadow-[0_20px_48px_rgba(0,0,0,.32)]"
+              portalled={false}
+              side="top"
+              sideOffset={10}
+            >
+              <DropdownMenuLabel className="flex items-center gap-[11px] px-2.5 py-2 font-normal">
+                <span className="sales-ops-num flex size-10 flex-none items-center justify-center rounded-[11px] bg-[#eaa81a] text-[14px] font-bold text-[#18181b]">
+                  {initials(userName)}
+                </span>
+                <span className="min-w-0 flex-1 leading-[1.2]">
+                  <span className="block truncate text-[13.5px] font-bold text-[#201f24]">
+                    {userName}
+                  </span>
+                  {profile.email ? (
+                    <span className="mt-0.5 block truncate text-[11.5px] text-[#8b8b92]">
+                      {profile.email}
+                    </span>
+                  ) : null}
+                  <span className="mt-0.5 block truncate text-[11.5px] text-[#8b8b92]">
+                    {roleLabel}
+                  </span>
+                </span>
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator className="my-1.5 bg-[#e5e5ea]" />
+              <DropdownMenuGroup>
+                <DropdownMenuItem asChild>
+                  <button
+                    aria-label="Sair"
+                    className="flex w-full cursor-pointer items-center gap-2.5 rounded-[10px] px-2.5 py-2.5 text-left text-[13.5px] font-semibold text-[#c93d32] outline-none transition hover:bg-[#fff2f0] focus:bg-[#fff2f0]"
+                    onClick={() => {
+                      void logout();
+                    }}
+                    type="button"
+                  >
+                    <LogOut className="size-4" />
+                    Sair
+                  </button>
+                </DropdownMenuItem>
+              </DropdownMenuGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </aside>
 
@@ -780,25 +869,6 @@ export function SalesOpsApp() {
               Julho 2026
               <ChevronDown className="h-[13px] w-[13px] text-[#8b8b92]" />
             </div>
-            <div className="hidden items-center gap-2 py-1 pl-1 pr-2 lg:flex">
-              <span className="sales-ops-num flex h-10 w-10 flex-none items-center justify-center rounded-full bg-gradient-to-br from-[#eaa81a] to-[#9c7210] text-[15px] font-bold text-white">
-                {initials(userName)}
-              </span>
-              <span className="min-w-0 text-left leading-tight">
-                <span className="block max-w-[150px] truncate text-sm font-bold">{userName}</span>
-                <span className="block text-xs text-[#8b8b92]">{roleLabel}</span>
-              </span>
-            </div>
-            <button
-              aria-label="Sair"
-              className={iconButtonClass}
-              onClick={() => {
-                void logout();
-              }}
-              type="button"
-            >
-              <LogOut className="h-4 w-4" />
-            </button>
           </div>
         </header>
 
