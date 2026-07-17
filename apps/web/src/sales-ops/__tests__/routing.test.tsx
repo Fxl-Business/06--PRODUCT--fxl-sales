@@ -20,14 +20,19 @@ const act = (
 
 let profileRoles: AppRole[] = [];
 
+const authMocks = vi.hoisted(() => ({
+  logout: vi.fn(async () => undefined),
+}));
+
 vi.mock('@/auth/react', () => ({
   useAuthProfile: () => ({
     isLoaded: true,
     isSignedIn: true,
     roles: profileRoles,
     name: 'Test User',
+    email: 'test.user@fxl.example',
   }),
-  useLogout: () => vi.fn(async () => undefined),
+  useLogout: () => authMocks.logout,
 }));
 
 const mutation = {
@@ -273,6 +278,29 @@ describe('Sales Ops canonical routing', () => {
     await renderRoute('/tatico/dashboard', ['admin', 'seller', 'finder']);
     expect(container.querySelector('button[title="Trocar visualização"]')).toBeNull();
     expect(container.textContent).not.toContain('Nível de visualização');
+  });
+
+  it('keeps account identity and logout inside the sidebar account menu', async () => {
+    await renderRoute('/tatico/dashboard', ['admin']);
+
+    const sidebar = container.querySelector('aside');
+    const header = container.querySelector('header');
+    const accountButton = sidebar?.querySelector<HTMLButtonElement>(
+      'button[aria-label="Abrir menu da conta"]',
+    );
+
+    expect(accountButton).not.toBeNull();
+    expect(sidebar?.textContent).toContain('Test User');
+    expect(sidebar?.textContent).toContain('Equipe');
+    expect(header?.textContent).not.toContain('Test User');
+    expect(header?.querySelector('button[aria-label="Sair"]')).toBeNull();
+    expect(container.querySelector('button[aria-label="Sair"]')).toBeNull();
+
+    await click(accountButton!);
+
+    expect(sidebar?.textContent).toContain('test.user@fxl.example');
+    await click(buttonByText('Sair'));
+    expect(authMocks.logout).toHaveBeenCalledTimes(1);
   });
 
   it('shows all four workspaces for team plus personal roles', async () => {
