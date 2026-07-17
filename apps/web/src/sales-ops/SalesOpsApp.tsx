@@ -21,7 +21,7 @@ import {
   Trash2,
   UserRound,
 } from 'lucide-react';
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { useAuthProfile, useLogout } from '@/auth/react';
 import { Badge } from '@/components/ui/badge';
@@ -495,6 +495,7 @@ export function SalesOpsApp() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [modal, setModal] = useState<ModalState>(null);
   const [saleWizardOpen, setSaleWizardOpen] = useState(false);
+  const mountedRef = useRef(true);
 
   const visibleWorkspaceIds = useMemo(
     () => getVisibleWorkspaces(profile.roles),
@@ -512,18 +513,22 @@ export function SalesOpsApp() {
     profile.roles.includes('admin');
 
   useEffect(() => {
-    if (canManagePeople) return;
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
-    let active = true;
+  useEffect(() => {
+    if (canManagePeople || modal?.kind !== 'person') return;
+
+    const departedModal = modal;
     queueMicrotask(() => {
-      if (active) {
-        setModal((current) => (current?.kind === 'person' ? null : current));
+      if (mountedRef.current) {
+        setModal((current) => (current === departedModal ? null : current));
       }
     });
-    return () => {
-      active = false;
-    };
-  }, [canManagePeople]);
+  }, [canManagePeople, modal]);
 
   const payableBrl = bootstrap.payables
     .filter((payable) => payable.status === 'open')

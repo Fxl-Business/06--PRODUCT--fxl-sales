@@ -2,6 +2,7 @@
 
 import * as React from 'react';
 import type { HTMLAttributes } from 'react';
+import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import {
   MemoryRouter,
@@ -149,7 +150,11 @@ async function renderRoute(path: string, roles: AppRole[]) {
   await flushReact();
 }
 
-async function renderHistory(entries: string[], roles: AppRole[]) {
+async function renderHistory(
+  entries: string[],
+  roles: AppRole[],
+  startTransition = true,
+) {
   if (root) {
     await act(async () => root?.unmount());
   }
@@ -158,7 +163,7 @@ async function renderHistory(entries: string[], roles: AppRole[]) {
   await act(async () => {
     root?.render(
       <MemoryRouter
-        future={{ v7_relativeSplatPath: true, v7_startTransition: true }}
+        future={{ v7_relativeSplatPath: true, v7_startTransition: startTransition }}
         initialEntries={entries}
         initialIndex={entries.length - 1}
       >
@@ -465,5 +470,41 @@ describe('Sales Ops canonical routing', () => {
     expect(pathname()).toBe('/cadastros/vendedores');
     expect(container.querySelector('h2')).toBeNull();
     expect(buttonByTextOrNull('Salvar')).toBeNull();
+  });
+
+  it('irrevocably clears people dialogs during rapid browser history transitions', async () => {
+    await renderHistory(['/tatico/dashboard', '/cadastros/vendedores'], ['admin'], false);
+    await click(buttonByText('Novo vendedor'));
+    expect(container.querySelector('h2')?.textContent).toBe('Pessoa');
+
+    const queuedMicrotasks: Array<() => void> = [];
+    const queueMicrotaskSpy = vi
+      .spyOn(globalThis, 'queueMicrotask')
+      .mockImplementation((callback) => queuedMicrotasks.push(callback));
+
+    try {
+      await act(async () => {
+        flushSync(() =>
+          buttonByText('Back').dispatchEvent(new MouseEvent('click', { bubbles: true })),
+        );
+        expect(pathname()).toBe('/tatico/dashboard');
+        expect(queuedMicrotasks).toHaveLength(1);
+
+        flushSync(() =>
+          buttonByText('Forward').dispatchEvent(new MouseEvent('click', { bubbles: true })),
+        );
+      });
+      expect(pathname()).toBe('/cadastros/vendedores');
+      expect(queuedMicrotasks).toHaveLength(1);
+
+      await act(async () => {
+        queuedMicrotasks.forEach((callback) => callback());
+      });
+
+      expect(container.querySelector('h2')).toBeNull();
+      expect(buttonByTextOrNull('Salvar')).toBeNull();
+    } finally {
+      queueMicrotaskSpy.mockRestore();
+    }
   });
 });
