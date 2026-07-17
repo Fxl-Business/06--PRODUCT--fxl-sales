@@ -11,8 +11,7 @@ import {
 } from 'lucide-react';
 import type { AppRole } from '@/auth/claims';
 
-export type SalesOpsWorkspace = 'tatico' | 'operacional' | 'cadastros';
-export type SalesOpsRoleView = 'equipe' | 'vendedor' | 'finder';
+export type SalesOpsWorkspace = 'tatico' | 'operacional' | 'cadastros' | 'meus-dados';
 export type SalesOpsView =
   | 'dashboard'
   | 'vendas'
@@ -51,14 +50,6 @@ const tacticalTeam: SalesOpsNavigationItem[] = [
   { id: 'finders', label: 'Finders', icon: Search },
 ];
 
-const tacticalSeller: SalesOpsNavigationItem[] = [
-  { id: 'vendedores', label: 'Meu painel', icon: UsersRound },
-];
-
-const tacticalFinder: SalesOpsNavigationItem[] = [
-  { id: 'finders', label: 'Meu painel', icon: Search },
-];
-
 const operational: SalesOpsNavigationItem[] = [
   { id: 'vendas', label: 'Vendas', icon: BriefcaseBusiness },
   { id: 'comissoes', label: 'Comissões', icon: BadgeDollarSign },
@@ -70,6 +61,16 @@ const cadastros: SalesOpsNavigationItem[] = [
   { id: 'geral', label: 'Geral', icon: Cog },
 ];
 
+const meusDadosSeller: SalesOpsNavigationItem[] = [
+  { id: 'vendedores', label: 'Meu painel', icon: UsersRound },
+  { id: 'comissoes', label: 'Comissões', icon: BadgeDollarSign },
+];
+
+const meusDadosFinder: SalesOpsNavigationItem[] = [
+  { id: 'finders', label: 'Meu painel', icon: Search },
+  { id: 'vendas', label: 'Indicações', icon: BriefcaseBusiness },
+];
+
 export const salesOpsWorkspaces: Array<{
   id: SalesOpsWorkspace;
   label: string;
@@ -78,26 +79,40 @@ export const salesOpsWorkspaces: Array<{
   { id: 'tatico', label: 'Tático', description: 'Indicadores e painéis' },
   { id: 'operacional', label: 'Operacional', description: 'Vendas e conferência' },
   { id: 'cadastros', label: 'Cadastros', description: 'Catálogo e regras' },
+  { id: 'meus-dados', label: 'Meus dados', description: 'Painel e comissões pessoais' },
 ];
+
+export function getVisibleWorkspaces(roles: readonly AppRole[]): SalesOpsWorkspace[] {
+  const roleSet = new Set(roles);
+  const visible: SalesOpsWorkspace[] = [];
+  if (roleSet.has('admin')) {
+    visible.push('tatico', 'operacional', 'cadastros');
+  }
+  if (roleSet.has('seller') || roleSet.has('finder')) {
+    visible.push('meus-dados');
+  }
+  return visible;
+}
 
 export function getSalesOpsNavigation(
   workspace: SalesOpsWorkspace,
-  role: SalesOpsRoleView,
+  roles: readonly AppRole[],
 ): SalesOpsNavigationItem[] {
-  if (workspace === 'operacional') return operational;
-  if (workspace === 'cadastros') return role === 'equipe' ? cadastros : [];
-  if (role === 'vendedor') return tacticalSeller;
-  if (role === 'finder') return tacticalFinder;
-  return tacticalTeam;
-}
-
-export function getSalesOpsRoleViews(roles: readonly AppRole[]): SalesOpsRoleView[] {
-  const roleSet = new Set(roles);
-  const views: SalesOpsRoleView[] = [];
-  if (roleSet.has('admin')) views.push('equipe');
-  if (roleSet.has('seller')) views.push('vendedor');
-  if (roleSet.has('finder')) views.push('finder');
-  return views;
+  switch (workspace) {
+    case 'tatico':
+      return tacticalTeam;
+    case 'operacional':
+      return operational;
+    case 'cadastros':
+      return cadastros;
+    case 'meus-dados': {
+      const roleSet = new Set(roles);
+      const items: SalesOpsNavigationItem[] = [];
+      if (roleSet.has('seller')) items.push(...meusDadosSeller);
+      if (roleSet.has('finder')) items.push(...meusDadosFinder);
+      return items;
+    }
+  }
 }
 
 export function buildSalesOpsPath(route: SalesOpsRoute): string {
@@ -105,27 +120,32 @@ export function buildSalesOpsPath(route: SalesOpsRoute): string {
 }
 
 export function getDefaultSalesOpsRoute(
-  role: SalesOpsRoleView,
+  roles: readonly AppRole[],
   preferredWorkspace?: SalesOpsWorkspace,
 ): SalesOpsRoute {
-  if (preferredWorkspace) {
-    const preferredView = getSalesOpsNavigation(preferredWorkspace, role)[0]?.id;
+  const visible = getVisibleWorkspaces(roles);
+
+  if (preferredWorkspace && visible.includes(preferredWorkspace)) {
+    const preferredView = getSalesOpsNavigation(preferredWorkspace, roles)[0]?.id;
     if (preferredView) return { workspace: preferredWorkspace, view: preferredView };
   }
 
-  return {
-    workspace: 'tatico',
-    view: getSalesOpsNavigation('tatico', role)[0]?.id ?? 'dashboard',
-  };
+  const workspace = visible[0];
+  if (workspace) {
+    const view = getSalesOpsNavigation(workspace, roles)[0]?.id;
+    if (view) return { workspace, view };
+  }
+
+  return { workspace: 'tatico', view: 'dashboard' };
 }
 
 export function resolveSalesOpsRoute(
   params: SalesOpsRouteParams,
-  role: SalesOpsRoleView,
+  roles: readonly AppRole[],
 ): SalesOpsRouteResolution {
-  const workspace = salesOpsWorkspaces.find((item) => item.id === params.workspace)?.id;
+  const workspace = getVisibleWorkspaces(roles).find((id) => id === params.workspace);
   const view = workspace
-    ? getSalesOpsNavigation(workspace, role).find((item) => item.id === params.view)?.id
+    ? getSalesOpsNavigation(workspace, roles).find((item) => item.id === params.view)?.id
     : undefined;
 
   if (workspace && view) {
@@ -133,20 +153,18 @@ export function resolveSalesOpsRoute(
     return { route, path: buildSalesOpsPath(route), redirect: false };
   }
 
-  const route = getDefaultSalesOpsRoute(role);
+  const route = getDefaultSalesOpsRoute(roles);
   return { route, path: buildSalesOpsPath(route), redirect: true };
 }
 
-export function workspaceForView(view: SalesOpsView, role: SalesOpsRoleView): SalesOpsWorkspace {
-  for (const workspace of salesOpsWorkspaces) {
-    if (getSalesOpsNavigation(workspace.id, role).some((item) => item.id === view)) {
-      return workspace.id;
+export function workspaceForView(
+  view: SalesOpsView,
+  roles: readonly AppRole[],
+): SalesOpsWorkspace {
+  for (const workspace of getVisibleWorkspaces(roles)) {
+    if (getSalesOpsNavigation(workspace, roles).some((item) => item.id === view)) {
+      return workspace;
     }
   }
-  for (const workspace of salesOpsWorkspaces) {
-    if (getSalesOpsNavigation(workspace.id, 'equipe').some((item) => item.id === view)) {
-      return workspace.id;
-    }
-  }
-  return 'tatico';
+  return getDefaultSalesOpsRoute(roles).workspace;
 }

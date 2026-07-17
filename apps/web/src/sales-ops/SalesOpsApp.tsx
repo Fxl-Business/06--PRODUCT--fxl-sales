@@ -53,14 +53,14 @@ import {
   buildSalesOpsPath,
   getDefaultSalesOpsRoute,
   getSalesOpsNavigation,
-  getSalesOpsRoleViews,
+  getVisibleWorkspaces,
   resolveSalesOpsRoute,
   salesOpsWorkspaces,
   workspaceForView,
-  type SalesOpsRoleView,
   type SalesOpsView,
   type SalesOpsWorkspace,
 } from './navigation';
+import type { AppRole } from '@/auth/claims';
 import type {
   CreateSalePayload,
   PaymentCondition,
@@ -122,6 +122,7 @@ const workspaceVisuals: Record<
   tatico: { icon: LayoutGrid, tileBg: '#eaa81a', tileColor: '#18181b' },
   operacional: { icon: ListChecks, tileBg: '#3f7cc4', tileColor: '#fff' },
   cadastros: { icon: Settings, tileBg: '#5a9166', tileColor: '#fff' },
+  'meus-dados': { icon: UserRound, tileBg: '#8a5cc4', tileColor: '#fff' },
 };
 
 type ModalState =
@@ -130,26 +131,27 @@ type ModalState =
   | { kind: 'person'; person?: SalesOpsPerson; roleHint: 'seller' | 'finder' | 'collaborator' }
   | null;
 
-function titleForView(view: SalesOpsView, role: SalesOpsRoleView) {
+function titleForView(view: SalesOpsView, workspace: SalesOpsWorkspace) {
+  const personal = workspace === 'meus-dados';
   const map: Record<SalesOpsView, { title: string; subtitle: string }> = {
     dashboard: {
       title: 'Visão geral',
       subtitle: 'Receita, recorrência, comissões e ranking do mês',
     },
     vendas: {
-      title: role === 'finder' ? 'Minhas indicações' : role === 'vendedor' ? 'Minhas vendas' : 'Vendas',
+      title: personal ? 'Minhas indicações' : 'Vendas',
       subtitle: 'Registro operacional com código, cliente, produto, responsável e status',
     },
     vendedores: {
-      title: role === 'vendedor' ? 'Meu painel' : 'Vendedores',
+      title: personal ? 'Meu painel' : 'Vendedores',
       subtitle: 'Performance, comissão, ticket médio e vendas por responsável',
     },
     finders: {
-      title: role === 'finder' ? 'Meu painel' : 'Finders',
+      title: personal ? 'Meu painel' : 'Finders',
       subtitle: 'Indicações, receita gerada e comissão por parceiro',
     },
     comissoes: {
-      title: role === 'equipe' ? 'Comissões' : 'Minhas comissões',
+      title: personal ? 'Minhas comissões' : 'Comissões',
       subtitle: 'Contas a pagar geradas pelas vendas persistidas',
     },
     produtos: {
@@ -166,6 +168,15 @@ function titleForView(view: SalesOpsView, role: SalesOpsRoleView) {
     },
   };
   return map[view];
+}
+
+function roleSummaryLabel(roles: readonly AppRole[]): string {
+  const roleSet = new Set(roles);
+  const parts: string[] = [];
+  if (roleSet.has('admin')) parts.push('Equipe');
+  if (roleSet.has('seller')) parts.push('Vendedor');
+  if (roleSet.has('finder')) parts.push('Finder');
+  return parts.join(' · ');
 }
 
 function statusMeta(status: SalesOpsStatus) {
@@ -470,55 +481,37 @@ export function SalesOpsApp() {
   const saveSettings = useSaveSalesOpsSettings();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
-  const [roleMenuOpen, setRoleMenuOpen] = useState(false);
-  const [selectedRoleView, setSelectedRoleView] = useState<SalesOpsRoleView | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [modal, setModal] = useState<ModalState>(null);
   const [saleWizardOpen, setSaleWizardOpen] = useState(false);
 
-  const availableRoleViews = useMemo(() => getSalesOpsRoleViews(profile.roles), [profile.roles]);
-  const roleView =
-    selectedRoleView && availableRoleViews.includes(selectedRoleView)
-      ? selectedRoleView
-      : availableRoleViews[0];
-  const activeRoleView = roleView ?? 'finder';
-  const resolution = resolveSalesOpsRoute(routeParams, activeRoleView);
+  const visibleWorkspaceIds = useMemo(
+    () => getVisibleWorkspaces(profile.roles),
+    [profile.roles],
+  );
+  const resolution = resolveSalesOpsRoute(routeParams, profile.roles);
   const { workspace, view } = resolution.route;
   const bootstrap = bootstrapQuery.data ?? emptyBootstrap;
   const dashboard = useMemo(() => buildDashboardModel(bootstrap), [bootstrap]);
-  const navItems = getSalesOpsNavigation(workspace, activeRoleView);
-  const title = titleForView(view, activeRoleView);
+  const navItems = getSalesOpsNavigation(workspace, profile.roles);
+  const title = titleForView(view, workspace);
   const payableBrl = bootstrap.payables
     .filter((payable) => payable.status === 'open')
     .reduce((sum, payable) => sum + payable.amountBrl, 0);
-  const roleLabel =
-    activeRoleView === 'equipe'
-      ? 'Equipe · Admin'
-      : activeRoleView === 'vendedor'
-        ? 'Vendedor'
-        : 'Finder';
-  const userName = profile.name ?? (activeRoleView === 'finder' ? 'Finder' : 'FXL');
+  const roleLabel = roleSummaryLabel(profile.roles);
+  const userName = profile.name ?? 'FXL';
 
   function setWorkspace(next: SalesOpsWorkspace) {
     setWorkspaceMenuOpen(false);
-    navigate(buildSalesOpsPath(getDefaultSalesOpsRoute(activeRoleView, next)));
-  }
-
-  function setRole(next: SalesOpsRoleView) {
-    if (!availableRoleViews.includes(next)) return;
-    const nextResolution = resolveSalesOpsRoute(routeParams, next);
-    setRoleMenuOpen(false);
-    setSelectedRoleView(next);
-    if (nextResolution.redirect) {
-      navigate(nextResolution.path, { replace: true });
-    }
+    navigate(buildSalesOpsPath(getDefaultSalesOpsRoute(profile.roles, next)));
   }
 
   function go(next: SalesOpsView) {
     setWorkspaceMenuOpen(false);
-    navigate(
-      buildSalesOpsPath({ workspace: workspaceForView(next, activeRoleView), view: next }),
-    );
+    const targetWorkspace = navItems.some((item) => item.id === next)
+      ? workspace
+      : workspaceForView(next, profile.roles);
+    navigate(buildSalesOpsPath({ workspace: targetWorkspace, view: next }));
   }
 
   function runHeaderAction() {
@@ -553,46 +546,14 @@ export function SalesOpsApp() {
             : view === 'finders'
               ? 'Novo finder'
               : 'Nova venda';
-  const availableWorkspaces = salesOpsWorkspaces.filter(
-    (item) => activeRoleView === 'equipe' || item.id !== 'cadastros',
+  const availableWorkspaces = salesOpsWorkspaces.filter((item) =>
+    visibleWorkspaceIds.includes(item.id),
   );
   const activeWorkspaceMeta = salesOpsWorkspaces.find((item) => item.id === workspace);
   const activeWorkspaceVisual = workspaceVisuals[workspace];
   const ActiveWorkspaceIcon = activeWorkspaceVisual.icon;
-  const roleOptions: Array<{
-    id: SalesOpsRoleView;
-    name: string;
-    description: string;
-    initials: string;
-  }> = (
-    [
-      {
-        id: 'equipe',
-        name: 'Equipe',
-        description: 'Acesso total ao negócio',
-        initials: initials(userName),
-      },
-      {
-        id: 'vendedor',
-        name: 'Vendedor',
-        description: 'Só os próprios dados',
-        initials: 'VD',
-      },
-      {
-        id: 'finder',
-        name: 'Finder',
-        description: 'Só as próprias indicações',
-        initials: 'FN',
-      },
-    ] satisfies Array<{
-      id: SalesOpsRoleView;
-      name: string;
-      description: string;
-      initials: string;
-    }>
-  ).filter((option) => availableRoleViews.includes(option.id));
 
-  if (!roleView) {
+  if (visibleWorkspaceIds.length === 0) {
     return <Navigate to="/no-role" replace />;
   }
 
@@ -757,7 +718,7 @@ export function SalesOpsApp() {
                 {!sidebarCollapsed ? <span className="min-w-0 flex-1 truncate">{item.label}</span> : null}
                 {!sidebarCollapsed &&
                 item.id === 'comissoes' &&
-                activeRoleView === 'equipe' &&
+                workspace === 'operacional' &&
                 openPayablesCount > 0 ? (
                   <span
                     className={`sales-ops-num rounded-full px-2 py-0.5 text-[11px] font-bold ${
@@ -819,70 +780,14 @@ export function SalesOpsApp() {
               Julho 2026
               <ChevronDown className="h-[13px] w-[13px] text-[#8b8b92]" />
             </div>
-            <div className="relative hidden lg:block">
-              <button
-                aria-expanded={roleMenuOpen}
-                className="flex items-center gap-2 rounded-xl py-1 pl-1 pr-2 transition hover:bg-[#ededf0]"
-                onClick={() => setRoleMenuOpen((open) => !open)}
-                title="Trocar visualização"
-                type="button"
-              >
-                <span className="sales-ops-num flex h-10 w-10 flex-none items-center justify-center rounded-full bg-gradient-to-br from-[#eaa81a] to-[#9c7210] text-[15px] font-bold text-white">
-                  {initials(userName)}
-                </span>
-                <span className="min-w-0 text-left leading-tight">
-                  <span className="block max-w-[150px] truncate text-sm font-bold">{userName}</span>
-                  <span className="flex items-center gap-1 text-xs text-[#8b8b92]">
-                    {roleLabel}
-                    <ChevronDown className="h-3 w-3" />
-                  </span>
-                </span>
-              </button>
-              {roleMenuOpen ? (
-                <>
-                  <button
-                    aria-label="Fechar visualização"
-                    className="fixed inset-0 z-[55] cursor-default"
-                    onClick={() => setRoleMenuOpen(false)}
-                    type="button"
-                  />
-                  <div className="absolute right-0 top-[54px] z-[60] w-[288px] rounded-2xl border border-[#e5e5ea] bg-white p-2 shadow-[0_18px_44px_rgba(0,0,0,.16)]">
-                    <div className="px-2.5 pb-1.5 pt-2 text-[11px] font-bold uppercase tracking-[0.08em] text-[#9b9ba3]">
-                      Nível de visualização
-                    </div>
-                    {roleOptions.map((option) => {
-                      const active = activeRoleView === option.id;
-                      return (
-                        <button
-                          className={`flex w-full items-center gap-[11px] rounded-[11px] px-2.5 py-[9px] text-left transition hover:bg-[#f5f5f7] ${
-                            active ? 'bg-[#eef0f3]' : 'bg-transparent'
-                          }`}
-                          key={option.id}
-                          onClick={() => setRole(option.id)}
-                          type="button"
-                        >
-                          <span
-                            className={`sales-ops-num flex h-[34px] w-[34px] flex-none items-center justify-center rounded-[9px] text-[13px] font-bold ${
-                              active ? 'bg-[#eaa81a] text-white' : 'bg-[#ececf1] text-[#84848c]'
-                            }`}
-                          >
-                            {option.initials}
-                          </span>
-                          <span className="min-w-0 flex-1">
-                            <span className="block text-[13.5px] font-bold text-[#201f24]">
-                              {option.name}
-                            </span>
-                            <span className="block truncate text-[11.5px] text-[#8b8b92]">
-                              {option.description}
-                            </span>
-                          </span>
-                          {active ? <Check className="h-[17px] w-[17px] flex-none text-[#2f7d4b]" /> : null}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </>
-              ) : null}
+            <div className="hidden items-center gap-2 py-1 pl-1 pr-2 lg:flex">
+              <span className="sales-ops-num flex h-10 w-10 flex-none items-center justify-center rounded-full bg-gradient-to-br from-[#eaa81a] to-[#9c7210] text-[15px] font-bold text-white">
+                {initials(userName)}
+              </span>
+              <span className="min-w-0 text-left leading-tight">
+                <span className="block max-w-[150px] truncate text-sm font-bold">{userName}</span>
+                <span className="block text-xs text-[#8b8b92]">{roleLabel}</span>
+              </span>
             </div>
             <button
               aria-label="Sair"

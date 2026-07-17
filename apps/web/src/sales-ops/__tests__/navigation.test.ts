@@ -1,199 +1,189 @@
 import { describe, expect, it } from 'vitest';
+import type { AppRole } from '@/auth/claims';
 import {
   buildSalesOpsPath,
   getDefaultSalesOpsRoute,
   getSalesOpsNavigation,
-  getSalesOpsRoleViews,
+  getVisibleWorkspaces,
   resolveSalesOpsRoute,
   salesOpsWorkspaces,
   workspaceForView,
-  type SalesOpsRoleView,
-  type SalesOpsRoute,
-  type SalesOpsView,
-  type SalesOpsWorkspace,
 } from '../navigation';
 
-const canonicalRoutes = [
-  { workspace: 'tatico', view: 'dashboard' },
-  { workspace: 'tatico', view: 'vendedores' },
-  { workspace: 'tatico', view: 'finders' },
-  { workspace: 'operacional', view: 'vendas' },
-  { workspace: 'operacional', view: 'comissoes' },
-  { workspace: 'cadastros', view: 'produtos' },
-  { workspace: 'cadastros', view: 'clientes' },
-  { workspace: 'cadastros', view: 'geral' },
-] as const satisfies readonly SalesOpsRoute[];
-
-const allowedRoutes: Record<SalesOpsRoleView, readonly SalesOpsRoute[]> = {
-  equipe: canonicalRoutes,
-  vendedor: canonicalRoutes.filter(
-    (route) =>
-      route.workspace === 'operacional' ||
-      (route.workspace === 'tatico' && route.view === 'vendedores'),
-  ),
-  finder: canonicalRoutes.filter(
-    (route) =>
-      route.workspace === 'operacional' ||
-      (route.workspace === 'tatico' && route.view === 'finders'),
-  ),
-};
-
-const roleDefaults: Record<SalesOpsRoleView, SalesOpsRoute> = {
-  equipe: { workspace: 'tatico', view: 'dashboard' },
-  vendedor: { workspace: 'tatico', view: 'vendedores' },
-  finder: { workspace: 'tatico', view: 'finders' },
-};
+const team: AppRole[] = ['admin'];
+const seller: AppRole[] = ['seller'];
+const finder: AppRole[] = ['finder'];
+const sellerFinder: AppRole[] = ['seller', 'finder'];
+const everything: AppRole[] = ['admin', 'seller', 'finder'];
 
 describe('sales operations navigation', () => {
-  it('uses the exact workspace vocabulary and role-visible navigation', () => {
+  it('exposes the exact workspace catalogue including meus-dados', () => {
     expect(salesOpsWorkspaces).toEqual([
       { id: 'tatico', label: 'Tático', description: 'Indicadores e painéis' },
       { id: 'operacional', label: 'Operacional', description: 'Vendas e conferência' },
       { id: 'cadastros', label: 'Cadastros', description: 'Catálogo e regras' },
+      { id: 'meus-dados', label: 'Meus dados', description: 'Painel e comissões pessoais' },
     ]);
-    expect(getSalesOpsNavigation('tatico', 'equipe').map((item) => item.id)).toEqual([
+  });
+
+  it('derives visible workspaces from the Hub role set', () => {
+    expect(getVisibleWorkspaces(team)).toEqual(['tatico', 'operacional', 'cadastros']);
+    expect(getVisibleWorkspaces(seller)).toEqual(['meus-dados']);
+    expect(getVisibleWorkspaces(finder)).toEqual(['meus-dados']);
+    expect(getVisibleWorkspaces(sellerFinder)).toEqual(['meus-dados']);
+    expect(getVisibleWorkspaces(everything)).toEqual([
+      'tatico',
+      'operacional',
+      'cadastros',
+      'meus-dados',
+    ]);
+    expect(getVisibleWorkspaces([])).toEqual([]);
+  });
+
+  it('renders fixed team navigation for the team workspaces', () => {
+    expect(getSalesOpsNavigation('tatico', team).map((item) => item.id)).toEqual([
       'dashboard',
       'vendedores',
       'finders',
     ]);
-    expect(getSalesOpsNavigation('tatico', 'vendedor').map((item) => item.id)).toEqual([
-      'vendedores',
+    expect(getSalesOpsNavigation('operacional', team).map((item) => item.id)).toEqual([
+      'vendas',
+      'comissoes',
     ]);
-    expect(getSalesOpsNavigation('tatico', 'finder').map((item) => item.id)).toEqual(['finders']);
-    expect(getSalesOpsNavigation('cadastros', 'equipe').map((item) => item.id)).toEqual([
+    expect(getSalesOpsNavigation('cadastros', team).map((item) => item.id)).toEqual([
       'produtos',
       'clientes',
       'geral',
     ]);
-    expect(getSalesOpsNavigation('cadastros', 'vendedor')).toEqual([]);
-    expect(getSalesOpsNavigation('cadastros', 'finder')).toEqual([]);
   });
 
-  it.each<SalesOpsRoleView>(['equipe', 'vendedor', 'finder'])(
-    'keeps operational sales and commissions available for %s',
-    (role) => {
-      expect(getSalesOpsNavigation('operacional', role).map((item) => item.id)).toEqual([
-        'vendas',
-        'comissoes',
-      ]);
-    },
-  );
+  it('renders the union of personal items in meus-dados', () => {
+    expect(getSalesOpsNavigation('meus-dados', seller).map((item) => item.id)).toEqual([
+      'vendedores',
+      'comissoes',
+    ]);
+    expect(getSalesOpsNavigation('meus-dados', seller).map((item) => item.label)).toEqual([
+      'Meu painel',
+      'Comissões',
+    ]);
+    expect(getSalesOpsNavigation('meus-dados', finder).map((item) => item.id)).toEqual([
+      'finders',
+      'vendas',
+    ]);
+    expect(getSalesOpsNavigation('meus-dados', finder).map((item) => item.label)).toEqual([
+      'Meu painel',
+      'Indicações',
+    ]);
+    expect(getSalesOpsNavigation('meus-dados', sellerFinder).map((item) => item.id)).toEqual([
+      'vendedores',
+      'comissoes',
+      'finders',
+      'vendas',
+    ]);
+  });
 
-  it.each(
-    (Object.entries(allowedRoutes) as Array<[SalesOpsRoleView, readonly SalesOpsRoute[]]>).flatMap(
-      ([role, routes]) => routes.map((route) => ({ role, route })),
-    ),
-  )('preserves $role route $route.workspace/$route.view', ({ role, route }) => {
-    expect(resolveSalesOpsRoute(route, role)).toEqual({
-      route,
-      path: `/${route.workspace}/${route.view}`,
+  it('defaults team users to tatico and personal-only users to meus-dados', () => {
+    expect(getDefaultSalesOpsRoute(team)).toEqual({ workspace: 'tatico', view: 'dashboard' });
+    expect(getDefaultSalesOpsRoute(seller)).toEqual({ workspace: 'meus-dados', view: 'vendedores' });
+    expect(getDefaultSalesOpsRoute(finder)).toEqual({ workspace: 'meus-dados', view: 'finders' });
+    expect(getDefaultSalesOpsRoute(sellerFinder)).toEqual({
+      workspace: 'meus-dados',
+      view: 'vendedores',
+    });
+    expect(getDefaultSalesOpsRoute(everything)).toEqual({ workspace: 'tatico', view: 'dashboard' });
+  });
+
+  it('honours a visible preferred workspace and ignores an invisible one', () => {
+    expect(getDefaultSalesOpsRoute(team, 'operacional')).toEqual({
+      workspace: 'operacional',
+      view: 'vendas',
+    });
+    expect(getDefaultSalesOpsRoute(team, 'cadastros')).toEqual({
+      workspace: 'cadastros',
+      view: 'produtos',
+    });
+    expect(getDefaultSalesOpsRoute(everything, 'meus-dados')).toEqual({
+      workspace: 'meus-dados',
+      view: 'vendedores',
+    });
+    expect(getDefaultSalesOpsRoute(seller, 'tatico')).toEqual({
+      workspace: 'meus-dados',
+      view: 'vendedores',
+    });
+  });
+
+  it('keeps valid routes and reports no redirect', () => {
+    expect(resolveSalesOpsRoute({ workspace: 'tatico', view: 'dashboard' }, team)).toEqual({
+      route: { workspace: 'tatico', view: 'dashboard' },
+      path: '/tatico/dashboard',
+      redirect: false,
+    });
+    expect(resolveSalesOpsRoute({ workspace: 'meus-dados', view: 'comissoes' }, seller)).toEqual({
+      route: { workspace: 'meus-dados', view: 'comissoes' },
+      path: '/meus-dados/comissoes',
+      redirect: false,
+    });
+    expect(resolveSalesOpsRoute({ workspace: 'meus-dados', view: 'vendas' }, finder)).toEqual({
+      route: { workspace: 'meus-dados', view: 'vendas' },
+      path: '/meus-dados/vendas',
       redirect: false,
     });
   });
 
-  it.each(
-    (['equipe', 'vendedor', 'finder'] as const).flatMap((role) => [
-      { role, params: {} },
-      { role, params: { workspace: 'unknown', view: 'vendas' } },
-    ]),
-  )('redirects missing or unknown params for $role', ({ role, params }) => {
-    const route = roleDefaults[role];
-    expect(resolveSalesOpsRoute(params, role)).toEqual({
-      route,
-      path: buildSalesOpsPath(route),
+  it('redirects routes pointing at an invisible or forbidden target to the role default', () => {
+    expect(resolveSalesOpsRoute({ workspace: 'tatico', view: 'dashboard' }, seller)).toEqual({
+      route: { workspace: 'meus-dados', view: 'vendedores' },
+      path: '/meus-dados/vendedores',
+      redirect: true,
+    });
+    expect(resolveSalesOpsRoute({ workspace: 'cadastros', view: 'produtos' }, seller)).toEqual({
+      route: { workspace: 'meus-dados', view: 'vendedores' },
+      path: '/meus-dados/vendedores',
+      redirect: true,
+    });
+    expect(resolveSalesOpsRoute({ workspace: 'operacional', view: 'vendas' }, finder)).toEqual({
+      route: { workspace: 'meus-dados', view: 'finders' },
+      path: '/meus-dados/finders',
+      redirect: true,
+    });
+    expect(resolveSalesOpsRoute({ workspace: 'meus-dados', view: 'vendedores' }, team)).toEqual({
+      route: { workspace: 'tatico', view: 'dashboard' },
+      path: '/tatico/dashboard',
+      redirect: true,
+    });
+    expect(resolveSalesOpsRoute({ workspace: 'meus-dados', view: 'finders' }, seller)).toEqual({
+      route: { workspace: 'meus-dados', view: 'vendedores' },
+      path: '/meus-dados/vendedores',
+      redirect: true,
+    });
+    expect(resolveSalesOpsRoute({}, team)).toEqual({
+      route: { workspace: 'tatico', view: 'dashboard' },
+      path: '/tatico/dashboard',
+      redirect: true,
+    });
+    expect(resolveSalesOpsRoute({ workspace: 'unknown', view: 'vendas' }, seller)).toEqual({
+      route: { workspace: 'meus-dados', view: 'vendedores' },
+      path: '/meus-dados/vendedores',
       redirect: true,
     });
   });
 
-  it.each(
-    (['equipe', 'vendedor', 'finder'] as const).flatMap((role) =>
-      canonicalRoutes.flatMap((ownedRoute) =>
-        (['tatico', 'operacional', 'cadastros'] as const)
-          .filter((workspace) => workspace !== ownedRoute.workspace)
-          .map((workspace) => ({ role, workspace, view: ownedRoute.view })),
-      ),
-    ),
-  )('redirects mismatched $workspace/$view for $role', ({ role, workspace, view }) => {
-    const route = roleDefaults[role];
-    expect(resolveSalesOpsRoute({ workspace, view }, role)).toEqual({
-      route,
-      path: buildSalesOpsPath(route),
-      redirect: true,
-    });
+  it('maps a view to its workspace within the visible set, team taking precedence', () => {
+    expect(workspaceForView('produtos', team)).toBe('cadastros');
+    expect(workspaceForView('vendas', team)).toBe('operacional');
+    expect(workspaceForView('dashboard', team)).toBe('tatico');
+    expect(workspaceForView('vendedores', seller)).toBe('meus-dados');
+    expect(workspaceForView('comissoes', seller)).toBe('meus-dados');
+    expect(workspaceForView('finders', finder)).toBe('meus-dados');
+    expect(workspaceForView('vendas', finder)).toBe('meus-dados');
+    expect(workspaceForView('vendedores', ['admin', 'seller'])).toBe('tatico');
+    expect(workspaceForView('vendas', ['admin', 'finder'])).toBe('operacional');
   });
 
-  it.each([
-    { role: 'vendedor', workspace: 'tatico', view: 'dashboard' },
-    { role: 'vendedor', workspace: 'tatico', view: 'finders' },
-    { role: 'finder', workspace: 'tatico', view: 'dashboard' },
-    { role: 'finder', workspace: 'tatico', view: 'vendedores' },
-    ...(['vendedor', 'finder'] as const).flatMap((role) =>
-      (['produtos', 'clientes', 'geral'] as const).map((view) => ({
-        role,
-        workspace: 'cadastros' as const,
-        view,
-      })),
-    ),
-  ] satisfies Array<{
-    role: SalesOpsRoleView;
-    workspace: SalesOpsWorkspace;
-    view: SalesOpsView;
-  }>)('redirects forbidden $workspace/$view for $role', ({ role, workspace, view }) => {
-    const route = roleDefaults[role];
-    expect(resolveSalesOpsRoute({ workspace, view }, role)).toEqual({
-      route,
-      path: buildSalesOpsPath(route),
-      redirect: true,
-    });
-  });
-
-  it('selects workspace defaults and falls back from inaccessible workspaces', () => {
-    expect(getDefaultSalesOpsRoute('equipe', 'tatico')).toEqual(roleDefaults.equipe);
-    expect(getDefaultSalesOpsRoute('equipe', 'operacional')).toEqual({
-      workspace: 'operacional',
-      view: 'vendas',
-    });
-    expect(getDefaultSalesOpsRoute('equipe', 'cadastros')).toEqual({
-      workspace: 'cadastros',
-      view: 'produtos',
-    });
-    expect(getDefaultSalesOpsRoute('vendedor', 'tatico')).toEqual(roleDefaults.vendedor);
-    expect(getDefaultSalesOpsRoute('vendedor', 'operacional')).toEqual({
-      workspace: 'operacional',
-      view: 'vendas',
-    });
-    expect(getDefaultSalesOpsRoute('vendedor', 'cadastros')).toEqual(roleDefaults.vendedor);
-    expect(getDefaultSalesOpsRoute('finder', 'tatico')).toEqual(roleDefaults.finder);
-    expect(getDefaultSalesOpsRoute('finder', 'operacional')).toEqual({
-      workspace: 'operacional',
-      view: 'vendas',
-    });
-    expect(getDefaultSalesOpsRoute('finder', 'cadastros')).toEqual(roleDefaults.finder);
-  });
-
-  it('builds exact canonical paths and maps catalogue pages to cadastros', () => {
-    expect(buildSalesOpsPath({ workspace: 'tatico', view: 'dashboard' })).toBe(
-      '/tatico/dashboard',
+  it('builds canonical paths', () => {
+    expect(buildSalesOpsPath({ workspace: 'tatico', view: 'dashboard' })).toBe('/tatico/dashboard');
+    expect(buildSalesOpsPath({ workspace: 'meus-dados', view: 'comissoes' })).toBe(
+      '/meus-dados/comissoes',
     );
-    expect(buildSalesOpsPath({ workspace: 'operacional', view: 'comissoes' })).toBe(
-      '/operacional/comissoes',
-    );
-    expect(buildSalesOpsPath({ workspace: 'cadastros', view: 'clientes' })).toBe(
-      '/cadastros/clientes',
-    );
-    expect(workspaceForView('produtos', 'equipe')).toBe('cadastros');
-    expect(workspaceForView('clientes', 'equipe')).toBe('cadastros');
-    expect(workspaceForView('geral', 'equipe')).toBe('cadastros');
-  });
-
-  it('limits the visual role switcher to Hub-granted app roles', () => {
-    expect(getSalesOpsRoleViews(['admin', 'seller', 'finder'])).toEqual([
-      'equipe',
-      'vendedor',
-      'finder',
-    ]);
-    expect(getSalesOpsRoleViews(['seller', 'finder'])).toEqual(['vendedor', 'finder']);
-    expect(getSalesOpsRoleViews(['seller'])).toEqual(['vendedor']);
-    expect(getSalesOpsRoleViews([])).toEqual([]);
   });
 });

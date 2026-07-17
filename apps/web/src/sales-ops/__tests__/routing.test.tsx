@@ -160,26 +160,9 @@ function buttonByText(label: string): HTMLButtonElement {
   return match;
 }
 
-function roleOptionByIdentity(name: string, description: string): HTMLButtonElement {
-  const match = [...container.querySelectorAll('button')].find(
-    (candidate) =>
-      candidate.textContent?.includes(name) && candidate.textContent?.includes(description),
-  );
-  if (!(match instanceof HTMLButtonElement)) {
-    throw new Error(`role option not found: ${name} - ${description}`);
-  }
-  return match;
-}
-
 function workspaceButton(): HTMLButtonElement {
   const match = container.querySelector('button[title="Trocar workspace"]');
   if (!(match instanceof HTMLButtonElement)) throw new Error('workspace button not found');
-  return match;
-}
-
-function roleButton(): HTMLButtonElement {
-  const match = container.querySelector('button[title="Trocar visualização"]');
-  if (!(match instanceof HTMLButtonElement)) throw new Error('role button not found');
   return match;
 }
 
@@ -255,52 +238,50 @@ describe('Sales Ops canonical routing', () => {
     expectHeading('Visão geral');
 
     await renderRoute('/cadastros/produtos', ['seller']);
-    expect(pathname()).toBe('/tatico/vendedores');
+    expect(pathname()).toBe('/meus-dados/vendedores');
+    expectWorkspace('Meus dados');
     expectHeading('Meu painel');
 
-    await renderRoute('/tatico/dashboard', ['finder']);
-    expect(pathname()).toBe('/tatico/finders');
+    await renderRoute('/operacional/vendas', ['finder']);
+    expect(pathname()).toBe('/meus-dados/finders');
+    expectWorkspace('Meus dados');
     expectHeading('Meu painel');
   });
 
   it('does not restore a role-forbidden route after canonical replacement', async () => {
-    await renderHistory(['/operacional/vendas', '/cadastros/produtos'], ['seller']);
-    expect(pathname()).toBe('/tatico/vendedores');
+    await renderHistory(['/meus-dados/vendas', '/cadastros/produtos'], ['finder']);
+    expect(pathname()).toBe('/meus-dados/finders');
     expectHeading('Meu painel');
 
     await click(buttonByText('Back'));
-    expect(pathname()).toBe('/operacional/vendas');
-    expectHeading('Minhas vendas');
-    expectWorkspace('Operacional');
-  });
-
-  it('preserves or replaces the route when the active role changes', async () => {
-    const roles: AppRole[] = ['admin', 'seller', 'finder'];
-    await renderRoute('/operacional/vendas', roles);
-    await click(roleButton());
-    await click(roleOptionByIdentity('Vendedor', 'Só os próprios dados'));
-    expect(pathname()).toBe('/operacional/vendas');
-    expectHeading('Minhas vendas');
-
-    await renderRoute('/cadastros/produtos', roles);
-    await click(roleButton());
-    await click(roleOptionByIdentity('Finder', 'Só as próprias indicações'));
-    expect(pathname()).toBe('/tatico/finders');
-    expectHeading('Meu painel');
-  });
-
-  it('does not restore forbidden Cadastros after a role-switch replacement', async () => {
-    const roles: AppRole[] = ['admin', 'seller', 'finder'];
-    await renderHistory(['/operacional/vendas', '/cadastros/produtos'], roles);
-    await click(roleButton());
-    await click(roleOptionByIdentity('Finder', 'Só as próprias indicações'));
-    expect(pathname()).toBe('/tatico/finders');
-    expectHeading('Meu painel');
-
-    await click(buttonByText('Back'));
-    expect(pathname()).toBe('/operacional/vendas');
+    expect(pathname()).toBe('/meus-dados/vendas');
     expectHeading('Minhas indicações');
-    expectWorkspace('Operacional');
+    expectWorkspace('Meus dados');
+  });
+
+  it('lands seller-only users in Meus dados and blocks team workspaces', async () => {
+    await renderRoute('/', ['seller']);
+    expect(pathname()).toBe('/meus-dados/vendedores');
+    expectWorkspace('Meus dados');
+    expectHeading('Meu painel');
+
+    await renderRoute('/operacional/vendas', ['seller']);
+    expect(pathname()).toBe('/meus-dados/vendedores');
+  });
+
+  it('no longer renders the viewing-level switcher', async () => {
+    await renderRoute('/tatico/dashboard', ['admin', 'seller', 'finder']);
+    expect(container.querySelector('button[title="Trocar visualização"]')).toBeNull();
+    expect(container.textContent).not.toContain('Nível de visualização');
+  });
+
+  it('shows all four workspaces for team plus personal roles', async () => {
+    await renderRoute('/tatico/dashboard', ['admin', 'seller', 'finder']);
+    await click(workspaceButton());
+    buttonByText('Tático');
+    buttonByText('Operacional');
+    buttonByText('Cadastros');
+    buttonByText('Meus dados');
   });
 
   it('navigates from the dashboard sales card to operational sales', async () => {
