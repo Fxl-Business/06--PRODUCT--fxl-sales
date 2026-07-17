@@ -1,0 +1,1 @@
+{"agent":"verify","slice":"release-v2.2.0","status":"PASS","report":"nexo/runs/20260716-ship-v2.2.0/release-verify.md","summary":"PASS: pinned commit passed lint, type-check, 256 unit and contract tests, 27 integration tests, build, and dependency audits.","done":true,"started":"2026-07-17T02:08:03Z","ended":"2026-07-17T02:14:14Z","ts":"2026-07-17T02:14:14Z"}
