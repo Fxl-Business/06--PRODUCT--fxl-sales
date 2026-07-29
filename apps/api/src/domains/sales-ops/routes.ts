@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { z } from 'zod';
 import { getDb } from '../../db/client.js';
 import { requireAdmin } from '../../middleware/require-admin.js';
 import {
@@ -7,9 +8,11 @@ import {
   CreateSaleSchema,
   PersonSchema,
   ProductSchema,
+  SaleInputError,
   SettingsSchema,
   UpdateAreaSchema,
   UpdatePersonSchema,
+  UpdateSaleSchema,
   createArea,
   createClient,
   createPerson,
@@ -28,8 +31,11 @@ import {
   updateClient,
   updatePerson,
   updateProduct,
+  updateSale,
   upsertSettings,
 } from './service.js';
+
+const saleIdSchema = z.string().uuid();
 
 export const salesOpsRouter = new Hono();
 
@@ -157,8 +163,41 @@ salesOpsRouter.post('/sales', async (c) => {
   if (!parsed.success) {
     return c.json({ error: 'validation_error', issues: parsed.error.flatten() }, 400);
   }
-  const result = await createSale(getDb(), c.get('orgId'), parsed.data);
-  return c.json(result, 201);
+  try {
+    const result = await createSale(getDb(), c.get('orgId'), parsed.data);
+    return c.json(result, 201);
+  } catch (error) {
+    if (error instanceof SaleInputError) {
+      return c.json(
+        { error: 'validation_error', reason: error.code, itemIndex: error.itemIndex },
+        400,
+      );
+    }
+    throw error;
+  }
+});
+
+salesOpsRouter.put('/sales/:id', async (c) => {
+  const saleId = c.req.param('id');
+  if (!saleIdSchema.safeParse(saleId).success) return c.json({ error: 'not_found' }, 404);
+  const parsed = UpdateSaleSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) {
+    return c.json({ error: 'validation_error', issues: parsed.error.flatten() }, 400);
+  }
+  try {
+    const result = await updateSale(getDb(), c.get('orgId'), saleId, parsed.data);
+    if (!result.ok && result.reason === 'not_found') return c.json({ error: 'not_found' }, 404);
+    if (!result.ok) return c.json({ error: 'sale_not_editable', status: result.status }, 409);
+    return c.json({ sale: result.sale, ledger: result.ledger });
+  } catch (error) {
+    if (error instanceof SaleInputError) {
+      return c.json(
+        { error: 'validation_error', reason: error.code, itemIndex: error.itemIndex },
+        400,
+      );
+    }
+    throw error;
+  }
 });
 
 salesOpsRouter.get('/settings', async (c) => {

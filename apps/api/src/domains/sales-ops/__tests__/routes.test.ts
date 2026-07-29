@@ -11,6 +11,8 @@ const serviceMocks = vi.hoisted(() => ({
   updateArea: vi.fn(),
   getArea: vi.fn(),
   createProduct: vi.fn(),
+  createSale: vi.fn(),
+  updateSale: vi.fn(),
 }));
 
 vi.mock('../../../db/client.js', () => ({
@@ -29,6 +31,8 @@ vi.mock('../service.js', async (importOriginal) => {
     updateArea: serviceMocks.updateArea,
     getArea: serviceMocks.getArea,
     createProduct: serviceMocks.createProduct,
+    createSale: serviceMocks.createSale,
+    updateSale: serviceMocks.updateSale,
   };
 });
 
@@ -119,6 +123,35 @@ const productResult = {
   ...productPayload,
 };
 
+const salePayload = {
+  clientId: '11111111-1111-4111-8111-111111111111',
+  clientName: 'SegPro',
+  sellerPersonId: '22222222-2222-4222-8222-222222222222',
+  sellerName: 'Ana Martins',
+  status: 'open' as const,
+  baseDate: '2026-07-14',
+  sellerCommissionPct: 10,
+  finderCommissionPct: 3,
+  taxPct: 6,
+  otherCostsBrl: 0,
+  items: [
+    {
+      productId: '44444444-4444-4444-8444-444444444444',
+      productName: 'Módulo Vendas',
+      quantity: 1,
+      unitBrl: 400000,
+    },
+  ],
+  professionals: [],
+  installments: [{ dueDate: '2026-07-14', amountBrl: 400000, method: 'pix' as const }],
+};
+
+const saleResult = {
+  sale: { id: '55555555-5555-4555-8555-555555555555', code: '0001-01' },
+  ledger: { sale: { totalBrl: 400000 } },
+  payables: [],
+};
+
 beforeEach(() => {
   currentRole = undefined;
   vi.clearAllMocks();
@@ -130,6 +163,8 @@ beforeEach(() => {
   serviceMocks.updateArea.mockResolvedValue(areaResult);
   serviceMocks.getArea.mockResolvedValue(areaResult);
   serviceMocks.createProduct.mockResolvedValue(productResult);
+  serviceMocks.createSale.mockResolvedValue(saleResult);
+  serviceMocks.updateSale.mockResolvedValue({ ok: true, sale: saleResult.sale, ledger: saleResult.ledger });
 });
 
 describe('Sales Ops people routes', () => {
@@ -292,5 +327,77 @@ describe('Sales Ops product area binding', () => {
       'verified-org',
       expect.objectContaining({ areaId: productPayload.areaId }),
     );
+  });
+});
+
+describe('Sales Ops sale write routes', () => {
+  it('returns 400 and skips the service when installments do not sum to the items total', async () => {
+    const response = await jsonRequestWithBody('POST', '/sales', {
+      ...salePayload,
+      installments: [{ dueDate: '2026-07-14', amountBrl: 399999, method: 'pix' as const }],
+    });
+
+    expect(response.status).toBe(400);
+    expect(serviceMocks.createSale).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 for a free-form item without areaId', async () => {
+    const response = await jsonRequestWithBody('POST', '/sales', {
+      ...salePayload,
+      items: [{ productName: 'Serviço avulso', quantity: 1, unitBrl: 400000 }],
+    });
+
+    expect(response.status).toBe(400);
+    expect(serviceMocks.createSale).not.toHaveBeenCalled();
+  });
+
+  it('creates a v2 proposta and forwards the verified org', async () => {
+    const response = await jsonRequestWithBody('POST', '/sales', salePayload);
+
+    expect(response.status).toBe(201);
+    expect(serviceMocks.createSale).toHaveBeenCalledWith(
+      mockedDb,
+      'verified-org',
+      expect.objectContaining({ clientName: 'SegPro', status: 'open' }),
+    );
+    expect(await response.json()).toEqual(saleResult);
+  });
+
+  it('returns 409 when updating a won proposta', async () => {
+    serviceMocks.updateSale.mockResolvedValueOnce({
+      ok: false,
+      reason: 'not_editable',
+      status: 'won',
+    });
+
+    const putResponse = await app.request('/sales/55555555-5555-4555-8555-555555555555', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(salePayload),
+    });
+
+    expect(putResponse.status).toBe(409);
+    expect(await putResponse.json()).toEqual({ error: 'sale_not_editable', status: 'won' });
+  });
+
+  it('returns 404 for an unknown or non-uuid sale id', async () => {
+    const nonUuidResponse = await app.request('/sales/not-a-uuid', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(salePayload),
+    });
+    expect(nonUuidResponse.status).toBe(404);
+    expect(serviceMocks.updateSale).not.toHaveBeenCalled();
+
+    serviceMocks.updateSale.mockResolvedValueOnce({ ok: false, reason: 'not_found' });
+    const unknownResponse = await app.request(
+      '/sales/66666666-6666-4666-8666-666666666666',
+      {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(salePayload),
+      },
+    );
+    expect(unknownResponse.status).toBe(404);
   });
 });

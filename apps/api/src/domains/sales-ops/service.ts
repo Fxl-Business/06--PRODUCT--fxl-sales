@@ -1,4 +1,4 @@
-import { and, desc, eq, ne, sql, type SQL } from 'drizzle-orm';
+import { and, desc, eq, inArray, ne, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { getDb } from '../../db/client.js';
 import {
@@ -113,13 +113,38 @@ export const SettingsSchema = z.object({
   sellerCanBeFinder: z.boolean().default(true),
 });
 
-export const SaleItemSchema = z.object({
-  productId: uuid.optional(),
-  productName: z.string().trim().min(1).max(140),
-  productType: z.string().min(1).default('SaaS'),
-  quantity: z.number().int().positive(),
-  unitBrl: money,
+const MethodSchema = z.enum(['pix', 'card', 'boleto', 'transfer']);
+
+export const SaleInstallmentSchema = z.object({
+  dueDate: isoDate,
+  amountBrl: money,
+  method: MethodSchema,
 });
+
+export const SaleRecurringSchema = z.object({
+  monthlyBrl: z.number().int().positive(),
+  startDate: isoDate,
+  cycles: z.number().int().min(1).max(120).nullable(),
+  method: MethodSchema.default('pix'),
+});
+
+export const SaleItemSchema = z
+  .object({
+    productId: uuid.optional(),
+    productName: z.string().trim().min(1).max(140),
+    areaId: uuid.optional(),
+    quantity: z.number().int().positive(),
+    unitBrl: money,
+  })
+  .superRefine((item, ctx) => {
+    if (!item.productId && !item.areaId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['areaId'],
+        message: 'areaId is required when productId is absent',
+      });
+    }
+  });
 
 export const SaleProfessionalSchema = z.object({
   personId: uuid.optional(),
@@ -128,18 +153,32 @@ export const SaleProfessionalSchema = z.object({
   costBrl: money,
 });
 
-export const CreateSaleSchema = z.object({
+function validatePaymentPlan(
+  data: {
+    items: Array<{ quantity: number; unitBrl: number }>;
+    installments: Array<{ amountBrl: number }>;
+  },
+  ctx: z.RefinementCtx,
+) {
+  const itemsTotalBrl = data.items.reduce((sum, item) => sum + item.quantity * item.unitBrl, 0);
+  const planTotalBrl = data.installments.reduce((sum, row) => sum + row.amountBrl, 0);
+  if (planTotalBrl !== itemsTotalBrl) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['installments'],
+      message: `installments_sum_mismatch: expected ${itemsTotalBrl}, got ${planTotalBrl}`,
+    });
+  }
+}
+
+const SaleWriteBaseSchema = z.object({
   clientId: uuid.optional(),
   clientName: z.string().min(1),
   sellerPersonId: uuid.optional(),
   sellerName: z.string().min(1),
   finderPersonId: uuid.optional(),
   finderName: z.string().optional().nullable(),
-  // Canonical: draft | open | won | lost | cancelled. Legacy values remain accepted until slice 03 reworks CreateSaleSchema.
-  status: z.enum(['draft', 'open', 'won', 'lost', 'cancelled', 'forecast', 'closed', 'in_progress', 'completed']),
-  paymentMethod: z.enum(['pix', 'card', 'boleto', 'transfer']),
-  condition: z.enum(['cash', 'installments', 'recurring']),
-  installments: z.number().int().min(1).max(120).default(1),
+  status: z.enum(['draft', 'open', 'won']),
   baseDate: isoDate,
   notes: z.string().optional().nullable(),
   sellerCommissionPct: pct.default(10),
@@ -148,9 +187,18 @@ export const CreateSaleSchema = z.object({
   otherCostsBrl: money.default(0),
   items: z.array(SaleItemSchema).min(1),
   professionals: z.array(SaleProfessionalSchema).default([]),
+  installments: z.array(SaleInstallmentSchema).min(1).max(120),
+  recurring: SaleRecurringSchema.nullish(),
 });
 
+export const CreateSaleSchema = SaleWriteBaseSchema.superRefine(validatePaymentPlan);
+
+export const UpdateSaleSchema = SaleWriteBaseSchema.extend({
+  status: z.enum(['draft', 'open']),
+}).superRefine(validatePaymentPlan);
+
 export type CreateSaleInput = z.infer<typeof CreateSaleSchema>;
+export type UpdateSaleInput = z.infer<typeof UpdateSaleSchema>;
 export type ProductInput = z.infer<typeof ProductSchema>;
 export type ClientInput = z.infer<typeof ClientSchema>;
 export type PersonInput = z.infer<typeof PersonSchema>;
@@ -179,6 +227,8 @@ export type SalesOpsSnapshot = {
   people: unknown[];
   payables: PayableSummaryRow[];
   saleItems?: Array<{ saleId: string; productNameSnapshot: string; subtotalBrl: number }>;
+  receivables?: unknown[];
+  saleProfessionals?: unknown[];
 };
 
 function asDateOnly(value: string | Date): string {
@@ -201,28 +251,131 @@ function addMonths(value: string, months: number): string {
   return target.toISOString().slice(0, 10);
 }
 
-function splitAmount(total: number, parts: number): number[] {
-  const count = Math.max(1, parts);
-  const base = Math.floor(total / count);
-  const values = Array.from({ length: count }, () => base);
-  values[count - 1] = (values[count - 1] ?? 0) + total - base * count;
-  return values;
-}
-
 function pctOf(amount: number, rate: number): number {
   return Math.floor((amount * rate) / 100);
 }
 
-export function buildSaleLedger(input: CreateSaleInput) {
-  const totalBrl = input.items.reduce((sum, item) => sum + item.quantity * item.unitBrl, 0);
-  const recurringBrl = input.condition === 'recurring' ? totalBrl : 0;
+export class SaleInputError extends Error {
+  constructor(
+    readonly code: 'product_not_found' | 'product_area_missing' | 'area_not_found',
+    readonly itemIndex: number,
+  ) {
+    super(code);
+    this.name = 'SaleInputError';
+  }
+}
+
+export type ResolvedItemContext = {
+  areaId: string;
+  areaNameSnapshot: string;
+  productTypeSnapshot: string;
+};
+
+async function resolveSaleItemContexts(
+  tx: Db,
+  orgId: string,
+  items: CreateSaleInput['items'],
+): Promise<ResolvedItemContext[]> {
+  const productIds = [
+    ...new Set(items.map((item) => item.productId).filter((id): id is string => Boolean(id))),
+  ];
+  const products = productIds.length
+    ? await tx
+        .select({
+          id: salesOpsProducts.id,
+          type: salesOpsProducts.type,
+          areaId: salesOpsProducts.areaId,
+        })
+        .from(salesOpsProducts)
+        .where(and(eq(salesOpsProducts.orgId, orgId), inArray(salesOpsProducts.id, productIds)))
+    : [];
+  const productsById = new Map(products.map((product) => [product.id, product]));
+
+  const areaIds = new Set<string>();
+  for (const product of products) {
+    if (product.areaId) areaIds.add(product.areaId);
+  }
+  for (const item of items) {
+    if (!item.productId && item.areaId) areaIds.add(item.areaId);
+  }
+  const areaIdList = [...areaIds];
+  const areas = areaIdList.length
+    ? await tx
+        .select({ id: salesOpsAreas.id, name: salesOpsAreas.name })
+        .from(salesOpsAreas)
+        .where(and(eq(salesOpsAreas.orgId, orgId), inArray(salesOpsAreas.id, areaIdList)))
+    : [];
+  const areasById = new Map(areas.map((area) => [area.id, area]));
+
+  return items.map((item, index) => {
+    if (item.productId) {
+      const product = productsById.get(item.productId);
+      if (!product) throw new SaleInputError('product_not_found', index);
+      if (!product.areaId) throw new SaleInputError('product_area_missing', index);
+      const area = areasById.get(product.areaId);
+      if (!area) throw new SaleInputError('area_not_found', index);
+      return { areaId: area.id, areaNameSnapshot: area.name, productTypeSnapshot: product.type };
+    }
+    const area = item.areaId ? areasById.get(item.areaId) : undefined;
+    if (!area) throw new SaleInputError('area_not_found', index);
+    return { areaId: area.id, areaNameSnapshot: area.name, productTypeSnapshot: '' };
+  });
+}
+
+export type ReceivableDraft = {
+  label: string;
+  dueDate: string;
+  amountBrl: number;
+  method: 'pix' | 'card' | 'boleto' | 'transfer';
+  status: 'open';
+};
+
+export function buildSaleLedger(input: CreateSaleInput, itemContexts: ResolvedItemContext[]) {
+  if (itemContexts.length !== input.items.length) {
+    throw new Error('item_context_mismatch');
+  }
+
+  const itemsTotalBrl = input.items.reduce((sum, item) => sum + item.quantity * item.unitBrl, 0);
+
+  const keptInstallments = input.installments.filter((row) => row.amountBrl > 0);
+  const receivables: ReceivableDraft[] = keptInstallments.map((row, index) => ({
+    label: `${index + 1}/${keptInstallments.length}`,
+    dueDate: row.dueDate,
+    amountBrl: row.amountBrl,
+    method: row.method,
+    status: 'open',
+  }));
+
+  const recurring = input.recurring ?? null;
+  if (recurring && recurring.cycles !== null) {
+    for (let i = 0; i < recurring.cycles; i++) {
+      receivables.push({
+        label: `M${i + 1}/${recurring.cycles}`,
+        dueDate: addMonths(recurring.startDate, i),
+        amountBrl: recurring.monthlyBrl,
+        method: recurring.method,
+        status: 'open',
+      });
+    }
+  }
+
+  const boundedRecurringBrl =
+    recurring && recurring.cycles !== null ? recurring.monthlyBrl * recurring.cycles : 0;
+  const totalBrl = itemsTotalBrl + boundedRecurringBrl;
+  const recurringBrl = recurring ? recurring.monthlyBrl : 0;
+
+  const sellerCommissionBrl = receivables.reduce(
+    (sum, row) => sum + pctOf(row.amountBrl, input.sellerCommissionPct),
+    0,
+  );
+  const finderCommissionBrl = input.finderPersonId
+    ? receivables.reduce((sum, row) => sum + pctOf(row.amountBrl, input.finderCommissionPct), 0)
+    : 0;
+  const taxBrl = receivables.reduce((sum, row) => sum + pctOf(row.amountBrl, input.taxPct), 0);
   const professionalCostsBrl = input.professionals.reduce(
     (sum, professional) => sum + professional.costBrl,
     0,
   );
-  const sellerCommissionBrl = pctOf(totalBrl, input.sellerCommissionPct);
-  const finderCommissionBrl = input.finderPersonId ? pctOf(totalBrl, input.finderCommissionPct) : 0;
-  const taxBrl = pctOf(totalBrl, input.taxPct);
   const netMarginBrl =
     totalBrl -
     sellerCommissionBrl -
@@ -231,76 +384,14 @@ export function buildSaleLedger(input: CreateSaleInput) {
     input.otherCostsBrl -
     taxBrl;
   const netMarginPct = totalBrl > 0 ? ((netMarginBrl / totalBrl) * 100).toFixed(2) : '0.00';
-  const installmentCount = input.condition === 'cash' ? 1 : input.installments;
-  const receivables = splitAmount(totalBrl, installmentCount).map((amountBrl, index) => ({
-    label: `${index + 1}/${installmentCount}`,
-    dueDate: addMonths(input.baseDate, index),
-    amountBrl,
-    status: 'open',
-  }));
 
-  const payables: Array<{
-    beneficiaryName: string;
-    kind:
-      | 'seller_commission'
-      | 'finder_commission'
-      | 'professional_cost'
-      | 'tax'
-      | 'other_cost';
-    dueDate: string;
-    amountBrl: number;
-    status: 'open';
-  }> = [
-    {
-      beneficiaryName: input.sellerName,
-      kind: 'seller_commission',
-      dueDate: addMonths(input.baseDate, 1),
-      amountBrl: sellerCommissionBrl,
-      status: 'open',
-    },
-  ];
-
-  if (input.finderPersonId && finderCommissionBrl > 0) {
-    payables.push({
-      beneficiaryName: input.finderName ?? 'Finder',
-      kind: 'finder_commission',
-      dueDate: addMonths(input.baseDate, 1),
-      amountBrl: finderCommissionBrl,
-      status: 'open',
-    });
-  }
-
-  for (const professional of input.professionals) {
-    if (professional.costBrl > 0) {
-      payables.push({
-        beneficiaryName: professional.personName,
-        kind: 'professional_cost',
-        dueDate: input.baseDate,
-        amountBrl: professional.costBrl,
-        status: 'open',
-      });
-    }
-  }
-
-  if (taxBrl > 0) {
-    payables.push({
-      beneficiaryName: 'Impostos',
-      kind: 'tax',
-      dueDate: addMonths(input.baseDate, 1),
-      amountBrl: taxBrl,
-      status: 'open',
-    });
-  }
-
-  if (input.otherCostsBrl > 0) {
-    payables.push({
-      beneficiaryName: 'Outros custos',
-      kind: 'other_cost',
-      dueDate: input.baseDate,
-      amountBrl: input.otherCostsBrl,
-      status: 'open',
-    });
-  }
+  const paymentMethod = input.installments[0]!.method;
+  const condition = input.recurring
+    ? 'recurring'
+    : input.installments.length === 1
+      ? 'cash'
+      : 'installments';
+  const installmentsColumn = input.installments.length;
 
   return {
     sale: {
@@ -311,9 +402,9 @@ export function buildSaleLedger(input: CreateSaleInput) {
       finderPersonId: input.finderPersonId,
       finderNameSnapshot: input.finderName ?? null,
       status: input.status,
-      paymentMethod: input.paymentMethod,
-      condition: input.condition,
-      installments: installmentCount,
+      paymentMethod,
+      condition,
+      installments: installmentsColumn,
       baseDate: input.baseDate,
       notes: input.notes ?? null,
       totalBrl,
@@ -329,10 +420,12 @@ export function buildSaleLedger(input: CreateSaleInput) {
       netMarginBrl,
       netMarginPct,
     },
-    items: input.items.map((item) => ({
+    items: input.items.map((item, index) => ({
       productId: item.productId,
       productNameSnapshot: item.productName,
-      productTypeSnapshot: item.productType,
+      productTypeSnapshot: itemContexts[index]!.productTypeSnapshot,
+      areaId: itemContexts[index]!.areaId,
+      areaNameSnapshot: itemContexts[index]!.areaNameSnapshot,
       quantity: item.quantity,
       unitBrl: item.unitBrl,
       subtotalBrl: item.quantity * item.unitBrl,
@@ -344,12 +437,132 @@ export function buildSaleLedger(input: CreateSaleInput) {
       costBrl: professional.costBrl,
     })),
     receivables,
-    payables,
   };
 }
 
+export type SaleLedger = ReturnType<typeof buildSaleLedger>;
+
+export type PayableKind =
+  | 'seller_commission'
+  | 'finder_commission'
+  | 'professional_cost'
+  | 'tax'
+  | 'other_cost';
+
+export type PayableDraft = {
+  beneficiaryName: string;
+  kind: PayableKind;
+  dueDate: string;
+  amountBrl: number;
+  status: 'open';
+  receivableId: string | null;
+};
+
+export type ExistingPayableRef = {
+  kind: PayableKind;
+  receivableId: string | null;
+  status: string;
+};
+
+export type MaterializeWonPayablesInput = {
+  sale: {
+    sellerName: string;
+    finderName: string | null;
+    hasFinder: boolean;
+    sellerCommissionPct: number;
+    finderCommissionPct: number;
+    taxPct: number;
+    otherCostsBrl: number;
+  };
+  professionals: Array<{ personName: string; costBrl: number }>;
+  receivables: Array<{ id: string; dueDate: string; amountBrl: number; status: string }>;
+  existingPayables?: ExistingPayableRef[];
+  wonDate: string;
+};
+
+export function materializeWonPayables(input: MaterializeWonPayablesInput): PayableDraft[] {
+  const existingPayables = input.existingPayables ?? [];
+  const alreadyExists = (kind: PayableKind, receivableId: string | null) =>
+    existingPayables.some(
+      (payable) =>
+        payable.kind === kind &&
+        payable.receivableId === receivableId &&
+        payable.status !== 'void',
+    );
+
+  const drafts: PayableDraft[] = [];
+
+  for (const row of input.receivables) {
+    if (row.status === 'void') continue;
+
+    const sellerAmountBrl = pctOf(row.amountBrl, input.sale.sellerCommissionPct);
+    if (sellerAmountBrl > 0 && !alreadyExists('seller_commission', row.id)) {
+      drafts.push({
+        beneficiaryName: input.sale.sellerName,
+        kind: 'seller_commission',
+        dueDate: row.dueDate,
+        amountBrl: sellerAmountBrl,
+        status: 'open',
+        receivableId: row.id,
+      });
+    }
+
+    if (input.sale.hasFinder) {
+      const finderAmountBrl = pctOf(row.amountBrl, input.sale.finderCommissionPct);
+      if (finderAmountBrl > 0 && !alreadyExists('finder_commission', row.id)) {
+        drafts.push({
+          beneficiaryName: input.sale.finderName ?? 'Finder',
+          kind: 'finder_commission',
+          dueDate: row.dueDate,
+          amountBrl: finderAmountBrl,
+          status: 'open',
+          receivableId: row.id,
+        });
+      }
+    }
+
+    const taxAmountBrl = pctOf(row.amountBrl, input.sale.taxPct);
+    if (taxAmountBrl > 0 && !alreadyExists('tax', row.id)) {
+      drafts.push({
+        beneficiaryName: 'Impostos',
+        kind: 'tax',
+        dueDate: row.dueDate,
+        amountBrl: taxAmountBrl,
+        status: 'open',
+        receivableId: row.id,
+      });
+    }
+  }
+
+  for (const professional of input.professionals) {
+    if (professional.costBrl > 0 && !alreadyExists('professional_cost', null)) {
+      drafts.push({
+        beneficiaryName: professional.personName,
+        kind: 'professional_cost',
+        dueDate: input.wonDate,
+        amountBrl: professional.costBrl,
+        status: 'open',
+        receivableId: null,
+      });
+    }
+  }
+
+  if (input.sale.otherCostsBrl > 0 && !alreadyExists('other_cost', null)) {
+    drafts.push({
+      beneficiaryName: 'Outros custos',
+      kind: 'other_cost',
+      dueDate: input.wonDate,
+      amountBrl: input.sale.otherCostsBrl,
+      status: 'open',
+      receivableId: null,
+    });
+  }
+
+  return drafts;
+}
+
 export function summarizeSalesOpsState(snapshot: SalesOpsSnapshot) {
-  const closedStatuses = new Set(['won', 'closed', 'completed']);
+  const closedStatuses = new Set(['won']);
   const activeSales = snapshot.sales.filter((sale) => sale.status !== 'cancelled');
   const closedSales = activeSales.filter((sale) => closedStatuses.has(sale.status));
   const payableBrl = snapshot.payables
@@ -622,9 +835,16 @@ export async function getSettings(db: Db, orgId: string) {
   });
 }
 
-export async function createSale(db: Db, orgId: string, input: CreateSaleInput) {
-  const ledger = buildSaleLedger(input);
+export async function createSale(
+  db: Db,
+  orgId: string,
+  input: CreateSaleInput,
+  now: Date = new Date(),
+): Promise<{ sale: typeof salesOpsSales.$inferSelect; ledger: SaleLedger; payables: PayableDraft[] }> {
   return withTenant(db, orgId, async (tx) => {
+    const itemContexts = await resolveSaleItemContexts(tx, orgId, input.items);
+    const ledger = buildSaleLedger(input, itemContexts);
+
     const sequenceRows = await tx
       .select({ nextSequence: sql<number>`COALESCE(MAX(${salesOpsSales.sequence}), 0) + 1` })
       .from(salesOpsSales)
@@ -652,6 +872,7 @@ export async function createSale(db: Db, orgId: string, input: CreateSaleInput) 
         finderPersonId: ledger.sale.finderPersonId ?? null,
         baseDate: dateFromIsoDay(ledger.sale.baseDate),
         netMarginPct: ledger.sale.netMarginPct,
+        wonAt: input.status === 'won' ? now : null,
       })
       .returning();
     if (!sale) throw new Error('sale_insert_failed');
@@ -676,25 +897,159 @@ export async function createSale(db: Db, orgId: string, input: CreateSaleInput) 
         })),
       );
     }
-    await tx.insert(salesOpsReceivables).values(
-      ledger.receivables.map((receivable) => ({
-        ...receivable,
-        orgId,
-        saleId: sale.id,
-        dueDate: dateFromIsoDay(receivable.dueDate),
-      })),
-    );
-    if (ledger.payables.length > 0) {
-      await tx.insert(salesOpsPayables).values(
-        ledger.payables.map((payable) => ({
-          ...payable,
+
+    let insertedReceivables: Array<{
+      id: string;
+      dueDate: Date;
+      amountBrl: number;
+      status: string;
+    }> = [];
+    if (ledger.receivables.length > 0) {
+      insertedReceivables = await tx
+        .insert(salesOpsReceivables)
+        .values(
+          ledger.receivables.map((receivable) => ({
+            ...receivable,
+            orgId,
+            saleId: sale.id,
+            dueDate: dateFromIsoDay(receivable.dueDate),
+          })),
+        )
+        .returning({
+          id: salesOpsReceivables.id,
+          dueDate: salesOpsReceivables.dueDate,
+          amountBrl: salesOpsReceivables.amountBrl,
+          status: salesOpsReceivables.status,
+        });
+    }
+
+    let payables: PayableDraft[] = [];
+    if (input.status === 'won') {
+      payables = materializeWonPayables({
+        sale: {
+          sellerName: input.sellerName,
+          finderName: input.finderName ?? null,
+          hasFinder: input.finderPersonId != null,
+          sellerCommissionPct: input.sellerCommissionPct,
+          finderCommissionPct: input.finderCommissionPct,
+          taxPct: input.taxPct,
+          otherCostsBrl: input.otherCostsBrl,
+        },
+        professionals: input.professionals.map((p) => ({
+          personName: p.personName,
+          costBrl: p.costBrl,
+        })),
+        receivables: insertedReceivables.map((r) => ({
+          id: r.id,
+          dueDate: asDateOnly(r.dueDate),
+          amountBrl: r.amountBrl,
+          status: r.status,
+        })),
+        wonDate: asDateOnly(now),
+      });
+      if (payables.length > 0) {
+        await tx.insert(salesOpsPayables).values(
+          payables.map((payable) => ({
+            ...payable,
+            orgId,
+            saleId: sale.id,
+            dueDate: dateFromIsoDay(payable.dueDate),
+          })),
+        );
+      }
+    }
+
+    return { sale, ledger, payables };
+  });
+}
+
+export type UpdateSaleResult =
+  | { ok: true; sale: typeof salesOpsSales.$inferSelect; ledger: SaleLedger }
+  | { ok: false; reason: 'not_found' }
+  | { ok: false; reason: 'not_editable'; status: string };
+
+export async function updateSale(
+  db: Db,
+  orgId: string,
+  saleId: string,
+  input: UpdateSaleInput,
+): Promise<UpdateSaleResult> {
+  return withTenant(db, orgId, async (tx): Promise<UpdateSaleResult> => {
+    const [existing] = await tx
+      .select()
+      .from(salesOpsSales)
+      .where(and(eq(salesOpsSales.orgId, orgId), eq(salesOpsSales.id, saleId)))
+      .limit(1);
+    if (!existing) return { ok: false, reason: 'not_found' };
+    if (existing.status === 'won' || existing.status === 'lost' || existing.status === 'cancelled') {
+      return { ok: false, reason: 'not_editable', status: existing.status };
+    }
+
+    const itemContexts = await resolveSaleItemContexts(tx, orgId, input.items);
+    const ledger = buildSaleLedger(input, itemContexts);
+
+    await tx
+      .delete(salesOpsPayables)
+      .where(and(eq(salesOpsPayables.orgId, orgId), eq(salesOpsPayables.saleId, saleId)));
+    await tx
+      .delete(salesOpsReceivables)
+      .where(and(eq(salesOpsReceivables.orgId, orgId), eq(salesOpsReceivables.saleId, saleId)));
+    await tx
+      .delete(salesOpsSaleProfessionals)
+      .where(
+        and(eq(salesOpsSaleProfessionals.orgId, orgId), eq(salesOpsSaleProfessionals.saleId, saleId)),
+      );
+    await tx
+      .delete(salesOpsSaleItems)
+      .where(and(eq(salesOpsSaleItems.orgId, orgId), eq(salesOpsSaleItems.saleId, saleId)));
+
+    const [sale] = await tx
+      .update(salesOpsSales)
+      .set({
+        ...ledger.sale,
+        clientId: ledger.sale.clientId ?? null,
+        sellerPersonId: ledger.sale.sellerPersonId ?? null,
+        finderPersonId: ledger.sale.finderPersonId ?? null,
+        baseDate: dateFromIsoDay(ledger.sale.baseDate),
+        netMarginPct: ledger.sale.netMarginPct,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(salesOpsSales.orgId, orgId), eq(salesOpsSales.id, saleId)))
+      .returning();
+    if (!sale) throw new Error('sale_update_failed');
+
+    if (ledger.items.length > 0) {
+      await tx.insert(salesOpsSaleItems).values(
+        ledger.items.map((item) => ({
+          ...item,
           orgId,
           saleId: sale.id,
-          dueDate: dateFromIsoDay(payable.dueDate),
+          productId: item.productId ?? null,
         })),
       );
     }
-    return { sale, ledger };
+    if (ledger.professionals.length > 0) {
+      await tx.insert(salesOpsSaleProfessionals).values(
+        ledger.professionals.map((professional) => ({
+          ...professional,
+          orgId,
+          saleId: sale.id,
+          personId: professional.personId ?? null,
+        })),
+      );
+    }
+    if (ledger.receivables.length > 0) {
+      await tx.insert(salesOpsReceivables).values(
+        ledger.receivables.map((receivable) => ({
+          ...receivable,
+          orgId,
+          saleId: sale.id,
+          dueDate: dateFromIsoDay(receivable.dueDate),
+        })),
+      );
+    }
+
+    return { ok: true, sale, ledger };
   });
 }
 
@@ -745,6 +1100,14 @@ export async function getSalesOpsSnapshot(db: Db, orgId: string) {
       .from(salesOpsAreas)
       .where(eq(salesOpsAreas.orgId, orgId))
       .orderBy(salesOpsAreas.name);
+    const receivables = await tx
+      .select()
+      .from(salesOpsReceivables)
+      .where(eq(salesOpsReceivables.orgId, orgId));
+    const saleProfessionals = await tx
+      .select()
+      .from(salesOpsSaleProfessionals)
+      .where(eq(salesOpsSaleProfessionals.orgId, orgId));
     return {
       sales,
       products,
@@ -753,6 +1116,8 @@ export async function getSalesOpsSnapshot(db: Db, orgId: string) {
       payables,
       saleItems,
       areas,
+      receivables,
+      saleProfessionals,
       settings: settings[0] ?? null,
     };
   });
