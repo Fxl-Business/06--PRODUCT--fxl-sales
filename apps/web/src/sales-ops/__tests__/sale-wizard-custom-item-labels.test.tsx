@@ -42,6 +42,7 @@ function product(
     name,
     type: openPrice ? 'Custom' : 'SaaS',
     codeSuffix: openPrice ? 'CST' : 'FIN',
+    areaId: null,
     openPrice,
     setupBrl,
     hasMonthly: false,
@@ -92,6 +93,7 @@ const bootstrap: SalesOpsBootstrap = {
       updatedAt: null,
     },
   ],
+  areas: [],
   payables: [],
   saleItems: [],
   settings: {

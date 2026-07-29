@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAccessToken } from '@/auth/react';
 import {
   salesOpsApi,
+  type SaveAreaPayload,
   type SaveClientPayload,
   type SavePersonPayload,
   type SaveProductPayload,
@@ -27,6 +28,7 @@ export function useSalesOpsBootstrap() {
       sales: Array.isArray(data.sales) ? data.sales : [],
       products: Array.isArray(data.products) ? data.products : [],
       clients: Array.isArray(data.clients) ? data.clients : [],
+      areas: Array.isArray(data.areas) ? data.areas : [],
       people: Array.isArray(data.people) ? data.people : [],
       payables: Array.isArray(data.payables) ? data.payables : [],
       saleItems: Array.isArray(data.saleItems) ? data.saleItems : [],
@@ -70,6 +72,18 @@ export function useSaveSalesOpsClient() {
   return useMutation({
     mutationFn: async (payload: SaveClientPayload) =>
       salesOpsApi.saveClient(payload, await requireToken(getToken)),
+    onSuccess: () => {
+      void invalidate();
+    },
+  });
+}
+
+export function useSaveSalesOpsArea() {
+  const { getToken } = useAccessToken();
+  const invalidate = useInvalidateSalesOps();
+  return useMutation({
+    mutationFn: async (payload: SaveAreaPayload) =>
+      salesOpsApi.saveArea(payload, await requireToken(getToken)),
     onSuccess: () => {
       void invalidate();
     },

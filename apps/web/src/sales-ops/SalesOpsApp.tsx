@@ -54,6 +54,7 @@ import { cn } from '@/lib/utils';
 import {
   useCreateSalesOpsSale,
   useSalesOpsBootstrap,
+  useSaveSalesOpsArea,
   useSaveSalesOpsClient,
   useSaveSalesOpsPerson,
   useSaveSalesOpsProduct,
@@ -76,6 +77,7 @@ import type {
   PaymentCondition,
   PaymentMethod,
   SaleDraft,
+  SalesOpsArea,
   SalesOpsBootstrap,
   SalesOpsClient,
   SalesOpsPerson,
@@ -92,6 +94,7 @@ import {
   resolveSaleCommissionDefaults,
 } from './calculations';
 import type {
+  SaveAreaPayload,
   SaveClientPayload,
   SavePersonPayload,
   SaveProductPayload,
@@ -102,6 +105,7 @@ const emptyBootstrap: SalesOpsBootstrap = {
   sales: [],
   products: [],
   clients: [],
+  areas: [],
   people: [],
   payables: [],
   saleItems: [],
@@ -119,7 +123,6 @@ const formInputClass =
   'h-11 rounded-[10px] border-[#dcdce2] bg-[#fafafb] px-3 text-sm text-[#201f24] shadow-none outline-none ring-0 transition focus-visible:border-[#eaa81a] focus-visible:ring-0 focus-visible:ring-offset-0 disabled:bg-[#f4f4f6] disabled:text-[#9b9ba3] disabled:opacity-100';
 const formSelectClass =
   'h-11 appearance-none rounded-[10px] border-[#dcdce2] bg-[#fafafb] px-3 pr-9 text-sm font-medium text-[#201f24] outline-none transition focus:border-[#eaa81a] disabled:cursor-not-allowed disabled:opacity-60';
-const productTypeOptions = ['SaaS', 'Custom', 'Advisor', 'Visual'];
 
 const workspaceVisuals: Record<
   SalesOpsWorkspace,
@@ -138,6 +141,7 @@ const workspaceVisuals: Record<
 type ModalState =
   | { kind: 'product'; product?: SalesOpsProduct }
   | { kind: 'client'; client?: SalesOpsClient }
+  | { kind: 'area'; area?: SalesOpsArea }
   | { kind: 'person'; person?: SalesOpsPerson; roleHint: 'seller' | 'finder' | 'collaborator' }
   | null;
 
@@ -167,6 +171,10 @@ function titleForView(view: SalesOpsView, workspace: SalesOpsWorkspace) {
     produtos: {
       title: 'Produtos',
       subtitle: 'Catálogo, valores, códigos e regras de comissão',
+    },
+    areas: {
+      title: 'Áreas',
+      subtitle: 'Unidades de negócio que classificam produtos e itens de venda',
     },
     clientes: {
       title: 'Clientes',
@@ -487,6 +495,7 @@ export function SalesOpsApp() {
   const savePerson = useSaveSalesOpsPerson();
   const saveProduct = useSaveSalesOpsProduct();
   const saveClient = useSaveSalesOpsClient();
+  const saveArea = useSaveSalesOpsArea();
   const createSale = useCreateSalesOpsSale();
   const saveSettings = useSaveSalesOpsSettings();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -561,6 +570,10 @@ export function SalesOpsApp() {
       setModal({ kind: 'product' });
       return;
     }
+    if (view === 'areas') {
+      setModal({ kind: 'area' });
+      return;
+    }
     if (view === 'clientes') {
       setModal({ kind: 'client' });
       return;
@@ -581,15 +594,17 @@ export function SalesOpsApp() {
       ? null
       : view === 'produtos'
         ? 'Novo produto'
-        : view === 'clientes'
-          ? 'Novo cliente'
-          : view === 'vendedores' && canManagePeople
-            ? 'Novo vendedor'
-            : view === 'finders' && canManagePeople
-              ? 'Novo finder'
-              : view === 'vendedores' || view === 'finders'
-                ? null
-                : 'Nova venda';
+        : view === 'areas'
+          ? 'Nova área'
+          : view === 'clientes'
+            ? 'Novo cliente'
+            : view === 'vendedores' && canManagePeople
+              ? 'Novo vendedor'
+              : view === 'finders' && canManagePeople
+                ? 'Novo finder'
+                : view === 'vendedores' || view === 'finders'
+                  ? null
+                  : 'Nova venda';
   const availableWorkspaces = salesOpsWorkspaces.filter((item) =>
     visibleWorkspaceIds.includes(item.id),
   );
@@ -965,6 +980,7 @@ export function SalesOpsApp() {
                 {view === 'comissoes' ? <CommissionsView bootstrap={bootstrap} /> : null}
                 {view === 'produtos' ? (
                   <ProductsView
+                    areas={bootstrap.areas}
                     products={bootstrap.products}
                     onEdit={(product) => setModal({ kind: 'product', product })}
                   />
@@ -973,6 +989,12 @@ export function SalesOpsApp() {
                   <ClientsView
                     bootstrap={bootstrap}
                     onEdit={(client) => setModal({ kind: 'client', client })}
+                  />
+                ) : null}
+                {view === 'areas' ? (
+                  <AreasView
+                    bootstrap={bootstrap}
+                    onEdit={(area) => setModal({ kind: 'area', area })}
                   />
                 ) : null}
                 {view === 'geral' ? (
@@ -990,6 +1012,7 @@ export function SalesOpsApp() {
       </main>
 
       <ProductDialog
+        areas={bootstrap.areas}
         collaborators={bootstrap.people.filter((person) => person.isCollaborator)}
         modal={modal?.kind === 'product' ? modal : null}
         onClose={() => setModal(null)}
@@ -1005,6 +1028,14 @@ export function SalesOpsApp() {
           saveClient.mutate(payload, { onSuccess: () => setModal(null) });
         }}
         saving={saveClient.isPending}
+      />
+      <AreaDialog
+        modal={modal?.kind === 'area' ? modal : null}
+        onClose={() => setModal(null)}
+        onSave={(payload) => {
+          saveArea.mutate(payload, { onSuccess: () => setModal(null) });
+        }}
+        saving={saveArea.isPending}
       />
       <PersonDialog
         modal={personModalMatchesRoute && modal?.kind === 'person' ? modal : null}
@@ -1462,9 +1493,11 @@ function formatProductCommission(type: 'pct' | 'fix', value: string): string {
 }
 
 export function ProductsView({
+  areas,
   products,
   onEdit,
 }: {
+  areas: SalesOpsArea[];
   products: SalesOpsProduct[];
   onEdit: (product: SalesOpsProduct) => void;
 }) {
@@ -1483,7 +1516,7 @@ export function ProductsView({
         <TableHeader>
           <TableRow className="bg-[#fafafb] hover:bg-[#fafafb]">
             <TableHead className={tableHeadClass}>Nome</TableHead>
-            <TableHead className={tableHeadClass}>Tipo</TableHead>
+            <TableHead className={tableHeadClass}>Área</TableHead>
             <TableHead className={`${tableHeadClass} text-center`}>Cód.</TableHead>
             <TableHead className={`${tableHeadClass} text-right`}>Setup</TableHead>
             <TableHead className={`${tableHeadClass} text-right`}>Mensalidade</TableHead>
@@ -1497,7 +1530,9 @@ export function ProductsView({
           {products.map((product) => (
             <TableRow key={product.id}>
               <TableCell className="px-4 py-3 text-sm font-semibold">{product.name}</TableCell>
-              <TableCell className={tableCellClass}>{product.type}</TableCell>
+              <TableCell className={tableCellClass}>
+                {areas.find((area) => area.id === product.areaId)?.name ?? '-'}
+              </TableCell>
               <TableCell className="px-4 py-3 text-center">
                 <span className="sales-ops-num rounded-md bg-[#fdf0cf] px-2 py-1 text-xs font-bold tracking-[0.04em] text-[#9c7210]">
                   ...{product.codeSuffix}
@@ -1593,6 +1628,69 @@ function ClientsView({
                 </TableCell>
                 <TableCell className="px-4 py-3 text-center">
                   <button className={iconButtonClass} onClick={() => onEdit(client)} type="button">
+                    <Edit3 className="h-[15px] w-[15px]" />
+                  </button>
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
+export function AreasView({
+  bootstrap,
+  onEdit,
+}: {
+  bootstrap: SalesOpsBootstrap;
+  onEdit: (area: SalesOpsArea) => void;
+}) {
+  if (bootstrap.areas.length === 0) {
+    return (
+      <EmptyPanel
+        text="Cadastre áreas para classificar produtos e itens de venda por unidade de negócio."
+        title="Nenhuma área cadastrada"
+      />
+    );
+  }
+
+  return (
+    <div className={`${panelClass} overflow-hidden`}>
+      <Table>
+        <TableHeader>
+          <TableRow className="bg-[#fafafb] hover:bg-[#fafafb]">
+            <TableHead className={tableHeadClass}>Nome</TableHead>
+            <TableHead className={`${tableHeadClass} text-center`}>Status</TableHead>
+            <TableHead className={`${tableHeadClass} text-center`}>Nº produtos</TableHead>
+            <TableHead className={`${tableHeadClass} text-center`}>Ações</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {bootstrap.areas.map((area) => {
+            const productCount = bootstrap.products.filter(
+              (product) => product.areaId === area.id,
+            ).length;
+            return (
+              <TableRow key={area.id}>
+                <TableCell className="px-4 py-3 text-sm font-semibold">{area.name}</TableCell>
+                <TableCell className="px-4 py-3 text-center">
+                  <Badge
+                    className={
+                      area.status === 'active'
+                        ? 'bg-[#c9e7cf] text-[#1f7d43]'
+                        : 'bg-[#eeeef1] text-[#6a6a72]'
+                    }
+                  >
+                    {area.status === 'active' ? 'Ativa' : 'Arquivada'}
+                  </Badge>
+                </TableCell>
+                <TableCell className="sales-ops-num px-4 py-3 text-center text-[13.5px]">
+                  {productCount}
+                </TableCell>
+                <TableCell className="px-4 py-3 text-center">
+                  <button className={iconButtonClass} onClick={() => onEdit(area)} type="button">
                     <Edit3 className="h-[15px] w-[15px]" />
                   </button>
                 </TableCell>
@@ -1808,7 +1906,7 @@ function SettingsView({
 
 type ProductForm = {
   name: string;
-  type: string;
+  areaId: string;
   codeSuffix: string;
   openPrice: boolean;
   setupBrl: string;
@@ -1828,7 +1926,7 @@ type ProductForm = {
 function productForm(product?: SalesOpsProduct): ProductForm {
   return {
     name: product?.name ?? '',
-    type: product?.type ?? 'SaaS',
+    areaId: product?.areaId ?? '',
     codeSuffix: product?.codeSuffix ?? '0',
     openPrice: product?.openPrice ?? false,
     setupBrl: centsToInput(product?.setupBrl),
@@ -1988,6 +2086,7 @@ function DefinedOnSaleNotice() {
 
 export function ProductDialog(props: {
   modal: Extract<ModalState, { kind: 'product' }> | null;
+  areas: SalesOpsArea[];
   collaborators: SalesOpsPerson[];
   onClose: () => void;
   onSave: (payload: SaveProductPayload) => void;
@@ -1997,6 +2096,7 @@ export function ProductDialog(props: {
   return (
     <ProductDialogBody
       key={props.modal.product?.id ?? 'new-product'}
+      areas={props.areas}
       collaborators={props.collaborators}
       modal={props.modal}
       onClose={props.onClose}
@@ -2008,12 +2108,14 @@ export function ProductDialog(props: {
 
 function ProductDialogBody({
   modal,
+  areas,
   collaborators,
   onClose,
   onSave,
   saving,
 }: {
   modal: Extract<ModalState, { kind: 'product' }>;
+  areas: SalesOpsArea[];
   collaborators: SalesOpsPerson[];
   onClose: () => void;
   onSave: (payload: SaveProductPayload) => void;
@@ -2027,12 +2129,21 @@ function ProductDialogBody({
     setForm((current) => ({ ...current, [key]: value }));
   }
 
+  const activeAreas = areas.filter((area) => area.status === 'active');
+  const currentArea =
+    modal.product?.areaId != null
+      ? areas.find((area) => area.id === modal.product?.areaId)
+      : undefined;
+  const selectableAreas =
+    currentArea && currentArea.status !== 'active' ? [currentArea, ...activeAreas] : activeAreas;
+
   function submit(event: FormEvent) {
     event.preventDefault();
+    if (!form.areaId) return;
     const payload: SaveProductPayload = {
       id: activeModal.product?.id,
       name: form.name.trim(),
-      type: form.type.trim() || 'SaaS',
+      areaId: form.areaId,
       codeSuffix: form.codeSuffix.replace(/\D/g, '').slice(0, 2) || '0',
       openPrice: form.openPrice,
       setupBrl: form.openPrice ? 0 : parseCurrencyToCents(form.setupBrl),
@@ -2138,16 +2249,20 @@ function ProductDialogBody({
             />
 
             <div className="grid gap-3 md:grid-cols-2">
-              <Field label="Tipo">
+              <Field label="Área" required>
                 <div className="relative">
                   <NativeSelect
+                    aria-label="Área do produto"
                     className={`${formSelectClass} w-full`}
-                    onChange={(value) => set('type', value)}
-                    value={form.type}
+                    onChange={(value) => set('areaId', value)}
+                    value={form.areaId}
                   >
-                    {productTypeOptions.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
+                    <option disabled value="">
+                      Selecione a área
+                    </option>
+                    {selectableAreas.map((area) => (
+                      <option key={area.id} value={area.id}>
+                        {area.name}
                       </option>
                     ))}
                   </NativeSelect>
@@ -2488,7 +2603,7 @@ function ProductDialogBody({
             </button>
             <button
               className="min-h-11 rounded-[11px] bg-[#201f24] px-[22px] text-sm font-bold text-white transition hover:bg-[#33333a] disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={saving}
+              disabled={saving || !form.areaId}
               type="submit"
             >
               {saving ? 'Salvando' : activeModal.product ? 'Salvar alterações' : 'Adicionar'}
@@ -2603,6 +2718,82 @@ function ClientDialogBody({
               placeholder="e-mail ou telefone"
               value={contact}
             />
+          </Field>
+          <div className="flex justify-end gap-3 border-t border-[#e8e8ec] pt-4">
+            <SecondaryButton onClick={onClose}>Cancelar</SecondaryButton>
+            <PrimaryButton disabled={saving || !name.trim()} type="submit">
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              Salvar
+            </PrimaryButton>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+export function AreaDialog(props: {
+  modal: Extract<ModalState, { kind: 'area' }> | null;
+  onClose: () => void;
+  onSave: (payload: SaveAreaPayload) => void;
+  saving: boolean;
+}) {
+  if (!props.modal) return null;
+  return (
+    <AreaDialogBody
+      key={props.modal.area?.id ?? 'new-area'}
+      modal={props.modal}
+      onClose={props.onClose}
+      onSave={props.onSave}
+      saving={props.saving}
+    />
+  );
+}
+
+function AreaDialogBody({
+  modal,
+  onClose,
+  onSave,
+  saving,
+}: {
+  modal: Extract<ModalState, { kind: 'area' }>;
+  onClose: () => void;
+  onSave: (payload: SaveAreaPayload) => void;
+  saving: boolean;
+}) {
+  const [name, setName] = useState(modal.area?.name ?? '');
+  const [status, setStatus] = useState<'active' | 'archived'>(modal.area?.status ?? 'active');
+
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!name.trim()) return;
+    onSave({ id: modal.area?.id, name: name.trim(), status });
+  }
+
+  return (
+    <Dialog onOpenChange={(open) => (!open ? onClose() : undefined)} open>
+      <DialogContent className="max-w-[520px] rounded-[20px] border-none bg-white p-0">
+        <DialogHeader className="border-b border-[#e8e8ec] px-6 py-5 text-left">
+          <DialogTitle className="sales-ops-num text-[19px]">Área</DialogTitle>
+          <DialogDescription>Unidade de negócio usada em produtos e vendas.</DialogDescription>
+        </DialogHeader>
+        <form className="flex flex-col gap-4 px-6 py-5" onSubmit={submit}>
+          <Field label="Nome" required>
+            <Input
+              className="bg-[#fafafb]"
+              onChange={(event) => setName(event.target.value)}
+              value={name}
+            />
+          </Field>
+          <Field label="Status">
+            <NativeSelect
+              aria-label="Status da área"
+              onChange={(value) => setStatus(value as 'active' | 'archived')}
+              value={status}
+            >
+              <option value="active">Ativa</option>
+              <option value="archived">Arquivada</option>
+            </NativeSelect>
           </Field>
           <div className="flex justify-end gap-3 border-t border-[#e8e8ec] pt-4">
             <SecondaryButton onClick={onClose}>Cancelar</SecondaryButton>

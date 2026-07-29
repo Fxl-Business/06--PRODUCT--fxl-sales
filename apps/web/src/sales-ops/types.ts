@@ -34,6 +34,7 @@ export type SalesOpsProduct = {
   name: string;
   type: string;
   codeSuffix: string;
+  areaId: string | null;
   openPrice: boolean;
   setupBrl: number;
   hasMonthly: boolean;
@@ -58,6 +59,15 @@ export type SalesOpsClient = {
   orgId: string;
   name: string;
   contact: string | null;
+  createdAt: string;
+  updatedAt: string | null;
+};
+
+export type SalesOpsArea = {
+  id: string;
+  orgId: string;
+  name: string;
+  status: 'active' | 'archived';
   createdAt: string;
   updatedAt: string | null;
 };
@@ -143,6 +153,7 @@ export type SalesOpsBootstrap = {
   sales: SalesOpsSale[];
   products: SalesOpsProduct[];
   clients: SalesOpsClient[];
+  areas: SalesOpsArea[];
   people: SalesOpsPerson[];
   payables: SalesOpsPayable[];
   saleItems: SalesOpsSaleItem[];

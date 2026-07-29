@@ -4,7 +4,7 @@ import * as React from 'react';
 import type { HTMLAttributes } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { SalesOpsProduct } from '../types';
+import type { SalesOpsArea, SalesOpsProduct } from '../types';
 
 vi.mock('@/components/ui/dialog', () => ({
   Dialog: ({ children }: HTMLAttributes<HTMLDivElement>) => <div>{children}</div>,
@@ -28,12 +28,22 @@ const act = (
   React as typeof React & { act: typeof import('react-dom/test-utils').act }
 ).act;
 
+const areaFixture: SalesOpsArea = {
+  id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  orgId: 'org-test',
+  name: 'FXL Tech',
+  status: 'active',
+  createdAt: '2026-07-29T12:00:00.000Z',
+  updatedAt: null,
+};
+
 const product = (patch: Partial<SalesOpsProduct> = {}): SalesOpsProduct => ({
   id: '11111111-1111-4111-8111-111111111111',
   orgId: 'org-test',
   name: 'FXL Finance',
   type: 'SaaS',
   codeSuffix: '7',
+  areaId: areaFixture.id,
   openPrice: false,
   setupBrl: 100000,
   hasMonthly: false,
@@ -75,6 +85,7 @@ async function renderDialog(existing?: SalesOpsProduct, onSave = vi.fn()) {
   await act(async () => {
     root.render(
       <ProductDialog
+        areas={[areaFixture]}
         collaborators={[]}
         modal={{ kind: 'product', product: existing }}
         onClose={vi.fn()}
@@ -124,6 +135,20 @@ async function submit() {
   await act(async () => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
 }
 
+async function changeSelect(select: HTMLSelectElement, value: string) {
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
+    setter?.call(select, value);
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+}
+
+async function chooseArea() {
+  const select = container.querySelector('select[aria-label="Área do produto"]');
+  if (!(select instanceof HTMLSelectElement)) throw new Error('area select not found');
+  await changeSelect(select, areaFixture.id);
+}
+
 describe('product commission editor', () => {
   it('keeps seller-only 10 percent independent from seller-with-finder 7 percent plus finder 3 percent', async () => {
     await renderDialog();
@@ -144,6 +169,7 @@ describe('product commission editor', () => {
   it('submits every commission pair regardless of the active tab', async () => {
     const onSave = await renderDialog();
 
+    await chooseArea();
     await submit();
 
     expect(onSave).toHaveBeenCalledWith(
@@ -179,6 +205,7 @@ describe('product commission editor', () => {
     await change(labeledInput('Comissão do finder'), '300');
     await click(button('Somente vendedor'));
     await click(button('Vendedor + Finder'));
+    await chooseArea();
     await submit();
 
     expect(onSave).toHaveBeenCalledWith(
@@ -195,6 +222,7 @@ describe('product commission editor', () => {
     await act(async () => {
       root.render(
         <ProductDialog
+          areas={[areaFixture]}
           collaborators={[]}
           modal={{
             kind: 'product',
@@ -231,6 +259,7 @@ describe('product commission editor', () => {
     await act(async () => {
       root.render(
         <ProductsView
+          areas={[areaFixture]}
           onEdit={vi.fn()}
           products={[
             product(),
