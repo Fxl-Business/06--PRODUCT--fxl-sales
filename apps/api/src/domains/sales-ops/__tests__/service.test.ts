@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ClientSchema,
   CreateSaleSchema,
   buildSaleLedger,
   materializeWonPayables,
@@ -437,5 +438,66 @@ describe('sales operations sale ledger', () => {
 
     expect(summary.kpis.closedSalesCount).toBe(1);
     expect(summary.kpis.closedRevenueBrl).toBe(500000);
+  });
+});
+
+describe('client schema legal fields', () => {
+  it('accepts a payload with all legal fields', () => {
+    const parsed = ClientSchema.parse({
+      name: 'Acme Ltda',
+      contact: 'contato@acme.com',
+      legalName: 'Acme Comércio e Serviços Ltda',
+      document: '12.345.678/0001-90',
+      address: 'Rua das Flores, 100, São Paulo - SP',
+      legalRepName: 'João da Silva',
+      legalRepDocument: '123.456.789-00',
+    });
+
+    expect(parsed).toEqual({
+      name: 'Acme Ltda',
+      contact: 'contato@acme.com',
+      legalName: 'Acme Comércio e Serviços Ltda',
+      document: '12.345.678/0001-90',
+      address: 'Rua das Flores, 100, São Paulo - SP',
+      legalRepName: 'João da Silva',
+      legalRepDocument: '123.456.789-00',
+    });
+  });
+
+  it('accepts omission and nulls for every legal field', () => {
+    const omitted = ClientSchema.parse({ name: 'Acme' });
+    expect(omitted.legalName).toBeUndefined();
+    expect(omitted.document).toBeUndefined();
+    expect(omitted.address).toBeUndefined();
+    expect(omitted.legalRepName).toBeUndefined();
+    expect(omitted.legalRepDocument).toBeUndefined();
+
+    const nulled = ClientSchema.parse({
+      name: 'Acme',
+      legalName: null,
+      document: null,
+      address: null,
+      legalRepName: null,
+      legalRepDocument: null,
+    });
+    expect(nulled.legalName).toBeNull();
+    expect(nulled.document).toBeNull();
+    expect(nulled.address).toBeNull();
+    expect(nulled.legalRepName).toBeNull();
+    expect(nulled.legalRepDocument).toBeNull();
+  });
+
+  it('rejects overlong legal documents', () => {
+    const overlongDocument = ClientSchema.safeParse({
+      name: 'Acme',
+      document: '1'.repeat(33),
+    });
+    expect(overlongDocument.success).toBe(false);
+
+    const overlongRepDocument = ClientSchema.safeParse({
+      name: 'Acme',
+      legalRepDocument: '1'.repeat(33),
+    });
+    expect(overlongRepDocument.success).toBe(false);
   });
 });

@@ -59,6 +59,11 @@ export type SalesOpsClient = {
   orgId: string;
   name: string;
   contact: string | null;
+  legalName?: string | null;
+  document?: string | null;
+  address?: string | null;
+  legalRepName?: string | null;
+  legalRepDocument?: string | null;
   createdAt: string;
   updatedAt: string | null;
 };

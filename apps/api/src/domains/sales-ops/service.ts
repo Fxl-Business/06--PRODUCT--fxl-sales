@@ -85,7 +85,12 @@ export const ProductSchema = z.object({
 
 export const ClientSchema = z.object({
   name: z.string().min(1).max(160),
-  contact: z.string().max(200).optional().or(z.literal('')),
+  contact: z.string().max(200).nullish(),
+  legalName: z.string().max(200).nullish(),
+  document: z.string().max(32).nullish(),
+  address: z.string().max(400).nullish(),
+  legalRepName: z.string().max(200).nullish(),
+  legalRepDocument: z.string().max(32).nullish(),
 });
 
 export const AreaSchema = z.object({
@@ -726,11 +731,25 @@ export async function listClients(db: Db, orgId: string) {
   );
 }
 
+function clearableText(value: string | null | undefined): string | null | undefined {
+  if (value === undefined) return undefined;
+  return value || null;
+}
+
 export async function createClient(db: Db, orgId: string, data: ClientInput) {
   return withTenant(db, orgId, async (tx) => {
     const [client] = await tx
       .insert(salesOpsClients)
-      .values({ ...data, orgId, contact: data.contact || null })
+      .values({
+        orgId,
+        name: data.name,
+        contact: data.contact || null,
+        legalName: data.legalName || null,
+        document: data.document || null,
+        address: data.address || null,
+        legalRepName: data.legalRepName || null,
+        legalRepDocument: data.legalRepDocument || null,
+      })
       .returning();
     return client!;
   });
@@ -740,7 +759,16 @@ export async function updateClient(db: Db, orgId: string, id: string, data: Part
   return withTenant(db, orgId, async (tx) => {
     const [client] = await tx
       .update(salesOpsClients)
-      .set({ ...data, contact: data.contact || null, updatedAt: new Date() })
+      .set({
+        ...(data.name !== undefined ? { name: data.name } : {}),
+        contact: clearableText(data.contact),
+        legalName: clearableText(data.legalName),
+        document: clearableText(data.document),
+        address: clearableText(data.address),
+        legalRepName: clearableText(data.legalRepName),
+        legalRepDocument: clearableText(data.legalRepDocument),
+        updatedAt: new Date(),
+      })
       .where(and(eq(salesOpsClients.orgId, orgId), eq(salesOpsClients.id, id)))
       .returning();
     return client ?? null;
