@@ -25,7 +25,7 @@ directly, one slice at a time, each gated by a separate local Verify agent (Gate
 | 01 | query-cache-refresh | done | feat/01-query-cache-refresh | PASS | 482d499 | wave 1 |
 | 01.1 | optimistic-row-edit-guard | todo | | | | wave 1, inserted from verify-01 |
 | 02 | dialog-no-outside-close | done | feat/02-dialog-no-outside-close | PASS 2/3 | e2d8b9b | wave 1 |
-| 03 | combobox-primitive | todo | | | | wave 1 |
+| 03 | combobox-primitive | done | feat/03-combobox-primitive | PASS 2/3 | 1fb35e9 | wave 1 |
 | 04 | itens-section-align | todo | | | | wave 1 |
 | 05 | pessoas-funcoes-api | todo | | | | wave 1 |
 | 06 | combobox-adoption | todo | | | | wave 2 |
@@ -217,6 +217,52 @@ Test diff 288 additions, zero deletions, no pre-existing test touched.
 Menus confirmed unaffected; no dialog became a trap; `alert-dialog.tsx` comment verified true against
 `@radix-ui/react-alert-dialog@1.1.18`.
 Report: `verify-02-attempt2.md`.
+
+### 03-combobox-primitive - Gate 2 FAIL then PASS, merged at `1fb35e9`
+
+Three new files under `apps/web/src/components/ui/`, no new dependency, inline non-portalled panel.
+Web 27 files / 152 tests to 28 / 181.
+
+**Attempt 1 FAIL.** The component was correct on every acceptance clause - the verifier proved that
+by dumping the real rendered markup - and 25 of 29 mutations were killed, but four survived:
+the create row could be moved outside `role="listbox"` with all tests green; `aria-activedescendant`
+could be pointed at a non-existent id with all tests green; `does not open when disabled` was vacuous
+because a programmatic click on a `disabled` button never reaches the React handler; and the
+trigger-toggle deviation shipped untested.
+Two of those are clauses the acceptance criterion names explicitly, so the oracle did not cover its
+own criterion.
+
+**Remediation was test-only.** `combobox.tsx` (blob `b0cfae0d`) and `combobox-filter.ts` (`1239554b`)
+verified byte-identical pre-amend, post-amend and in the worktree; the amend touched only the test
+file, +55/-1 where the deletion is a renamed title.
+
+**The executor pushed back on one finding, with evidence, and was right.** It argued that deleting
+`if (disabled) return;` from `openPanel` is an *equivalent mutant* rather than a coverage hole, because
+`openPanel` has exactly two callers and both are already closed while disabled.
+The attempt-2 verifier adjudicated this independently rather than taking either side on faith: it
+probed a disabled Combobox with 63 distinct input paths (`ref.current.click()`, dispatched clicks on
+the button, inner span and chevron svg, mousedown/mouseup, focus/blur, `form.reset()`, dispatched
+submit, keydown and keyup for nine keys on two targets).
+All 63 leave the panel closed pristine, and all 63 still leave it closed with the guard deleted.
+Claim upheld - redundant defence, not untested logic.
+
+**Attempt 2 PASS.** All four original mutations now killed. The attempt-2 verifier ran 39 mutations of
+its own and killed 35; the four survivors are all non-defects: the `openPanel` guard and
+`stopImmediatePropagation` are equivalent mutants (the latter proved by probing with a native
+`document` keydown listener - removing the load-bearing `stopPropagation` does go Red), while an
+untrimmed `onCreate(query)` and a `overflow-y-auto` negative assertion without a positive control are
+minor gaps outside the criterion.
+Gates `lint=0 type-check=0 test=0`. Report: `verify-03-attempt2.md`.
+
+**Carried forward to slice 06 (adoption), non-blocking:**
+
+- Assert `onCreate('Maria')` for the input `"  Maria  "` - no test currently commits a create with
+  surrounding whitespace.
+- Add the positive half of the pinned-footer assertion; test 10's `closest(...) === null` is a bare
+  negative with no positive control, so it does not lock the design it claims to.
+- If a parent flips `disabled` to `true` while the panel is already open, the panel stays mounted with
+  an enabled search input and keyboard commit still works. No call site exists yet, so slice 06 is the
+  first place this could matter.
 
 ### Deferred: the same defect in the frozen `/admin/*` tree
 
