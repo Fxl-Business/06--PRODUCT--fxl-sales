@@ -25,6 +25,14 @@ const AlertDialogOverlay = React.forwardRef<
 ))
 AlertDialogOverlay.displayName = AlertDialogPrimitive.Overlay.displayName
 
+/**
+ * No outside-click guard is needed here: `@radix-ui/react-alert-dialog`
+ * already hardcodes `onPointerDownOutside` / `onInteractOutside` to
+ * `preventDefault()` after spreading `contentProps`, and omits both props
+ * from `AlertDialogContentProps`, so a call site can neither override nor
+ * pass them. Adding the handlers here is a TS2322 compile error.
+ * `Esc` and `AlertDialogCancel` (`Cancelar` / `Voltar`) stay working.
+ */
 const AlertDialogContent = React.forwardRef<
   React.ElementRef<typeof AlertDialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Content>
