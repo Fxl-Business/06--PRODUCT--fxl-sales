@@ -3158,7 +3158,7 @@ function ListEditor({
   );
 }
 
-function ClientDialog(props: {
+export function ClientDialog(props: {
   modal: Extract<ModalState, { kind: 'client' }> | null;
   onClose: () => void;
   onSave: (payload: SaveClientPayload) => void;
@@ -3189,19 +3189,33 @@ function ClientDialogBody({
 }) {
   const [name, setName] = useState(modal.client?.name ?? '');
   const [contact, setContact] = useState(modal.client?.contact ?? '');
+  const [legalName, setLegalName] = useState(modal.client?.legalName ?? '');
+  const [documentNumber, setDocumentNumber] = useState(modal.client?.document ?? '');
+  const [address, setAddress] = useState(modal.client?.address ?? '');
+  const [legalRepName, setLegalRepName] = useState(modal.client?.legalRepName ?? '');
+  const [legalRepDocument, setLegalRepDocument] = useState(modal.client?.legalRepDocument ?? '');
   const activeModal = modal;
 
   function submit(event: FormEvent) {
     event.preventDefault();
-    onSave({ id: activeModal.client?.id, name: name.trim(), contact: contact.trim() || undefined });
+    onSave({
+      id: activeModal.client?.id,
+      name: name.trim(),
+      contact: contact.trim() || null,
+      legalName: legalName.trim() || null,
+      document: documentNumber.trim() || null,
+      address: address.trim() || null,
+      legalRepName: legalRepName.trim() || null,
+      legalRepDocument: legalRepDocument.trim() || null,
+    });
   }
 
   return (
     <Dialog onOpenChange={(open) => (!open ? onClose() : undefined)} open>
-      <DialogContent className="max-w-[520px] rounded-[20px] border-none bg-white p-0">
+      <DialogContent className="max-h-[85vh] max-w-[520px] overflow-y-auto rounded-[20px] border-none bg-white p-0">
         <DialogHeader className="border-b border-[#e8e8ec] px-6 py-5 text-left">
           <DialogTitle className="sales-ops-num text-[19px]">Cliente</DialogTitle>
-          <DialogDescription>Nome comercial e contato principal.</DialogDescription>
+          <DialogDescription>Nome comercial, contato e dados para contrato.</DialogDescription>
         </DialogHeader>
         <form className="flex flex-col gap-4 px-6 py-5" onSubmit={submit}>
           <Field label="Nome" required>
@@ -3213,6 +3227,55 @@ function ClientDialogBody({
               onChange={(event) => setContact(event.target.value)}
               placeholder="e-mail ou telefone"
               value={contact}
+            />
+          </Field>
+          <div className="flex flex-col gap-1 border-t border-[#e8e8ec] pt-4">
+            <span className="text-[13px] font-semibold text-[#3a3a40]">Dados para contrato</span>
+            <span className="text-xs text-[#a0a0a8]">Campos opcionais usados na geração de contratos.</span>
+          </div>
+          <Field label="Razão social">
+            <Input
+              aria-label="Razão social"
+              className="bg-[#fafafb]"
+              onChange={(event) => setLegalName(event.target.value)}
+              placeholder="Razão social do cliente"
+              value={legalName}
+            />
+          </Field>
+          <Field label="CNPJ/CPF">
+            <Input
+              aria-label="CNPJ/CPF"
+              className="bg-[#fafafb]"
+              onChange={(event) => setDocumentNumber(event.target.value)}
+              placeholder="00.000.000/0000-00"
+              value={documentNumber}
+            />
+          </Field>
+          <Field label="Endereço">
+            <Input
+              aria-label="Endereço"
+              className="bg-[#fafafb]"
+              onChange={(event) => setAddress(event.target.value)}
+              placeholder="Rua, número, bairro, cidade - UF, CEP"
+              value={address}
+            />
+          </Field>
+          <Field label="Representante legal">
+            <Input
+              aria-label="Representante legal"
+              className="bg-[#fafafb]"
+              onChange={(event) => setLegalRepName(event.target.value)}
+              placeholder="Nome completo"
+              value={legalRepName}
+            />
+          </Field>
+          <Field label="CPF do representante">
+            <Input
+              aria-label="CPF do representante"
+              className="bg-[#fafafb]"
+              onChange={(event) => setLegalRepDocument(event.target.value)}
+              placeholder="000.000.000-00"
+              value={legalRepDocument}
             />
           </Field>
           <div className="flex justify-end gap-3 border-t border-[#e8e8ec] pt-4">
