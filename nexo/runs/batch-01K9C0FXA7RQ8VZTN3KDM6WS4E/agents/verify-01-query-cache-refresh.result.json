@@ -1,0 +1,9 @@
+{"agent":"verify","slice":"01-query-cache-refresh","status":"PASS",
+ "report":"nexo/runs/batch-01K9C0FXA7RQ8VZTN3KDM6WS4E/verify-01.md",
+ "summary":"PASS - all gates 0 on the full suite, optimistic + rollback acceptance proven by tests that invert on revert, no test weakened, scope held; 2 non-blocking follow-ups in the report (optimistic id can escape into an edit request if the create dialog is dismissed mid-flight; the onSuccess reconcile hunk has no test that can fail)",
+ "gates":"lint=0 type-check=0 test=0 web=25/143 api=23/215",
+ "acceptance_proven":"yes - cadastros-refresh.test.tsx mounts the real SalesOpsApp with deferred POST/bootstrap promises and pins the pre-POST optimistic row, the single non-duplicated row after POST+refetch, the failure rollback, and the produtos refresh with bootstrap called exactly twice and no user action",
+ "tests_weakened":"none",
+ "scope_ok":"yes - only the 20 files enumerated in the slice plan; no api change, no propostas status machine, no payables/receivables or N/M label change, no auth/tenancy/navigation.ts change, no route tree change",
+ "defects":[],
+ "done":true,"started":"2026-07-29T22:12:00Z","ended":"2026-07-29T22:26:10Z","ts":"2026-07-29T22:26:10Z"}
