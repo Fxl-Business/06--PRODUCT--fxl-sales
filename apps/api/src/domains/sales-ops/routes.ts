@@ -2,23 +2,29 @@ import { Hono } from 'hono';
 import { getDb } from '../../db/client.js';
 import { requireAdmin } from '../../middleware/require-admin.js';
 import {
+  AreaSchema,
   ClientSchema,
   CreateSaleSchema,
   PersonSchema,
   ProductSchema,
   SettingsSchema,
+  UpdateAreaSchema,
   UpdatePersonSchema,
+  createArea,
   createClient,
   createPerson,
   createProduct,
   createSale,
+  getArea,
   getSalesOpsSnapshot,
   getSalesOpsSummary,
   getSettings,
+  listAreas,
   listClients,
   listPeople,
   listProducts,
   listSales,
+  updateArea,
   updateClient,
   updatePerson,
   updateProduct,
@@ -71,6 +77,8 @@ salesOpsRouter.post('/products', async (c) => {
   if (!parsed.success) {
     return c.json({ error: 'validation_error', issues: parsed.error.flatten() }, 400);
   }
+  const area = await getArea(getDb(), c.get('orgId'), parsed.data.areaId);
+  if (!area) return c.json({ error: 'validation_error', reason: 'unknown_area' }, 400);
   const product = await createProduct(getDb(), c.get('orgId'), parsed.data);
   return c.json({ product }, 201);
 });
@@ -79,6 +87,10 @@ salesOpsRouter.patch('/products/:id', async (c) => {
   const parsed = ProductSchema.partial().safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) {
     return c.json({ error: 'validation_error', issues: parsed.error.flatten() }, 400);
+  }
+  if (parsed.data.areaId !== undefined) {
+    const area = await getArea(getDb(), c.get('orgId'), parsed.data.areaId);
+    if (!area) return c.json({ error: 'validation_error', reason: 'unknown_area' }, 400);
   }
   const product = await updateProduct(getDb(), c.get('orgId'), c.req.param('id'), parsed.data);
   if (!product) return c.json({ error: 'not_found' }, 404);
@@ -107,6 +119,32 @@ salesOpsRouter.patch('/clients/:id', async (c) => {
   const client = await updateClient(getDb(), c.get('orgId'), c.req.param('id'), parsed.data);
   if (!client) return c.json({ error: 'not_found' }, 404);
   return c.json({ client });
+});
+
+salesOpsRouter.get('/areas', async (c) => {
+  const areas = await listAreas(getDb(), c.get('orgId'));
+  return c.json({ areas });
+});
+
+salesOpsRouter.post('/areas', async (c) => {
+  const parsed = AreaSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) {
+    return c.json({ error: 'validation_error', issues: parsed.error.flatten() }, 400);
+  }
+  const area = await createArea(getDb(), c.get('orgId'), parsed.data);
+  if (area === 'duplicate') return c.json({ error: 'conflict', reason: 'area_name_taken' }, 409);
+  return c.json({ area }, 201);
+});
+
+salesOpsRouter.patch('/areas/:id', async (c) => {
+  const parsed = UpdateAreaSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) {
+    return c.json({ error: 'validation_error', issues: parsed.error.flatten() }, 400);
+  }
+  const area = await updateArea(getDb(), c.get('orgId'), c.req.param('id'), parsed.data);
+  if (area === 'duplicate') return c.json({ error: 'conflict', reason: 'area_name_taken' }, 409);
+  if (!area) return c.json({ error: 'not_found' }, 404);
+  return c.json({ area });
 });
 
 salesOpsRouter.get('/sales', async (c) => {

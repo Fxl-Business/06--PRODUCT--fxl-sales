@@ -446,6 +446,19 @@ export const salesOpsPeople = pgTable(
   (t) => [index('sales_ops_people_org_id_idx').on(t.orgId, t.displayName)],
 );
 
+export const salesOpsAreas = pgTable(
+  'sales_ops_areas',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: text('org_id').notNull(),
+    name: text('name').notNull(),
+    status: text('status').notNull().default('active'), // 'active' | 'archived'
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }),
+  },
+  (t) => [uniqueIndex('sales_ops_areas_org_name_idx').on(t.orgId, t.name)],
+);
+
 export const salesOpsProducts = pgTable(
   'sales_ops_products',
   {
@@ -454,6 +467,7 @@ export const salesOpsProducts = pgTable(
     name: text('name').notNull(),
     type: text('type').notNull().default('SaaS'),
     codeSuffix: text('code_suffix').notNull().default('0'),
+    areaId: uuid('area_id').references(() => salesOpsAreas.id),
     openPrice: boolean('open_price').notNull().default(false),
     setupBrl: integer('setup_brl').notNull().default(0),
     hasMonthly: boolean('has_monthly').notNull().default(false),
