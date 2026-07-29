@@ -135,7 +135,8 @@ export const CreateSaleSchema = z.object({
   sellerName: z.string().min(1),
   finderPersonId: uuid.optional(),
   finderName: z.string().optional().nullable(),
-  status: z.enum(['draft', 'forecast', 'closed', 'in_progress', 'completed', 'cancelled']),
+  // Canonical: draft | open | won | lost | cancelled. Legacy values remain accepted until slice 03 reworks CreateSaleSchema.
+  status: z.enum(['draft', 'open', 'won', 'lost', 'cancelled', 'forecast', 'closed', 'in_progress', 'completed']),
   paymentMethod: z.enum(['pix', 'card', 'boleto', 'transfer']),
   condition: z.enum(['cash', 'installments', 'recurring']),
   installments: z.number().int().min(1).max(120).default(1),
@@ -348,7 +349,7 @@ export function buildSaleLedger(input: CreateSaleInput) {
 }
 
 export function summarizeSalesOpsState(snapshot: SalesOpsSnapshot) {
-  const closedStatuses = new Set(['closed', 'completed']);
+  const closedStatuses = new Set(['won', 'closed', 'completed']);
   const activeSales = snapshot.sales.filter((sale) => sale.status !== 'cancelled');
   const closedSales = activeSales.filter((sale) => closedStatuses.has(sale.status));
   const payableBrl = snapshot.payables

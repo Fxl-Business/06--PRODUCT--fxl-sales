@@ -182,4 +182,69 @@ describe('sales operations sale ledger', () => {
     expect(summary.latestSales).toEqual([]);
     expect(summary.revenueByProduct).toEqual([]);
   });
+
+  it('accepts canonical proposal statuses and counts won sales as closed', () => {
+    const basePayload = {
+      clientId: '11111111-1111-4111-8111-111111111111',
+      clientName: 'SegPro',
+      sellerPersonId: '22222222-2222-4222-8222-222222222222',
+      sellerName: 'Ana Martins',
+      paymentMethod: 'pix',
+      condition: 'cash',
+      installments: 1,
+      baseDate: '2026-07-14',
+      sellerCommissionPct: 10,
+      finderCommissionPct: 3,
+      taxPct: 6,
+      otherCostsBrl: 0,
+      items: [
+        {
+          productId: '44444444-4444-4444-8444-444444444444',
+          productName: 'Módulo Vendas',
+          productType: 'Custom',
+          quantity: 1,
+          unitBrl: 400000,
+        },
+      ],
+      professionals: [],
+    };
+
+    for (const status of ['won', 'open', 'lost', 'closed'] as const) {
+      expect(CreateSaleSchema.safeParse({ ...basePayload, status }).success).toBe(true);
+    }
+
+    const summary = summarizeSalesOpsState({
+      sales: [
+        {
+          id: 'won-sale',
+          code: '0001-01',
+          clientNameSnapshot: 'SegPro',
+          sellerNameSnapshot: 'Ana Martins',
+          finderNameSnapshot: null,
+          status: 'won',
+          totalBrl: 500000,
+          recurringBrl: 0,
+          baseDate: '2026-07-14',
+        },
+        {
+          id: 'closed-sale',
+          code: '0002-01',
+          clientNameSnapshot: 'Dias Pet',
+          sellerNameSnapshot: 'Ana Martins',
+          finderNameSnapshot: null,
+          status: 'closed',
+          totalBrl: 300000,
+          recurringBrl: 0,
+          baseDate: '2026-07-15',
+        },
+      ],
+      products: [],
+      clients: [],
+      people: [],
+      payables: [],
+    });
+
+    expect(summary.kpis.closedSalesCount).toBe(2);
+    expect(summary.kpis.closedRevenueBrl).toBe(800000);
+  });
 });
