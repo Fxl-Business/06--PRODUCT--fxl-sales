@@ -6,7 +6,8 @@ import { FinderShell } from './components/layout/FinderShell';
 import { SellerShell } from './components/layout/SellerShell';
 import { RoleGuard } from './components/auth/RoleGuard';
 import { NoRolePage } from './pages/errors/NoRolePage';
-import { Protected } from './auth/react';
+import { Protected } from '@/auth/react';
+import { RouteErrorPage } from './pages/errors/RouteErrorPage';
 import { SalesOpsApp } from './sales-ops/SalesOpsApp';
 
 // Lazy-loaded pages - low traffic, keeps the initial bundle small.
@@ -71,6 +72,7 @@ const SellerDealsPlaceholderPage = lazy(() =>
 const routes: RouteObject[] = [
   {
     path: '/',
+    errorElement: <RouteErrorPage />,
     element: (
       <Protected>
         <SalesOpsApp />
@@ -80,6 +82,7 @@ const routes: RouteObject[] = [
   // Admin shell
   {
     path: '/admin',
+    errorElement: <RouteErrorPage />,
     element: (
       <Protected>
         <RoleGuard role="admin">
@@ -105,6 +108,7 @@ const routes: RouteObject[] = [
   // Finder shell
   {
     path: '/finder',
+    errorElement: <RouteErrorPage />,
     element: (
       <Protected>
         <RoleGuard role="finder">
@@ -124,6 +128,7 @@ const routes: RouteObject[] = [
   // Seller shell
   {
     path: '/seller',
+    errorElement: <RouteErrorPage />,
     element: (
       <Protected>
         <RoleGuard role="seller">
@@ -138,6 +143,7 @@ const routes: RouteObject[] = [
   },
   {
     path: '/no-role',
+    errorElement: <RouteErrorPage />,
     element: (
       <Protected>
         <NoRolePage />
@@ -146,6 +152,7 @@ const routes: RouteObject[] = [
   },
   {
     path: '/:workspace/:view',
+    errorElement: <RouteErrorPage />,
     element: (
       <Protected>
         <SalesOpsApp />
