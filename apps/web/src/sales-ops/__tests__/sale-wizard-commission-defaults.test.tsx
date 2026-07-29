@@ -27,6 +27,8 @@ const act = (
   React as typeof React & { act: typeof import('react-dom/test-utils').act }
 ).act;
 
+const areaId = '66666666-6666-4666-8666-666666666666';
+
 function product(
   id: string,
   name: string,
@@ -40,7 +42,7 @@ function product(
     name,
     type: 'SaaS',
     codeSuffix: id.endsWith('1') ? '1' : '2',
-    areaId: null,
+    areaId,
     openPrice: false,
     setupBrl: 100000,
     hasMonthly: false,
@@ -103,9 +105,20 @@ const bootstrap: SalesOpsBootstrap = {
       updatedAt: null,
     },
   ],
-  areas: [],
+  areas: [
+    {
+      id: areaId,
+      orgId: 'org-test',
+      name: 'FXL Tech',
+      status: 'active',
+      createdAt: '2026-07-13T12:00:00.000Z',
+      updatedAt: null,
+    },
+  ],
   payables: [],
   saleItems: [],
+  receivables: [],
+  saleProfessionals: [],
   settings: {
     orgId: 'org-test',
     legalName: '',
@@ -143,6 +156,7 @@ beforeEach(async () => {
     root.render(
       <SaleWizardDialog
         bootstrap={bootstrap}
+        editSale={null}
         onClose={vi.fn()}
         onSave={onSave}
         open
@@ -202,17 +216,20 @@ async function flushReact() {
 describe('sale wizard product commission defaults', () => {
   it('starts with seller-only defaults and switches snapshots when finder participation changes', async () => {
     await click(buttonByText('Avançar'));
+    await click(buttonByText('Avançar'));
     expect(fieldInput('Comissão vendedor %').value).toBe('10');
     expect(fieldInput('Comissão finder %').value).toBe('2');
 
     await click(buttonByText('Voltar'));
-    await click(buttonByText('Essa venda teve um finder'));
+    await click(buttonByText('Voltar'));
+    await click(buttonByText('Essa proposta teve um finder'));
     await flushReact();
+    await click(buttonByText('Avançar'));
     await click(buttonByText('Avançar'));
     expect(fieldInput('Comissão vendedor %').value).toBe('7');
     expect(fieldInput('Comissão finder %').value).toBe('3');
 
-    await click(buttonByText('Salvar incompleto'));
+    await click(buttonByText('Salvar rascunho'));
     expect(onSave).toHaveBeenLastCalledWith(
       expect.objectContaining({
         sellerCommissionPct: 7,
@@ -220,15 +237,18 @@ describe('sale wizard product commission defaults', () => {
         finderPersonId: '55555555-5555-4555-8555-555555555555',
       }),
     );
+    expect(onSave.mock.lastCall?.[0].installments).toHaveLength(1);
 
+    await click(buttonByText('Voltar'));
     await click(buttonByText('Voltar'));
     await click(buttonByText('remover'));
     await flushReact();
     await click(buttonByText('Avançar'));
+    await click(buttonByText('Avançar'));
     expect(fieldInput('Comissão vendedor %').value).toBe('10');
     expect(fieldInput('Comissão finder %').value).toBe('2');
 
-    await click(buttonByText('Salvar incompleto'));
+    await click(buttonByText('Salvar rascunho'));
     expect(onSave).toHaveBeenLastCalledWith(
       expect.objectContaining({ sellerCommissionPct: 10, finderCommissionPct: 2 }),
     );
@@ -236,7 +256,7 @@ describe('sale wizard product commission defaults', () => {
   });
 
   it('uses only the primary item when product selection changes', async () => {
-    await click(buttonByText('Essa venda teve um finder'));
+    await click(buttonByText('Essa proposta teve um finder'));
     await click(buttonByText('+ item'));
     await flushReact();
 
@@ -245,12 +265,15 @@ describe('sale wizard product commission defaults', () => {
     await changeSelect(initialSelects[1]!, productB.id);
     await flushReact();
     await click(buttonByText('Avançar'));
+    await click(buttonByText('Avançar'));
     expect(fieldInput('Comissão vendedor %').value).toBe('7');
     expect(fieldInput('Comissão finder %').value).toBe('3');
 
     await click(buttonByText('Voltar'));
+    await click(buttonByText('Voltar'));
     await changeSelect(productSelects()[0]!, productB.id);
     await flushReact();
+    await click(buttonByText('Avançar'));
     await click(buttonByText('Avançar'));
     expect(fieldInput('Comissão vendedor %').value).toBe('8');
     expect(fieldInput('Comissão finder %').value).toBe('4');

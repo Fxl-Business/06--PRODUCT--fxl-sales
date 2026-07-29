@@ -29,6 +29,7 @@ const act = (
 
 const customProductId = '11111111-1111-4111-8111-111111111111';
 const fixedProductId = '22222222-2222-4222-8222-222222222222';
+const areaId = '66666666-6666-4666-8666-666666666666';
 
 function product(
   id: string,
@@ -42,7 +43,7 @@ function product(
     name,
     type: openPrice ? 'Custom' : 'SaaS',
     codeSuffix: openPrice ? 'CST' : 'FIN',
-    areaId: null,
+    areaId,
     openPrice,
     setupBrl,
     hasMonthly: false,
@@ -93,9 +94,20 @@ const bootstrap: SalesOpsBootstrap = {
       updatedAt: null,
     },
   ],
-  areas: [],
+  areas: [
+    {
+      id: areaId,
+      orgId: 'org-test',
+      name: 'FXL Tech',
+      status: 'active',
+      createdAt: '2026-07-14T12:00:00.000Z',
+      updatedAt: null,
+    },
+  ],
   payables: [],
   saleItems: [],
+  receivables: [],
+  saleProfessionals: [],
   settings: {
     orgId: 'org-test',
     legalName: '',
@@ -133,6 +145,7 @@ beforeEach(async () => {
     root.render(
       <SaleWizardDialog
         bootstrap={bootstrap}
+        editSale={null}
         onClose={vi.fn()}
         onSave={onSave}
         open
@@ -213,14 +226,16 @@ describe('sale wizard custom item labels', () => {
     expect(labeledInput('Nome / descrição do item 2').value).toBe('Módulo RH');
 
     await click(buttonByText('Avançar'));
+    expect(container.textContent).toContain('Plano de pagamento');
+    await click(buttonByText('Avançar'));
     expect(container.textContent).toContain('Custos e margem');
     await click(buttonByText('Avançar'));
     expect(container.textContent).toContain('Módulo Vendas, Módulo RH');
-    await click(buttonByText('Confirmar venda'));
+    await click(buttonByText('Salvar proposta'));
 
     expect(onSave).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        status: 'closed',
+        status: 'open',
         items: [
           expect.objectContaining({
             productId: customProductId,
@@ -240,7 +255,7 @@ describe('sale wizard custom item labels', () => {
   it('blocks advancement until every custom row has a label and positive negotiated value', async () => {
     await click(buttonByText('Avançar'));
 
-    expect(container.textContent).toContain('Registro da venda');
+    expect(container.textContent).toContain('Cliente e responsáveis');
     expect(textOccurrences('Informe o nome ou a descrição deste item personalizado.')).toBe(1);
     expect(textOccurrences('Informe um valor negociado maior que zero.')).toBe(1);
 
@@ -266,7 +281,7 @@ describe('sale wizard custom item labels', () => {
 
   it('saves an unlabeled custom draft with the catalog name fallback', async () => {
     await changeInput(labeledInput('Valor unitário do item 1'), '4000');
-    await click(buttonByText('Salvar incompleto'));
+    await click(buttonByText('Salvar rascunho'));
 
     expect(onSave).toHaveBeenLastCalledWith(
       expect.objectContaining({
@@ -276,6 +291,7 @@ describe('sale wizard custom item labels', () => {
             productId: customProductId,
             productName: 'FXL Custom',
             unitBrl: 400000,
+            areaId,
           }),
         ],
       }),
@@ -289,9 +305,10 @@ describe('sale wizard custom item labels', () => {
     expect(container.querySelector('input[aria-label="Nome / descrição do item 1"]')).toBeNull();
     await click(buttonByText('Avançar'));
     await click(buttonByText('Avançar'));
+    await click(buttonByText('Avançar'));
     expect(container.textContent).toContain('FXL Finance');
     expect(container.textContent).not.toContain('Rótulo que não pode vazar');
-    await click(buttonByText('Confirmar venda'));
+    await click(buttonByText('Salvar proposta'));
 
     expect(onSave).toHaveBeenLastCalledWith(
       expect.objectContaining({

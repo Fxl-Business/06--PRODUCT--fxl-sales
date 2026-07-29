@@ -2,6 +2,7 @@ import type {
   CommissionType,
   CreateSalePayload,
   DashboardModel,
+  PaymentMethod,
   SaleDraft,
   SalesOpsBootstrap,
   SalesOpsProduct,
@@ -123,6 +124,31 @@ export function formatMoneyBrl(
     .replace(/\u00a0/g, ' ');
 }
 
+export function addMonthsToIsoDate(value: string, months: number): string {
+  const [year, month, day] = value.slice(0, 10).split('-').map(Number);
+  if (!year || !month || !day) return value;
+  return new Date(Date.UTC(year, month - 1 + months, day)).toISOString().slice(0, 10);
+}
+
+export function splitInstallmentsEqually(
+  totalCents: number,
+  count: number,
+  startDate: string,
+  method: PaymentMethod,
+): Array<{ dueDate: string; amountBrl: number; method: PaymentMethod }> {
+  const n = Math.max(1, Math.floor(count));
+  const base = Math.floor(totalCents / n);
+  return Array.from({ length: n }, (_, index) => ({
+    dueDate: addMonthsToIsoDate(startDate, index),
+    amountBrl: index === n - 1 ? totalCents - base * (n - 1) : base,
+    method,
+  }));
+}
+
+export function installmentSumCents(rows: Array<{ amountBrl: string | number }>): number {
+  return rows.reduce((sum, row) => sum + parseCurrencyInputToCents(row.amountBrl), 0);
+}
+
 export function buildSalePayload(draft: SaleDraft): CreateSalePayload {
   return {
     clientId: cleanId(draft.clientId),
@@ -132,17 +158,28 @@ export function buildSalePayload(draft: SaleDraft): CreateSalePayload {
     finderPersonId: cleanId(draft.finderPersonId),
     finderName: cleanId(draft.finderName) ?? null,
     status: draft.status,
-    paymentMethod: draft.paymentMethod,
-    condition: draft.condition,
-    installments: Math.max(1, Math.floor(toNumber(draft.installments, 1))),
     baseDate: draft.baseDate,
     notes: cleanId(draft.notes) ?? null,
     sellerCommissionPct: toNumber(draft.sellerCommissionPct),
     finderCommissionPct: toNumber(draft.finderCommissionPct),
     taxPct: toNumber(draft.taxPct),
     otherCostsBrl: Math.max(0, Math.floor(toNumber(draft.otherCostsBrl))),
+    installments: draft.installments.map((row) => ({
+      dueDate: row.dueDate,
+      amountBrl: Math.max(0, Math.floor(toNumber(row.amountBrl))),
+      method: row.method,
+    })),
+    recurring: draft.recurring
+      ? {
+          monthlyBrl: Math.max(0, Math.floor(toNumber(draft.recurring.monthlyBrl))),
+          startDate: draft.recurring.startDate,
+          cycles: draft.recurring.cycles === null ? null : Math.max(1, Math.floor(draft.recurring.cycles)),
+          method: draft.recurring.method ?? 'pix',
+        }
+      : null,
     items: draft.items.map((item) => ({
       productId: cleanId(item.productId),
+      areaId: cleanId(item.areaId),
       productName: item.productName.trim(),
       productType: item.productType.trim() || 'SaaS',
       quantity: Math.max(1, Math.floor(toNumber(item.quantity, 1))),
