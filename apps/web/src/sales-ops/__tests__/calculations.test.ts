@@ -9,7 +9,45 @@ import {
   splitInstallmentsEqually,
   type SaleCommissionDefaultsProduct,
 } from '../calculations';
-import type { SalesOpsBootstrap } from '../types';
+import type { SalesOpsBootstrap, SalesOpsSale } from '../types';
+
+function saleFixture(overrides: Partial<SalesOpsSale> = {}): SalesOpsSale {
+  return {
+    id: 'sale-1',
+    orgId: 'org-test',
+    sequence: 1,
+    code: 'P-0001',
+    clientId: null,
+    clientNameSnapshot: 'Cliente',
+    sellerPersonId: null,
+    sellerNameSnapshot: 'Vendedor',
+    finderPersonId: null,
+    finderNameSnapshot: null,
+    status: 'open',
+    paymentMethod: 'pix',
+    condition: 'installments',
+    installments: 1,
+    baseDate: '2026-07-10',
+    notes: null,
+    wonAt: null,
+    lostAt: null,
+    totalBrl: 0,
+    recurringBrl: 0,
+    sellerCommissionPct: '10',
+    finderCommissionPct: '3',
+    taxPct: '6',
+    otherCostsBrl: 0,
+    professionalCostsBrl: 0,
+    sellerCommissionBrl: 0,
+    finderCommissionBrl: 0,
+    taxBrl: 0,
+    netMarginBrl: 0,
+    netMarginPct: '0',
+    createdAt: '2026-07-10T12:00:00.000Z',
+    updatedAt: null,
+    ...overrides,
+  };
+}
 
 describe('sales operations web calculations', () => {
   const commissionProduct: SaleCommissionDefaultsProduct = {
@@ -54,10 +92,47 @@ describe('sales operations web calculations', () => {
 
     const model = buildDashboardModel(bootstrap);
 
-    expect(model.kpis.closedRevenueBrl).toBe(0);
+    expect(model.kpis.wonRevenueBrl).toBe(0);
     expect(model.revenueByProduct).toEqual([]);
     expect(model.topSellers).toEqual([]);
     expect(model.latestSales).toEqual([]);
+  });
+
+  it('aggregates dashboard KPIs from won propostas only', () => {
+    const bootstrap: SalesOpsBootstrap = {
+      sales: [
+        saleFixture({ id: 'won-1', status: 'won', totalBrl: 100000, sellerNameSnapshot: 'Ana' }),
+        saleFixture({ id: 'open-1', status: 'open', totalBrl: 50000 }),
+        saleFixture({ id: 'draft-1', status: 'draft', totalBrl: 20000 }),
+        saleFixture({ id: 'lost-1', status: 'lost', totalBrl: 30000 }),
+        saleFixture({
+          id: 'cancelled-1',
+          status: 'cancelled',
+          totalBrl: 40000,
+          recurringBrl: 10000,
+        }),
+      ],
+      products: [],
+      clients: [],
+      areas: [],
+      people: [],
+      payables: [],
+      saleItems: [],
+      receivables: [],
+      saleProfessionals: [],
+      settings: null,
+    };
+
+    const model = buildDashboardModel(bootstrap);
+
+    expect(model.kpis.wonRevenueBrl).toBe(100000);
+    expect(model.kpis.wonSalesCount).toBe(1);
+    expect(model.topSellers).toEqual([{ name: 'Ana', totalBrl: 100000, commissionBrl: 0, count: 1 }]);
+    expect(model.kpis.activeMrrBrl).toBe(0);
+    expect(model.latestSales.map((sale) => sale.id)).toEqual(
+      expect.arrayContaining(['won-1', 'open-1', 'draft-1', 'lost-1']),
+    );
+    expect(model.latestSales.map((sale) => sale.id)).not.toContain('cancelled-1');
   });
 
   it('normalizes wizard draft values into the API sale payload', () => {
@@ -68,7 +143,7 @@ describe('sales operations web calculations', () => {
       sellerName: 'Ana Martins',
       finderPersonId: '',
       finderName: '',
-      status: 'closed',
+      status: 'open',
       baseDate: '2026-07-10',
       notes: '',
       sellerCommissionPct: '10',

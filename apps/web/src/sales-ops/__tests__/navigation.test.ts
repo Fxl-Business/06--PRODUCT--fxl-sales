@@ -20,7 +20,7 @@ describe('sales operations navigation', () => {
   it('exposes the exact workspace catalogue including meus-dados', () => {
     expect(salesOpsWorkspaces).toEqual([
       { id: 'tatico', label: 'Tático', description: 'Indicadores e painéis' },
-      { id: 'operacional', label: 'Operacional', description: 'Vendas e conferência' },
+      { id: 'operacional', label: 'Operacional', description: 'Propostas e conferência' },
       { id: 'cadastros', label: 'Cadastros', description: 'Pessoas, catálogo e regras' },
       { id: 'meus-dados', label: 'Meus dados', description: 'Painel e comissões pessoais' },
     ]);
@@ -45,6 +45,10 @@ describe('sales operations navigation', () => {
     expect(getSalesOpsNavigation('operacional', team).map((item) => item.id)).toEqual([
       'vendas',
       'comissoes',
+    ]);
+    expect(getSalesOpsNavigation('operacional', team).map((item) => item.label)).toEqual([
+      'Propostas',
+      'Comissões',
     ]);
     expect(getSalesOpsNavigation('cadastros', team).map((item) => item.id)).toEqual([
       'produtos',
