@@ -27,9 +27,22 @@ const DialogOverlay = React.forwardRef<
 ))
 DialogOverlay.displayName = DialogPrimitive.Overlay.displayName
 
+/**
+ * Outside-click dismissal is removed app-wide: a stray click must never
+ * discard typed work. `onPointerDownOutside` / `onInteractOutside` are
+ * omitted from the public props so no call site can opt back in, and the
+ * handlers below are applied after `{...props}` so ordering cannot defeat
+ * them either. `Esc`, the `X` affordance and `Cancelar` / `Voltar` are
+ * deliberately left working.
+ */
+type DialogContentProps = Omit<
+  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>,
+  "onPointerDownOutside" | "onInteractOutside"
+>
+
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
+  DialogContentProps
 >(({ className, children, ...props }, ref) => (
   <DialogPortal>
     <DialogOverlay />
@@ -40,11 +53,13 @@ const DialogContent = React.forwardRef<
         className
       )}
       {...props}
+      onInteractOutside={(event) => event.preventDefault()}
+      onPointerDownOutside={(event) => event.preventDefault()}
     >
       {children}
       <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground">
         <X className="h-4 w-4" />
-        <span className="sr-only">Close</span>
+        <span className="sr-only">Fechar</span>
       </DialogPrimitive.Close>
     </DialogPrimitive.Content>
   </DialogPortal>

@@ -105,20 +105,26 @@ So no existing test has to be updated. The whole suite (21 files, 122 tests) was
 There is **no `@testing-library/*`** in this repo.
 `apps/web/vitest.config.ts` sets `environment: 'node'`; each component test opts in with `// @vitest-environment happy-dom` on line 1, renders via `createRoot` from `react-dom/client` plus `React.act` reached through a cast, and queries the DOM by hand (see `apps/web/src/sales-ops/__tests__/client-dialog-legal-fields.test.tsx:1-101` for the canonical shape).
 
-**Measured harness limit, and it decides the Red strategy.**
-A prototype test that mounted the *real* Radix dialog and dispatched `new PointerEvent('pointerdown', { bubbles: true, button: 0 })` on an element outside the portal was written and run.
-The event provably reached `document` with the right `target` and `button`, and Radix's `pointerdown` listener was provably registered (`document.addEventListener` spy captured `"pointerdown"` after the `setTimeout(…, 0)` in `usePointerDownOutside`), yet Radix never dispatched `dismissableLayer.pointerDownOutside` and `onOpenChange` was never called - **outside-click dismissal simply does not happen in happy-dom**, before or after the fix.
-Such a test can therefore never go Red and would be a vacuous oracle. It is not planned.
+**CORRECTED 2026-07-29 (Gate 2, attempt 1).** This section originally claimed outside-click dismissal "simply does not happen in happy-dom" and that a DOM-driven test "can therefore never go Red and would be a vacuous oracle". **Both claims are false**, and they were the sole justification for planning a structural oracle instead of a behavioural one. The Verify agent disproved them, and the executor then reproduced the inversion directly.
 
-The oracle is instead a **prop-contract test with the Radix primitive mocked to capture the props our wrapper passes to `DialogPrimitive.Content`**.
-This was prototyped end to end: it fails Red on today's code with `expected 'undefined' to be 'function'`, and passes Green after the implementation below.
-Escape and the X affordance *are* driveable in happy-dom (both verified working against the real primitive), so they get a second, separate real-primitive test file.
+What actually happened in the original prototype: it dispatched `new PointerEvent('pointerdown', { bubbles: true, button: 0 })` and nothing dismissed. That single observation is real but does not generalise. `DialogContentImpl` passes `deferPointerDownOutside: true`, and `usePointerDownOutside` defers only when `event.button === 0`, so a lone button-0 pointerdown parks the dismissal on a follow-up `click` that the prototype never sent. It looks inert; it is merely deferred.
+
+Two forms **do** dismiss an unguarded Radix dialog in this exact harness, with no new dependencies:
+
+1. `new Event('pointerdown', { bubbles: true })` on a node outside the content (`button` is `undefined`, so the synchronous branch fires).
+2. A button-0 `MouseEvent` `pointerdown` completed by a `click`.
+
+Measured against `master`'s unguarded `dialog.tsx`, both call `onOpenChange(false)` exactly once; against the guarded `DialogContent`, neither fires.
+
+So the oracle is **behavioural first**: the real-primitive file below carries the outside-pointerdown tests alongside `Esc` and `X`, and it is what actually guards the acceptance criterion - notably it survives a future Radix rename of `onPointerDownOutside`, which a prop-name assertion would not.
+
+The **prop-contract test with the Radix primitive mocked** is kept as a deliberate complement, not a substitute. It pins what the behavioural test cannot see: that the handlers are `preventDefault`-ing, and that a call site's own handler is dropped rather than composed. It fails Red on today's code with `expected 'undefined' to be 'function'` and passes Green after the implementation below.
 
 ## Red
 
 Two new files. Both use `// @vitest-environment happy-dom` on line 1 and the repo's `createRoot` + `React.act` idiom.
 
-### File 1 (the real Red): `apps/web/src/components/ui/__tests__/dialog-outside-close.test.tsx`
+### File 1 (structural complement): `apps/web/src/components/ui/__tests__/dialog-outside-close.test.tsx`
 
 `describe('DialogContent outside-interaction contract')` with 5 tests:
 
@@ -135,8 +141,9 @@ Two new files. Both use `// @vitest-environment happy-dom` on line 1 and the rep
    Asserts the rendered text contains `'Fechar'` and does not contain `'Close'`.
    **Red today:** the label is `Close` (`dialog.tsx:47`).
 5. `it('ignores a call-site attempt to re-enable outside dismissal')`
-   Renders `<DialogContent {...({ onPointerDownOutside: spy } as never)}>`, asserts the captured handler still calls `preventDefault` and that `spy` was **not** called - proving the guard wins at runtime regardless of prop ordering, not only at the type level.
+   Renders `DialogContent` with a call-site `onPointerDownOutside` spy spread in through a cast that bypasses the new `Omit`, asserts the captured handler still calls `preventDefault` and that `spy` was **not** called - proving the guard wins at runtime regardless of prop ordering, not only at the type level.
    **Red today:** the caller's handler is the only one there.
+   **CORRECTED:** the cast form this plan first gave, `{...({ onPointerDownOutside: spy } as never)}`, does not compile - `TS2698: Spread types may only be created from object types`. Use an object-typed cast instead, e.g. `{...(extraProps as unknown as React.ComponentPropsWithoutRef<typeof DialogContent>)}`.
 
 Mechanics the executor must copy exactly, because they were verified and the obvious alternatives break:
 
@@ -150,15 +157,22 @@ Mechanics the executor must copy exactly, because they were verified and the obv
 - Reset `captured.props = null` in `beforeEach`.
 - No `console.*` and no `eslint-disable` comments: `no-console` is not enabled in this repo's eslint config, so a disable directive is itself reported as an unused-directive warning.
 
-### File 2 (behaviour guard for the affordances we keep): `apps/web/src/components/ui/__tests__/dialog-close-affordances.test.tsx`
+### File 2 (the real Red, and the guard for the affordances we keep): `apps/web/src/components/ui/__tests__/dialog-close-affordances.test.tsx`
 
 No mocks - this one drives the **real** `@radix-ui/react-dialog`, which does render in happy-dom.
+Mount `<Dialog onOpenChange={onOpenChange} open>` with `DialogContent` + `DialogTitle`, and append a sibling `<button>` to `document.body` to act as the outside target.
+
+`describe('dialogs never close on an outside pointer down')` - **this is the behavioural oracle for the acceptance criterion**, 2 tests, both Red against `master`'s unguarded `dialog.tsx` (`onOpenChange` called once with `false`) and Green after the fix:
+
+1. `it('stays open when a bare pointerdown lands outside the content')` - dispatch `new Event('pointerdown', { bubbles: true })` on the outside button, settle a macrotask, assert `onOpenChange` was never called and `[role="dialog"]` is still in `document.body`.
+2. `it('stays open through a full outside primary-button click sequence')` - dispatch button-0 `MouseEvent`s `pointerdown`, `mousedown`, `mouseup`, `click` on the outside button, settle, same assertions. This is the case a lone button-0 `pointerdown` misses, because Radix defers it to the follow-up `click`.
+
 `describe('dialog close affordances stay working')` with 2 tests, both green before and after (they exist so the next person cannot silently kill `Esc` or the `X`):
 
-1. `it('closes on Escape')` - mount `<Dialog onOpenChange={onOpenChange} open>` with `DialogContent` + `DialogTitle`, then `document.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Escape' }))` inside `act`, then `expect(onOpenChange).toHaveBeenCalledWith(false)`.
-2. `it('closes on the X affordance')` - same mount, then click `document.body.querySelector('[role="dialog"] button')` with `new MouseEvent('click', { bubbles: true })` inside `act`, then `expect(onOpenChange).toHaveBeenCalledWith(false)`.
+1. `it('closes on Escape')` - `document.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Escape' }))` inside `act`, then `expect(onOpenChange).toHaveBeenCalledWith(false)`.
+2. `it('closes on the X affordance')` - click `document.body.querySelector('[role="dialog"] button')` with `new MouseEvent('click', { bubbles: true })` inside `act`, then `expect(onOpenChange).toHaveBeenCalledWith(false)`.
 
-Both need the Radix `DismissableLayer` listeners registered first, so after mounting await one macrotask inside `act`:
+All four need the Radix `DismissableLayer` listeners registered first, so after mounting await one macrotask inside `act`. The two outside-pointerdown tests need the same settle *after* dispatching, so a deferred dismissal has a chance to land before the assertion runs - otherwise they would pass for the wrong reason:
 
 ```ts
 await act(async () => {
@@ -243,7 +257,8 @@ CI=true pnpm test
 6. Write the two test files described under **Red**.
 
 7. Run the ORACLE, then the full gate (`pnpm run lint`, `pnpm run type-check`, `CI=true pnpm test`).
-   Expect 23 test files / 129 tests green (21 files / 122 tests today, plus 5 + 2 new).
+   Measure the baseline on the actual branch point rather than trusting a figure from planning time. At `9fc47fd` (slice 01 merged) it is web 25 files / 143 tests, so expect web 27 files / 152 tests after the 5 + 4 new ones. `apps/api` must stay unchanged - this is a web-only slice.
+   Also confirm the behavioural tests actually invert: temporarily restore `master`'s `dialog.tsx`, run the affordances file, and watch the two outside-pointerdown tests fail before shipping them.
 
 8. Commit as one atomic commit, for example:
    `fix(web): keep dialogs open on outside click`
@@ -268,7 +283,7 @@ Two things explicitly **not** done as cleanup here, to keep the commit atomic:
 
 ## Risks
 
-- **The oracle could be vacuous.** An outside-pointerdown DOM test cannot go Red in happy-dom - measured, not assumed (Radix's listener registers, the event lands on `document` with the right `target`/`button`, and no dismissal fires). *Avoided by* making the oracle a prop-contract test against a mocked `DialogPrimitive.Content`, prototyped to fail Red on today's code and pass Green after step 3, plus test 5 which specifically proves runtime non-overridability.
+- **The oracle could be structural rather than behavioural.** This plan originally asserted that an outside-pointerdown DOM test could not go Red in happy-dom and planned only a prop-capture oracle. That assertion was **wrong** (see the corrected "Test harness reality" above), and a prop-name-coupled oracle would stay green through a Radix rename while every dialog silently resumed dismissing. *Avoided by* leading with the behavioural tests in File 2, proven to invert against `master`'s `dialog.tsx`, and keeping the prop-contract tests only as a complement for the two properties behaviour cannot show (handlers are `preventDefault`-ing; a call site's handler is dropped, not composed).
 - **A call site silently opts back in later.** *Avoided twice over:* `Omit` in step 1 makes it a `tsc` error caught by `pnpm run type-check`, and the post-spread ordering in step 3 makes it a no-op even if the type is bypassed with a cast. Test 5 locks the runtime half in place.
 - **`Omit` breaks an existing call site.** *Avoided:* grep found zero `onPointerDownOutside` / `onInteractOutside` usages in `apps/web/src`, and a prototype of steps 1-4 passed `pnpm run type-check` across all four workspace projects.
 - **Over-applying the change to menus, trapping the user.** *Avoided:* the dialog-vs-popover line is drawn explicitly above, with the three keep-as-is surfaces named by file and line and an explicit "no change" instruction.
