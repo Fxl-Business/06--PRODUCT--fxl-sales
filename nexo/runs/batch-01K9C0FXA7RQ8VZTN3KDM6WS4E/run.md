@@ -24,7 +24,7 @@ directly, one slice at a time, each gated by a separate local Verify agent (Gate
 |---|---|---|---|---|---|---|
 | 01 | query-cache-refresh | done | feat/01-query-cache-refresh | PASS | 482d499 | wave 1 |
 | 01.1 | optimistic-row-edit-guard | todo | | | | wave 1, inserted from verify-01 |
-| 02 | dialog-no-outside-close | todo | | | | wave 1 |
+| 02 | dialog-no-outside-close | done | feat/02-dialog-no-outside-close | PASS 2/3 | e2d8b9b | wave 1 |
 | 03 | combobox-primitive | todo | | | | wave 1 |
 | 04 | itens-section-align | todo | | | | wave 1 |
 | 05 | pessoas-funcoes-api | todo | | | | wave 1 |
@@ -136,3 +136,93 @@ own small slice rather than being folded into a verified commit.
 Verify also noted the `onSuccess` reconcile wiring has no test that can fail, since the refetch
 overwrites the whole snapshot and ids are never rendered; the pure `reconcileOptimisticRow` function
 is covered. Slice 01.1 should close that gap too.
+
+**Severity upgraded during 01.1 planning.** The planner found nine affected sites, not three, and the
+six beyond the cadastro edit affordances are worse than the original finding suggested: the produto
+área select (`SalesOpsApp.tsx:2639` via `:1109`), the wizard item área select (`:3824`), the wizard
+cliente input (`:4216-4229`), the vendedor/finder selects (`:3683-3690`) and the prestador options
+(`:3691-3694`) all feed a row id into a request body, so a placeholder id reaching a
+`POST /sales-ops/sales` body discards an entire wizard of typing rather than merely failing one
+`PATCH`.
+`go()` at `:587-594` clears only `person` modals, so an área or cliente dialog survives a route
+change and those pickers are reachable without dismissing anything.
+Slice 02 confirmed not to close the path: every create dialog ships an always-enabled `Cancelar`
+(`:3369`, `:3468`) and only the submit button is gated on `saving`.
+The fix became one invariant rather than nine patches - an optimistic row is visible in the cadastro
+that created it and nowhere else - via a memoised `withoutOptimisticRows(snapshot)` handed to every
+consumer except the three cadastro lists.
+
+### 02-dialog-no-outside-close - Gate 2 FAIL, attempt 1 of 3
+
+First Verify failure of the batch, and it caught something a green suite would have hidden.
+
+The production change is correct and Verify proved it independently rather than trusting the slice's
+own tests: a throwaway probe drove the real `@radix-ui/react-dialog` in happy-dom and confirmed an
+unguarded dialog fires `onOpenChange(false)` on an outside pointerdown while the branch's
+`DialogContent` never fires, across three different outside sequences.
+Esc and X still close, `alert-dialog.tsx`'s comment-only change was verified true against Radix
+1.1.18, menus were untouched, anti-gaming was clean (two added files, zero deletions, no pre-existing
+test modified), scope held, hygiene was clean, and every gate was green at web 27 files / 150 tests.
+
+What failed is the oracle. `dialog-outside-close.test.tsx` asserts as established fact that
+outside-click dismissal "provably does not fire inside happy-dom" and that a DOM-driven test "could
+therefore never go Red and would be a vacuous oracle".
+Both claims are false, and they are the only justification for the weaker prop-capture oracle.
+Verify demonstrated two working behavioural probes with no new dependencies: `new Event('pointerdown',
+{ bubbles: true })` dispatched at a sibling node outside the content, or a `MouseEvent` `pointerdown`
+followed by a `click`.
+The trap that misled the planner: `DialogContentImpl` passes `deferPointerDownOutside: true` and Radix
+defers only when `event.button === 0`, so a lone button-0 `MouseEvent` genuinely looks inert - which
+is not the same as the behaviour being undrivable.
+
+The consequence is substantive rather than pedantic.
+The shipped tests assert Radix prop names while the acceptance criterion is about behaviour, so a
+future Radix rename of `onPointerDownOutside` would leave all five tests green while every dialog in
+the app silently resumes dismissing on outside click - exactly the regression the slice exists to
+prevent.
+In fairness the prop-capture tests are not vacuous: repointed at `master`'s `dialog.tsx`, 4 of 5 go
+Red including the strong "call site cannot override" case.
+They are simply not sufficient alone.
+
+Remediation sent back to the same executor: keep both source files byte-identical, delete the false
+paragraph, add a real-primitive behavioural test proven to invert against `master`, keep the
+prop-contract tests reframed as a complement, correct the plan file so the next reader is not misled,
+and amend rather than add a commit.
+
+### 02-dialog-no-outside-close - Gate 2 PASS on attempt 2, merged
+
+Commit amended to `e2d8b9b`. A **fresh** Verify agent, explicitly told not to trust the remediation
+claims, cleared it.
+
+It reproduced the inversion itself rather than accepting the executor's word: it overwrote
+`dialog.tsx` with `git show master:...`, confirmed byte-identity with master, ran only the behavioural
+file and watched both outside-pointerdown tests fail with `onOpenChange` called once with `false`
+while the Esc and X tests stayed green, then restored the branch file and verified the restore with
+`git hash-object`.
+It also confirmed the false claim was removed rather than reworded, that the replacement text asserts
+the opposite of the old claim, and that `git diff 9a70c45..e2d8b9b` over both production files is
+empty so the amend touched only tests plus the plan file.
+
+The behavioural test settles a macrotask **after** dispatch so a deferred button-0 dismissal gets its
+chance to land - it cannot pass for the wrong reason. That detail is what makes it evidence.
+
+Residual judged acceptable rather than waved through: the type-level `Omit` has no direct
+`@ts-expect-error` probe, but the verifier ran a throwaway `tsc` probe confirming the `Omit` does
+reject both props with TS2322, and noted the behaviour-critical defence is the post-spread ordering,
+which two verified-inverting oracles lock. Deleting the `Omit` could not resurface the user-visible
+bug.
+
+Gates: `lint=0 type-check=0 test=0`, web 27 files / 152 tests, api 23 / 215 unchanged.
+Test diff 288 additions, zero deletions, no pre-existing test touched.
+Menus confirmed unaffected; no dialog became a trap; `alert-dialog.tsx` comment verified true against
+`@radix-ui/react-alert-dialog@1.1.18`.
+Report: `verify-02-attempt2.md`.
+
+### Deferred: the same defect in the frozen `/admin/*` tree
+
+`apps/web/src/admin/products/ProductsPage.tsx:80` and `:88` carry the identical defect
+(`setEditProduct(product)` and `navigate('/admin/products/' + product.id)` with an
+`optimistic:<appId>:<slug>` id).
+It pre-dates slice 01 and `CLAUDE.md` fences the legacy `/admin/*` route tree off as unchanged, so it
+is deliberately not fixed here.
+Needs a human decision: a dedicated slice, or a logged doubt.
