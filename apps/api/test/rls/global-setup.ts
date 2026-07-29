@@ -16,6 +16,7 @@ import postgres from 'postgres';
  */
 export async function setup() {
   const migrateUrl =
+    process.env.TEST_MIGRATE_DATABASE_URL ??
     process.env.TEST_DATABASE_URL ??
     process.env.DATABASE_URL ??
     'postgresql://postgres:postgres@localhost:5006/fxl_sales';
