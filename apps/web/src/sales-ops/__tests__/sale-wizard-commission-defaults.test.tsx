@@ -40,6 +40,7 @@ function product(
     name,
     type: 'SaaS',
     codeSuffix: id.endsWith('1') ? '1' : '2',
+    areaId: null,
     openPrice: false,
     setupBrl: 100000,
     hasMonthly: false,
@@ -102,6 +103,7 @@ const bootstrap: SalesOpsBootstrap = {
       updatedAt: null,
     },
   ],
+  areas: [],
   payables: [],
   saleItems: [],
   settings: {

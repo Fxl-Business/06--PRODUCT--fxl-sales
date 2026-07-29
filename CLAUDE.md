@@ -40,7 +40,7 @@ Keep the repository folder name unchanged until the editor session can safely mo
 
 ## Sales Ops Routing
 
-- Canonical Sales Ops routes are `tatico/dashboard`, `operacional/vendas|comissoes`, `cadastros/produtos|clientes|vendedores|finders|geral`, and `meus-dados/vendedores|comissoes|finders|vendas`.
+- Canonical Sales Ops routes are `tatico/dashboard`, `operacional/vendas|comissoes`, `cadastros/produtos|areas|clientes|vendedores|finders|geral`, and `meus-dados/vendedores|comissoes|finders|vendas`.
 - The URL is the single source of truth for the active Sales Ops workspace and page.
 - Workspace visibility is driven purely by the Hub role set `profile.roles: AppRole[]` (`AppRole = 'admin' | 'seller' | 'finder'`) via `getVisibleWorkspaces` in `apps/web/src/sales-ops/navigation.ts`. There is no viewing-level switcher; the old "Nível de visualização" selector was removed.
 - Visibility rule: `admin` (team) sees `tatico` + `operacional` + `cadastros`; holding `seller` or `finder` adds the `meus-dados` workspace. So seller-only or finder-only sees only `meus-dados` and defaults there; team-only sees the three team workspaces and no `meus-dados`; team + seller/finder sees all four. Zero recognized roles keeps `/no-role`.

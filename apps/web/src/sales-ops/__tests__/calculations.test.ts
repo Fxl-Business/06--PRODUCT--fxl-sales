@@ -41,6 +41,7 @@ describe('sales operations web calculations', () => {
       sales: [],
       products: [],
       clients: [],
+      areas: [],
       people: [],
       payables: [],
       saleItems: [],

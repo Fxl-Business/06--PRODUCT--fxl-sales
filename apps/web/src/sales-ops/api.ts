@@ -1,6 +1,7 @@
 import { apiFetch } from '@/lib/api-client';
 import type {
   CreateSalePayload,
+  SalesOpsArea,
   SalesOpsBootstrap,
   SalesOpsClient,
   SalesOpsPerson,
@@ -34,6 +35,11 @@ export type SaveProductPayload = Omit<
 
 export type SaveClientPayload = Omit<
   Partial<SalesOpsClient>,
+  'id' | 'orgId' | 'createdAt' | 'updatedAt'
+> & { id?: string; name: string };
+
+export type SaveAreaPayload = Omit<
+  Partial<SalesOpsArea>,
   'id' | 'orgId' | 'createdAt' | 'updatedAt'
 > & { id?: string; name: string };
 
@@ -74,6 +80,13 @@ export const salesOpsApi = {
     const { id, ...body } = payload;
     return apiFetch<{ client: SalesOpsClient }>(
       id ? `/api/v1/sales-ops/clients/${id}` : '/api/v1/sales-ops/clients',
+      { method: id ? 'PATCH' : 'POST', token, body: JSON.stringify(body) },
+    );
+  },
+  saveArea: (payload: SaveAreaPayload, token: Token) => {
+    const { id, ...body } = payload;
+    return apiFetch<{ area: SalesOpsArea }>(
+      id ? `/api/v1/sales-ops/areas/${id}` : '/api/v1/sales-ops/areas',
       { method: id ? 'PATCH' : 'POST', token, body: JSON.stringify(body) },
     );
   },

@@ -5,6 +5,7 @@ import {
   Cog,
   ContactRound,
   Database,
+  Layers,
   Search,
   UsersRound,
   type LucideIcon,
@@ -19,6 +20,7 @@ export type SalesOpsView =
   | 'finders'
   | 'comissoes'
   | 'produtos'
+  | 'areas'
   | 'clientes'
   | 'geral';
 
@@ -55,6 +57,7 @@ const operational: SalesOpsNavigationItem[] = [
 
 const cadastros: SalesOpsNavigationItem[] = [
   { id: 'produtos', label: 'Produtos', icon: Database },
+  { id: 'areas', label: 'Áreas', icon: Layers },
   { id: 'clientes', label: 'Clientes', icon: ContactRound },
   { id: 'vendedores', label: 'Vendedores', icon: UsersRound },
   { id: 'finders', label: 'Finders', icon: Search },
