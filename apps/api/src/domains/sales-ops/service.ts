@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, ne, sql, type SQL } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, ne, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { getDb } from '../../db/client.js';
 import {
@@ -196,6 +196,14 @@ export const CreateSaleSchema = SaleWriteBaseSchema.superRefine(validatePaymentP
 export const UpdateSaleSchema = SaleWriteBaseSchema.extend({
   status: z.enum(['draft', 'open']),
 }).superRefine(validatePaymentPlan);
+
+export const SaleTransitionSchema = z.object({
+  status: z.enum(['open', 'won', 'lost', 'cancelled']),
+});
+
+export const CancelContractSchema = z.object({
+  effectiveDate: isoDate.optional(),
+});
 
 export type CreateSaleInput = z.infer<typeof CreateSaleSchema>;
 export type UpdateSaleInput = z.infer<typeof UpdateSaleSchema>;
@@ -1050,6 +1058,204 @@ export async function updateSale(
     }
 
     return { ok: true, sale, ledger };
+  });
+}
+
+export type SaleStatus = 'draft' | 'open' | 'won' | 'lost' | 'cancelled';
+export type TransitionTarget = 'open' | 'won' | 'lost' | 'cancelled';
+
+export const SALE_TRANSITIONS: Record<SaleStatus, readonly TransitionTarget[]> = {
+  draft: ['open', 'won', 'cancelled'],
+  open: ['won', 'lost', 'cancelled'],
+  won: ['open'],
+  lost: ['open', 'cancelled'],
+  cancelled: ['open'],
+};
+
+export function canTransition(from: string, to: TransitionTarget): boolean {
+  const allowed = SALE_TRANSITIONS[from as SaleStatus];
+  return allowed !== undefined && allowed.includes(to);
+}
+
+export type TransitionResult =
+  | { ok: true; sale: typeof salesOpsSales.$inferSelect }
+  | { ok: false; reason: 'not_found' }
+  | { ok: false; reason: 'invalid_transition'; from: string; to: TransitionTarget };
+
+export async function transitionSale(
+  db: Db,
+  orgId: string,
+  saleId: string,
+  to: TransitionTarget,
+): Promise<TransitionResult> {
+  return withTenant(db, orgId, async (tx): Promise<TransitionResult> => {
+    const [sale] = await tx
+      .select()
+      .from(salesOpsSales)
+      .where(and(eq(salesOpsSales.orgId, orgId), eq(salesOpsSales.id, saleId)))
+      .for('update')
+      .limit(1);
+    if (!sale) return { ok: false, reason: 'not_found' };
+
+    if (!canTransition(sale.status, to)) {
+      return { ok: false, reason: 'invalid_transition', from: sale.status, to };
+    }
+
+    const now = new Date();
+    let patch: Partial<typeof salesOpsSales.$inferInsert>;
+
+    if (to === 'won') {
+      const receivableRows = await tx
+        .select()
+        .from(salesOpsReceivables)
+        .where(and(eq(salesOpsReceivables.orgId, orgId), eq(salesOpsReceivables.saleId, saleId)))
+        .orderBy(salesOpsReceivables.dueDate);
+      const professionalRows = await tx
+        .select()
+        .from(salesOpsSaleProfessionals)
+        .where(
+          and(
+            eq(salesOpsSaleProfessionals.orgId, orgId),
+            eq(salesOpsSaleProfessionals.saleId, saleId),
+          ),
+        );
+      const existingPayableRows = await tx
+        .select()
+        .from(salesOpsPayables)
+        .where(and(eq(salesOpsPayables.orgId, orgId), eq(salesOpsPayables.saleId, saleId)));
+
+      const drafts = materializeWonPayables({
+        sale: {
+          sellerName: sale.sellerNameSnapshot,
+          finderName: sale.finderNameSnapshot,
+          hasFinder: sale.finderPersonId !== null,
+          sellerCommissionPct: Number(sale.sellerCommissionPct),
+          finderCommissionPct: Number(sale.finderCommissionPct),
+          taxPct: Number(sale.taxPct),
+          otherCostsBrl: sale.otherCostsBrl,
+        },
+        professionals: professionalRows.map((p) => ({
+          personName: p.personNameSnapshot,
+          costBrl: p.costBrl,
+        })),
+        receivables: receivableRows.map((r) => ({
+          id: r.id,
+          dueDate: asDateOnly(r.dueDate),
+          amountBrl: r.amountBrl,
+          status: r.status,
+        })),
+        existingPayables: existingPayableRows.map((p) => ({
+          kind: p.kind as PayableKind,
+          receivableId: p.receivableId,
+          status: p.status,
+        })),
+        wonDate: asDateOnly(now),
+      });
+
+      if (drafts.length > 0) {
+        await tx.insert(salesOpsPayables).values(
+          drafts.map((d) => ({ ...d, dueDate: dateFromIsoDay(d.dueDate), orgId, saleId })),
+        );
+      }
+      patch = { status: 'won', wonAt: now, lostAt: null, updatedAt: now };
+    } else if (to === 'open') {
+      if (sale.status === 'won') {
+        await tx
+          .update(salesOpsPayables)
+          .set({ status: 'void' })
+          .where(
+            and(
+              eq(salesOpsPayables.orgId, orgId),
+              eq(salesOpsPayables.saleId, saleId),
+              eq(salesOpsPayables.status, 'open'),
+            ),
+          );
+      }
+      patch = { status: 'open', wonAt: null, lostAt: null, updatedAt: now };
+    } else if (to === 'lost') {
+      patch = { status: 'lost', lostAt: now, updatedAt: now };
+    } else {
+      patch = { status: 'cancelled', updatedAt: now };
+    }
+
+    const [updated] = await tx
+      .update(salesOpsSales)
+      .set(patch)
+      .where(and(eq(salesOpsSales.orgId, orgId), eq(salesOpsSales.id, saleId)))
+      .returning();
+    return { ok: true, sale: updated! };
+  });
+}
+
+export type CancelContractResult =
+  | { ok: true; sale: typeof salesOpsSales.$inferSelect; voidedReceivables: number; voidedPayables: number }
+  | { ok: false; reason: 'not_found' }
+  | { ok: false; reason: 'not_cancellable' };
+
+export async function cancelContract(
+  db: Db,
+  orgId: string,
+  saleId: string,
+  effectiveDate?: string,
+): Promise<CancelContractResult> {
+  return withTenant(db, orgId, async (tx): Promise<CancelContractResult> => {
+    const [sale] = await tx
+      .select()
+      .from(salesOpsSales)
+      .where(and(eq(salesOpsSales.orgId, orgId), eq(salesOpsSales.id, saleId)))
+      .for('update')
+      .limit(1);
+    if (!sale) return { ok: false, reason: 'not_found' };
+    if (sale.status !== 'won') return { ok: false, reason: 'not_cancellable' };
+
+    const effective = effectiveDate ?? new Date().toISOString().slice(0, 10);
+    const cutoff = dateFromIsoDay(effective);
+
+    const future = await tx
+      .select({ id: salesOpsReceivables.id })
+      .from(salesOpsReceivables)
+      .where(
+        and(
+          eq(salesOpsReceivables.orgId, orgId),
+          eq(salesOpsReceivables.saleId, saleId),
+          eq(salesOpsReceivables.status, 'open'),
+          gt(salesOpsReceivables.dueDate, cutoff),
+        ),
+      );
+    const futureIds = future.map((r) => r.id);
+
+    if (sale.recurringBrl <= 0 && futureIds.length === 0) {
+      return { ok: false, reason: 'not_cancellable' };
+    }
+
+    let voidedReceivables: Array<{ id: string }> = [];
+    let voidedPayables: Array<{ id: string }> = [];
+    if (futureIds.length > 0) {
+      voidedReceivables = await tx
+        .update(salesOpsReceivables)
+        .set({ status: 'void' })
+        .where(and(eq(salesOpsReceivables.orgId, orgId), inArray(salesOpsReceivables.id, futureIds)))
+        .returning({ id: salesOpsReceivables.id });
+      voidedPayables = await tx
+        .update(salesOpsPayables)
+        .set({ status: 'void' })
+        .where(
+          and(
+            eq(salesOpsPayables.orgId, orgId),
+            eq(salesOpsPayables.saleId, saleId),
+            eq(salesOpsPayables.status, 'open'),
+            inArray(salesOpsPayables.receivableId, futureIds),
+          ),
+        )
+        .returning({ id: salesOpsPayables.id });
+    }
+
+    return {
+      ok: true,
+      sale,
+      voidedReceivables: voidedReceivables.length,
+      voidedPayables: voidedPayables.length,
+    };
   });
 }
 

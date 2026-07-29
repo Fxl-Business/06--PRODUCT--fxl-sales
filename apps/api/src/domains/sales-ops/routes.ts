@@ -4,15 +4,18 @@ import { getDb } from '../../db/client.js';
 import { requireAdmin } from '../../middleware/require-admin.js';
 import {
   AreaSchema,
+  CancelContractSchema,
   ClientSchema,
   CreateSaleSchema,
   PersonSchema,
   ProductSchema,
   SaleInputError,
+  SaleTransitionSchema,
   SettingsSchema,
   UpdateAreaSchema,
   UpdatePersonSchema,
   UpdateSaleSchema,
+  cancelContract,
   createArea,
   createClient,
   createPerson,
@@ -27,6 +30,7 @@ import {
   listPeople,
   listProducts,
   listSales,
+  transitionSale,
   updateArea,
   updateClient,
   updatePerson,
@@ -175,6 +179,38 @@ salesOpsRouter.post('/sales', async (c) => {
     }
     throw error;
   }
+});
+
+salesOpsRouter.post('/sales/:id/transition', async (c) => {
+  const id = saleIdSchema.safeParse(c.req.param('id'));
+  if (!id.success) return c.json({ error: 'not_found' }, 404);
+  const parsed = SaleTransitionSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) {
+    return c.json({ error: 'validation_error', issues: parsed.error.flatten() }, 400);
+  }
+  const result = await transitionSale(getDb(), c.get('orgId'), id.data, parsed.data.status);
+  if (!result.ok && result.reason === 'not_found') return c.json({ error: 'not_found' }, 404);
+  if (!result.ok) {
+    return c.json({ error: 'invalid_transition', from: result.from, to: result.to }, 409);
+  }
+  return c.json({ sale: result.sale });
+});
+
+salesOpsRouter.post('/sales/:id/cancel-contract', async (c) => {
+  const id = saleIdSchema.safeParse(c.req.param('id'));
+  if (!id.success) return c.json({ error: 'not_found' }, 404);
+  const parsed = CancelContractSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) {
+    return c.json({ error: 'validation_error', issues: parsed.error.flatten() }, 400);
+  }
+  const result = await cancelContract(getDb(), c.get('orgId'), id.data, parsed.data.effectiveDate);
+  if (!result.ok && result.reason === 'not_found') return c.json({ error: 'not_found' }, 404);
+  if (!result.ok) return c.json({ error: 'contract_not_cancellable' }, 409);
+  return c.json({
+    sale: result.sale,
+    voidedReceivables: result.voidedReceivables,
+    voidedPayables: result.voidedPayables,
+  });
 });
 
 salesOpsRouter.put('/sales/:id', async (c) => {

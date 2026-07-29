@@ -1,0 +1,181 @@
+import { describe, expect, it } from 'vitest';
+import { canTransition, materializeWonPayables } from '../service.js';
+
+const ALL_STATUSES = ['draft', 'open', 'won', 'lost', 'cancelled'] as const;
+const ALL_TARGETS = ['open', 'won', 'lost', 'cancelled'] as const;
+
+// Mirrors the transition matrix table from the plan (04-proposal-transition-backend.md).
+const EXPECTED_MATRIX: Record<(typeof ALL_STATUSES)[number], Record<(typeof ALL_TARGETS)[number], boolean>> = {
+  draft: { open: true, won: true, lost: false, cancelled: true },
+  open: { open: false, won: true, lost: true, cancelled: true },
+  won: { open: true, won: false, lost: false, cancelled: false },
+  lost: { open: true, won: false, lost: false, cancelled: true },
+  cancelled: { open: true, won: false, lost: false, cancelled: false },
+};
+
+describe('canTransition', () => {
+  it('transition matrix: allows exactly the documented pairs', () => {
+    for (const from of ALL_STATUSES) {
+      for (const to of ALL_TARGETS) {
+        expect(canTransition(from, to)).toBe(EXPECTED_MATRIX[from][to]);
+      }
+    }
+
+    expect(canTransition('forecast', 'won')).toBe(false);
+    expect(canTransition('closed', 'open')).toBe(false);
+  });
+});
+
+describe('materializeWonPayables (slice 04 standalone contract pin)', () => {
+  it('links per-receivable commission and tax payables via receivableId', () => {
+    const drafts = materializeWonPayables({
+      sale: {
+        sellerName: 'Ana Martins',
+        finderName: 'Carlos Finder',
+        hasFinder: true,
+        sellerCommissionPct: 10,
+        finderCommissionPct: 3,
+        taxPct: 6,
+        otherCostsBrl: 0,
+      },
+      professionals: [],
+      receivables: [
+        { id: 'r1', dueDate: '2026-08-01', amountBrl: 500000, status: 'open' },
+        { id: 'r2', dueDate: '2026-09-01', amountBrl: 500000, status: 'open' },
+      ],
+      wonDate: '2026-07-29',
+    });
+
+    expect(drafts).toHaveLength(6);
+    expect(drafts.every((d) => d.receivableId !== null)).toBe(true);
+
+    const r1Drafts = drafts.filter((d) => d.receivableId === 'r1');
+    expect(r1Drafts).toHaveLength(3);
+    expect(r1Drafts.map((d) => d.amountBrl).sort((a, b) => a - b)).toEqual([15000, 30000, 50000]);
+    expect(r1Drafts.every((d) => d.dueDate === '2026-08-01')).toBe(true);
+
+    const r2Drafts = drafts.filter((d) => d.receivableId === 'r2');
+    expect(r2Drafts).toHaveLength(3);
+    expect(r2Drafts.map((d) => d.amountBrl).sort((a, b) => a - b)).toEqual([15000, 30000, 50000]);
+    expect(r2Drafts.every((d) => d.dueDate === '2026-09-01')).toBe(true);
+  });
+
+  it('emits one-shot professional and other cost drafts at the won date', () => {
+    const drafts = materializeWonPayables({
+      sale: {
+        sellerName: 'Ana Martins',
+        finderName: null,
+        hasFinder: false,
+        sellerCommissionPct: 10,
+        finderCommissionPct: 3,
+        taxPct: 6,
+        otherCostsBrl: 25000,
+      },
+      professionals: [{ personName: 'Rafael Nunes', costBrl: 40000 }],
+      receivables: [],
+      wonDate: '2026-07-29',
+    });
+
+    expect(drafts).toEqual([
+      {
+        beneficiaryName: 'Rafael Nunes',
+        kind: 'professional_cost',
+        dueDate: '2026-07-29',
+        amountBrl: 40000,
+        status: 'open',
+        receivableId: null,
+      },
+      {
+        beneficiaryName: 'Outros custos',
+        kind: 'other_cost',
+        dueDate: '2026-07-29',
+        amountBrl: 25000,
+        status: 'open',
+        receivableId: null,
+      },
+    ]);
+  });
+
+  it('skips finder commission when hasFinder is false and drops zero-amount drafts', () => {
+    const drafts = materializeWonPayables({
+      sale: {
+        sellerName: 'Ana Martins',
+        finderName: 'Carlos Finder',
+        hasFinder: false,
+        sellerCommissionPct: 10,
+        finderCommissionPct: 3,
+        taxPct: 0,
+        otherCostsBrl: 0,
+      },
+      professionals: [],
+      receivables: [{ id: 'r1', dueDate: '2026-08-01', amountBrl: 500000, status: 'open' }],
+      wonDate: '2026-07-29',
+    });
+
+    expect(drafts).toEqual([
+      {
+        beneficiaryName: 'Ana Martins',
+        kind: 'seller_commission',
+        dueDate: '2026-08-01',
+        amountBrl: 50000,
+        status: 'open',
+        receivableId: 'r1',
+      },
+    ]);
+  });
+
+  it('never duplicates a surviving paid payable on re-win', () => {
+    const drafts = materializeWonPayables({
+      sale: {
+        sellerName: 'Ana Martins',
+        finderName: null,
+        hasFinder: false,
+        sellerCommissionPct: 10,
+        finderCommissionPct: 3,
+        taxPct: 0,
+        otherCostsBrl: 20000,
+      },
+      professionals: [],
+      receivables: [
+        { id: 'r1', dueDate: '2026-08-01', amountBrl: 500000, status: 'open' },
+        { id: 'r2', dueDate: '2026-09-01', amountBrl: 500000, status: 'open' },
+      ],
+      existingPayables: [
+        { kind: 'seller_commission', receivableId: 'r1', status: 'paid' },
+        { kind: 'seller_commission', receivableId: 'r2', status: 'void' },
+        { kind: 'other_cost', receivableId: null, status: 'paid' },
+      ],
+      wonDate: '2026-07-29',
+    });
+
+    expect(drafts).toEqual([
+      {
+        beneficiaryName: 'Ana Martins',
+        kind: 'seller_commission',
+        dueDate: '2026-09-01',
+        amountBrl: 50000,
+        status: 'open',
+        receivableId: 'r2',
+      },
+    ]);
+  });
+
+  it('ignores void receivable rows', () => {
+    const drafts = materializeWonPayables({
+      sale: {
+        sellerName: 'Ana Martins',
+        finderName: null,
+        hasFinder: false,
+        sellerCommissionPct: 10,
+        finderCommissionPct: 3,
+        taxPct: 6,
+        otherCostsBrl: 0,
+      },
+      professionals: [],
+      receivables: [{ id: 'r1', dueDate: '2026-08-01', amountBrl: 500000, status: 'void' }],
+      wonDate: '2026-07-29',
+    });
+
+    expect(drafts).toEqual([]);
+  });
+});
