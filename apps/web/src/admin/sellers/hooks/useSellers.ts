@@ -1,17 +1,18 @@
 import { useAccessToken } from '@/auth/react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { adminSellersApi } from '@/lib/api-client';
+import { useAppMutation } from '@/lib/app-mutation';
+import { queryKeys } from '@/lib/query-keys';
 import type { CreateSellerBody, SellerRow } from '@/admin/types';
 
 /**
  * Admin sellers TanStack Query hooks (Phase 03 T10). apiFetch + getToken() (D-J).
- * The invite mutation invalidates ['admin','sellers'].
  */
 
 export function useSellers() {
   const { getToken } = useAccessToken();
   return useQuery({
-    queryKey: ['admin', 'sellers'],
+    queryKey: queryKeys.adminSellers.list(),
     queryFn: async () => adminSellersApi.list((await getToken()) ?? ''),
     select: (data): SellerRow[] => (Array.isArray(data.sellers) ? data.sellers : []),
   });
@@ -19,12 +20,9 @@ export function useSellers() {
 
 export function useInviteSeller() {
   const { getToken } = useAccessToken();
-  const qc = useQueryClient();
-  return useMutation({
+  return useAppMutation({
     mutationFn: async (data: CreateSellerBody) =>
       adminSellersApi.create(data, (await getToken()) ?? ''),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ['admin', 'sellers'] });
-    },
+    invalidates: [queryKeys.adminSellers.all],
   });
 }

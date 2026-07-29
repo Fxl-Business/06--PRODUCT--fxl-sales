@@ -1,12 +1,13 @@
 import { useAccessToken } from '@/auth/react';
 import {
-  useMutation,
   useQuery,
   useQueryClient,
   type QueryClient,
   type QueryKey,
 } from '@tanstack/react-query';
 import { adminProductsApi } from '@/lib/api-client';
+import { useAppMutation } from '@/lib/app-mutation';
+import { queryKeys } from '@/lib/query-keys';
 import type {
   AppRow,
   CreateProductBody,
@@ -47,6 +48,8 @@ function isAppsListData(data: unknown): data is AppsListData {
 function productListQueryMatchesApp(queryKey: QueryKey, appId: string): boolean {
   if (queryKey[0] !== 'admin' || queryKey[1] !== 'products') return false;
   const filter = queryKey[2];
+  // 'detail' is the single-product key segment, never a list filter.
+  if (filter === 'detail') return false;
   return filter === 'all' || filter === appId;
 }
 
@@ -55,7 +58,7 @@ function sortedProducts(products: ProductListRow[]): ProductListRow[] {
 }
 
 function findCachedApp(queryClient: QueryClient, appId: string): AppRow | undefined {
-  const data = queryClient.getQueryData<unknown>(['admin', 'apps']);
+  const data = queryClient.getQueryData<unknown>(queryKeys.adminApps.list());
   if (!isAppsListData(data)) return undefined;
   return data.apps.find((app) => app.id === appId);
 }
@@ -97,7 +100,7 @@ function applyOptimisticProductCreate(
   const app = findCachedApp(queryClient, data.appId);
   const optimisticRow = optimisticProductRowFromBody(data, app);
   const snapshots = queryClient
-    .getQueriesData<unknown>({ queryKey: ['admin', 'products'] })
+    .getQueriesData<unknown>({ queryKey: queryKeys.adminProducts.all })
     .reduce<ProductListSnapshot[]>((acc, [queryKey, listData]) => {
       if (!productListQueryMatchesApp(queryKey, data.appId) || !isProductsListData(listData)) {
         return acc;
@@ -156,7 +159,7 @@ function rollbackOptimisticProductCreate(
 export function useAdminProducts(appId?: string) {
   const { getToken } = useAccessToken();
   return useQuery({
-    queryKey: ['admin', 'products', appId ?? 'all'],
+    queryKey: queryKeys.adminProducts.list(appId),
     queryFn: async () => adminProductsApi.list(appId, (await getToken()) ?? ''),
     select: (d): ProductListRow[] => (Array.isArray(d.products) ? d.products : []),
   });
@@ -165,7 +168,7 @@ export function useAdminProducts(appId?: string) {
 export function useAdminProduct(id: string) {
   const { getToken } = useAccessToken();
   return useQuery({
-    queryKey: ['admin', 'products', id],
+    queryKey: queryKeys.adminProducts.detail(id),
     queryFn: async () => adminProductsApi.get(id, (await getToken()) ?? ''),
     enabled: Boolean(id),
   });
@@ -174,11 +177,12 @@ export function useAdminProduct(id: string) {
 export function useCreateProduct() {
   const { getToken } = useAccessToken();
   const queryClient = useQueryClient();
-  return useMutation({
+  return useAppMutation({
     mutationFn: async (data: CreateProductBody) =>
       adminProductsApi.create(data, (await getToken()) ?? ''),
+    invalidates: [queryKeys.adminProducts.all],
     onMutate: async (data) => {
-      await queryClient.cancelQueries({ queryKey: ['admin', 'products'] });
+      await queryClient.cancelQueries({ queryKey: queryKeys.adminProducts.all });
       return applyOptimisticProductCreate(queryClient, data);
     },
     onSuccess: (res, _data, context) => {
@@ -187,29 +191,24 @@ export function useCreateProduct() {
     onError: (_error, _data, context) => {
       rollbackOptimisticProductCreate(queryClient, context);
     },
-    onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: ['admin', 'products'] });
-    },
   });
 }
 
 export function useUpdateProduct() {
   const { getToken } = useAccessToken();
-  const queryClient = useQueryClient();
-  return useMutation({
+  return useAppMutation({
     mutationFn: async ({ id, data }: { id: string; data: UpdateProductBody }) =>
       adminProductsApi.update(id, data, (await getToken()) ?? ''),
-    onSuccess: (_res, { id }) => {
-      void queryClient.invalidateQueries({ queryKey: ['admin', 'products'] });
-      void queryClient.invalidateQueries({ queryKey: ['admin', 'products', id] });
-    },
+    invalidates: ({ variables }) => [
+      queryKeys.adminProducts.all,
+      queryKeys.adminProducts.detail(variables.id),
+    ],
   });
 }
 
 export function useUpsertPriceBand(productId: string) {
   const { getToken } = useAccessToken();
-  const queryClient = useQueryClient();
-  return useMutation({
+  return useAppMutation({
     mutationFn: async ({
       component,
       data,
@@ -217,20 +216,15 @@ export function useUpsertPriceBand(productId: string) {
       component: PriceBandComponent;
       data: UpsertPriceBandBody;
     }) => adminProductsApi.upsertPriceBand(productId, component, data, (await getToken()) ?? ''),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['admin', 'products', productId] });
-    },
+    invalidates: [queryKeys.adminProducts.detail(productId)],
   });
 }
 
 export function useUpsertCommissionRule(productId: string) {
   const { getToken } = useAccessToken();
-  const queryClient = useQueryClient();
-  return useMutation({
+  return useAppMutation({
     mutationFn: async (data: UpsertCommissionRuleBody) =>
       adminProductsApi.upsertCommissionRule(productId, data, (await getToken()) ?? ''),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['admin', 'products', productId] });
-    },
+    invalidates: [queryKeys.adminProducts.detail(productId)],
   });
 }

@@ -1,18 +1,20 @@
 import { useAccessToken } from '@/auth/react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { adminFindersApi } from '@/lib/api-client';
+import { useAppMutation } from '@/lib/app-mutation';
+import { queryKeys } from '@/lib/query-keys';
 import type { FinderRow, FinderStatus } from '@/admin/types';
 
- /**
+/**
  * Admin finders TanStack Query hooks (Phase 03 T10). All calls go through
- * apiFetch + useAccessToken() (D-J). approve/suspend invalidate BOTH the list
- * key ['admin','finders'] AND the detail key ['admin','finders', id] (WARN).
+ * apiFetch + useAccessToken() (D-J). Each mutation's `invalidates` declaration is
+ * the source of truth for which caches it refreshes.
  */
 
 export function useFinders(status?: FinderStatus) {
   const { getToken } = useAccessToken();
   return useQuery({
-    queryKey: ['admin', 'finders', status],
+    queryKey: queryKeys.adminFinders.list(status),
     queryFn: async () => adminFindersApi.list(status, (await getToken()) ?? ''),
     select: (data): FinderRow[] => (Array.isArray(data.items) ? data.items : []),
   });
@@ -21,7 +23,7 @@ export function useFinders(status?: FinderStatus) {
 export function useFinder(id: string) {
   const { getToken } = useAccessToken();
   return useQuery({
-    queryKey: ['admin', 'finders', id],
+    queryKey: queryKeys.adminFinders.detail(id),
     queryFn: async () => adminFindersApi.get(id, (await getToken()) ?? ''),
     select: (data): FinderRow => data.finder,
   });
@@ -29,25 +31,23 @@ export function useFinder(id: string) {
 
 export function useApproveFinder() {
   const { getToken } = useAccessToken();
-  const qc = useQueryClient();
-  return useMutation({
+  return useAppMutation({
     mutationFn: async (id: string) => adminFindersApi.approve(id, (await getToken()) ?? ''),
-    onSuccess: (_data, id) => {
-      void qc.invalidateQueries({ queryKey: ['admin', 'finders'] });
-      void qc.invalidateQueries({ queryKey: ['admin', 'finders', id] });
-    },
+    invalidates: ({ variables }) => [
+      queryKeys.adminFinders.all,
+      queryKeys.adminFinders.detail(variables),
+    ],
   });
 }
 
 export function useSuspendFinder() {
   const { getToken } = useAccessToken();
-  const qc = useQueryClient();
-  return useMutation({
+  return useAppMutation({
     mutationFn: async ({ id, reason }: { id: string; reason: string }) =>
       adminFindersApi.suspend(id, reason, (await getToken()) ?? ''),
-    onSuccess: (_data, { id }) => {
-      void qc.invalidateQueries({ queryKey: ['admin', 'finders'] });
-      void qc.invalidateQueries({ queryKey: ['admin', 'finders', id] });
-    },
+    invalidates: ({ variables }) => [
+      queryKeys.adminFinders.all,
+      queryKeys.adminFinders.detail(variables.id),
+    ],
   });
 }
