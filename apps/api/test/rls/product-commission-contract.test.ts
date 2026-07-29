@@ -3,7 +3,9 @@ import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import * as schema from '../../src/db/schema.js';
 import {
+  AreaSchema,
   ProductSchema,
+  createArea,
   createProduct,
   listProducts,
   updateProduct,
@@ -31,6 +33,7 @@ describe('sales operations product commission persistence', () => {
   afterAll(async () => {
     for (const orgId of orgIds) {
       await adminClient`DELETE FROM sales_ops_products WHERE org_id = ${orgId}`;
+      await adminClient`DELETE FROM sales_ops_areas WHERE org_id = ${orgId}`;
     }
     await appClient.end();
     await adminClient.end();
@@ -39,12 +42,15 @@ describe('sales operations product commission persistence', () => {
   it('persists independent commission pairs through create, partial updates, and list', async () => {
     const orgId = `org_product_commission_${Date.now()}`;
     orgIds.push(orgId);
+    const area = await createArea(db, orgId, AreaSchema.parse({ name: 'FXL Tech' }));
+    if (area === 'duplicate') throw new Error('unexpected duplicate area');
     const created = await createProduct(
       db,
       orgId,
       ProductSchema.parse({
         name: 'Independent commissions',
         codeSuffix: '91',
+        areaId: area.id,
         sellerCommissionType: 'pct',
         sellerCommissionValue: 10,
         sellerWithFinderCommissionType: 'pct',
@@ -74,6 +80,7 @@ describe('sales operations product commission persistence', () => {
     const listed = await listProducts(db, orgId);
     expect(listed).toEqual([
       expect.objectContaining({
+        areaId: created.areaId,
         sellerCommissionValue: '11.00',
         sellerWithFinderCommissionType: 'pct',
         sellerWithFinderCommissionValue: '8.00',
@@ -85,12 +92,15 @@ describe('sales operations product commission persistence', () => {
   it('copies the seller-only pair when a legacy create payload omits the new pair', async () => {
     const orgId = `org_product_commission_legacy_${Date.now()}`;
     orgIds.push(orgId);
+    const area = await createArea(db, orgId, AreaSchema.parse({ name: 'FXL Tech' }));
+    if (area === 'duplicate') throw new Error('unexpected duplicate area');
     const created = await createProduct(
       db,
       orgId,
       ProductSchema.parse({
         name: 'Legacy fixed commission',
         codeSuffix: '92',
+        areaId: area.id,
         sellerCommissionType: 'fix',
         sellerCommissionValue: 1234.56,
         finderCommissionType: 'fix',

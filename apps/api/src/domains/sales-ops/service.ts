@@ -1,7 +1,8 @@
-import { and, desc, eq, sql, type SQL } from 'drizzle-orm';
+import { and, desc, eq, ne, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { getDb } from '../../db/client.js';
 import {
+  salesOpsAreas,
   salesOpsClients,
   salesOpsPayables,
   salesOpsPeople,
@@ -64,6 +65,7 @@ export const ProductSchema = z.object({
   name: z.string().min(1).max(140),
   type: z.string().min(1).max(60).default('SaaS'),
   codeSuffix: z.string().regex(/^\d{1,2}$/).default('0'),
+  areaId: uuid,
   openPrice: z.boolean().default(false),
   setupBrl: money.default(0),
   hasMonthly: z.boolean().default(false),
@@ -85,6 +87,13 @@ export const ClientSchema = z.object({
   name: z.string().min(1).max(160),
   contact: z.string().max(200).optional().or(z.literal('')),
 });
+
+export const AreaSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  status: z.enum(['active', 'archived']).default('active'),
+});
+export const UpdateAreaSchema = AreaSchema.partial();
+export type AreaInput = z.infer<typeof AreaSchema>;
 
 export const SettingsSchema = z.object({
   legalName: z.string().default(''),
@@ -516,6 +525,65 @@ export async function updateClient(db: Db, orgId: string, id: string, data: Part
   });
 }
 
+export async function listAreas(db: Db, orgId: string) {
+  return withTenant(db, orgId, (tx) =>
+    tx
+      .select()
+      .from(salesOpsAreas)
+      .where(eq(salesOpsAreas.orgId, orgId))
+      .orderBy(salesOpsAreas.name),
+  );
+}
+
+export async function getArea(db: Db, orgId: string, id: string) {
+  return withTenant(db, orgId, async (tx) => {
+    const [area] = await tx
+      .select()
+      .from(salesOpsAreas)
+      .where(and(eq(salesOpsAreas.orgId, orgId), eq(salesOpsAreas.id, id)))
+      .limit(1);
+    return area ?? null;
+  });
+}
+
+export async function createArea(db: Db, orgId: string, data: AreaInput) {
+  return withTenant(db, orgId, async (tx) => {
+    const [existing] = await tx
+      .select({ id: salesOpsAreas.id })
+      .from(salesOpsAreas)
+      .where(and(eq(salesOpsAreas.orgId, orgId), eq(salesOpsAreas.name, data.name)))
+      .limit(1);
+    if (existing) return 'duplicate' as const;
+    const [area] = await tx.insert(salesOpsAreas).values({ ...data, orgId }).returning();
+    return area!;
+  });
+}
+
+export async function updateArea(db: Db, orgId: string, id: string, data: Partial<AreaInput>) {
+  return withTenant(db, orgId, async (tx) => {
+    if (data.name !== undefined) {
+      const [existing] = await tx
+        .select({ id: salesOpsAreas.id })
+        .from(salesOpsAreas)
+        .where(
+          and(
+            eq(salesOpsAreas.orgId, orgId),
+            eq(salesOpsAreas.name, data.name),
+            ne(salesOpsAreas.id, id),
+          ),
+        )
+        .limit(1);
+      if (existing) return 'duplicate' as const;
+    }
+    const [area] = await tx
+      .update(salesOpsAreas)
+      .set({ ...data, updatedAt: new Date() })
+      .where(and(eq(salesOpsAreas.orgId, orgId), eq(salesOpsAreas.id, id)))
+      .returning();
+    return area ?? null;
+  });
+}
+
 export async function upsertSettings(db: Db, orgId: string, data: SettingsInput) {
   return withTenant(db, orgId, async (tx) => {
     const [settings] = await tx
@@ -671,7 +739,21 @@ export async function getSalesOpsSnapshot(db: Db, orgId: string) {
       .from(salesOpsSettings)
       .where(eq(salesOpsSettings.orgId, orgId))
       .limit(1);
-    return { sales, products, clients, people, payables, saleItems, settings: settings[0] ?? null };
+    const areas = await tx
+      .select()
+      .from(salesOpsAreas)
+      .where(eq(salesOpsAreas.orgId, orgId))
+      .orderBy(salesOpsAreas.name);
+    return {
+      sales,
+      products,
+      clients,
+      people,
+      payables,
+      saleItems,
+      areas,
+      settings: settings[0] ?? null,
+    };
   });
 }
 

@@ -71,6 +71,13 @@
       "when": 1783962269296,
       "tag": "0009_product_commission_scenarios",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1785347036159,
+      "tag": "0010_sales_ops_areas",
+      "breakpoints": true
     }
   ]
 }
