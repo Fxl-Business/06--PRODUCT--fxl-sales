@@ -87,7 +87,14 @@ function profileFromToken(token: string | null): Omit<AuthProfile, 'isLoaded' | 
   };
 }
 
-const HubAuthContext = createContext<HubAuthState | null>(null);
+// Pinned to globalThis so a duplicated module instance (Vite dev re-optimization
+// serving this file under both plain and ?t= URLs) still shares one context object.
+type HubAuthContextType = ReturnType<typeof createContext<HubAuthState | null>>;
+const hubAuthGlobal = globalThis as typeof globalThis & {
+  __fxlHubAuthContext?: HubAuthContextType;
+};
+const HubAuthContext = (hubAuthGlobal.__fxlHubAuthContext ??=
+  createContext<HubAuthState | null>(null));
 
 function useHubAuthContext() {
   const value = useContext(HubAuthContext);
