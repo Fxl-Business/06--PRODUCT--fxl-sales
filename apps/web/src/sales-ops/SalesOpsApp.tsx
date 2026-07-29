@@ -59,6 +59,7 @@ import {
   useSaveSalesOpsPerson,
   useSaveSalesOpsProduct,
   useSaveSalesOpsSettings,
+  useUpdateSalesOpsSale,
 } from './hooks';
 import {
   buildSalesOpsPath,
@@ -82,16 +83,20 @@ import type {
   SalesOpsClient,
   SalesOpsPerson,
   SalesOpsProduct,
+  SalesOpsSale,
   SalesOpsSettings,
   SalesOpsStatus,
 } from './types';
 import {
+  addMonthsToIsoDate,
   buildDashboardModel,
   buildSalePayload,
   formatMoneyBrl,
   initials,
+  installmentSumCents,
   parseCurrencyInputToCents,
   resolveSaleCommissionDefaults,
+  splitInstallmentsEqually,
 } from './calculations';
 import type {
   SaveAreaPayload,
@@ -109,6 +114,8 @@ const emptyBootstrap: SalesOpsBootstrap = {
   people: [],
   payables: [],
   saleItems: [],
+  receivables: [],
+  saleProfessionals: [],
   settings: null,
 };
 
@@ -144,6 +151,8 @@ type ModalState =
   | { kind: 'area'; area?: SalesOpsArea }
   | { kind: 'person'; person?: SalesOpsPerson; roleHint: 'seller' | 'finder' | 'collaborator' }
   | null;
+
+type SaleWizardRequest = { mode: 'create' } | { mode: 'edit'; sale: SalesOpsSale };
 
 function titleForView(view: SalesOpsView, workspace: SalesOpsWorkspace) {
   const personal = workspace === 'meus-dados';
@@ -200,6 +209,9 @@ function roleSummaryLabel(roles: readonly AppRole[]): string {
 function statusMeta(status: SalesOpsStatus) {
   const map: Record<SalesOpsStatus, { label: string; className: string }> = {
     draft: { label: 'Rascunho', className: 'bg-[#e9e9ed] text-[#6a6a72]' },
+    open: { label: 'Aberta', className: 'bg-[#d3e3f6] text-[#2664ad]' },
+    won: { label: 'Ganha', className: 'bg-[#c9e7cf] text-[#1f7d43]' },
+    lost: { label: 'Perdida', className: 'bg-[#f6d1c5] text-[#a5341c]' },
     forecast: { label: 'Previsto', className: 'bg-[#e9e9ed] text-[#6a6a72]' },
     closed: { label: 'Fechado', className: 'bg-[#f7e2a8] text-[#7a5a12]' },
     in_progress: { label: 'Em andamento', className: 'bg-[#d3e3f6] text-[#2664ad]' },
@@ -232,13 +244,6 @@ function displayDate(value: string) {
   const [year, month, day] = iso.split('-');
   if (!year || !month || !day) return value;
   return `${day}/${month}/${year}`;
-}
-
-function addMonthsToIsoDate(value: string, months: number) {
-  const [year, month, day] = dateOnly(value).split('-').map(Number);
-  if (!year || !month || !day) return value;
-  const date = new Date(year, month - 1 + months, day);
-  return date.toISOString().slice(0, 10);
 }
 
 function inputDateToday() {
@@ -497,13 +502,14 @@ export function SalesOpsApp() {
   const saveClient = useSaveSalesOpsClient();
   const saveArea = useSaveSalesOpsArea();
   const createSale = useCreateSalesOpsSale();
+  const updateSale = useUpdateSalesOpsSale();
   const saveSettings = useSaveSalesOpsSettings();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [modal, setModal] = useState<ModalState>(null);
-  const [saleWizardOpen, setSaleWizardOpen] = useState(false);
+  const [saleWizard, setSaleWizard] = useState<SaleWizardRequest | null>(null);
   const mountedRef = useRef(true);
 
   const visibleWorkspaceIds = useMemo(
@@ -586,7 +592,7 @@ export function SalesOpsApp() {
       setModal({ kind: 'person', roleHint: 'finder' });
       return;
     }
-    setSaleWizardOpen(true);
+    setSaleWizard({ mode: 'create' });
   }
 
   const headerAction =
@@ -604,7 +610,7 @@ export function SalesOpsApp() {
                 ? 'Novo finder'
                 : view === 'vendedores' || view === 'finders'
                   ? null
-                  : 'Nova venda';
+                  : 'Nova proposta';
   const availableWorkspaces = salesOpsWorkspaces.filter((item) =>
     visibleWorkspaceIds.includes(item.id),
   );
@@ -806,9 +812,9 @@ export function SalesOpsApp() {
               </div>
             </div>
           ) : null}
-          <AccentButton onClick={() => setSaleWizardOpen(true)}>
+          <AccentButton onClick={() => setSaleWizard({ mode: 'create' })}>
             <Plus className="h-4 w-4" />
-            {!sidebarCollapsed ? <span>Nova venda</span> : null}
+            {!sidebarCollapsed ? <span>Nova proposta</span> : null}
           </AccentButton>
           <DropdownMenu onOpenChange={setAccountMenuOpen} open={accountMenuOpen}>
             <DropdownMenuTrigger asChild>
@@ -1047,14 +1053,20 @@ export function SalesOpsApp() {
       />
       <SaleWizardDialog
         bootstrap={bootstrap}
-        onClose={() => setSaleWizardOpen(false)}
+        editSale={saleWizard?.mode === 'edit' ? saleWizard.sale : null}
+        onClose={() => setSaleWizard(null)}
         onSave={(payload) => {
-          createSale.mutate(payload, {
-            onSuccess: () => setSaleWizardOpen(false),
-          });
+          if (saleWizard?.mode === 'edit') {
+            updateSale.mutate(
+              { saleId: saleWizard.sale.id, payload },
+              { onSuccess: () => setSaleWizard(null) },
+            );
+          } else {
+            createSale.mutate(payload, { onSuccess: () => setSaleWizard(null) });
+          }
         }}
-        open={saleWizardOpen}
-        saving={createSale.isPending}
+        open={saleWizard !== null}
+        saving={createSale.isPending || updateSale.isPending}
       />
     </div>
   );
@@ -1152,7 +1164,7 @@ function DashboardView({
           <SalesMiniTable bootstrap={bootstrap} sales={dashboard.latestSales} />
         ) : (
           <EmptyPanel
-            text="Use o botão Nova venda para registrar o primeiro negócio real."
+            text="Use o botão Nova proposta para registrar a primeira proposta."
             title="Nenhuma venda registrada"
           />
         )}
@@ -2934,11 +2946,15 @@ function RoleToggle({
 }
 
 type SaleItemForm = {
-  productId: string;
-  customLabel: string;
-  quantity: string;
+  kind: 'product' | 'free';
+  productId: string; // '' on free rows
+  areaId: string; // '' on product rows (derived from the product); picked on free rows
+  customLabel: string; // open-price custom label on product rows; the description on free rows
+  quantity: string; // always '1' on free rows
   unitBrl: string;
 };
+
+type InstallmentRowForm = { dueDate: string; amountBrl: string; method: PaymentMethod };
 
 type ProfessionalForm = {
   personId: string;
@@ -2966,18 +2982,121 @@ function commissionDefaultsSourceKey(
   ]);
 }
 
+type WizardPrefill = {
+  clientId: string;
+  clientName: string;
+  sellerPersonId: string;
+  finderVisible: boolean;
+  sellerIsFinder: boolean;
+  finderPersonId: string;
+  baseDate: string;
+  notes: string;
+  sellerCommissionPct: string;
+  finderCommissionPct: string;
+  taxPct: string;
+  otherCostsBrl: string;
+  items: SaleItemForm[];
+  professionals: ProfessionalForm[];
+  installmentRows: InstallmentRowForm[];
+  recurringEnabled: boolean;
+  recurringMonthlyBrl: string;
+  recurringStartDate: string;
+  recurringCycles: string;
+  recurringIndefinite: boolean;
+  recurringMethod: PaymentMethod;
+};
+
+function deriveWizardPrefill(sale: SalesOpsSale, bootstrap: SalesOpsBootstrap): WizardPrefill {
+  const receivables = bootstrap.receivables
+    .filter((row) => row.saleId === sale.id && row.status !== 'void')
+    .sort(
+      (a, b) =>
+        a.dueDate.slice(0, 10).localeCompare(b.dueDate.slice(0, 10)) ||
+        (a.label ?? '').localeCompare(b.label ?? ''),
+    );
+  const recurringRows = receivables.filter((row) => (row.label ?? '').startsWith('M'));
+  const installmentReceivables = receivables.filter((row) => !(row.label ?? '').startsWith('M'));
+  const items: SaleItemForm[] = bootstrap.saleItems
+    .filter((item) => item.saleId === sale.id)
+    .map((item) => {
+      if (!item.productId) {
+        return {
+          kind: 'free' as const,
+          productId: '',
+          areaId: item.areaId ?? '',
+          customLabel: item.productNameSnapshot,
+          quantity: '1',
+          unitBrl: centsToInput(item.unitBrl),
+        };
+      }
+      const product = bootstrap.products.find((candidate) => candidate.id === item.productId);
+      return {
+        kind: 'product' as const,
+        productId: item.productId,
+        areaId: '',
+        customLabel:
+          product?.openPrice && item.productNameSnapshot !== product.name
+            ? item.productNameSnapshot
+            : '',
+        quantity: String(item.quantity),
+        unitBrl: centsToInput(item.unitBrl),
+      };
+    });
+  const hasRecurring = sale.recurringBrl > 0;
+  const bounded = hasRecurring && recurringRows.length > 0;
+  return {
+    clientId: sale.clientId ?? '',
+    clientName: sale.clientNameSnapshot,
+    sellerPersonId: sale.sellerPersonId ?? '',
+    finderVisible: Boolean(sale.finderPersonId || sale.finderNameSnapshot),
+    sellerIsFinder: Boolean(sale.finderPersonId && sale.finderPersonId === sale.sellerPersonId),
+    finderPersonId: sale.finderPersonId ?? '',
+    baseDate: sale.baseDate.slice(0, 10),
+    notes: sale.notes ?? '',
+    sellerCommissionPct: pctToInput(sale.sellerCommissionPct),
+    finderCommissionPct: pctToInput(sale.finderCommissionPct),
+    taxPct: pctToInput(sale.taxPct),
+    otherCostsBrl: centsToInput(sale.otherCostsBrl),
+    items,
+    professionals: bootstrap.saleProfessionals
+      .filter((row) => row.saleId === sale.id)
+      .map((row) => ({
+        personId: row.personId ?? '',
+        personName: row.personNameSnapshot,
+        role: row.role,
+        costBrl: centsToInput(row.costBrl),
+      })),
+    installmentRows: installmentReceivables.map((row) => ({
+      dueDate: row.dueDate.slice(0, 10),
+      amountBrl: centsToInput(row.amountBrl),
+      method: row.method,
+    })),
+    recurringEnabled: hasRecurring,
+    recurringMonthlyBrl: centsToInput(sale.recurringBrl),
+    recurringStartDate: bounded
+      ? recurringRows[0]!.dueDate.slice(0, 10)
+      : addMonthsToIsoDate(sale.baseDate.slice(0, 10), 1),
+    recurringCycles: bounded ? String(recurringRows.length) : '12',
+    recurringIndefinite: hasRecurring && !bounded,
+    recurringMethod: bounded ? recurringRows[0]!.method : 'pix',
+  };
+}
+
 export function SaleWizardDialog(props: {
   open: boolean;
   bootstrap: SalesOpsBootstrap;
+  editSale: SalesOpsSale | null;
   onClose: () => void;
   onSave: (payload: CreateSalePayload) => void;
   saving: boolean;
 }) {
   if (!props.open) return null;
+  if (props.editSale && props.editSale.status !== 'draft' && props.editSale.status !== 'open') return null;
   return (
     <SaleWizardDialogBody
-      key={`${props.bootstrap.clients[0]?.id ?? 'no-client'}-${props.bootstrap.products[0]?.id ?? 'no-product'}-${props.bootstrap.people.length}`}
+      key={`${props.editSale?.id ?? 'create'}-${props.bootstrap.clients[0]?.id ?? 'no-client'}-${props.bootstrap.products[0]?.id ?? 'no-product'}-${props.bootstrap.people.length}`}
       bootstrap={props.bootstrap}
+      editSale={props.editSale}
       onClose={props.onClose}
       onSave={props.onSave}
       saving={props.saving}
@@ -2987,11 +3106,13 @@ export function SaleWizardDialog(props: {
 
 function SaleWizardDialogBody({
   bootstrap,
+  editSale,
   onClose,
   onSave,
   saving,
 }: {
   bootstrap: SalesOpsBootstrap;
+  editSale: SalesOpsSale | null;
   onClose: () => void;
   onSave: (payload: CreateSalePayload) => void;
   saving: boolean;
@@ -3012,40 +3133,49 @@ function SaleWizardDialogBody({
   const firstProduct = bootstrap.products[0];
   const firstClient = bootstrap.clients[0];
   const firstSeller = sellers[0];
+  const prefill = editSale ? deriveWizardPrefill(editSale, bootstrap) : null;
+  const prefilledPrimaryProduct = prefill
+    ? bootstrap.products.find((product) => product.id === prefill.items[0]?.productId)
+    : undefined;
+  const prefilledHasFinder = Boolean(
+    prefill ? prefill.finderVisible && (prefill.sellerIsFinder || prefill.finderPersonId) : false,
+  );
   const initialCommissionDefaults = resolveSaleCommissionDefaults(
     firstProduct,
     false,
     bootstrap.settings,
   );
-  const [clientId, setClientId] = useState(firstClient?.id ?? '');
-  const [clientName, setClientName] = useState(firstClient?.name ?? '');
-  const [sellerPersonId, setSellerPersonId] = useState(firstSeller?.id ?? '');
-  const [finderPersonId, setFinderPersonId] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('pix');
-  const [condition, setCondition] = useState<PaymentCondition>('cash');
-  const [installments, setInstallments] = useState('1');
-  const [baseDate, setBaseDate] = useState(inputDateToday());
-  const [notes, setNotes] = useState('');
-  const [taxPct, setTaxPct] = useState(String(settings.defaultTaxPct ?? 6));
+  const [clientId, setClientId] = useState(prefill?.clientId ?? firstClient?.id ?? '');
+  const [clientName, setClientName] = useState(prefill?.clientName ?? firstClient?.name ?? '');
+  const [sellerPersonId, setSellerPersonId] = useState(prefill?.sellerPersonId ?? firstSeller?.id ?? '');
+  const [finderPersonId, setFinderPersonId] = useState(prefill?.finderPersonId ?? '');
+  const [baseDate, setBaseDate] = useState(prefill?.baseDate ?? inputDateToday());
+  const [notes, setNotes] = useState(prefill?.notes ?? '');
+  const [taxPct, setTaxPct] = useState(prefill?.taxPct ?? String(settings.defaultTaxPct ?? 6));
   const [sellerCommissionPct, setSellerCommissionPct] = useState(
-    String(initialCommissionDefaults.sellerCommissionPct),
+    prefill?.sellerCommissionPct ?? String(initialCommissionDefaults.sellerCommissionPct),
   );
   const [finderCommissionPct, setFinderCommissionPct] = useState(
-    String(initialCommissionDefaults.finderCommissionPct),
+    prefill?.finderCommissionPct ?? String(initialCommissionDefaults.finderCommissionPct),
   );
   const [commissionDefaultsSource, setCommissionDefaultsSource] = useState(() =>
-    commissionDefaultsSourceKey(firstProduct, false, bootstrap.settings),
+    prefill
+      ? commissionDefaultsSourceKey(prefilledPrimaryProduct, prefilledHasFinder, bootstrap.settings)
+      : commissionDefaultsSourceKey(firstProduct, false, bootstrap.settings),
   );
-  const [otherCostsBrl, setOtherCostsBrl] = useState('0.00');
-  const [wizardStep, setWizardStep] = useState<1 | 2 | 3>(1);
-  const [showCustomItemErrors, setShowCustomItemErrors] = useState(false);
-  const [finderVisible, setFinderVisible] = useState(false);
-  const [sellerIsFinder, setSellerIsFinder] = useState(false);
+  const [otherCostsBrl, setOtherCostsBrl] = useState(prefill?.otherCostsBrl ?? '0.00');
+  const [wizardStep, setWizardStep] = useState<1 | 2 | 3 | 4>(1);
+  const [showItemErrors, setShowItemErrors] = useState(false);
+  const [finderVisible, setFinderVisible] = useState(prefill?.finderVisible ?? false);
+  const [sellerIsFinder, setSellerIsFinder] = useState(prefill?.sellerIsFinder ?? false);
   const [items, setItems] = useState<SaleItemForm[]>(() =>
-    firstProduct
+    prefill?.items ??
+    (firstProduct
       ? [
           {
+            kind: 'product',
             productId: firstProduct.id,
+            areaId: '',
             customLabel: '',
             quantity: '1',
             unitBrl: centsToInput(
@@ -3053,9 +3183,35 @@ function SaleWizardDialogBody({
             ),
           },
         ]
-      : [],
+      : []),
   );
-  const [professionals, setProfessionals] = useState<ProfessionalForm[]>([]);
+  const [professionals, setProfessionals] = useState<ProfessionalForm[]>(prefill?.professionals ?? []);
+  const [installmentRows, setInstallmentRows] = useState<InstallmentRowForm[]>(() =>
+    prefill && prefill.installmentRows.length > 0
+      ? prefill.installmentRows
+      : [{ dueDate: inputDateToday(), amountBrl: '0', method: 'pix' }],
+  );
+  const [planAuto, setPlanAuto] = useState(!prefill || prefill.installmentRows.length === 0);
+  const [planAutoKey, setPlanAutoKey] = useState('');
+  const [splitCount, setSplitCount] = useState('3');
+  const [showPlanErrors, setShowPlanErrors] = useState(false);
+  const [recurringEnabled, setRecurringEnabled] = useState(prefill?.recurringEnabled ?? false);
+  const [recurringMonthlyBrl, setRecurringMonthlyBrl] = useState(prefill?.recurringMonthlyBrl ?? '0');
+  const [recurringStartDate, setRecurringStartDate] = useState(
+    prefill?.recurringStartDate ?? addMonthsToIsoDate(inputDateToday(), 1),
+  );
+  const [recurringCycles, setRecurringCycles] = useState(prefill?.recurringCycles ?? '12');
+  const [recurringIndefinite, setRecurringIndefinite] = useState(prefill?.recurringIndefinite ?? false);
+  const [recurringSource, setRecurringSource] = useState(() =>
+    prefill
+      ? JSON.stringify([
+          prefilledPrimaryProduct?.id,
+          prefilledPrimaryProduct?.hasMonthly,
+          prefilledPrimaryProduct?.monthlyBrl,
+        ])
+      : '',
+  );
+  const [recurringMethod] = useState<PaymentMethod>(prefill?.recurringMethod ?? 'pix');
   const primaryItemProduct = bootstrap.products.find(
     (product) => product.id === items[0]?.productId,
   );
@@ -3078,21 +3234,71 @@ function SaleWizardDialogBody({
   }
 
   const canSave = Boolean(clientName.trim() && sellerPersonId && items.length > 0);
-  const installmentCount =
-    condition === 'cash' ? 1 : Math.max(1, Math.floor(Number(installments) || 1));
   const totalCents = items.reduce(
     (sum, item) => sum + Math.max(1, Number(item.quantity) || 1) * parseCurrencyToCents(item.unitBrl),
     0,
   );
-  const canSaveBasics = canSave && totalCents > 0 && Boolean(paymentMethod);
-  const customItemsValid = items.every((item) => {
-    const product = selectedProduct(item);
-    return (
-      !product?.openPrice ||
-      (Boolean(item.customLabel.trim()) && parseCurrencyToCents(item.unitBrl) > 0)
+
+  const planAutoKeyNow = JSON.stringify([totalCents, baseDate]);
+  if (planAuto && planAutoKey !== planAutoKeyNow) {
+    setPlanAutoKey(planAutoKeyNow);
+    setInstallmentRows([{ dueDate: baseDate, amountBrl: centsToInput(totalCents), method: 'pix' }]);
+  }
+
+  const recurringSourceNow = JSON.stringify([
+    primaryItemProduct?.id,
+    primaryItemProduct?.hasMonthly,
+    primaryItemProduct?.monthlyBrl,
+  ]);
+  if (recurringSource !== recurringSourceNow) {
+    const suggested = Boolean(primaryItemProduct?.hasMonthly && primaryItemProduct.monthlyBrl > 0);
+    setRecurringSource(recurringSourceNow);
+    setRecurringEnabled(suggested);
+    setRecurringMonthlyBrl(centsToInput(primaryItemProduct?.monthlyBrl));
+    setRecurringStartDate(addMonthsToIsoDate(baseDate, 1));
+    setRecurringIndefinite(false);
+  }
+
+  const activeAreas = bootstrap.areas.filter((area) => area.status === 'active');
+  const areaNameById = new Map(bootstrap.areas.map((area) => [area.id, area.name]));
+  const planSumCents = installmentSumCents(installmentRows);
+  const planDeltaCents = planSumCents - totalCents;
+  const planRowsValid =
+    installmentRows.length >= 1 &&
+    installmentRows.every(
+      (row) => /^\d{4}-\d{2}-\d{2}$/.test(row.dueDate) && parseCurrencyToCents(row.amountBrl) > 0,
     );
+  const planValid = planRowsValid && planDeltaCents === 0;
+  const recurringMonthlyCents = parseCurrencyToCents(recurringMonthlyBrl);
+  const recurringCyclesCount = Math.max(1, Math.min(120, Math.floor(Number(recurringCycles) || 0)));
+  const recurringValid =
+    !recurringEnabled ||
+    (recurringMonthlyCents > 0 &&
+      /^\d{4}-\d{2}-\d{2}$/.test(recurringStartDate) &&
+      (recurringIndefinite || Math.floor(Number(recurringCycles) || 0) >= 1));
+  const canAdvanceStepTwo = planValid && recurringValid;
+
+  const itemsValid = items.every((item) => {
+    if (item.kind === 'free') {
+      return Boolean(item.areaId) && Boolean(item.customLabel.trim()) && parseCurrencyToCents(item.unitBrl) > 0;
+    }
+    const product = selectedProduct(item);
+    const openPriceOk =
+      !product?.openPrice || (Boolean(item.customLabel.trim()) && parseCurrencyToCents(item.unitBrl) > 0);
+    return openPriceOk && Boolean(product?.areaId);
   });
-  const canAdvanceStepOne = canSaveBasics && customItemsValid;
+  const canSaveBasics = canSave && totalCents > 0;
+  const canAdvanceStepOne = canSaveBasics && itemsValid;
+  const draftValid =
+    canSaveBasics &&
+    planValid &&
+    recurringValid &&
+    items.every((item) =>
+      item.kind === 'free'
+        ? Boolean(item.areaId) && Boolean(item.customLabel.trim()) && parseCurrencyToCents(item.unitBrl) > 0
+        : Boolean(selectedProduct(item)?.areaId),
+    );
+
   const professionalCents = professionals.reduce(
     (sum, professional) => sum + parseCurrencyToCents(professional.costBrl),
     0,
@@ -3106,44 +3312,55 @@ function SaleWizardDialogBody({
   const marginCents =
     totalCents - professionalCents - sellerCommissionCents - finderCommissionCents - taxCents - otherCents;
   const marginPct = totalCents > 0 ? Math.round((marginCents / totalCents) * 1000) / 10 : 0;
-  const recurringLine =
-    primaryItemProduct?.hasMonthly && primaryItemProduct.monthlyBrl > 0
-      ? `Mensalidade de ${formatMoneyBrl(primaryItemProduct.monthlyBrl, {
-          maximumFractionDigits: 0,
-        })} a partir de ${displayDate(baseDate)}, recorrente`
-      : null;
-  const paymentRows = Array.from({ length: installmentCount }, (_, index) => {
-    const baseValue = Math.floor(totalCents / installmentCount);
-    const value = index === installmentCount - 1 ? totalCents - baseValue * index : baseValue;
-    return {
-      index: index + 1,
-      dueDate: displayDate(addMonthsToIsoDate(baseDate, index)),
-      value,
-    };
-  });
+
   const selectedSeller = sellers.find((person) => person.id === sellerPersonId);
   const selectedFinder = sellerIsFinder
     ? selectedSeller
     : finders.find((person) => person.id === finderPersonId);
-  const payablesPreview = [
-    {
-      label: `Comissão - ${selectedSeller?.displayName ?? 'vendedor'}`,
-      type: 'Comissão vendedor',
-      date: displayDate(addMonthsToIsoDate(baseDate, 1)),
-      value: sellerCommissionCents,
-      className: 'bg-[#fdf0cf] text-[#9c7210]',
-    },
-    ...(hasFinderForSale
-      ? [
-          {
-            label: `Comissão - ${selectedFinder?.displayName ?? 'finder'} (finder)`,
-            type: 'Comissão finder',
-            date: displayDate(addMonthsToIsoDate(baseDate, 1)),
-            value: finderCommissionCents,
-            className: 'bg-[#fdf0cf] text-[#9c7210]',
-          },
-        ]
+
+  const previewReceivables = [
+    ...installmentRows.map((row) => ({
+      dueDate: row.dueDate,
+      amountCents: parseCurrencyToCents(row.amountBrl),
+    })),
+    ...(recurringEnabled && !recurringIndefinite && settings.commissionOnRecurring
+      ? Array.from({ length: recurringCyclesCount }, (_, index) => ({
+          dueDate: addMonthsToIsoDate(recurringStartDate, index),
+          amountCents: recurringMonthlyCents,
+        }))
       : []),
+  ];
+
+  const payablesPreview = [
+    ...previewReceivables.flatMap((receivable, index) => {
+      const rows: Array<{ label: string; type: string; date: string; value: number; className: string }> = [];
+      rows.push({
+        label: `Comissão - ${selectedSeller?.displayName ?? 'vendedor'} (parcela ${index + 1})`,
+        type: 'Comissão vendedor',
+        date: displayDate(receivable.dueDate),
+        value: Math.floor((receivable.amountCents * parseDecimal(sellerCommissionPct, 0)) / 100),
+        className: 'bg-[#fdf0cf] text-[#9c7210]',
+      });
+      if (hasFinderForSale) {
+        rows.push({
+          label: `Comissão - ${selectedFinder?.displayName ?? 'finder'} (finder, parcela ${index + 1})`,
+          type: 'Comissão finder',
+          date: displayDate(receivable.dueDate),
+          value: Math.floor((receivable.amountCents * parseDecimal(finderCommissionPct, 0)) / 100),
+          className: 'bg-[#fdf0cf] text-[#9c7210]',
+        });
+      }
+      if (parseDecimal(taxPct, 0) > 0) {
+        rows.push({
+          label: `Imposto sobre a parcela ${index + 1} (${taxPct}%)`,
+          type: 'Imposto',
+          date: displayDate(receivable.dueDate),
+          value: Math.floor((receivable.amountCents * parseDecimal(taxPct, 0)) / 100),
+          className: 'bg-[#f6e3dd] text-[#b23a22]',
+        });
+      }
+      return rows;
+    }),
     ...professionals.map((professional) => ({
       label: `Alocação - ${professional.personName || 'prestador'}`,
       type: 'Custo profissional',
@@ -3151,17 +3368,6 @@ function SaleWizardDialogBody({
       value: parseCurrencyToCents(professional.costBrl),
       className: 'bg-[#e6edf4] text-[#3f6ea3]',
     })),
-    ...(taxCents > 0
-      ? [
-          {
-            label: `Imposto sobre a venda (${taxPct}%)`,
-            type: 'Imposto',
-            date: displayDate(addMonthsToIsoDate(baseDate, 1)),
-            value: taxCents,
-            className: 'bg-[#f6e3dd] text-[#b23a22]',
-          },
-        ]
-      : []),
     ...(otherCents > 0
       ? [
           {
@@ -3173,13 +3379,15 @@ function SaleWizardDialogBody({
           },
         ]
       : []),
-  ];
+  ].filter((row) => row.value > 0);
 
   function selectedProduct(item: SaleItemForm) {
+    if (item.kind === 'free') return undefined;
     return bootstrap.products.find((product) => product.id === item.productId) ?? firstProduct;
   }
 
   function saleItemDisplayName(item: SaleItemForm): string {
+    if (item.kind === 'free') return item.customLabel.trim() || 'Item avulso';
     const product = selectedProduct(item);
     if (!product) return 'Produto';
     if (!product.openPrice) return product.name;
@@ -3209,12 +3417,45 @@ function SaleWizardDialogBody({
     setItems((current) => [
       ...current,
       {
+        kind: 'product',
         productId: product.id,
+        areaId: '',
         customLabel: '',
         quantity: '1',
         unitBrl: centsToInput(product.openPrice ? 0 : product.setupBrl || product.monthlyBrl),
       },
     ]);
+  }
+
+  function addFreeItem() {
+    if (activeAreas.length === 0) return;
+    setItems((current) => [
+      ...current,
+      { kind: 'free', productId: '', areaId: activeAreas[0]!.id, customLabel: '', quantity: '1', unitBrl: '0' },
+    ]);
+  }
+
+  function applySplit() {
+    const count = Math.max(1, Math.min(120, Math.floor(Number(splitCount) || 1)));
+    setPlanAuto(false);
+    setInstallmentRows(
+      splitInstallmentsEqually(totalCents, count, baseDate, installmentRows[0]?.method ?? 'pix').map((row) => ({
+        dueDate: row.dueDate,
+        amountBrl: centsToInput(row.amountBrl),
+        method: row.method,
+      })),
+    );
+  }
+
+  function addInstallmentRow() {
+    setPlanAuto(false);
+    setInstallmentRows((current) => {
+      const last = current.at(-1);
+      return [
+        ...current,
+        { dueDate: addMonthsToIsoDate(last?.dueDate ?? baseDate, 1), amountBrl: '0', method: last?.method ?? 'pix' },
+      ];
+    });
   }
 
   function handleSellerChange(value: string) {
@@ -3245,21 +3486,25 @@ function SaleWizardDialogBody({
 
   function advanceWizard() {
     if (wizardStep === 1) {
-      setShowCustomItemErrors(true);
+      setShowItemErrors(true);
       if (!canAdvanceStepOne) return;
     }
-    if (wizardStep < 3) {
-      setWizardStep((current) => (current === 1 ? 2 : 3));
+    if (wizardStep === 2) {
+      setShowPlanErrors(true);
+      if (!canAdvanceStepTwo) return;
+    }
+    if (wizardStep < 4) {
+      setWizardStep((current) => (current + 1) as 2 | 3 | 4);
       return;
     }
-    submit('closed');
+    submit('open');
   }
 
   function goBack() {
-    setWizardStep((current) => (current === 3 ? 2 : 1));
+    setWizardStep((current) => (current > 1 ? ((current - 1) as 1 | 2 | 3) : current));
   }
 
-  function createPayload(status: SalesOpsStatus): CreateSalePayload {
+  function createPayload(status: 'draft' | 'open'): CreateSalePayload {
     const seller = selectedSeller;
     const finder = selectedFinder;
     const draft: SaleDraft = {
@@ -3274,19 +3519,40 @@ function SaleWizardDialogBody({
         : undefined,
       finderName: finder?.displayName,
       status,
-      paymentMethod,
-      condition,
-      installments,
       baseDate,
       notes,
       sellerCommissionPct,
       finderCommissionPct,
       taxPct,
       otherCostsBrl: otherCents,
+      installments: installmentRows.map((row) => ({
+        dueDate: row.dueDate,
+        amountBrl: parseCurrencyToCents(row.amountBrl),
+        method: row.method,
+      })),
+      recurring: recurringEnabled
+        ? {
+            monthlyBrl: parseCurrencyToCents(recurringMonthlyBrl),
+            startDate: recurringStartDate,
+            cycles: recurringIndefinite ? null : recurringCyclesCount,
+            method: recurringMethod,
+          }
+        : null,
       items: items.map((item) => {
+        if (item.kind === 'free') {
+          return {
+            productId: undefined,
+            areaId: item.areaId,
+            productName: item.customLabel.trim() || 'Item avulso',
+            productType: 'Avulso',
+            quantity: '1',
+            unitBrl: parseCurrencyToCents(item.unitBrl),
+          };
+        }
         const product = selectedProduct(item);
         return {
           productId: product?.id,
+          areaId: product?.areaId ?? undefined,
           productName: saleItemDisplayName(item),
           productType: product?.type ?? 'SaaS',
           quantity: item.quantity,
@@ -3303,27 +3569,29 @@ function SaleWizardDialogBody({
     return buildSalePayload(draft);
   }
 
-  function submit(status: SalesOpsStatus) {
+  function submit(status: 'draft' | 'open') {
     if (!canSave) return;
+    if (editSale && editSale.status !== 'draft' && editSale.status !== 'open') return;
     onSave(createPayload(status));
   }
 
-  const wizardSteps: Array<{ step: 1 | 2 | 3; label: string }> = [
-    { step: 1, label: 'Registro da venda' },
-    { step: 2, label: 'Custos e margem' },
-    { step: 3, label: 'Revisão' },
+  const wizardSteps: Array<{ step: 1 | 2 | 3 | 4; label: string }> = [
+    { step: 1, label: 'Proposta' },
+    { step: 2, label: 'Pagamento' },
+    { step: 3, label: 'Custos e margem' },
+    { step: 4, label: 'Revisão' },
   ];
-  const primaryLabel = wizardStep < 3 ? 'Avançar' : 'Confirmar venda';
+  const primaryLabel = wizardStep < 4 ? 'Avançar' : 'Salvar proposta';
 
   return (
     <Dialog onOpenChange={(nextOpen) => (!nextOpen ? onClose() : undefined)} open>
       <DialogContent className="max-h-[92vh] w-[calc(100vw-48px)] max-w-[940px] gap-0 overflow-hidden rounded-[22px] border-none bg-[#f4f4f6] p-0 shadow-[0_30px_80px_rgba(0,0,0,.3)] sm:rounded-[22px] [&>button]:right-[26px] [&>button]:top-[31px] [&>button]:flex [&>button]:h-9 [&>button]:w-9 [&>button]:items-center [&>button]:justify-center [&>button]:rounded-[10px] [&>button]:border [&>button]:border-[#dcdce2] [&>button]:bg-white [&>button]:opacity-100 [&>button]:shadow-none">
         <DialogHeader className="border-b border-[#e8e8ec] bg-white px-[26px] py-5 pr-[78px] text-left">
           <DialogTitle className="sales-ops-num text-[19px] font-bold text-[#201f24]">
-            Fechamento da venda
+            {editSale ? 'Editar proposta' : 'Nova proposta'}
           </DialogTitle>
           <DialogDescription className="text-[13px] text-[#8b8b92]">
-            Cliente, itens e pagamento - só o primeiro passo é obrigatório
+            Cliente, itens, pagamento e custos - salve como rascunho a qualquer momento
           </DialogDescription>
         </DialogHeader>
 
@@ -3335,7 +3603,7 @@ function SaleWizardDialogBody({
               <div className="flex flex-none items-center gap-1" key={item.step}>
                 <button
                   className="flex items-center gap-[9px] focus-visible:outline-none"
-                  disabled={item.step > 1 && !canAdvanceStepOne}
+                  disabled={(item.step > 1 && !canAdvanceStepOne) || (item.step > 2 && !canAdvanceStepTwo)}
                   onClick={() => setWizardStep(item.step)}
                   type="button"
                 >
@@ -3369,7 +3637,7 @@ function SaleWizardDialogBody({
         <div className="max-h-[calc(92vh-210px)] overflow-y-auto px-[26px] py-6">
           {bootstrap.products.length === 0 || sellers.length === 0 ? (
             <EmptyPanel
-              text="Cadastre pelo menos um produto e um vendedor para registrar uma venda real."
+              text="Cadastre pelo menos um produto e um vendedor para registrar uma proposta."
               title="Cadastro incompleto"
             />
           ) : (
@@ -3469,10 +3737,21 @@ function SaleWizardDialogBody({
                             type="button"
                           >
                             <Plus className="h-[15px] w-[15px]" />
-                            Essa venda teve um finder
+                            Essa proposta teve um finder
                           </button>
                         </div>
                       )}
+                    </div>
+
+                    <div className="mt-4 grid gap-4 md:grid-cols-2">
+                      <Field label="Data da proposta">
+                        <Input
+                          className={`sales-ops-num ${formInputClass}`}
+                          onChange={(event) => setBaseDate(event.target.value)}
+                          type="date"
+                          value={baseDate}
+                        />
+                      </Field>
                     </div>
                   </div>
 
@@ -3485,6 +3764,15 @@ function SaleWizardDialogBody({
                           type="button"
                         >
                           Cadastrar produto
+                        </button>
+                        <button
+                          className="rounded-[9px] border border-[#dcdce2] bg-white px-3 py-[7px] text-[12.5px] font-semibold text-[#57575f] transition hover:bg-[#f2f2f4] disabled:cursor-not-allowed disabled:opacity-45"
+                          disabled={activeAreas.length === 0}
+                          onClick={addFreeItem}
+                          title={activeAreas.length === 0 ? 'Cadastre áreas em Cadastros > Áreas' : undefined}
+                          type="button"
+                        >
+                          + item avulso
                         </button>
                         <button
                           className="rounded-[9px] bg-[#201f24] px-3 py-[7px] text-[12.5px] font-semibold text-white transition hover:bg-[#33333a]"
@@ -3504,30 +3792,126 @@ function SaleWizardDialogBody({
                     </div>
                     <div className="flex flex-col gap-2">
                       {items.map((item, index) => {
+                        if (item.kind === 'free') {
+                          const areaValid = Boolean(item.areaId);
+                          const descriptionValid = Boolean(item.customLabel.trim());
+                          const unitValid = parseCurrencyToCents(item.unitBrl) > 0;
+                          const subtotal = parseCurrencyToCents(item.unitBrl);
+                          return (
+                            <div className="flex flex-col gap-[5px]" key={`free-${index}`}>
+                              <div className="grid grid-cols-[minmax(0,1fr)_70px_130px_120px_36px] items-center gap-[9px]">
+                                <NativeSelect
+                                  aria-label={`Área do item ${index + 1}`}
+                                  className="h-10 rounded-[9px] text-[13.5px]"
+                                  onChange={(value) => setItem(index, { areaId: value })}
+                                  value={item.areaId}
+                                >
+                                  {activeAreas.map((area) => (
+                                    <option key={area.id} value={area.id}>
+                                      {area.name}
+                                    </option>
+                                  ))}
+                                </NativeSelect>
+                                <div className="sales-ops-num text-center text-[13.5px] text-[#57575f]">1</div>
+                                <Input
+                                  aria-invalid={showItemErrors && !unitValid}
+                                  aria-label={`Valor unitário do item ${index + 1}`}
+                                  className={cn(
+                                    'sales-ops-num h-10 rounded-[9px] text-right',
+                                    formInputClass,
+                                    showItemErrors && !unitValid && 'border-destructive',
+                                  )}
+                                  onChange={(event) => setItem(index, { unitBrl: event.target.value })}
+                                  value={item.unitBrl}
+                                />
+                                <div className="sales-ops-num text-right text-[13.5px] font-bold">
+                                  {formatMoneyBrl(subtotal, { maximumFractionDigits: 0 })}
+                                </div>
+                                <button
+                                  aria-label={`Remover item ${index + 1}`}
+                                  className="flex h-8 w-8 items-center justify-center rounded-[8px] border border-[#f0dcd5] bg-[#fbeee9] text-[#b23a22] transition hover:bg-[#f6e0d9]"
+                                  onClick={() =>
+                                    setItems((current) => current.filter((_, itemIndex) => itemIndex !== index))
+                                  }
+                                  type="button"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
+                              <div className="grid grid-cols-[minmax(0,1fr)_70px_130px_120px_36px] gap-[9px]">
+                                <label className="flex min-w-0 flex-col gap-[6px]">
+                                  <span className="text-xs font-semibold text-[#8b8b92]">Descrição do item</span>
+                                  <Input
+                                    aria-invalid={showItemErrors && !descriptionValid}
+                                    aria-label={`Descrição do item ${index + 1}`}
+                                    className={cn(
+                                      'h-10 rounded-[9px]',
+                                      formInputClass,
+                                      showItemErrors && !descriptionValid && 'border-destructive',
+                                    )}
+                                    maxLength={140}
+                                    onChange={(event) => setItem(index, { customLabel: event.target.value })}
+                                    placeholder="Ex.: Consultoria de processos"
+                                    value={item.customLabel}
+                                  />
+                                  {showItemErrors ? (
+                                    <span className="flex flex-col gap-1 text-[11.5px] font-semibold text-destructive">
+                                      {!areaValid ? <span>Selecione a área deste item.</span> : null}
+                                      {!descriptionValid ? (
+                                        <span>Informe a descrição deste item avulso.</span>
+                                      ) : null}
+                                      {!unitValid ? (
+                                        <span>Informe um valor negociado maior que zero.</span>
+                                      ) : null}
+                                    </span>
+                                  ) : (
+                                    <span className="flex items-center gap-1.5 pl-0.5 text-[11.5px] font-semibold text-[#9c7210]">
+                                      <AlertTriangle className="h-[13px] w-[13px]" />
+                                      Item avulso - informe a área, a descrição e o valor
+                                    </span>
+                                  )}
+                                </label>
+                              </div>
+                            </div>
+                          );
+                        }
+
                         const product = selectedProduct(item);
                         const customLabelValid = Boolean(item.customLabel.trim());
                         const customUnitValid = parseCurrencyToCents(item.unitBrl) > 0;
                         const showCustomLabelError =
-                          Boolean(product?.openPrice) && showCustomItemErrors && !customLabelValid;
+                          Boolean(product?.openPrice) && showItemErrors && !customLabelValid;
                         const showCustomUnitError =
-                          Boolean(product?.openPrice) && showCustomItemErrors && !customUnitValid;
+                          Boolean(product?.openPrice) && showItemErrors && !customUnitValid;
+                        const showAreaError = showItemErrors && !product?.areaId;
                         const subtotal =
                           Math.max(1, Number(item.quantity) || 1) * parseCurrencyToCents(item.unitBrl);
                         return (
                           <div className="flex flex-col gap-[5px]" key={`${item.productId}-${index}`}>
                             <div className="grid grid-cols-[minmax(0,1fr)_70px_130px_120px_36px] items-center gap-[9px]">
-                              <NativeSelect
-                                aria-label={`Produto / serviço do item ${index + 1}`}
-                                className="h-10 rounded-[9px] text-[13.5px]"
-                                onChange={(value) => setItem(index, { productId: value })}
-                                value={item.productId}
-                              >
-                                {bootstrap.products.map((candidate) => (
-                                  <option key={candidate.id} value={candidate.id}>
-                                    {candidate.name}
-                                  </option>
-                                ))}
-                              </NativeSelect>
+                              <div className="flex flex-col gap-1">
+                                <NativeSelect
+                                  aria-label={`Produto / serviço do item ${index + 1}`}
+                                  className="h-10 rounded-[9px] text-[13.5px]"
+                                  onChange={(value) => setItem(index, { productId: value })}
+                                  value={item.productId}
+                                >
+                                  {bootstrap.products.map((candidate) => (
+                                    <option key={candidate.id} value={candidate.id}>
+                                      {candidate.name}
+                                    </option>
+                                  ))}
+                                </NativeSelect>
+                                {product?.areaId ? (
+                                  <span className="self-start rounded-full bg-[#ececf1] px-2 py-[2px] text-[11px] font-bold text-[#57575f]">
+                                    {areaNameById.get(product.areaId) ?? 'Área'}
+                                  </span>
+                                ) : (
+                                  <span className="self-start rounded-full bg-[#fdf0cf] px-2 py-[2px] text-[11px] font-bold text-[#9c7210]">
+                                    Sem área
+                                  </span>
+                                )}
+                              </div>
                               <Input
                                 aria-label={`Quantidade do item ${index + 1}`}
                                 className={`sales-ops-num h-10 rounded-[9px] text-center ${formInputClass}`}
@@ -3582,7 +3966,7 @@ function SaleWizardDialogBody({
                                     placeholder="Ex.: Módulo Vendas"
                                     value={item.customLabel}
                                   />
-                                  {showCustomItemErrors ? (
+                                  {showItemErrors ? (
                                     <span className="flex flex-col gap-1 text-[11.5px] font-semibold text-destructive">
                                       {showCustomLabelError ? (
                                         <span>
@@ -3602,96 +3986,16 @@ function SaleWizardDialogBody({
                                 </label>
                               </div>
                             ) : null}
+                            {showAreaError ? (
+                              <div className="grid grid-cols-[minmax(0,1fr)_70px_130px_120px_36px] gap-[9px]">
+                                <span className="text-[11.5px] font-semibold text-destructive">
+                                  Defina a área deste produto em Cadastros {'>'} Produtos.
+                                </span>
+                              </div>
+                            ) : null}
                           </div>
                         );
                       })}
-                    </div>
-                  </div>
-
-                  <div className="rounded-[14px] border border-[#e8e8ec] bg-white p-4">
-                    <div className="mb-4 text-[13px] font-bold">Pagamento e recebimento</div>
-                    <div className="grid gap-3 md:grid-cols-4">
-                      <Field label="Forma de pagamento" required>
-                        <NativeSelect
-                          className="h-11 rounded-[10px]"
-                          onChange={(value) => setPaymentMethod(value as PaymentMethod)}
-                          value={paymentMethod}
-                        >
-                          <option value="pix">Pix</option>
-                          <option value="card">Cartão</option>
-                          <option value="boleto">Boleto</option>
-                          <option value="transfer">Transferência</option>
-                        </NativeSelect>
-                      </Field>
-                      <Field label="Condição">
-                        <NativeSelect
-                          className="h-11 rounded-[10px]"
-                          onChange={(value) => setCondition(value as PaymentCondition)}
-                          value={condition}
-                        >
-                          <option value="cash">À vista</option>
-                          <option value="installments">Parcelado</option>
-                          <option value="recurring">Recorrente</option>
-                        </NativeSelect>
-                      </Field>
-                      <Field label="Nº parcelas / ciclos">
-                        <Input
-                          className={`sales-ops-num ${formInputClass}`}
-                          min={1}
-                          onChange={(event) => setInstallments(event.target.value)}
-                          type="number"
-                          value={installments}
-                        />
-                      </Field>
-                      <Field label="Data-base">
-                        <Input
-                          className={`sales-ops-num ${formInputClass}`}
-                          onChange={(event) => setBaseDate(event.target.value)}
-                          type="date"
-                          value={baseDate}
-                        />
-                      </Field>
-                    </div>
-                    {recurringLine ? (
-                      <div className="mt-[14px] flex items-center gap-2.5 rounded-[11px] border border-[#cfe4cf] bg-[#e2efe2] px-[14px] py-[11px] text-[13px] font-semibold text-[#2f7d4b]">
-                        <RotateCcw className="h-4 w-4 flex-none" />
-                        {recurringLine}
-                      </div>
-                    ) : null}
-                    <div className="mt-[14px] overflow-hidden rounded-[12px] border border-[#ececf1]">
-                      <div className="flex items-center justify-between border-b border-[#eeeef1] bg-[#fafafb] px-[14px] py-[11px]">
-                        <div className="text-[12.5px] font-bold">Parcelas a receber</div>
-                        <div className="text-[12.5px] text-[#8b8b92]">
-                          Soma ·{' '}
-                          <span className="sales-ops-num font-bold text-[#9c7210]">
-                            {formatMoneyBrl(totalCents)}
-                          </span>
-                        </div>
-                      </div>
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead className={tableHeadClass}>Parcela</TableHead>
-                            <TableHead className={tableHeadClass}>Vencimento</TableHead>
-                            <TableHead className={`${tableHeadClass} text-right`}>Valor</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {paymentRows.map((row) => (
-                            <TableRow key={row.index}>
-                              <TableCell className="sales-ops-num px-[14px] py-2.5 text-[13px] font-semibold">
-                                {row.index}
-                              </TableCell>
-                              <TableCell className="sales-ops-num px-3 py-2.5 text-[13px] text-[#57575f]">
-                                {row.dueDate}
-                              </TableCell>
-                              <TableCell className="sales-ops-num px-[14px] py-2.5 text-right text-[13px] font-bold">
-                                {formatMoneyBrl(row.value)}
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
                     </div>
                   </div>
 
@@ -3699,13 +4003,13 @@ function SaleWizardDialogBody({
                     <textarea
                       className="min-h-[74px] rounded-[10px] border border-[#dcdce2] bg-white px-3 py-2 text-sm outline-none transition focus:border-[#eaa81a]"
                       onChange={(event) => setNotes(event.target.value)}
-                      placeholder="Notas internas sobre a venda..."
+                      placeholder="Notas internas sobre a proposta..."
                       value={notes}
                     />
                   </Field>
 
                   <div className="flex items-baseline justify-end gap-2.5 rounded-[12px] border border-[#e8e8ec] bg-white px-[18px] py-[14px]">
-                    <span className="text-[13px] font-semibold text-[#8b8b92]">Total da venda</span>
+                    <span className="text-[13px] font-semibold text-[#8b8b92]">Total da proposta</span>
                     <span className="sales-ops-num text-2xl font-bold text-[#9c7210]">
                       {formatMoneyBrl(totalCents, { maximumFractionDigits: 0 })}
                     </span>
@@ -3714,6 +4018,245 @@ function SaleWizardDialogBody({
               ) : null}
 
               {wizardStep === 2 ? (
+                <div className="flex flex-col gap-[18px]">
+                  <div className="rounded-[14px] border border-[#e8e8ec] bg-white p-4">
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                      <div className="text-[13px] font-bold">Plano de pagamento</div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[12.5px] font-semibold text-[#8b8b92]">Dividir em</span>
+                        <Input
+                          aria-label="Número de parcelas"
+                          className={`sales-ops-num h-9 w-16 rounded-[9px] text-center ${formInputClass}`}
+                          min={1}
+                          onChange={(event) => setSplitCount(event.target.value)}
+                          type="number"
+                          value={splitCount}
+                        />
+                        <span className="text-[12.5px] font-semibold text-[#8b8b92]">x</span>
+                        <button
+                          className="rounded-[9px] border border-[#dcdce2] bg-white px-3 py-[7px] text-[12.5px] font-semibold text-[#9c7210] transition hover:bg-[#f2f2f4]"
+                          onClick={applySplit}
+                          type="button"
+                        >
+                          Dividir
+                        </button>
+                        <button
+                          className="rounded-[9px] bg-[#201f24] px-3 py-[7px] text-[12.5px] font-semibold text-white transition hover:bg-[#33333a]"
+                          onClick={addInstallmentRow}
+                          type="button"
+                        >
+                          + parcela
+                        </button>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-[44px_minmax(0,1fr)_150px_150px_36px] gap-[9px] px-0.5 pb-[7px] text-[11px] font-bold uppercase tracking-[0.05em] text-[#9b9ba3]">
+                      <span>Nº</span>
+                      <span>Vencimento</span>
+                      <span className="text-right">Valor</span>
+                      <span>Forma</span>
+                      <span />
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      {installmentRows.map((row, index) => {
+                        const dateValid = /^\d{4}-\d{2}-\d{2}$/.test(row.dueDate);
+                        const amountValid = parseCurrencyToCents(row.amountBrl) > 0;
+                        return (
+                          <div
+                            className="grid grid-cols-[44px_minmax(0,1fr)_150px_150px_36px] items-center gap-[9px]"
+                            key={index}
+                          >
+                            <div className="sales-ops-num text-[13px] font-semibold">{index + 1}</div>
+                            <Input
+                              aria-invalid={showPlanErrors && !dateValid}
+                              aria-label={`Vencimento da parcela ${index + 1}`}
+                              className={cn(
+                                'sales-ops-num h-10 rounded-[9px]',
+                                formInputClass,
+                                showPlanErrors && !dateValid && 'border-destructive',
+                              )}
+                              onChange={(event) => {
+                                const value = event.target.value;
+                                setPlanAuto(false);
+                                setInstallmentRows((current) =>
+                                  current.map((rowItem, rowIndex) =>
+                                    rowIndex === index ? { ...rowItem, dueDate: value } : rowItem,
+                                  ),
+                                );
+                              }}
+                              type="date"
+                              value={row.dueDate}
+                            />
+                            <Input
+                              aria-invalid={showPlanErrors && !amountValid}
+                              aria-label={`Valor da parcela ${index + 1}`}
+                              className={cn(
+                                'sales-ops-num h-10 rounded-[9px] text-right',
+                                formInputClass,
+                                showPlanErrors && !amountValid && 'border-destructive',
+                              )}
+                              onChange={(event) => {
+                                const value = event.target.value;
+                                setPlanAuto(false);
+                                setInstallmentRows((current) =>
+                                  current.map((rowItem, rowIndex) =>
+                                    rowIndex === index ? { ...rowItem, amountBrl: value } : rowItem,
+                                  ),
+                                );
+                              }}
+                              value={row.amountBrl}
+                            />
+                            <NativeSelect
+                              aria-label={`Forma de pagamento da parcela ${index + 1}`}
+                              className="h-10 rounded-[9px] text-[13.5px]"
+                              onChange={(value) => {
+                                setPlanAuto(false);
+                                setInstallmentRows((current) =>
+                                  current.map((rowItem, rowIndex) =>
+                                    rowIndex === index ? { ...rowItem, method: value as PaymentMethod } : rowItem,
+                                  ),
+                                );
+                              }}
+                              value={row.method}
+                            >
+                              <option value="pix">Pix</option>
+                              <option value="card">Cartão</option>
+                              <option value="boleto">Boleto</option>
+                              <option value="transfer">Transferência</option>
+                            </NativeSelect>
+                            <button
+                              aria-label={`Remover parcela ${index + 1}`}
+                              className="flex h-8 w-8 items-center justify-center rounded-[8px] border border-[#f0dcd5] bg-[#fbeee9] text-[#b23a22] transition hover:bg-[#f6e0d9] disabled:cursor-not-allowed disabled:opacity-40"
+                              disabled={installmentRows.length === 1}
+                              onClick={() => {
+                                setPlanAuto(false);
+                                setInstallmentRows((current) =>
+                                  current.filter((_, rowIndex) => rowIndex !== index),
+                                );
+                              }}
+                              type="button"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="mt-3 flex items-center justify-between border-t border-[#eeeef1] pt-3 text-[12.5px]">
+                      <span className="font-semibold text-[#8b8b92]">Soma das parcelas</span>
+                      <span
+                        className={`sales-ops-num font-bold ${planDeltaCents === 0 ? 'text-[#2f7d4b]' : 'text-[#b23a22]'}`}
+                      >
+                        {formatMoneyBrl(planSumCents)} / {formatMoneyBrl(totalCents)}
+                      </span>
+                    </div>
+                    {planDeltaCents !== 0 ? (
+                      <div className="mt-2 rounded-[10px] border border-[#f0dcd5] bg-[#fbeee9] px-3 py-2 text-[12.5px] font-semibold text-[#b23a22]">
+                        A soma das parcelas precisa ser igual ao total da proposta. Diferença:{' '}
+                        {formatMoneyBrl(Math.abs(planDeltaCents))}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className="rounded-[14px] border border-[#e8e8ec] bg-white p-4">
+                    <div className="mb-3 flex items-center justify-between">
+                      <div className="text-[13px] font-bold">Recorrência</div>
+                      {recurringEnabled ? (
+                        <button
+                          className="text-xs font-semibold text-[#b23a22]"
+                          onClick={() => setRecurringEnabled(false)}
+                          type="button"
+                        >
+                          remover
+                        </button>
+                      ) : null}
+                    </div>
+                    {recurringEnabled ? (
+                      <>
+                        <div className="grid gap-3 md:grid-cols-3">
+                          <Field label="Mensalidade (R$)">
+                            <Input
+                              aria-label="Valor da mensalidade"
+                              className={`sales-ops-num text-right ${formInputClass}`}
+                              onChange={(event) => setRecurringMonthlyBrl(event.target.value)}
+                              value={recurringMonthlyBrl}
+                            />
+                          </Field>
+                          <Field label="Início">
+                            <Input
+                              aria-label="Início da recorrência"
+                              className={`sales-ops-num ${formInputClass}`}
+                              onChange={(event) => setRecurringStartDate(event.target.value)}
+                              type="date"
+                              value={recurringStartDate}
+                            />
+                          </Field>
+                          <Field label="Nº de ciclos">
+                            <Input
+                              aria-label="Número de ciclos"
+                              className={`sales-ops-num ${formInputClass}`}
+                              disabled={recurringIndefinite}
+                              min={1}
+                              onChange={(event) => setRecurringCycles(event.target.value)}
+                              type="number"
+                              value={recurringCycles}
+                            />
+                          </Field>
+                        </div>
+                        <button
+                          className="mt-[9px] flex items-center gap-2 text-[13px] text-[#57575f]"
+                          onClick={() => setRecurringIndefinite((current) => !current)}
+                          type="button"
+                        >
+                          <span
+                            className={`flex h-[18px] w-[18px] items-center justify-center rounded-[5px] border ${
+                              recurringIndefinite
+                                ? 'border-[#eaa81a] bg-[#eaa81a]'
+                                : 'border-[#c9c3b4] bg-white'
+                            }`}
+                          >
+                            {recurringIndefinite ? <Check className="h-3 w-3 text-white" /> : null}
+                          </span>
+                          Prazo indeterminado
+                        </button>
+                        {showPlanErrors ? (
+                          <div className="mt-2 flex flex-col gap-1 text-[11.5px] font-semibold text-destructive">
+                            {recurringMonthlyCents <= 0 ? (
+                              <span>Informe uma mensalidade maior que zero.</span>
+                            ) : null}
+                            {!recurringIndefinite && Math.floor(Number(recurringCycles) || 0) < 1 ? (
+                              <span>Informe o número de ciclos ou marque prazo indeterminado.</span>
+                            ) : null}
+                          </div>
+                        ) : null}
+                        {recurringMonthlyCents > 0 && /^\d{4}-\d{2}-\d{2}$/.test(recurringStartDate) ? (
+                          <div className="mt-[14px] flex items-center gap-2.5 rounded-[11px] border border-[#cfe4cf] bg-[#e2efe2] px-[14px] py-[11px] text-[13px] font-semibold text-[#2f7d4b]">
+                            <RotateCcw className="h-4 w-4 flex-none" />
+                            Mensalidade de {formatMoneyBrl(recurringMonthlyCents, { maximumFractionDigits: 0 })} a
+                            partir de {displayDate(recurringStartDate)}
+                            {recurringIndefinite ? ', por prazo indeterminado' : `, por ${recurringCyclesCount} ciclos`}
+                          </div>
+                        ) : null}
+                        {recurringIndefinite ? (
+                          <div className="mt-2 text-[12px] font-semibold text-[#9b9ba3]">
+                            Sem parcelas futuras geradas agora - a mensalidade entra como receita recorrente (MRR).
+                          </div>
+                        ) : null}
+                      </>
+                    ) : (
+                      <button
+                        className="flex h-11 w-full items-center justify-center gap-2 rounded-[10px] border border-dashed border-[#d8cdb0] bg-[#fafafb] px-3 text-[13.5px] font-semibold text-[#9c7210] transition hover:bg-[#f4efe2]"
+                        onClick={() => setRecurringEnabled(true)}
+                        type="button"
+                      >
+                        <Plus className="h-[15px] w-[15px]" />
+                        Adicionar recorrência
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ) : null}
+
+              {wizardStep === 3 ? (
                 <div className="flex flex-col gap-[18px]">
                   <div className="rounded-[11px] border border-[#f0dfae] bg-[#fdf0cf] px-[14px] py-[11px] text-[13px] text-[#57575f]">
                     Aloque os profissionais do projeto e ajuste os percentuais - a margem líquida e as comissões são calculadas em tempo real.
@@ -3909,12 +4452,15 @@ function SaleWizardDialogBody({
                 </div>
               ) : null}
 
-              {wizardStep === 3 ? (
+              {wizardStep === 4 ? (
                 <div className="flex flex-col gap-[14px]">
+                  <div className="rounded-[11px] border border-[#f0dfae] bg-[#fdf0cf] px-[14px] py-[11px] text-[13px] text-[#57575f]">
+                    Esta é uma previsão - nada é lançado no financeiro até a proposta ser marcada como Ganha.
+                  </div>
                   <div className="grid gap-[14px] md:grid-cols-2">
                     <div className="rounded-[14px] border border-[#e8e8ec] bg-white p-[17px]">
                       <div className="mb-[11px] flex items-center justify-between">
-                        <div className="text-[13px] font-bold">Dados da venda</div>
+                        <div className="text-[13px] font-bold">Dados da proposta</div>
                         <button
                           className="text-xs font-semibold text-[#9c7210]"
                           onClick={() => setWizardStep(1)}
@@ -3943,9 +4489,20 @@ function SaleWizardDialogBody({
                           <span className="font-semibold">{selectedFinder?.displayName ?? 'Sem finder'}</span>
                         </div>
                         <div className="flex justify-between gap-4">
-                          <span className="text-[#8b8b92]">Condição</span>
-                          <span className="font-semibold">{conditionLabel(condition, installmentCount)}</span>
+                          <span className="text-[#8b8b92]">Pagamento</span>
+                          <span className="font-semibold">
+                            {installmentRows.length} parcela{installmentRows.length > 1 ? 's' : ''}
+                          </span>
                         </div>
+                        {recurringEnabled ? (
+                          <div className="flex justify-between gap-4">
+                            <span className="text-[#8b8b92]">Recorrência</span>
+                            <span className="font-semibold">
+                              {formatMoneyBrl(recurringMonthlyCents, { maximumFractionDigits: 0 })}/mês
+                              {recurringIndefinite ? ' (indeterminado)' : ` por ${recurringCyclesCount} ciclos`}
+                            </span>
+                          </div>
+                        ) : null}
                         <div className="mt-0.5 flex justify-between gap-4 border-t border-[#eeeef1] pt-2">
                           <span className="text-[#8b8b92]">Total</span>
                           <span className="sales-ops-num text-[15px] font-bold text-[#9c7210]">
@@ -3960,7 +4517,7 @@ function SaleWizardDialogBody({
                         <div className="text-[13px] font-bold">Margem líquida</div>
                         <button
                           className="text-xs font-semibold text-[#eaa81a]"
-                          onClick={() => setWizardStep(2)}
+                          onClick={() => setWizardStep(3)}
                           type="button"
                         >
                           editar
@@ -4003,10 +4560,15 @@ function SaleWizardDialogBody({
 
                   <div className="overflow-hidden rounded-[14px] border border-[#e8e8ec] bg-white">
                     <div className="flex items-center justify-between border-b border-[#eeeef1] px-4 py-[13px]">
-                      <div className="text-[13px] font-bold">Contas a pagar geradas</div>
+                      <div>
+                        <div className="text-[13px] font-bold">Previsão de contas a pagar</div>
+                        <div className="mt-0.5 text-[11.5px] text-[#9b9ba3]">
+                          Estes lançamentos serão gerados quando a proposta for marcada como Ganha.
+                        </div>
+                      </div>
                       <button
                         className="text-xs font-semibold text-[#9c7210]"
-                        onClick={() => setWizardStep(2)}
+                        onClick={() => setWizardStep(3)}
                         type="button"
                       >
                         editar custos
@@ -4044,7 +4606,7 @@ function SaleWizardDialogBody({
                         ))}
                         <TableRow className="border-t-2 border-[#e8e8ec] bg-[#fafafb]">
                           <TableCell className="px-4 py-[13px] text-[13.5px] font-bold" colSpan={3}>
-                            Total a pagar
+                            Total previsto
                           </TableCell>
                           <TableCell className="sales-ops-num px-4 py-[13px] text-right text-base font-bold text-[#b23a22]">
                             {formatMoneyBrl(payablesPreview.reduce((sum, item) => sum + item.value, 0))}
@@ -4069,17 +4631,19 @@ function SaleWizardDialogBody({
           </button>
           <div className="flex items-center gap-3">
             <span className="text-[13px] text-[#9b9ba3]">
-              Passo {wizardStep} de 3
+              Passo {wizardStep} de 4
             </span>
-            <button
-              className="rounded-[11px] border border-[#dcdce2] bg-white px-[18px] py-[11px] text-sm font-semibold text-[#57575f] transition hover:bg-[#f2f2f4] disabled:cursor-not-allowed disabled:opacity-45"
-              disabled={!canSaveBasics || saving}
-              onClick={() => submit('draft')}
-              title="Salvar com os dados básicos preenchidos"
-              type="button"
-            >
-              Salvar incompleto
-            </button>
+            {!editSale || editSale.status === 'draft' ? (
+              <button
+                className="rounded-[11px] border border-[#dcdce2] bg-white px-[18px] py-[11px] text-sm font-semibold text-[#57575f] transition hover:bg-[#f2f2f4] disabled:cursor-not-allowed disabled:opacity-45"
+                disabled={!draftValid || saving}
+                onClick={() => submit('draft')}
+                title="Salvar como rascunho para terminar depois"
+                type="button"
+              >
+                Salvar rascunho
+              </button>
+            ) : null}
             <button
               className="rounded-[11px] bg-[#201f24] px-[22px] py-[11px] text-sm font-bold text-white transition hover:bg-[#33333a] disabled:cursor-not-allowed disabled:opacity-60"
               disabled={saving || (wizardStep === 1 && !canSave)}

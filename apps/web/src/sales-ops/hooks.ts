@@ -32,6 +32,8 @@ export function useSalesOpsBootstrap() {
       people: Array.isArray(data.people) ? data.people : [],
       payables: Array.isArray(data.payables) ? data.payables : [],
       saleItems: Array.isArray(data.saleItems) ? data.saleItems : [],
+      receivables: Array.isArray(data.receivables) ? data.receivables : [],
+      saleProfessionals: Array.isArray(data.saleProfessionals) ? data.saleProfessionals : [],
       settings: data.settings ?? null,
     }),
   });
@@ -96,6 +98,18 @@ export function useCreateSalesOpsSale() {
   return useMutation({
     mutationFn: async (payload: CreateSalePayload) =>
       salesOpsApi.createSale(payload, await requireToken(getToken)),
+    onSuccess: () => {
+      void invalidate();
+    },
+  });
+}
+
+export function useUpdateSalesOpsSale() {
+  const { getToken } = useAccessToken();
+  const invalidate = useInvalidateSalesOps();
+  return useMutation({
+    mutationFn: async ({ saleId, payload }: { saleId: string; payload: CreateSalePayload }) =>
+      salesOpsApi.updateSale(saleId, payload, await requireToken(getToken)),
     onSuccess: () => {
       void invalidate();
     },

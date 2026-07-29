@@ -1,4 +1,14 @@
-export type SalesOpsStatus = 'draft' | 'forecast' | 'closed' | 'in_progress' | 'completed' | 'cancelled';
+export type SalesOpsStatus =
+  | 'draft'
+  | 'open'
+  | 'won'
+  | 'lost'
+  | 'cancelled'
+  // legacy statuses below are removed by slice 07-propostas-list-web
+  | 'forecast'
+  | 'closed'
+  | 'in_progress'
+  | 'completed';
 export type PaymentMethod = 'pix' | 'card' | 'boleto' | 'transfer';
 export type PaymentCondition = 'cash' | 'installments' | 'recurring';
 export type CommissionType = 'pct' | 'fix';
@@ -115,6 +125,31 @@ export type SalesOpsSaleItem = {
   quantity: number;
   unitBrl: number;
   subtotalBrl: number;
+  areaId?: string | null;
+  areaNameSnapshot?: string;
+};
+
+export type SalesOpsReceivable = {
+  id: string;
+  orgId?: string;
+  saleId: string;
+  label?: string; // '1/n' for installment rows, 'M1/c' for bounded recurring rows (slice 03 ledger contract)
+  dueDate: string;
+  amountBrl: number;
+  method: PaymentMethod;
+  status: 'open' | 'paid' | 'void';
+  createdAt?: string;
+  updatedAt?: string | null;
+};
+
+export type SalesOpsSaleProfessional = {
+  id?: string;
+  orgId?: string;
+  saleId: string;
+  personId: string | null;
+  personNameSnapshot: string;
+  role: string;
+  costBrl: number;
 };
 
 export type SalesOpsPayable = {
@@ -157,6 +192,8 @@ export type SalesOpsBootstrap = {
   people: SalesOpsPerson[];
   payables: SalesOpsPayable[];
   saleItems: SalesOpsSaleItem[];
+  receivables: SalesOpsReceivable[];
+  saleProfessionals: SalesOpsSaleProfessional[];
   settings: SalesOpsSettings | null;
 };
 
@@ -175,6 +212,7 @@ export type DashboardModel = {
 
 export type SaleDraftItem = {
   productId?: string;
+  areaId?: string;
   productName: string;
   productType: string;
   quantity: string | number;
@@ -188,6 +226,14 @@ export type SaleDraftProfessional = {
   costBrl: string | number;
 };
 
+export type SaleDraftInstallment = { dueDate: string; amountBrl: string | number; method: PaymentMethod };
+export type SaleDraftRecurring = {
+  monthlyBrl: string | number;
+  startDate: string;
+  cycles: number | null;
+  method?: PaymentMethod;
+};
+
 export type SaleDraft = {
   clientId?: string;
   clientName: string;
@@ -196,15 +242,14 @@ export type SaleDraft = {
   finderPersonId?: string;
   finderName?: string;
   status: SalesOpsStatus;
-  paymentMethod: PaymentMethod;
-  condition: PaymentCondition;
-  installments: string | number;
   baseDate: string;
   notes?: string;
   sellerCommissionPct: string | number;
   finderCommissionPct: string | number;
   taxPct: string | number;
   otherCostsBrl: string | number;
+  installments: SaleDraftInstallment[];
+  recurring?: SaleDraftRecurring | null;
   items: SaleDraftItem[];
   professionals: SaleDraftProfessional[];
 };
@@ -217,17 +262,17 @@ export type CreateSalePayload = {
   finderPersonId?: string;
   finderName?: string | null;
   status: SalesOpsStatus;
-  paymentMethod: PaymentMethod;
-  condition: PaymentCondition;
-  installments: number;
   baseDate: string;
   notes: string | null;
   sellerCommissionPct: number;
   finderCommissionPct: number;
   taxPct: number;
   otherCostsBrl: number;
+  installments: Array<{ dueDate: string; amountBrl: number; method: PaymentMethod }>;
+  recurring: { monthlyBrl: number; startDate: string; cycles: number | null; method?: PaymentMethod } | null;
   items: Array<{
     productId?: string;
+    areaId?: string;
     productName: string;
     productType: string;
     quantity: number;

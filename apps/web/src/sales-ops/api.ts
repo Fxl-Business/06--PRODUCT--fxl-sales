@@ -96,6 +96,12 @@ export const salesOpsApi = {
       token,
       body: JSON.stringify(payload),
     }),
+  updateSale: (saleId: string, payload: CreateSalePayload, token: Token) =>
+    apiFetch<{ sale: unknown; ledger: unknown }>(`/api/v1/sales-ops/sales/${saleId}`, {
+      method: 'PUT',
+      token,
+      body: JSON.stringify(payload),
+    }),
   saveSettings: (payload: SaveSettingsPayload, token: Token) =>
     apiFetch<{ settings: SalesOpsSettings }>('/api/v1/sales-ops/settings', {
       method: 'PUT',

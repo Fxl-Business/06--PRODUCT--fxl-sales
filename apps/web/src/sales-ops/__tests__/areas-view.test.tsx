@@ -74,6 +74,8 @@ function bootstrap(patch: Partial<SalesOpsBootstrap> = {}): SalesOpsBootstrap {
     people: [],
     payables: [],
     saleItems: [],
+    receivables: [],
+    saleProfessionals: [],
     settings: null,
     ...patch,
   };

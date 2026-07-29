@@ -3,8 +3,10 @@ import {
   buildDashboardModel,
   buildSalePayload,
   formatMoneyBrl,
+  installmentSumCents,
   parseCurrencyInputToCents,
   resolveSaleCommissionDefaults,
+  splitInstallmentsEqually,
   type SaleCommissionDefaultsProduct,
 } from '../calculations';
 import type { SalesOpsBootstrap } from '../types';
@@ -45,6 +47,8 @@ describe('sales operations web calculations', () => {
       people: [],
       payables: [],
       saleItems: [],
+      receivables: [],
+      saleProfessionals: [],
       settings: null,
     };
 
@@ -65,18 +69,21 @@ describe('sales operations web calculations', () => {
       finderPersonId: '',
       finderName: '',
       status: 'closed',
-      paymentMethod: 'pix',
-      condition: 'installments',
-      installments: 3,
       baseDate: '2026-07-10',
       notes: '',
       sellerCommissionPct: '10',
       finderCommissionPct: '3',
       taxPct: '6',
       otherCostsBrl: '60000',
+      installments: [
+        { dueDate: '2026-07-10', amountBrl: 400000, method: 'pix' },
+        { dueDate: '2026-08-10', amountBrl: '400000', method: 'boleto' },
+      ],
+      recurring: { monthlyBrl: '100000', startDate: '2026-08-10', cycles: null },
       items: [
         {
           productId: '33333333-3333-4333-8333-333333333333',
+          areaId: '66666666-6666-4666-8666-666666666666',
           productName: 'FXL Finance',
           productType: 'SaaS',
           quantity: '1',
@@ -90,6 +97,109 @@ describe('sales operations web calculations', () => {
     expect(payload.notes).toBeNull();
     expect(payload.otherCostsBrl).toBe(60000);
     expect(payload.items[0]?.quantity).toBe(1);
+    expect(payload.items[0]?.areaId).toBe('66666666-6666-4666-8666-666666666666');
+    expect(payload.installments).toEqual([
+      { dueDate: '2026-07-10', amountBrl: 400000, method: 'pix' },
+      { dueDate: '2026-08-10', amountBrl: 400000, method: 'boleto' },
+    ]);
+    expect(payload.recurring).toEqual({
+      monthlyBrl: 100000,
+      startDate: '2026-08-10',
+      cycles: null,
+      method: 'pix',
+    });
+  });
+
+  it('splits a total into equal monthly installments with the remainder on the last row', () => {
+    expect(splitInstallmentsEqually(250000, 3, '2026-07-10', 'boleto')).toEqual([
+      { dueDate: '2026-07-10', amountBrl: 83333, method: 'boleto' },
+      { dueDate: '2026-08-10', amountBrl: 83333, method: 'boleto' },
+      { dueDate: '2026-09-10', amountBrl: 83334, method: 'boleto' },
+    ]);
+    expect(splitInstallmentsEqually(100, 1, '2026-07-10', 'pix')).toEqual([
+      { dueDate: '2026-07-10', amountBrl: 100, method: 'pix' },
+    ]);
+    expect(splitInstallmentsEqually(100, 0, '2026-07-10', 'pix')).toEqual([
+      { dueDate: '2026-07-10', amountBrl: 100, method: 'pix' },
+    ]);
+  });
+
+  it('rolls month-end split dates forward like native Date arithmetic', () => {
+    expect(splitInstallmentsEqually(300, 2, '2026-01-31', 'pix')[1]!.dueDate).toBe('2026-03-03');
+  });
+
+  it('sums installment rows from mixed string and numeric inputs', () => {
+    expect(
+      installmentSumCents([{ amountBrl: '8.000,00' }, { amountBrl: 250000 }, { amountBrl: '833.34' }]),
+    ).toBe(800000 + 250000 + 83334);
+  });
+
+  it('normalizes a free-form item without productId', () => {
+    const payload = buildSalePayload({
+      clientId: undefined,
+      clientName: 'Cliente',
+      sellerPersonId: undefined,
+      sellerName: 'Vendedor',
+      status: 'draft',
+      baseDate: '2026-07-10',
+      sellerCommissionPct: '10',
+      finderCommissionPct: '3',
+      taxPct: '6',
+      otherCostsBrl: 0,
+      installments: [{ dueDate: '2026-07-10', amountBrl: 500000, method: 'pix' }],
+      recurring: null,
+      items: [
+        {
+          productName: 'Consultoria',
+          productType: 'Avulso',
+          areaId: 'x',
+          quantity: '1',
+          unitBrl: 500000,
+        },
+      ],
+      professionals: [],
+    });
+
+    expect(payload.items[0]?.productId).toBeUndefined();
+    expect(payload.items[0]?.areaId).toBe('x');
+  });
+
+  it('passes the recurring method through and defaults to pix when absent', () => {
+    const base = {
+      clientId: undefined,
+      clientName: 'Cliente',
+      sellerPersonId: undefined,
+      sellerName: 'Vendedor',
+      status: 'draft' as const,
+      baseDate: '2026-07-10',
+      sellerCommissionPct: '10',
+      finderCommissionPct: '3',
+      taxPct: '6',
+      otherCostsBrl: 0,
+      installments: [{ dueDate: '2026-07-10', amountBrl: 500000, method: 'pix' as const }],
+      items: [
+        {
+          productName: 'Consultoria',
+          productType: 'Avulso',
+          areaId: 'x',
+          quantity: '1',
+          unitBrl: 500000,
+        },
+      ],
+      professionals: [],
+    };
+    expect(
+      buildSalePayload({
+        ...base,
+        recurring: { monthlyBrl: 100000, startDate: '2026-08-10', cycles: null, method: 'boleto' },
+      }).recurring,
+    ).toEqual({ monthlyBrl: 100000, startDate: '2026-08-10', cycles: null, method: 'boleto' });
+    expect(
+      buildSalePayload({
+        ...base,
+        recurring: { monthlyBrl: 100000, startDate: '2026-08-10', cycles: null },
+      }).recurring,
+    ).toEqual({ monthlyBrl: 100000, startDate: '2026-08-10', cycles: null, method: 'pix' });
   });
 
   it('resolves seller-only product percentage without applying the product finder rate', () => {
