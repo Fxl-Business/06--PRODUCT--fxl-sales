@@ -11,6 +11,9 @@ import type {
 
 type Token = string;
 
+export type TransitionSaleStatus = 'open' | 'won' | 'lost' | 'cancelled';
+export type TransitionSalePayload = { saleId: string; status: TransitionSaleStatus };
+
 export type SavePersonPayload = Omit<
   Partial<SalesOpsPerson>,
   'id' | 'orgId' | 'createdAt' | 'updatedAt'
@@ -107,5 +110,17 @@ export const salesOpsApi = {
       method: 'PUT',
       token,
       body: JSON.stringify(payload),
+    }),
+  transitionSale: ({ saleId, status }: TransitionSalePayload, token: Token) =>
+    apiFetch<{ sale: unknown }>(`/api/v1/sales-ops/sales/${saleId}/transition`, {
+      method: 'POST',
+      token,
+      body: JSON.stringify({ status }),
+    }),
+  cancelContract: (saleId: string, token: Token) =>
+    apiFetch<{ sale: unknown }>(`/api/v1/sales-ops/sales/${saleId}/cancel-contract`, {
+      method: 'POST',
+      token,
+      body: JSON.stringify({}),
     }),
 };

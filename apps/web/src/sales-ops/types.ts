@@ -1,14 +1,4 @@
-export type SalesOpsStatus =
-  | 'draft'
-  | 'open'
-  | 'won'
-  | 'lost'
-  | 'cancelled'
-  // legacy statuses below are removed by slice 07-propostas-list-web
-  | 'forecast'
-  | 'closed'
-  | 'in_progress'
-  | 'completed';
+export type SalesOpsStatus = 'draft' | 'open' | 'won' | 'lost' | 'cancelled';
 export type PaymentMethod = 'pix' | 'card' | 'boleto' | 'transfer';
 export type PaymentCondition = 'cash' | 'installments' | 'recurring';
 export type CommissionType = 'pct' | 'fix';
@@ -99,6 +89,8 @@ export type SalesOpsSale = {
   installments: number;
   baseDate: string;
   notes: string | null;
+  wonAt: string | null;
+  lostAt: string | null;
   totalBrl: number;
   recurringBrl: number;
   sellerCommissionPct: string;
@@ -160,7 +152,7 @@ export type SalesOpsPayable = {
   kind: string;
   dueDate: string;
   amountBrl: number;
-  status: 'open' | 'paid' | 'voided';
+  status: 'open' | 'paid' | 'void';
 };
 
 export type SalesOpsSettings = {
@@ -199,10 +191,10 @@ export type SalesOpsBootstrap = {
 
 export type DashboardModel = {
   kpis: {
-    closedRevenueBrl: number;
+    wonRevenueBrl: number;
     activeMrrBrl: number;
     payableBrl: number;
-    closedSalesCount: number;
+    wonSalesCount: number;
   };
   revenueByProduct: Array<{ name: string; amountBrl: number; widthPct: number }>;
   topSellers: Array<{ name: string; totalBrl: number; commissionBrl: number; count: number }>;

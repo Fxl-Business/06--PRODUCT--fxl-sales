@@ -13,6 +13,7 @@ import {
   ListChecks,
   Loader2,
   LogOut,
+  MoreHorizontal,
   Plus,
   RotateCcw,
   Save,
@@ -24,6 +25,16 @@ import {
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { useAuthProfile, useLogout } from '@/auth/react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import {
   Dialog,
@@ -52,6 +63,7 @@ import {
 } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
 import {
+  useCancelSalesOpsContract,
   useCreateSalesOpsSale,
   useSalesOpsBootstrap,
   useSaveSalesOpsArea,
@@ -59,6 +71,7 @@ import {
   useSaveSalesOpsPerson,
   useSaveSalesOpsProduct,
   useSaveSalesOpsSettings,
+  useTransitionSalesOpsSale,
   useUpdateSalesOpsSale,
 } from './hooks';
 import {
@@ -75,7 +88,6 @@ import {
 import type { AppRole } from '@/auth/claims';
 import type {
   CreateSalePayload,
-  PaymentCondition,
   PaymentMethod,
   SaleDraft,
   SalesOpsArea,
@@ -104,6 +116,7 @@ import type {
   SavePersonPayload,
   SaveProductPayload,
   SaveSettingsPayload,
+  TransitionSaleStatus,
 } from './api';
 
 const emptyBootstrap: SalesOpsBootstrap = {
@@ -154,6 +167,8 @@ type ModalState =
 
 type SaleWizardRequest = { mode: 'create' } | { mode: 'edit'; sale: SalesOpsSale };
 
+type SalesFilters = { status: SalesOpsStatus | 'all'; areaId: string | 'all' };
+
 function titleForView(view: SalesOpsView, workspace: SalesOpsWorkspace) {
   const personal = workspace === 'meus-dados';
   const map: Record<SalesOpsView, { title: string; subtitle: string }> = {
@@ -162,8 +177,10 @@ function titleForView(view: SalesOpsView, workspace: SalesOpsWorkspace) {
       subtitle: 'Receita, recorrência, comissões e ranking do mês',
     },
     vendas: {
-      title: personal ? 'Minhas indicações' : 'Vendas',
-      subtitle: 'Registro operacional com código, cliente, produto, responsável e status',
+      title: personal ? 'Minhas indicações' : 'Propostas',
+      subtitle: personal
+        ? 'Registro operacional com código, cliente, produto, responsável e status'
+        : 'Propostas com código, cliente, áreas, responsáveis, status e ciclo de vida',
     },
     vendedores: {
       title: personal ? 'Meu painel' : 'Vendedores',
@@ -212,13 +229,9 @@ function statusMeta(status: SalesOpsStatus) {
     open: { label: 'Aberta', className: 'bg-[#d3e3f6] text-[#2664ad]' },
     won: { label: 'Ganha', className: 'bg-[#c9e7cf] text-[#1f7d43]' },
     lost: { label: 'Perdida', className: 'bg-[#f6d1c5] text-[#a5341c]' },
-    forecast: { label: 'Previsto', className: 'bg-[#e9e9ed] text-[#6a6a72]' },
-    closed: { label: 'Fechado', className: 'bg-[#f7e2a8] text-[#7a5a12]' },
-    in_progress: { label: 'Em andamento', className: 'bg-[#d3e3f6] text-[#2664ad]' },
-    completed: { label: 'Concluído', className: 'bg-[#c9e7cf] text-[#1f7d43]' },
-    cancelled: { label: 'Cancelado', className: 'bg-[#f6d1c5] text-[#a5341c]' },
+    cancelled: { label: 'Cancelada', className: 'bg-[#eeeef1] text-[#6a6a72]' },
   };
-  return map[status];
+  return map[status] ?? { label: status, className: 'bg-[#e9e9ed] text-[#6a6a72]' };
 }
 
 function payableTypeMeta(kind: string) {
@@ -227,12 +240,6 @@ function payableTypeMeta(kind: string) {
   if (kind === 'professional_cost') return { label: 'Prestador', className: 'bg-[#eeeef1] text-[#57575f]' };
   if (kind === 'tax') return { label: 'Imposto', className: 'bg-[#f6d1c5] text-[#a5341c]' };
   return { label: 'Custo', className: 'bg-[#eeeef1] text-[#57575f]' };
-}
-
-function conditionLabel(condition: PaymentCondition, installments: number) {
-  if (condition === 'cash') return 'À vista';
-  if (condition === 'recurring') return 'Recorrente';
-  return `${installments}x`;
 }
 
 function dateOnly(value: string) {
@@ -287,7 +294,7 @@ function salesForPerson(bootstrap: SalesOpsBootstrap, person: SalesOpsPerson, mo
 }
 
 function personMetrics(bootstrap: SalesOpsBootstrap, person: SalesOpsPerson, mode: 'seller' | 'finder') {
-  const sales = salesForPerson(bootstrap, person, mode).filter((sale) => sale.status !== 'cancelled');
+  const sales = salesForPerson(bootstrap, person, mode).filter((sale) => sale.status === 'won');
   const totalBrl = sales.reduce((sum, sale) => sum + sale.totalBrl, 0);
   const commissionBrl = sales.reduce(
     (sum, sale) =>
@@ -503,6 +510,8 @@ export function SalesOpsApp() {
   const saveArea = useSaveSalesOpsArea();
   const createSale = useCreateSalesOpsSale();
   const updateSale = useUpdateSalesOpsSale();
+  const transitionSale = useTransitionSalesOpsSale();
+  const cancelContract = useCancelSalesOpsContract();
   const saveSettings = useSaveSalesOpsSettings();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
@@ -510,6 +519,7 @@ export function SalesOpsApp() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [modal, setModal] = useState<ModalState>(null);
   const [saleWizard, setSaleWizard] = useState<SaleWizardRequest | null>(null);
+  const [salesFilters, setSalesFilters] = useState<SalesFilters>({ status: 'all', areaId: 'all' });
   const mountedRef = useRef(true);
 
   const visibleWorkspaceIds = useMemo(
@@ -520,6 +530,18 @@ export function SalesOpsApp() {
   const { workspace, view } = resolution.route;
   const bootstrap = bootstrapQuery.data ?? emptyBootstrap;
   const dashboard = useMemo(() => buildDashboardModel(bootstrap), [bootstrap]);
+  const filteredSales = useMemo(() => {
+    return bootstrap.sales.filter((sale) => {
+      if (salesFilters.status !== 'all' && sale.status !== salesFilters.status) return false;
+      if (salesFilters.areaId !== 'all') {
+        const match = bootstrap.saleItems.some(
+          (item) => item.saleId === sale.id && item.areaId === salesFilters.areaId,
+        );
+        if (!match) return false;
+      }
+      return true;
+    });
+  }, [bootstrap.sales, bootstrap.saleItems, salesFilters]);
   const navItems = getSalesOpsNavigation(workspace, profile.roles);
   const title = titleForView(view, workspace);
   const canManagePeople =
@@ -927,7 +949,53 @@ export function SalesOpsApp() {
         </header>
 
         <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-b-2xl border border-t-0 border-[#e5e5ea] bg-[#fafafb]">
-          {filtersOpen && (view === 'vendas' || view === 'comissoes') ? (
+          {filtersOpen && view === 'vendas' ? (
+            <div className="flex flex-none flex-wrap items-center gap-3 border-b border-[#ececf1] bg-white px-[22px] py-[13px]">
+              <span className="text-xs font-bold uppercase tracking-[0.08em] text-[#9b9ba3]">
+                Filtros
+              </span>
+              <NativeSelect
+                aria-label="Filtrar por status"
+                className="w-[190px]"
+                onChange={(value) =>
+                  setSalesFilters((current) => ({
+                    ...current,
+                    status: value as SalesFilters['status'],
+                  }))
+                }
+                value={salesFilters.status}
+              >
+                <option value="all">Todos os status</option>
+                <option value="draft">Rascunho</option>
+                <option value="open">Aberta</option>
+                <option value="won">Ganha</option>
+                <option value="lost">Perdida</option>
+                <option value="cancelled">Cancelada</option>
+              </NativeSelect>
+              <NativeSelect
+                aria-label="Filtrar por área"
+                className="w-[190px]"
+                onChange={(value) =>
+                  setSalesFilters((current) => ({ ...current, areaId: value }))
+                }
+                value={salesFilters.areaId}
+              >
+                <option value="all">Todas as áreas</option>
+                {bootstrap.areas.map((area) => (
+                  <option key={area.id} value={area.id}>
+                    {area.name}
+                  </option>
+                ))}
+              </NativeSelect>
+              <span className="ml-auto text-[13px] text-[#8b8b92]">
+                <span className="sales-ops-num font-bold text-[#201f24]">
+                  {filteredSales.length}
+                </span>{' '}
+                registros
+              </span>
+            </div>
+          ) : null}
+          {filtersOpen && view === 'comissoes' ? (
             <div className="flex flex-none flex-wrap items-center gap-3 border-b border-[#ececf1] bg-white px-[22px] py-[13px]">
               <span className="text-xs font-bold uppercase tracking-[0.08em] text-[#9b9ba3]">
                 Filtros
@@ -940,7 +1008,7 @@ export function SalesOpsApp() {
               </NativeSelect>
               <span className="ml-auto text-[13px] text-[#8b8b92]">
                 <span className="sales-ops-num font-bold text-[#201f24]">
-                  {view === 'vendas' ? bootstrap.sales.length : bootstrap.payables.length}
+                  {bootstrap.payables.length}
                 </span>{' '}
                 registros
               </span>
@@ -960,7 +1028,18 @@ export function SalesOpsApp() {
                 {view === 'dashboard' ? (
                   <DashboardView bootstrap={bootstrap} dashboard={dashboard} go={go} />
                 ) : null}
-                {view === 'vendas' ? <SalesView bootstrap={bootstrap} /> : null}
+                {view === 'vendas' ? (
+                  <SalesView
+                    bootstrap={bootstrap}
+                    canManage={workspace === 'operacional'}
+                    onCancelContract={(sale) => cancelContract.mutate(sale.id)}
+                    onEdit={(sale) => setSaleWizard({ mode: 'edit', sale })}
+                    onTransition={(sale, status) =>
+                      transitionSale.mutate({ saleId: sale.id, status })
+                    }
+                    sales={filteredSales}
+                  />
+                ) : null}
                 {view === 'vendedores' ? (
                   <PeopleView
                     bootstrap={bootstrap}
@@ -1081,16 +1160,16 @@ function DashboardView({
   dashboard: ReturnType<typeof buildDashboardModel>;
   go: (view: SalesOpsView) => void;
 }) {
-  const closedSalesLabel =
-    dashboard.kpis.closedSalesCount === 1 ? '1 venda registrada' : `${dashboard.kpis.closedSalesCount} vendas registradas`;
+  const wonSalesLabel =
+    dashboard.kpis.wonSalesCount === 1 ? '1 proposta ganha' : `${dashboard.kpis.wonSalesCount} propostas ganhas`;
   return (
     <div className="flex flex-col gap-[14px]">
       <div className="grid gap-[14px] xl:grid-cols-4 md:grid-cols-2">
         <MetricCard
           accent="green"
-          label="Receita fechada no mês"
-          sub={closedSalesLabel}
-          value={formatMoneyBrl(dashboard.kpis.closedRevenueBrl, { maximumFractionDigits: 0 })}
+          label="Receita ganha no mês"
+          sub={wonSalesLabel}
+          value={formatMoneyBrl(dashboard.kpis.wonRevenueBrl, { maximumFractionDigits: 0 })}
         />
         <MetricCard
           accent="green"
@@ -1106,9 +1185,9 @@ function DashboardView({
         />
         <MetricCard
           accent="blue"
-          label="Vendas fechadas"
-          sub="Status fechado ou concluído"
-          value={String(dashboard.kpis.closedSalesCount)}
+          label="Propostas ganhas"
+          sub="Propostas com status ganha"
+          value={String(dashboard.kpis.wonSalesCount)}
         />
       </div>
 
@@ -1151,7 +1230,7 @@ function DashboardView({
 
       <div className={`${panelClass} p-5`}>
         <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-[15px] font-bold">Últimas vendas</h3>
+          <h3 className="text-[15px] font-bold">Últimas propostas</h3>
           <button
             className="text-[13px] font-semibold text-[#9c7210]"
             onClick={() => go('vendas')}
@@ -1164,7 +1243,7 @@ function DashboardView({
           <SalesMiniTable bootstrap={bootstrap} sales={dashboard.latestSales} />
         ) : (
           <EmptyPanel
-            text="Use o botão Nova proposta para registrar a primeira proposta."
+            text="Use o botão Nova proposta para registrar o primeiro negócio real."
             title="Nenhuma venda registrada"
           />
         )}
@@ -1227,7 +1306,7 @@ function RankingPanel({
         </div>
       ) : (
         <EmptyPanel
-          text="O ranking será calculado a partir das vendas fechadas."
+          text="O ranking será calculado a partir das propostas ganhas."
           title="Sem ranking no período"
         />
       )}
@@ -1266,12 +1345,97 @@ function SalesMiniTable({ bootstrap, sales }: { bootstrap: SalesOpsBootstrap; sa
   );
 }
 
-function SalesView({ bootstrap }: { bootstrap: SalesOpsBootstrap }) {
+function saleAreaNames(bootstrap: SalesOpsBootstrap, saleId: string): string {
+  const names = [
+    ...new Set(
+      bootstrap.saleItems
+        .filter((item) => item.saleId === saleId)
+        .map((item) => item.areaNameSnapshot)
+        .filter(Boolean),
+    ),
+  ];
+  return names.length > 0 ? names.join(', ') : '-';
+}
+
+type PendingSaleAction =
+  | { kind: 'lost'; sale: SalesOpsSale }
+  | { kind: 'cancelled'; sale: SalesOpsSale }
+  | { kind: 'reopen-won'; sale: SalesOpsSale }
+  | { kind: 'cancel-contract'; sale: SalesOpsSale };
+
+const confirmCopy: Record<
+  PendingSaleAction['kind'],
+  { title: string; description: (code: string) => string; action: string }
+> = {
+  lost: {
+    title: 'Marcar proposta como perdida?',
+    description: (code) => `A proposta ${code} será marcada como perdida.`,
+    action: 'Marcar como perdida',
+  },
+  cancelled: {
+    title: 'Cancelar proposta?',
+    description: (code) => `A proposta ${code} será cancelada e as contas a pagar em aberto serão anuladas.`,
+    action: 'Cancelar proposta',
+  },
+  'reopen-won': {
+    title: 'Reabrir proposta ganha?',
+    description: (code) =>
+      `As contas a pagar em aberto geradas pela proposta ${code} serão anuladas. Pagamentos já baixados não são afetados.`,
+    action: 'Reabrir',
+  },
+  'cancel-contract': {
+    title: 'Cancelar contrato?',
+    description: (code) =>
+      `As parcelas futuras em aberto da proposta ${code} e as comissões vinculadas serão anuladas. Parcelas pagas não são afetadas.`,
+    action: 'Cancelar contrato',
+  },
+};
+
+export function SalesView({
+  bootstrap,
+  sales,
+  canManage,
+  onEdit,
+  onTransition,
+  onCancelContract,
+}: {
+  bootstrap: SalesOpsBootstrap;
+  sales: SalesOpsSale[];
+  canManage: boolean;
+  onEdit: (sale: SalesOpsSale) => void;
+  onTransition: (sale: SalesOpsSale, status: TransitionSaleStatus) => void;
+  onCancelContract: (sale: SalesOpsSale) => void;
+}) {
+  const [pendingAction, setPendingAction] = useState<PendingSaleAction | null>(null);
+  const [detailSaleId, setDetailSaleId] = useState<string | null>(null);
+  const detailSale =
+    sales.find((sale) => sale.id === detailSaleId) ??
+    bootstrap.sales.find((sale) => sale.id === detailSaleId) ??
+    null;
+
+  function confirmPendingAction() {
+    if (!pendingAction) return;
+    const { kind, sale } = pendingAction;
+    if (kind === 'cancel-contract') onCancelContract(sale);
+    else if (kind === 'reopen-won') onTransition(sale, 'open');
+    else onTransition(sale, kind);
+    setPendingAction(null);
+  }
+
   if (bootstrap.sales.length === 0) {
     return (
       <EmptyPanel
-        text="As vendas são carregadas da API de operações comerciais. Nenhuma linha de demonstração é renderizada."
-        title="Nenhuma venda persistida"
+        text="As propostas são carregadas da API de operações comerciais. Use Nova proposta para registrar a primeira."
+        title="Nenhuma proposta registrada"
+      />
+    );
+  }
+
+  if (sales.length === 0) {
+    return (
+      <EmptyPanel
+        text="Ajuste os filtros de status e área para ver outras propostas."
+        title="Nenhuma proposta encontrada"
       />
     );
   }
@@ -1283,20 +1447,23 @@ function SalesView({ bootstrap }: { bootstrap: SalesOpsBootstrap }) {
           <TableRow className="bg-[#fafafb] hover:bg-[#fafafb]">
             <TableHead className={tableHeadClass}>Código</TableHead>
             <TableHead className={tableHeadClass}>Cliente</TableHead>
-            <TableHead className={tableHeadClass}>Produto</TableHead>
             <TableHead className={tableHeadClass}>Vendedor</TableHead>
-            <TableHead className={tableHeadClass}>Finder</TableHead>
-            <TableHead className={`${tableHeadClass} text-right`}>Valor</TableHead>
-            <TableHead className={tableHeadClass}>Condição</TableHead>
+            <TableHead className={tableHeadClass}>Áreas</TableHead>
+            <TableHead className={`${tableHeadClass} text-right`}>Total</TableHead>
             <TableHead className={tableHeadClass}>Status</TableHead>
             <TableHead className={`${tableHeadClass} text-right`}>Data</TableHead>
+            {canManage ? <TableHead className={tableHeadClass}>Ações</TableHead> : null}
           </TableRow>
         </TableHeader>
         <TableBody>
-          {bootstrap.sales.map((sale) => {
+          {sales.map((sale) => {
             const meta = statusMeta(sale.status);
             return (
-              <TableRow key={sale.id}>
+              <TableRow
+                className="cursor-pointer"
+                key={sale.id}
+                onClick={() => setDetailSaleId(sale.id)}
+              >
                 <TableCell className="px-4 py-3">
                   <span className="sales-ops-num rounded-md bg-[#eef3f9] px-2 py-1 text-xs font-bold tracking-[0.04em] text-[#3f6ea3]">
                     {sale.code}
@@ -1305,32 +1472,343 @@ function SalesView({ bootstrap }: { bootstrap: SalesOpsBootstrap }) {
                 <TableCell className="px-4 py-3 text-sm font-semibold text-[#201f24]">
                   {sale.clientNameSnapshot}
                 </TableCell>
-                <TableCell className={tableCellClass}>
-                  <div className="flex flex-col">
-                    <span className="font-semibold text-[#201f24]">
-                      {salePrimaryProductName(bootstrap, sale.id)}
-                    </span>
-                    <span className="text-[11.5px] text-[#9b9ba3]">{sale.paymentMethod}</span>
-                  </div>
-                </TableCell>
                 <TableCell className={tableCellClass}>{sale.sellerNameSnapshot}</TableCell>
-                <TableCell className={tableCellClass}>{sale.finderNameSnapshot ?? 'Sem finder'}</TableCell>
+                <TableCell className={tableCellClass}>{saleAreaNames(bootstrap, sale.id)}</TableCell>
                 <TableCell className="sales-ops-num px-4 py-3 text-right text-sm font-bold">
                   {formatMoneyBrl(sale.totalBrl, { maximumFractionDigits: 0 })}
                 </TableCell>
-                <TableCell className={tableCellClass}>{conditionLabel(sale.condition, sale.installments)}</TableCell>
                 <TableCell className="px-4 py-3">
                   <Badge className={meta.className}>{meta.label}</Badge>
                 </TableCell>
                 <TableCell className="sales-ops-num px-4 py-3 text-right text-[13px] text-[#8b8b92]">
                   {displayDate(sale.baseDate)}
                 </TableCell>
+                {canManage ? (
+                  <TableCell className="px-4 py-3">
+                    <div onClick={(event) => event.stopPropagation()}>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            aria-label={`Ações da proposta ${sale.code}`}
+                            className={iconButtonClass}
+                            type="button"
+                          >
+                            <MoreHorizontal className="h-[15px] w-[15px]" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent
+                          align="end"
+                          className="w-[220px] rounded-xl border-[#e5e5ea] bg-white p-1.5"
+                        >
+                          {sale.status === 'draft' || sale.status === 'open' ? (
+                            <>
+                              <DropdownMenuItem onSelect={() => onEdit(sale)}>Editar</DropdownMenuItem>
+                              <DropdownMenuItem onSelect={() => onTransition(sale, 'won')}>
+                                Marcar como ganha
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onSelect={() => setPendingAction({ kind: 'lost', sale })}>
+                                Marcar como perdida
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onSelect={() => setPendingAction({ kind: 'cancelled', sale })}
+                              >
+                                Cancelar
+                              </DropdownMenuItem>
+                            </>
+                          ) : null}
+                          {sale.status === 'won' ? (
+                            <>
+                              <DropdownMenuItem
+                                onSelect={() => setPendingAction({ kind: 'reopen-won', sale })}
+                              >
+                                Reabrir
+                              </DropdownMenuItem>
+                              {sale.recurringBrl > 0 ? (
+                                <DropdownMenuItem
+                                  onSelect={() => setPendingAction({ kind: 'cancel-contract', sale })}
+                                >
+                                  Cancelar contrato
+                                </DropdownMenuItem>
+                              ) : null}
+                            </>
+                          ) : null}
+                          {sale.status === 'lost' || sale.status === 'cancelled' ? (
+                            <DropdownMenuItem onSelect={() => onTransition(sale, 'open')}>
+                              Reabrir
+                            </DropdownMenuItem>
+                          ) : null}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  </TableCell>
+                ) : null}
               </TableRow>
             );
           })}
         </TableBody>
       </Table>
+
+      <AlertDialog
+        onOpenChange={(open) => (!open ? setPendingAction(null) : undefined)}
+        open={pendingAction !== null}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{pendingAction ? confirmCopy[pendingAction.kind].title : ''}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingAction ? confirmCopy[pendingAction.kind].description(pendingAction.sale.code) : ''}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Voltar</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmPendingAction}>
+              {pendingAction ? confirmCopy[pendingAction.kind].action : ''}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <SaleDetailDialog
+        bootstrap={bootstrap}
+        onClose={() => setDetailSaleId(null)}
+        sale={detailSale}
+      />
     </div>
+  );
+}
+
+function SaleDetailDialog({
+  bootstrap,
+  sale,
+  onClose,
+}: {
+  bootstrap: SalesOpsBootstrap;
+  sale: SalesOpsSale | null;
+  onClose: () => void;
+}) {
+  if (!sale) return null;
+
+  const meta = statusMeta(sale.status);
+  const items = bootstrap.saleItems.filter((item) => item.saleId === sale.id);
+  const receivables = [...bootstrap.receivables]
+    .filter((row) => row.saleId === sale.id)
+    .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+  const payables = bootstrap.payables.filter((payable) => payable.saleId === sale.id);
+  const methodLabels: Record<PaymentMethod, string> = {
+    pix: 'PIX',
+    card: 'Cartão',
+    boleto: 'Boleto',
+    transfer: 'Transferência',
+  };
+  const receivableStatusMeta: Record<'open' | 'paid' | 'void', { label: string; className: string }> = {
+    open: { label: 'Aberta', className: 'bg-[#fdf0cf] text-[#7a5a12]' },
+    paid: { label: 'Paga', className: 'bg-[#c9e7cf] text-[#1f7d43]' },
+    void: { label: 'Anulada', className: 'bg-[#eeeef1] text-[#6a6a72]' },
+  };
+  const payableStatusMeta: Record<'open' | 'paid' | 'void', { label: string; className: string }> = {
+    open: { label: 'Aberto', className: 'bg-[#fdf0cf] text-[#7a5a12]' },
+    paid: { label: 'Pago', className: 'bg-[#c9e7cf] text-[#1f7d43]' },
+    void: { label: 'Anulado', className: 'bg-[#eeeef1] text-[#6a6a72]' },
+  };
+  const showFinderCommission = sale.finderCommissionBrl !== 0 || Boolean(sale.finderNameSnapshot);
+
+  return (
+    <Dialog onOpenChange={(open) => (!open ? onClose() : undefined)} open>
+      <DialogContent className="max-h-[92vh] w-[calc(100vw-48px)] max-w-[760px] gap-0 overflow-y-auto rounded-[20px] border-none bg-white p-0">
+        <DialogHeader className="border-b border-[#e8e8ec] px-6 py-5 text-left">
+          <DialogTitle className="sales-ops-num flex items-center gap-3 text-[19px] font-bold text-[#201f24]">
+            Proposta {sale.code}
+            <Badge className={meta.className}>{meta.label}</Badge>
+          </DialogTitle>
+          <DialogDescription className="text-[13px] text-[#8b8b92]">
+            {sale.clientNameSnapshot} · Vendedor {sale.sellerNameSnapshot}
+            {sale.finderNameSnapshot ? ` · Finder ${sale.finderNameSnapshot}` : ''} ·{' '}
+            {displayDate(sale.baseDate)}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex flex-col gap-5 px-6 py-5">
+          <div className="overflow-hidden rounded-[14px] border border-[#e8e8ec]">
+            <div className="border-b border-[#eeeef1] bg-[#fafafb] px-4 py-[10px] text-[13px] font-bold">
+              Itens
+            </div>
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-[#fafafb] hover:bg-[#fafafb]">
+                  <TableHead className={tableHeadClass}>Item</TableHead>
+                  <TableHead className={tableHeadClass}>Área</TableHead>
+                  <TableHead className={`${tableHeadClass} text-right`}>Qtd</TableHead>
+                  <TableHead className={`${tableHeadClass} text-right`}>Unitário</TableHead>
+                  <TableHead className={`${tableHeadClass} text-right`}>Subtotal</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {items.map((item, index) => (
+                  <TableRow key={item.id ?? `${item.saleId}-${index}`}>
+                    <TableCell className="px-4 py-3 text-[13.5px] font-semibold">
+                      {item.productNameSnapshot}
+                    </TableCell>
+                    <TableCell className={tableCellClass}>{item.areaNameSnapshot || '-'}</TableCell>
+                    <TableCell className="sales-ops-num px-4 py-3 text-right text-[13.5px]">
+                      {item.quantity}
+                    </TableCell>
+                    <TableCell className="sales-ops-num px-4 py-3 text-right text-[13.5px]">
+                      {formatMoneyBrl(item.unitBrl, { maximumFractionDigits: 0 })}
+                    </TableCell>
+                    <TableCell className="sales-ops-num px-4 py-3 text-right text-[13.5px] font-bold">
+                      {formatMoneyBrl(item.subtotalBrl, { maximumFractionDigits: 0 })}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+
+          <div className="overflow-hidden rounded-[14px] border border-[#e8e8ec]">
+            <div className="border-b border-[#eeeef1] bg-[#fafafb] px-4 py-[10px] text-[13px] font-bold">
+              Plano de pagamento
+            </div>
+            {receivables.length > 0 ? (
+              <>
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-[#fafafb] hover:bg-[#fafafb]">
+                      <TableHead className={tableHeadClass}>Vencimento</TableHead>
+                      <TableHead className={tableHeadClass}>Método</TableHead>
+                      <TableHead className={`${tableHeadClass} text-right`}>Valor</TableHead>
+                      <TableHead className={tableHeadClass}>Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {receivables.map((row) => {
+                      const rowMeta = receivableStatusMeta[row.status];
+                      return (
+                        <TableRow key={row.id}>
+                          <TableCell className={tableCellClass}>{displayDate(row.dueDate)}</TableCell>
+                          <TableCell className={tableCellClass}>{methodLabels[row.method]}</TableCell>
+                          <TableCell className="sales-ops-num px-4 py-3 text-right text-[13.5px] font-bold">
+                            {formatMoneyBrl(row.amountBrl, { maximumFractionDigits: 0 })}
+                          </TableCell>
+                          <TableCell className="px-4 py-3">
+                            <Badge className={rowMeta.className}>{rowMeta.label}</Badge>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+                {sale.recurringBrl > 0 ? (
+                  <div className="border-t border-[#eeeef1] px-4 py-[10px] text-[12.5px] text-[#8b8b92]">
+                    Recorrência de {formatMoneyBrl(sale.recurringBrl)} por mês
+                  </div>
+                ) : null}
+              </>
+            ) : (
+              <div className="p-4">
+                <EmptyPanel
+                  text="Esta proposta não possui parcelas registradas."
+                  title="Sem plano de parcelas"
+                />
+              </div>
+            )}
+          </div>
+
+          {payables.length > 0 ? (
+            <div className="overflow-hidden rounded-[14px] border border-[#e8e8ec]">
+              <div className="border-b border-[#eeeef1] bg-[#fafafb] px-4 py-[10px] text-[13px] font-bold">
+                Contas a pagar
+              </div>
+              <Table>
+                <TableHeader>
+                  <TableRow className="bg-[#fafafb] hover:bg-[#fafafb]">
+                    <TableHead className={tableHeadClass}>Beneficiário</TableHead>
+                    <TableHead className={tableHeadClass}>Tipo</TableHead>
+                    <TableHead className={tableHeadClass}>Vencimento</TableHead>
+                    <TableHead className={`${tableHeadClass} text-right`}>Valor</TableHead>
+                    <TableHead className={tableHeadClass}>Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {payables.map((payable, index) => {
+                    const kindMeta = payableTypeMeta(payable.kind);
+                    const rowMeta = payableStatusMeta[payable.status] ?? payableStatusMeta.open;
+                    return (
+                      <TableRow key={payable.id ?? `${payable.saleId}-${index}`}>
+                        <TableCell className="px-4 py-3 text-[13.5px] font-semibold">
+                          {payable.beneficiaryName}
+                        </TableCell>
+                        <TableCell className="px-4 py-3">
+                          <Badge className={kindMeta.className}>{kindMeta.label}</Badge>
+                        </TableCell>
+                        <TableCell className={tableCellClass}>{displayDate(payable.dueDate)}</TableCell>
+                        <TableCell className="sales-ops-num px-4 py-3 text-right text-[13.5px] font-bold">
+                          {formatMoneyBrl(payable.amountBrl, { maximumFractionDigits: 0 })}
+                        </TableCell>
+                        <TableCell className="px-4 py-3">
+                          <Badge className={rowMeta.className}>{rowMeta.label}</Badge>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          ) : null}
+
+          <div className="rounded-[14px] border border-[#e8e8ec] p-4">
+            <div className="mb-2 text-[13px] font-bold">Margem</div>
+            <div className="flex flex-col gap-[7px] text-[13px] text-[#57575f]">
+              <div className="flex justify-between gap-4">
+                <span>Total</span>
+                <span className="sales-ops-num font-semibold text-[#201f24]">
+                  {formatMoneyBrl(sale.totalBrl, { maximumFractionDigits: 0 })}
+                </span>
+              </div>
+              <div className="flex justify-between gap-4">
+                <span>Comissão vendedor</span>
+                <span className="sales-ops-num font-semibold text-[#201f24]">
+                  {formatMoneyBrl(sale.sellerCommissionBrl, { maximumFractionDigits: 0 })}
+                </span>
+              </div>
+              {showFinderCommission ? (
+                <div className="flex justify-between gap-4">
+                  <span>Comissão finder</span>
+                  <span className="sales-ops-num font-semibold text-[#201f24]">
+                    {formatMoneyBrl(sale.finderCommissionBrl, { maximumFractionDigits: 0 })}
+                  </span>
+                </div>
+              ) : null}
+              <div className="flex justify-between gap-4">
+                <span>Imposto</span>
+                <span className="sales-ops-num font-semibold text-[#201f24]">
+                  {formatMoneyBrl(sale.taxBrl, { maximumFractionDigits: 0 })}
+                </span>
+              </div>
+              <div className="flex justify-between gap-4">
+                <span>Custos profissionais</span>
+                <span className="sales-ops-num font-semibold text-[#201f24]">
+                  {formatMoneyBrl(sale.professionalCostsBrl, { maximumFractionDigits: 0 })}
+                </span>
+              </div>
+              <div className="flex justify-between gap-4">
+                <span>Outros custos</span>
+                <span className="sales-ops-num font-semibold text-[#201f24]">
+                  {formatMoneyBrl(sale.otherCostsBrl, { maximumFractionDigits: 0 })}
+                </span>
+              </div>
+              <div className="mt-1 flex justify-between gap-4 border-t border-[#eeeef1] pt-2 text-[14px] font-bold text-[#201f24]">
+                <span>Margem líquida</span>
+                <span className="sales-ops-num">
+                  {formatMoneyBrl(sale.netMarginBrl, { maximumFractionDigits: 0 })} ({sale.netMarginPct}%)
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {sale.notes ? <p className="text-[13px] text-[#8b8b92]">{sale.notes}</p> : null}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -1366,7 +1844,7 @@ function PeopleView({
               <div className="min-w-0">
                 <div className="truncate text-base font-bold">{person.displayName}</div>
                 <div className="text-[12.5px] text-[#8b8b92]">
-                  {metrics.sales.length} vendas no período
+                  {metrics.sales.length} propostas ganhas no período
                 </div>
               </div>
             </div>
@@ -1469,10 +1947,16 @@ function CommissionsView({ bootstrap }: { bootstrap: SalesOpsBootstrap }) {
                         className={
                           payable.status === 'paid'
                             ? 'bg-[#c9e7cf] text-[#1f7d43]'
-                            : 'bg-[#fdf0cf] text-[#7a5a12]'
+                            : payable.status === 'void'
+                              ? 'bg-[#eeeef1] text-[#6a6a72]'
+                              : 'bg-[#fdf0cf] text-[#7a5a12]'
                         }
                       >
-                        {payable.status === 'paid' ? 'Pago' : 'Aberto'}
+                        {payable.status === 'paid'
+                          ? 'Pago'
+                          : payable.status === 'void'
+                            ? 'Anulado'
+                            : 'Aberto'}
                       </Badge>
                     </TableCell>
                   </TableRow>

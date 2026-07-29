@@ -51,7 +51,7 @@ const tacticalTeam: SalesOpsNavigationItem[] = [
 ];
 
 const operational: SalesOpsNavigationItem[] = [
-  { id: 'vendas', label: 'Vendas', icon: BriefcaseBusiness },
+  { id: 'vendas', label: 'Propostas', icon: BriefcaseBusiness },
   { id: 'comissoes', label: 'Comissões', icon: BadgeDollarSign },
 ];
 
@@ -80,7 +80,7 @@ export const salesOpsWorkspaces: Array<{
   description: string;
 }> = [
   { id: 'tatico', label: 'Tático', description: 'Indicadores e painéis' },
-  { id: 'operacional', label: 'Operacional', description: 'Vendas e conferência' },
+  { id: 'operacional', label: 'Operacional', description: 'Propostas e conferência' },
   { id: 'cadastros', label: 'Cadastros', description: 'Pessoas, catálogo e regras' },
   { id: 'meus-dados', label: 'Meus dados', description: 'Painel e comissões pessoais' },
 ];

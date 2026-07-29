@@ -52,6 +52,8 @@ const editSale: SalesOpsSale = {
   installments: 2,
   baseDate: '2026-07-10',
   notes: 'nota interna',
+  wonAt: null,
+  lostAt: null,
   totalBrl: 300000,
   recurringBrl: 100000,
   sellerCommissionPct: '8',

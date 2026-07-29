@@ -7,6 +7,7 @@ import {
   type SavePersonPayload,
   type SaveProductPayload,
   type SaveSettingsPayload,
+  type TransitionSalePayload,
 } from './api';
 import type { CreateSalePayload, SalesOpsBootstrap } from './types';
 
@@ -110,6 +111,30 @@ export function useUpdateSalesOpsSale() {
   return useMutation({
     mutationFn: async ({ saleId, payload }: { saleId: string; payload: CreateSalePayload }) =>
       salesOpsApi.updateSale(saleId, payload, await requireToken(getToken)),
+    onSuccess: () => {
+      void invalidate();
+    },
+  });
+}
+
+export function useTransitionSalesOpsSale() {
+  const { getToken } = useAccessToken();
+  const invalidate = useInvalidateSalesOps();
+  return useMutation({
+    mutationFn: async (payload: TransitionSalePayload) =>
+      salesOpsApi.transitionSale(payload, await requireToken(getToken)),
+    onSuccess: () => {
+      void invalidate();
+    },
+  });
+}
+
+export function useCancelSalesOpsContract() {
+  const { getToken } = useAccessToken();
+  const invalidate = useInvalidateSalesOps();
+  return useMutation({
+    mutationFn: async (saleId: string) =>
+      salesOpsApi.cancelContract(saleId, await requireToken(getToken)),
     onSuccess: () => {
       void invalidate();
     },

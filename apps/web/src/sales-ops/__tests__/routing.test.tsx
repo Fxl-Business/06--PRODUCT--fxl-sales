@@ -73,6 +73,8 @@ vi.mock('../hooks', () => ({
   }),
   useCreateSalesOpsSale: () => mutation,
   useUpdateSalesOpsSale: () => mutation,
+  useTransitionSalesOpsSale: () => mutation,
+  useCancelSalesOpsContract: () => mutation,
   useSaveSalesOpsArea: () => mutation,
   useSaveSalesOpsClient: () => mutation,
   useSaveSalesOpsPerson: () => mutation,
@@ -241,7 +243,8 @@ describe('Sales Ops canonical routing', () => {
     await renderRoute('/operacional/vendas', ['admin']);
     expect(pathname()).toBe('/operacional/vendas');
     expectWorkspace('Operacional');
-    expectHeading('Vendas');
+    expectHeading('Propostas');
+    expect(buttonByAccessibleName('Propostas')).not.toBeNull();
 
     await click(buttonByText('Comissões'));
     expect(pathname()).toBe('/operacional/comissoes');
@@ -262,7 +265,7 @@ describe('Sales Ops canonical routing', () => {
     await click(workspaceButton());
     await click(buttonByText('Operacional'));
     expect(pathname()).toBe('/operacional/vendas');
-    expectHeading('Vendas');
+    expectHeading('Propostas');
     expectWorkspace('Operacional');
 
     await click(buttonByText('Comissões'));
@@ -271,7 +274,7 @@ describe('Sales Ops canonical routing', () => {
 
     await click(buttonByText('Back'));
     expect(pathname()).toBe('/operacional/vendas');
-    expectHeading('Vendas');
+    expectHeading('Propostas');
     expectWorkspace('Operacional');
 
     await click(buttonByText('Back'));
@@ -281,7 +284,7 @@ describe('Sales Ops canonical routing', () => {
 
     await click(buttonByText('Forward'));
     expect(pathname()).toBe('/operacional/vendas');
-    expectHeading('Vendas');
+    expectHeading('Propostas');
     expectWorkspace('Operacional');
   });
 
@@ -365,7 +368,7 @@ describe('Sales Ops canonical routing', () => {
     await click(buttonByText('Ver todas'));
     expect(pathname()).toBe('/operacional/vendas');
     expectWorkspace('Operacional');
-    expectHeading('Vendas');
+    expectHeading('Propostas');
   });
 
   it('keeps people management in Cadastros and personal people panels read-only', async () => {
@@ -408,7 +411,7 @@ describe('Sales Ops canonical routing', () => {
       await renderRoute(personal.path, personal.roles);
       expectWorkspace('Meus dados');
       expectHeading('Meu painel');
-      expect(mainRegion().textContent).toContain('0 vendas no período');
+      expect(mainRegion().textContent).toContain('0 propostas ganhas no período');
       const personalCard = mainRegion().querySelector('article');
       expect(personalCard?.textContent).toContain('Alex Silva');
       await click(personalCard!);

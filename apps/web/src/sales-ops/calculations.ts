@@ -10,7 +10,7 @@ import type {
   SalesOpsSettings,
 } from './types';
 
-const closedStatuses = new Set(['closed', 'completed']);
+const wonStatuses = new Set<string>(['won']);
 
 function toNumber(value: string | number | undefined, fallback = 0): number {
   if (typeof value === 'number') return Number.isFinite(value) ? value : fallback;
@@ -200,7 +200,7 @@ function saleTime(sale: SalesOpsSale): number {
 
 export function buildDashboardModel(bootstrap: SalesOpsBootstrap): DashboardModel {
   const activeSales = bootstrap.sales.filter((sale) => sale.status !== 'cancelled');
-  const closedSales = activeSales.filter((sale) => closedStatuses.has(sale.status));
+  const wonSales = activeSales.filter((sale) => wonStatuses.has(sale.status));
   const payableBrl = bootstrap.payables
     .filter((payable) => payable.status === 'open')
     .reduce((sum, payable) => sum + payable.amountBrl, 0);
@@ -215,7 +215,7 @@ export function buildDashboardModel(bootstrap: SalesOpsBootstrap): DashboardMode
     );
   }
 
-  for (const sale of closedSales) {
+  for (const sale of wonSales) {
     const seller = sellerMap.get(sale.sellerNameSnapshot) ?? {
       totalBrl: 0,
       commissionBrl: 0,
@@ -243,10 +243,10 @@ export function buildDashboardModel(bootstrap: SalesOpsBootstrap): DashboardMode
 
   return {
     kpis: {
-      closedRevenueBrl: closedSales.reduce((sum, sale) => sum + sale.totalBrl, 0),
+      wonRevenueBrl: wonSales.reduce((sum, sale) => sum + sale.totalBrl, 0),
       activeMrrBrl: activeSales.reduce((sum, sale) => sum + sale.recurringBrl, 0),
       payableBrl,
-      closedSalesCount: closedSales.length,
+      wonSalesCount: wonSales.length,
     },
     revenueByProduct: [...revenueMap.entries()]
       .map(([name, amountBrl]) => ({
