@@ -1,6 +1,7 @@
 import { useAccessToken } from '@/auth/react';
 import { useQuery } from '@tanstack/react-query';
 import { finderClicksApi } from '@/lib/api-client';
+import { queryKeys } from '@/lib/query-keys';
 import type { ClickRow, ClickStats } from '@/finder/types';
 
 /**
@@ -12,7 +13,7 @@ import type { ClickRow, ClickStats } from '@/finder/types';
 export function useFinderClicks(linkId?: string) {
   const { getToken } = useAccessToken();
   return useQuery({
-    queryKey: ['finder', 'clicks', linkId ?? null],
+    queryKey: queryKeys.finderClicks.list(linkId),
     queryFn: async () =>
       finderClicksApi.list(linkId ? { linkId } : undefined, (await getToken()) ?? ''),
     select: (d): ClickRow[] => (Array.isArray(d.clicks) ? d.clicks : []),
@@ -22,7 +23,7 @@ export function useFinderClicks(linkId?: string) {
 export function useFinderClickStats() {
   const { getToken } = useAccessToken();
   return useQuery({
-    queryKey: ['finder', 'clicks', 'stats'],
+    queryKey: queryKeys.finderClicks.stats(),
     queryFn: async (): Promise<ClickStats> => finderClicksApi.getStats((await getToken()) ?? ''),
   });
 }

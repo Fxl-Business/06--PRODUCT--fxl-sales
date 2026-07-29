@@ -1,6 +1,8 @@
 import { useAccessToken } from '@/auth/react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { finderCatalogApi, finderClicksApi, finderLinksApi } from '@/lib/api-client';
+import { useAppMutation } from '@/lib/app-mutation';
+import { queryKeys } from '@/lib/query-keys';
 import type {
   ClickStats,
   CreateLinkBody,
@@ -19,7 +21,7 @@ import type {
 export function useFinderLinks() {
   const { getToken } = useAccessToken();
   return useQuery({
-    queryKey: ['finder', 'links'],
+    queryKey: queryKeys.finderLinks.list(),
     queryFn: async () => finderLinksApi.list((await getToken()) ?? ''),
     select: (d): ReferralLink[] => (Array.isArray(d.links) ? d.links : []),
   });
@@ -28,7 +30,7 @@ export function useFinderLinks() {
 export function useFinderApps() {
   const { getToken } = useAccessToken();
   return useQuery({
-    queryKey: ['finder', 'apps'],
+    queryKey: queryKeys.finderCatalog.apps(),
     queryFn: async () => finderCatalogApi.listApps((await getToken()) ?? ''),
     select: (d): FinderApp[] => (Array.isArray(d.apps) ? d.apps : []),
   });
@@ -37,7 +39,7 @@ export function useFinderApps() {
 export function useFinderProducts(appId?: string) {
   const { getToken } = useAccessToken();
   return useQuery({
-    queryKey: ['finder', 'apps', appId, 'products'],
+    queryKey: queryKeys.finderCatalog.products(appId),
     queryFn: async () => finderCatalogApi.listProducts(appId!, (await getToken()) ?? ''),
     enabled: !!appId,
     select: (d): FinderProduct[] => (Array.isArray(d.products) ? d.products : []),
@@ -46,31 +48,26 @@ export function useFinderProducts(appId?: string) {
 
 export function useCreateLink() {
   const { getToken } = useAccessToken();
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (data: CreateLinkBody) => finderLinksApi.create(data, (await getToken()) ?? ''),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['finder', 'links'] });
-    },
+  return useAppMutation({
+    mutationFn: async (data: CreateLinkBody) =>
+      finderLinksApi.create(data, (await getToken()) ?? ''),
+    invalidates: [queryKeys.finderLinks.all],
   });
 }
 
 export function useRevokeLink() {
   const { getToken } = useAccessToken();
-  const queryClient = useQueryClient();
-  return useMutation({
+  return useAppMutation({
     mutationFn: async ({ linkId, reason }: { linkId: string; reason?: string }) =>
       finderLinksApi.revoke(linkId, reason, (await getToken()) ?? ''),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['finder', 'links'] });
-    },
+    invalidates: [queryKeys.finderLinks.all],
   });
 }
 
 export function useFinderClickStats() {
   const { getToken } = useAccessToken();
   return useQuery({
-    queryKey: ['finder', 'clicks', 'stats'],
+    queryKey: queryKeys.finderClicks.stats(),
     queryFn: async (): Promise<ClickStats> => finderClicksApi.getStats((await getToken()) ?? ''),
   });
 }

@@ -23,4 +23,18 @@ export default tseslint.config(
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
     },
   },
+  {
+    files: ['**/*.{ts,tsx}'],
+    ignores: ['src/lib/app-mutation.ts'],
+    rules: {
+      'no-restricted-imports': ['error', {
+        paths: [{
+          name: '@tanstack/react-query',
+          importNames: ['useMutation'],
+          message:
+            'Use useAppMutation from @/lib/app-mutation. It requires an `invalidates` query-key list so a new mutation cannot ship without refreshing the cache it owns.',
+        }],
+      }],
+    },
+  },
 );

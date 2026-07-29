@@ -928,6 +928,15 @@ export function SalesOpsApp() {
             <div className="mt-0.5 text-[12.5px] text-[#8b8b92]">{title.subtitle}</div>
           </div>
           <div className="ml-auto flex items-center gap-2">
+            {bootstrapQuery.isFetching && !bootstrapQuery.isLoading ? (
+              <span
+                aria-live="polite"
+                className="flex items-center gap-1.5 text-[12.5px] font-semibold text-[#8b8b92]"
+              >
+                <Loader2 className="h-[13px] w-[13px] animate-spin" />
+                Atualizando
+              </span>
+            ) : null}
             {headerAction ? (
               <AccentButton onClick={runHeaderAction}>
                 <Plus className="h-[15px] w-[15px]" />
@@ -1130,23 +1139,25 @@ export function SalesOpsApp() {
         }}
         saving={savePerson.isPending}
       />
-      <SaleWizardDialog
-        bootstrap={bootstrap}
-        editSale={saleWizard?.mode === 'edit' ? saleWizard.sale : null}
-        onClose={() => setSaleWizard(null)}
-        onSave={(payload) => {
-          if (saleWizard?.mode === 'edit') {
-            updateSale.mutate(
-              { saleId: saleWizard.sale.id, payload },
-              { onSuccess: () => setSaleWizard(null) },
-            );
-          } else {
-            createSale.mutate(payload, { onSuccess: () => setSaleWizard(null) });
-          }
-        }}
-        open={saleWizard !== null}
-        saving={createSale.isPending || updateSale.isPending}
-      />
+      {bootstrapQuery.isSuccess ? (
+        <SaleWizardDialog
+          bootstrap={bootstrap}
+          editSale={saleWizard?.mode === 'edit' ? saleWizard.sale : null}
+          onClose={() => setSaleWizard(null)}
+          onSave={(payload) => {
+            if (saleWizard?.mode === 'edit') {
+              updateSale.mutate(
+                { saleId: saleWizard.sale.id, payload },
+                { onSuccess: () => setSaleWizard(null) },
+              );
+            } else {
+              createSale.mutate(payload, { onSuccess: () => setSaleWizard(null) });
+            }
+          }}
+          open={saleWizard !== null}
+          saving={createSale.isPending || updateSale.isPending}
+        />
+      ) : null}
     </div>
   );
 }
@@ -3641,7 +3652,11 @@ export function SaleWizardDialog(props: {
   if (props.editSale && props.editSale.status !== 'draft' && props.editSale.status !== 'open') return null;
   return (
     <SaleWizardDialogBody
-      key={`${props.editSale?.id ?? 'create'}-${props.bootstrap.clients[0]?.id ?? 'no-client'}-${props.bootstrap.products[0]?.id ?? 'no-product'}-${props.bootstrap.people.length}`}
+      // Wizard session identity only. Folding bootstrap rows into this key made any
+      // snapshot refetch that changed the first cliente, the first produto or the
+      // people count destroy in-progress typing. The body already unmounts when the
+      // dialog closes, so re-opening still re-seeds the defaults from fresh data.
+      key={props.editSale?.id ?? 'create'}
       bootstrap={props.bootstrap}
       editSale={props.editSale}
       onClose={props.onClose}

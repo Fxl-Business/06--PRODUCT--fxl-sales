@@ -1,6 +1,8 @@
 import { useAccessToken } from '@/auth/react';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { adminAuditApi } from '@/lib/api-client';
+import { NO_CACHE_EFFECT, useAppMutation } from '@/lib/app-mutation';
+import { queryKeys } from '@/lib/query-keys';
 
 /**
  * Admin audit log hooks (Phase 05 T12, D-J). The list endpoint returns a per-page
@@ -10,14 +12,16 @@ import { adminAuditApi } from '@/lib/api-client';
 export function useAuditLog(page = 1, action?: string) {
   const { getToken } = useAccessToken();
   return useQuery({
-    queryKey: ['admin', 'audit', page, action],
+    queryKey: queryKeys.adminAudit.list(page, action),
     queryFn: async () => adminAuditApi.list({ page, action }, (await getToken()) ?? ''),
   });
 }
 
 export function useVerifyChain() {
   const { getToken } = useAccessToken();
-  return useMutation({
+  // NO_CACHE_EFFECT: verification only reads the ledger, it writes no row.
+  return useAppMutation({
     mutationFn: async () => adminAuditApi.verifyChain((await getToken()) ?? ''),
+    invalidates: NO_CACHE_EFFECT,
   });
 }
