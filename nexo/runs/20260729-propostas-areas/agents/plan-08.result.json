@@ -1,0 +1,1 @@
+{"agent":"plan","slice":"08-client-legal-web","status":"PASS","report":"nexo/plans/20260729-propostas-areas/08-client-legal-web.md","summary":"Plan written: ClientSchema nullish legal fields + clearableText PATCH semantics, Dados para contrato dialog section, 3 named oracle tests (web dialog, schema unit, RLS integration).","done":true}

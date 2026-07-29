@@ -1,0 +1,1 @@
+{"agent":"verify","slice":"auth-context-dev-race","status":"PASS","report":"nexo/runs/20260729-auth-context-dev-race-verify.md","summary":"Diff matches acceptance criteria (RouteErrorPage errorElement wiring + globalThis HubAuthContext singleton + vite dedupe/optimizeDeps/warmup); lint, type-check, and test all pass.","done":true}

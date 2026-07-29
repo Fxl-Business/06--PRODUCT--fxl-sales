@@ -1,0 +1,1 @@
+{"agent":"plan","slice":"05-areas-web","status":"PASS","report":"nexo/plans/20260729-propostas-areas/05-areas-web.md","summary":"Complete web plan for cadastros/areas view + AreaDialog CRUD, product dialog Tipo-to-Area swap, types/api/hooks plumbing, and all test updates including new areas-view.test.tsx oracle.","done":true}

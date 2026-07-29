@@ -1,7 +1,7 @@
 ---
 id: auth-context-dev-race
 milestone: v2.3.0
-status: doing
+status: done
 flow: quick
 ---
 

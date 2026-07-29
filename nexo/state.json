@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "current_milestone_id": null,
+  "current_milestone_id": "v2.3.0",
   "delivery": {
     "mode": "promotion",
     "trunk": "master",
@@ -13,5 +13,11 @@
       "staging": "<deploy-target>",
       "production": "<deploy-target>"
     }
+  },
+  "gate1": {
+    "feature": "20260729-propostas-areas",
+    "decision": "skipped-autopilot",
+    "decided_at": "2026-07-29",
+    "note": "User invoked --autopilot after locking design answers 1-9 in chat."
   }
 }

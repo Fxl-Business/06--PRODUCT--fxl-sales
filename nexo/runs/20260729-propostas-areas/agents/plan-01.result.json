@@ -1,0 +1,1 @@
+{"agent":"plan","slice":"01-areas-backend","status":"PASS","report":"nexo/plans/20260729-propostas-areas/01-areas-backend.md","summary":"Complete executor-ready plan for sales_ops_areas table + RLS + six-area seed migration 0010, products.area_id, area CRUD service/routes, product areaId guard, bootstrap.areas, with named unit and RLS oracle tests.","done":true}

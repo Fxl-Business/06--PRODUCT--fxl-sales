@@ -1,0 +1,8 @@
+{
+  "agent": "plan",
+  "slice": "06-proposal-wizard-web",
+  "status": "PASS",
+  "report": "nexo/plans/20260729-propostas-areas/06-proposal-wizard-web.md",
+  "summary": "Plan revised per plan-checker: added the full edit path (salesOpsApi.updateSale via PUT, useUpdateSalesOpsSale, editSale prop adopting slice 07 section 6.4 names verbatim, deriveWizardPrefill from sale+saleItems+receivables+saleProfessionals with anti-clobber guards, draft/open-only guard, sale-wizard-edit.test.tsx oracle) on top of the 4-step Nova proposta wizard, v2 payload, plan builder, and free-form items; checker gap callout removed.",
+  "done": true
+}

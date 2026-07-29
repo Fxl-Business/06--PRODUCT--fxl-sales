@@ -1,0 +1,1 @@
+{"agent":"execute","slice":"05-areas-web","status":"PASS","report":"feat/05-areas-web","summary":"Areas cadastro view + product area select shipped; web tests 91/91 passed (7 new areas-view tests), api tests 187/187 passed, lint/type-check/build green.","done":true}

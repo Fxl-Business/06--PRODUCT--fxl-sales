@@ -1,0 +1,1 @@
+{"agent":"verify","slice":"06-proposal-wizard-web","status":"PASS","report":"nexo/runs/20260729-propostas-areas/verify-06.md","summary":"4-step Nova proposta wizard, plan builder, free-form items, and edit path all match the plan contract; lint, type-check, full test suite, and build are green.","done":true}

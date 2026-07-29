@@ -1,0 +1,8 @@
+{
+  "agent": "plan",
+  "slice": "07-propostas-list-web",
+  "status": "PASS",
+  "report": "nexo/plans/20260729-propostas-areas/07-propostas-list-web.md",
+  "summary": "Complete plan for the Propostas table, real status/area filters, row transition actions with alert-dialog confirmations, read-only detail dialog, transitionSale/cancelContract api+hooks, statusMeta rewrite, and the won-status dashboard sweep, with four named oracle tests.",
+  "done": true
+}
