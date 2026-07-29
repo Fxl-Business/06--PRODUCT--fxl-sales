@@ -510,6 +510,11 @@ export const salesOpsClients = pgTable(
     orgId: text('org_id').notNull(),
     name: text('name').notNull(),
     contact: text('contact'),
+    legalName: text('legal_name'),
+    document: text('document'),
+    address: text('address'),
+    legalRepName: text('legal_rep_name'),
+    legalRepDocument: text('legal_rep_document'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }),
   },
@@ -556,7 +561,9 @@ export const salesOpsSales = pgTable(
     sellerNameSnapshot: text('seller_name_snapshot').notNull(),
     finderPersonId: uuid('finder_person_id').references(() => salesOpsPeople.id),
     finderNameSnapshot: text('finder_name_snapshot'),
-    status: text('status').notNull().default('forecast'),
+    status: text('status').notNull().default('open'), // 'draft' | 'open' | 'won' | 'lost' | 'cancelled'
+    wonAt: timestamp('won_at', { withTimezone: true }),
+    lostAt: timestamp('lost_at', { withTimezone: true }),
     paymentMethod: text('payment_method').notNull(),
     condition: text('condition').notNull(),
     installments: integer('installments').notNull().default(1),
@@ -594,6 +601,8 @@ export const salesOpsSaleItems = pgTable(
     productId: uuid('product_id').references(() => salesOpsProducts.id),
     productNameSnapshot: text('product_name_snapshot').notNull(),
     productTypeSnapshot: text('product_type_snapshot').notNull(),
+    areaId: uuid('area_id').references(() => salesOpsAreas.id),
+    areaNameSnapshot: text('area_name_snapshot').notNull().default(''),
     quantity: integer('quantity').notNull().default(1),
     unitBrl: integer('unit_brl').notNull(),
     subtotalBrl: integer('subtotal_brl').notNull(),
@@ -628,7 +637,8 @@ export const salesOpsReceivables = pgTable(
     label: text('label').notNull(),
     dueDate: timestamp('due_date', { withTimezone: true }).notNull(),
     amountBrl: integer('amount_brl').notNull(),
-    status: text('status').notNull().default('open'),
+    method: text('method').notNull().default('pix'), // 'pix' | 'card' | 'boleto' | 'transfer'
+    status: text('status').notNull().default('open'), // 'open' | 'paid' | 'void'
   },
   (t) => [index('sales_ops_receivables_sale_id_idx').on(t.saleId)],
 );
@@ -643,9 +653,12 @@ export const salesOpsPayables = pgTable(
       .references(() => salesOpsSales.id),
     beneficiaryName: text('beneficiary_name').notNull(),
     kind: text('kind').notNull(),
+    receivableId: uuid('receivable_id').references(() => salesOpsReceivables.id, {
+      onDelete: 'set null',
+    }),
     dueDate: timestamp('due_date', { withTimezone: true }).notNull(),
     amountBrl: integer('amount_brl').notNull(),
-    status: text('status').notNull().default('open'),
+    status: text('status').notNull().default('open'), // 'open' | 'paid' | 'void'
   },
   (t) => [
     index('sales_ops_payables_org_status_idx').on(t.orgId, t.status),
