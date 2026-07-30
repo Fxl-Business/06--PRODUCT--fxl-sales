@@ -221,6 +221,13 @@ function comboboxText(ariaLabel: string): string {
   return comboboxTrigger(ariaLabel).textContent?.trim() ?? '';
 }
 
+/** The single grid the three declarative header controls share. */
+function planHeaderGrid(): HTMLElement {
+  const grid = comboboxTrigger('Tipo de entrada').closest('div.grid');
+  if (!(grid instanceof HTMLElement)) throw new Error('plan header grid not found');
+  return grid;
+}
+
 /** Open the picker and commit the row whose visible label starts with `optionLabel`. */
 async function pickOption(ariaLabel: string, optionLabel: string) {
   await click(comboboxTrigger(ariaLabel));
@@ -294,6 +301,43 @@ describe('sale wizard payment plan', () => {
 
     await click(buttonByText('Avançar'));
     expect(container.textContent).toContain('Profissionais alocados');
+  });
+
+  it('aligns the three declarative header controls on one grid with each derived line under its own control', async () => {
+    await click(buttonByText('Avançar'));
+
+    const grid = planHeaderGrid();
+    // One grid, three columns: `Recorrência` used to live in a sibling block below.
+    expect(grid.className).toContain('md:grid-cols-3');
+    expect(grid.querySelector('input[aria-label="Parcelas restantes"]')).not.toBeNull();
+    expect(grid.querySelector('button[role="combobox"][aria-label="Recorrência"]')).not.toBeNull();
+
+    // Each derived line is a child of its own FieldBlock and is NOT pushed to that
+    // grid column's right edge, which is what made it float across the card.
+    const hints = [...grid.querySelectorAll('div')].filter((node) =>
+      ['sem entrada', '1 x R$ 2.500,00'].includes(node.textContent?.trim() ?? ''),
+    );
+    expect(hints).toHaveLength(2);
+    for (const hint of hints) expect(hint.className).not.toContain('text-right');
+
+    // Form geometry, not the 40px `Filtros` bar: every header control is 44px.
+    expect(comboboxTrigger('Tipo de entrada').className).toContain('h-11');
+    expect(comboboxTrigger('Recorrência').className).toContain('h-11');
+    expect(labeledInput('Parcelas restantes').className).toContain('h-11');
+  });
+
+  it('keeps the recorrência sub-fields below the header grid, not inside it', async () => {
+    await pickOption('Produto / serviço do item 1', 'FXL Advisor');
+    await click(buttonByText('Avançar'));
+    expect(comboboxText('Recorrência')).toBe('mensal');
+
+    const grid = planHeaderGrid();
+    expect(grid.querySelector('input[aria-label="Valor da mensalidade"]')).toBeNull();
+    expect(grid.querySelector('input[aria-label="Número de ciclos"]')).toBeNull();
+
+    // The hint belongs to the control it describes.
+    const ciclos = labeledInput('Número de ciclos').closest('label');
+    expect(ciclos?.textContent).toContain('Deixe em branco para prazo indeterminado');
   });
 
   it('seeds the header from the produto default payment plan', async () => {

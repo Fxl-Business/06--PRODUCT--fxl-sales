@@ -6474,11 +6474,21 @@ function SaleWizardDialogBody({
                       Declarative and always visible: nothing to toggle and no per-row add
                       or remove affordance. "50% de entrada + o resto em 3x" is two
                       controls, and the table below follows them as they are typed.
+
+                      One grid, three columns, one 9px gutter - the same gutter the
+                      `Parcelas a receber` table below uses. Each control's derived line is
+                      the next child of its OWN `FieldBlock` and is left-aligned, so it sits
+                      under the control it describes instead of being pushed to that grid
+                      column's right edge.
                     */}
-                    <div className="grid gap-[9px] md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                    <div className="grid gap-x-[9px] gap-y-3 md:grid-cols-3">
                       <FieldBlock label="Entrada">
                         <div className="flex items-center gap-[9px]">
-                          <div className="w-[132px] flex-none">
+                          {/* With no value input beside it the picker takes the whole column,
+                              so all three columns read as one filled 44px control on one axis. */}
+                          <div
+                            className={entradaMode === 'none' ? 'flex-1' : 'w-[116px] flex-none'}
+                          >
                             <Combobox
                               aria-label="Tipo de entrada"
                               className={formSelectClass}
@@ -6499,7 +6509,7 @@ function SaleWizardDialogBody({
                         </div>
                         <div
                           className={cn(
-                            'sales-ops-num text-right text-[12.5px] font-bold',
+                            'sales-ops-num text-[12.5px] font-bold',
                             entradaMode === 'none' ? 'text-[#9b9ba3]' : 'text-[#2f7d4b]',
                           )}
                         >
@@ -6508,21 +6518,26 @@ function SaleWizardDialogBody({
                       </FieldBlock>
 
                       <FieldBlock label="Restante">
-                        <div className="flex items-center gap-[9px]">
+                        {/* Same suffix affordance as `UnitInput`, kept local because this input
+                            carries `min`/`max` clamps that `UnitInput` does not accept - routing
+                            it through the shared helper would silently drop them. */}
+                        <div className="relative">
                           <Input
                             aria-label="Parcelas restantes"
-                            className={`sales-ops-num w-[72px] text-center ${formInputClass}`}
+                            className={`sales-ops-num ${formInputClass} pr-8`}
                             max={maxRemainingInstallments(entradaMode)}
                             min={1}
                             onChange={(event) => setRestanteCountInput(event.target.value)}
                             type="number"
                             value={restanteCountInput}
                           />
-                          <span className="text-[13px] font-bold text-[#9b9ba3]">x</span>
+                          <span className="pointer-events-none absolute right-[13px] top-1/2 -translate-y-1/2 text-[13px] font-bold text-[#9b9ba3]">
+                            x
+                          </span>
                         </div>
                         <div
                           className={cn(
-                            'sales-ops-num text-right text-[12.5px] font-bold',
+                            'sales-ops-num text-[12.5px] font-bold',
                             restanteCents === 0 ? 'text-[#9b9ba3]' : 'text-[#2f7d4b]',
                           )}
                         >
@@ -6535,102 +6550,99 @@ function SaleWizardDialogBody({
                               }`}
                         </div>
                       </FieldBlock>
+
+                      <FieldBlock label="Recorrência">
+                        <Combobox
+                          aria-label="Recorrência"
+                          className={formSelectClass}
+                          onChange={(value) => setRecurringMode(value as 'none' | 'monthly')}
+                          options={recurringModeOptions}
+                          searchPlaceholder="Buscar recorrência..."
+                          value={recurringMode}
+                        />
+                      </FieldBlock>
                     </div>
 
-                    <div className="mt-[14px]">
-                      <FieldBlock label="Recorrência">
-                        <div className="w-[132px]">
-                          <Combobox
-                            aria-label="Recorrência"
-                            className={formSelectClass}
-                            onChange={(value) => setRecurringMode(value as 'none' | 'monthly')}
-                            options={recurringModeOptions}
-                            searchPlaceholder="Buscar recorrência..."
-                            value={recurringMode}
-                          />
+                    {recurringMode === 'monthly' ? (
+                      <div className="mt-3">
+                        <div className="grid gap-x-[9px] gap-y-3 md:grid-cols-3">
+                          <Field label="Mensalidade (R$)">
+                            <Input
+                              aria-label="Valor da mensalidade"
+                              className={`sales-ops-num text-right ${formInputClass}`}
+                              onChange={(event) => setRecurringMonthlyBrl(event.target.value)}
+                              value={recurringMonthlyBrl}
+                            />
+                          </Field>
+                          <Field label="Início">
+                            <Input
+                              aria-label="Início da recorrência"
+                              className={`sales-ops-num ${formInputClass}`}
+                              onChange={(event) => setRecurringStartDate(event.target.value)}
+                              type="date"
+                              value={recurringStartDate}
+                            />
+                          </Field>
+                          <Field label="Nº de ciclos">
+                            <Input
+                              aria-label="Número de ciclos"
+                              className={`sales-ops-num ${formInputClass}`}
+                              max={MAX_PLAN_INSTALLMENTS}
+                              min={1}
+                              onChange={(event) => setRecurringCycles(event.target.value)}
+                              placeholder="Indeterminado"
+                              type="number"
+                              value={recurringCycles}
+                            />
+                            <span className="text-[11.5px] text-[#8b8b92]">
+                              Deixe em branco para prazo indeterminado
+                            </span>
+                          </Field>
                         </div>
-                      </FieldBlock>
-                      {recurringMode === 'monthly' ? (
-                        <>
-                          <div className="mt-[9px] grid gap-3 md:grid-cols-3">
-                            <Field label="Mensalidade (R$)">
-                              <Input
-                                aria-label="Valor da mensalidade"
-                                className={`sales-ops-num text-right ${formInputClass}`}
-                                onChange={(event) => setRecurringMonthlyBrl(event.target.value)}
-                                value={recurringMonthlyBrl}
-                              />
-                            </Field>
-                            <Field label="Início">
-                              <Input
-                                aria-label="Início da recorrência"
-                                className={`sales-ops-num ${formInputClass}`}
-                                onChange={(event) => setRecurringStartDate(event.target.value)}
-                                type="date"
-                                value={recurringStartDate}
-                              />
-                            </Field>
-                            <Field label="Nº de ciclos">
-                              <Input
-                                aria-label="Número de ciclos"
-                                className={`sales-ops-num ${formInputClass}`}
-                                max={MAX_PLAN_INSTALLMENTS}
-                                min={1}
-                                onChange={(event) => setRecurringCycles(event.target.value)}
-                                placeholder="Indeterminado"
-                                type="number"
-                                value={recurringCycles}
-                              />
-                            </Field>
+                        {showPlanErrors ? (
+                          <div className="mt-2 flex flex-col gap-1 text-[11.5px] font-semibold text-destructive">
+                            {recurringMonthlyCents <= 0 ? (
+                              <span>Informe uma mensalidade maior que zero.</span>
+                            ) : null}
+                            {recurringCyclesValid ? null : (
+                              <span>
+                                Informe um número de ciclos válido ou deixe em branco para prazo
+                                indeterminado.
+                              </span>
+                            )}
                           </div>
-                          <div className="mt-[9px] text-[11.5px] text-[#8b8b92]">
-                            Deixe em branco para prazo indeterminado
+                        ) : null}
+                        {recurringMonthlyCents > 0 &&
+                        /^\d{4}-\d{2}-\d{2}$/.test(recurringStartDate) ? (
+                          <div className="mt-[14px] flex items-center gap-2.5 rounded-[11px] border border-[#cfe4cf] bg-[#e2efe2] px-[14px] py-[11px] text-[13px] font-semibold text-[#2f7d4b]">
+                            <RotateCcw className="h-4 w-4 flex-none" />
+                            Mensalidade de{' '}
+                            {formatMoneyBrl(recurringMonthlyCents, {
+                              maximumFractionDigits: 0,
+                            })}{' '}
+                            a partir de {displayDate(recurringStartDate)}
+                            {recurringIndefinite
+                              ? ', por prazo indeterminado'
+                              : `, por ${recurringCyclesCount} ciclos`}
                           </div>
-                          {showPlanErrors ? (
-                            <div className="mt-2 flex flex-col gap-1 text-[11.5px] font-semibold text-destructive">
-                              {recurringMonthlyCents <= 0 ? (
-                                <span>Informe uma mensalidade maior que zero.</span>
-                              ) : null}
-                              {recurringCyclesValid ? null : (
-                                <span>
-                                  Informe um número de ciclos válido ou deixe em branco para prazo
-                                  indeterminado.
-                                </span>
-                              )}
-                            </div>
-                          ) : null}
-                          {recurringMonthlyCents > 0 &&
-                          /^\d{4}-\d{2}-\d{2}$/.test(recurringStartDate) ? (
-                            <div className="mt-[14px] flex items-center gap-2.5 rounded-[11px] border border-[#cfe4cf] bg-[#e2efe2] px-[14px] py-[11px] text-[13px] font-semibold text-[#2f7d4b]">
-                              <RotateCcw className="h-4 w-4 flex-none" />
-                              Mensalidade de{' '}
-                              {formatMoneyBrl(recurringMonthlyCents, {
-                                maximumFractionDigits: 0,
-                              })}{' '}
-                              a partir de {displayDate(recurringStartDate)}
-                              {recurringIndefinite
-                                ? ', por prazo indeterminado'
-                                : `, por ${recurringCyclesCount} ciclos`}
-                            </div>
-                          ) : null}
-                          {recurringIndefinite ? (
-                            <div className="mt-2 text-[12px] font-semibold text-[#9b9ba3]">
-                              Sem parcelas futuras geradas agora - a mensalidade entra como receita
-                              recorrente (MRR).
-                            </div>
-                          ) : (
-                            <div className="mt-2 text-[12px] font-semibold text-[#9b9ba3]">
-                              {recurringCyclesCount} ciclos de{' '}
-                              {formatMoneyBrl(recurringMonthlyCents)}, de{' '}
-                              {displayDate(recurringStartDate)} a{' '}
-                              {displayDate(
-                                addMonthsToIsoDate(recurringStartDate, recurringCyclesCount - 1),
-                              )}
-                            </div>
-                          )}
-                        </>
-                      ) : null}
-                    </div>
+                        ) : null}
+                        {recurringIndefinite ? (
+                          <div className="mt-2 text-[12px] font-semibold text-[#9b9ba3]">
+                            Sem parcelas futuras geradas agora - a mensalidade entra como receita
+                            recorrente (MRR).
+                          </div>
+                        ) : (
+                          <div className="mt-2 text-[12px] font-semibold text-[#9b9ba3]">
+                            {recurringCyclesCount} ciclos de{' '}
+                            {formatMoneyBrl(recurringMonthlyCents)}, de{' '}
+                            {displayDate(recurringStartDate)} a{' '}
+                            {displayDate(
+                              addMonthsToIsoDate(recurringStartDate, recurringCyclesCount - 1),
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
 
                     <div className="mt-4 border-t border-[#eeeef1] pt-3">
                       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -6672,7 +6684,7 @@ function SaleWizardDialogBody({
                         Four columns, not five: `Restante em N x` owns the row count now, so a
                         manual remove would desynchronise the header from the table.
                       */}
-                      <div className="grid grid-cols-[44px_minmax(0,1fr)_150px_150px] gap-[9px] px-0.5 pb-[7px] text-[11px] font-bold uppercase tracking-[0.05em] text-[#9b9ba3]">
+                      <div className="grid grid-cols-[44px_minmax(0,1fr)_150px_150px] gap-[9px] pb-[7px] text-[11px] font-bold uppercase tracking-[0.05em] text-[#9b9ba3]">
                         <span>Nº</span>
                         <span>Vencimento</span>
                         <span className="text-right">Valor</span>
@@ -6694,7 +6706,7 @@ function SaleWizardDialogBody({
                                 aria-invalid={showPlanErrors && !dateValid}
                                 aria-label={`Vencimento da parcela ${index + 1}`}
                                 className={cn(
-                                  'sales-ops-num h-10 rounded-[9px]',
+                                  'sales-ops-num',
                                   formInputClass,
                                   showPlanErrors && !dateValid && 'border-destructive',
                                 )}
@@ -6709,7 +6721,7 @@ function SaleWizardDialogBody({
                                 aria-invalid={showPlanErrors && !amountValid}
                                 aria-label={`Valor da parcela ${index + 1}`}
                                 className={cn(
-                                  'sales-ops-num h-10 rounded-[9px] text-right',
+                                  'sales-ops-num text-right',
                                   formInputClass,
                                   showPlanErrors && !amountValid && 'border-destructive',
                                 )}
