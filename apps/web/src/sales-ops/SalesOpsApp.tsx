@@ -1,5 +1,4 @@
 import {
-  AlertTriangle,
   CalendarDays,
   Check,
   ChevronDown,
@@ -45,6 +44,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { InfoHint } from '@/components/ui/info-hint';
 import { Input } from '@/components/ui/input';
 import {
   DropdownMenu,
@@ -3726,15 +3726,27 @@ function ProductDialogBody({
         onOpenAutoFocus={(event) => event.preventDefault()}
       >
         <DialogHeader className={`relative ${wizardHeaderClass}`}>
-          <DialogTitle className="sales-ops-num text-[19px] font-bold text-[#201f24]">
-            {activeModal.product
-              ? isService
-                ? 'Editar serviço'
-                : 'Editar produto'
-              : isService
-                ? 'Novo serviço'
-                : 'Novo produto'}
-          </DialogTitle>
+          {/*
+            The "everything here is a default" sentence is true on every step and
+            useless after the first read, so it hangs off the title rather than
+            eating a banner row at the top of step 1. `DialogTitle` itself keeps its
+            className untouched: Radix reads it for the dialog's accessible name.
+          */}
+          <div className="flex items-center gap-1.5">
+            <DialogTitle className="sales-ops-num text-[19px] font-bold text-[#201f24]">
+              {activeModal.product
+                ? isService
+                  ? 'Editar serviço'
+                  : 'Editar produto'
+                : isService
+                  ? 'Novo serviço'
+                  : 'Novo produto'}
+            </DialogTitle>
+            <InfoHint label="valores padrão">
+              Tudo aqui é padrão: dentro da proposta você pode alterar qualquer valor sem mexer no
+              cadastro.
+            </InfoHint>
+          </div>
           <DialogDescription className="text-[13px] text-[#8b8b92]">
             {isService
               ? 'Valor variável, custos por função e padrões de proposta'
@@ -3781,27 +3793,21 @@ function ProductDialogBody({
             <div className={wizardStepCardClass}>
               {wizardStep === 1 ? (
                 <>
-                  <div className="flex flex-col gap-[11px]">
-                    <div className="flex gap-[5px] rounded-[11px] bg-[#f2f2f4] p-1">
-                      <SegmentedButton
-                        active={!isService}
-                        ariaLabel="Classificar como produto"
-                        onClick={() => setKind('product')}
-                      >
-                        Produto
-                      </SegmentedButton>
-                      <SegmentedButton
-                        active={isService}
-                        ariaLabel="Classificar como serviço"
-                        onClick={() => setKind('service')}
-                      >
-                        Serviço
-                      </SegmentedButton>
-                    </div>
-                    <div className="rounded-[11px] border border-[#f0dfae] bg-[#fdf0cf] px-[14px] py-[11px] text-[13px] text-[#57575f]">
-                      Tudo aqui é padrão: dentro da proposta você pode alterar qualquer valor sem mexer no
-                      cadastro.
-                    </div>
+                  <div className="flex gap-[5px] rounded-[11px] bg-[#f2f2f4] p-1">
+                    <SegmentedButton
+                      active={!isService}
+                      ariaLabel="Classificar como produto"
+                      onClick={() => setKind('product')}
+                    >
+                      Produto
+                    </SegmentedButton>
+                    <SegmentedButton
+                      active={isService}
+                      ariaLabel="Classificar como serviço"
+                      onClick={() => setKind('service')}
+                    >
+                      Serviço
+                    </SegmentedButton>
                   </div>
 
                   <div className="grid gap-3 md:grid-cols-2">
@@ -6686,8 +6692,14 @@ function SaleWizardDialogBody({
                                     ) : null}
                                   </span>
                                 ) : (
-                                  <span className="flex items-center gap-1.5 text-[11.5px] font-semibold text-[#9c7210]">
-                                    <AlertTriangle className="h-[13px] w-[13px]" />
+                                  /*
+                                    Per-row helper text, not a warning: it names the fields to
+                                    fill in the non-error state of this row's message slot. A
+                                    popover trigger per item row would be strictly more noise
+                                    than the sentence it hid, so this keeps its exact copy and
+                                    loses only the warning skin.
+                                  */
+                                  <span className="text-[11.5px] text-[#8b8b92]">
                                     Item avulso - informe a área, a descrição e o valor
                                   </span>
                                 )}
@@ -6886,8 +6898,8 @@ function SaleWizardDialogBody({
                                     ) : null}
                                   </span>
                                 ) : (
-                                  <span className="flex items-center gap-1.5 text-[11.5px] font-semibold text-[#9c7210]">
-                                    <AlertTriangle className="h-[13px] w-[13px]" />
+                                  /* Same slot, same reasoning as the free-item hint above. */
+                                  <span className="text-[11.5px] text-[#8b8b92]">
                                     {descriptionHint}
                                   </span>
                                 )}
@@ -7230,13 +7242,14 @@ function SaleWizardDialogBody({
 
               {wizardStep === 3 ? (
                 <div className="flex flex-col gap-[18px]">
-                  <div className="rounded-[11px] border border-[#f0dfae] bg-[#fdf0cf] px-[14px] py-[11px] text-[13px] text-[#57575f]">
-                    Aloque os profissionais do projeto e ajuste os percentuais - a margem líquida e as comissões são calculadas em tempo real.
-                  </div>
-
                   <div className="rounded-[14px] border border-[#e8e8ec] bg-white p-4">
                     <div className="mb-3 flex items-center justify-between">
-                      <div className="text-[13px] font-bold">Profissionais alocados</div>
+                      <div className="flex items-center gap-1.5">
+                        <div className="text-[13px] font-bold">Profissionais alocados</div>
+                        <InfoHint label="Profissionais alocados">
+                          Aloque os profissionais do projeto e ajuste os percentuais - a margem líquida e as comissões são calculadas em tempo real.
+                        </InfoHint>
+                      </div>
                       <button
                         className="rounded-[9px] bg-[#201f24] px-3 py-[7px] text-[12.5px] font-semibold text-white transition hover:bg-[#33333a]"
                         onClick={() =>
@@ -7609,9 +7622,6 @@ function SaleWizardDialogBody({
 
               {wizardStep === 4 ? (
                 <div className="flex flex-col gap-[14px]">
-                  <div className="rounded-[11px] border border-[#f0dfae] bg-[#fdf0cf] px-[14px] py-[11px] text-[13px] text-[#57575f]">
-                    Esta é uma previsão - nada é lançado no financeiro até a proposta ser marcada como Ganha.
-                  </div>
                   <div className="grid gap-[14px] md:grid-cols-2">
                     <div className="rounded-[14px] border border-[#e8e8ec] bg-white p-[17px]">
                       <div className="mb-[11px] flex items-center justify-between">
@@ -7742,10 +7752,24 @@ function SaleWizardDialogBody({
                     </div>
                   </div>
 
-                  <div className="overflow-hidden rounded-[14px] border border-[#e8e8ec] bg-white">
+                  {/*
+                    `overflow-hidden` moved OFF this card and onto the table
+                    wrapper below. It only ever existed to round the last row's
+                    bottom corners, but on the card it also clipped the header -
+                    and the header now owns an `InfoHint`, whose panel drops below
+                    it and was being cut off whenever the preview underneath was
+                    short. `rounded-b-[13px]` is `14px` less the 1px border, i.e.
+                    the same inner curve the card was clipping to before.
+                  */}
+                  <div className="rounded-[14px] border border-[#e8e8ec] bg-white">
                     <div className="flex items-center justify-between border-b border-[#eeeef1] px-4 py-[13px]">
                       <div>
-                        <div className="text-[13px] font-bold">Previsão de contas a pagar</div>
+                        <div className="flex items-center gap-1.5">
+                          <div className="text-[13px] font-bold">Previsão de contas a pagar</div>
+                          <InfoHint label="Previsão de contas a pagar">
+                            Esta é uma previsão - nada é lançado no financeiro até a proposta ser marcada como Ganha.
+                          </InfoHint>
+                        </div>
                         <div className="mt-0.5 text-[11.5px] text-[#9b9ba3]">
                           Estes lançamentos serão gerados quando a proposta for marcada como Ganha.
                         </div>
@@ -7758,46 +7782,48 @@ function SaleWizardDialogBody({
                         editar custos
                       </button>
                     </div>
-                    <Table>
-                      <TableHeader>
-                        <TableRow className="bg-[#fafafb]">
-                          <TableHead className={tableHeadClass}>Descrição</TableHead>
-                          <TableHead className={tableHeadClass}>Tipo</TableHead>
-                          <TableHead className={tableHeadClass}>Vencimento</TableHead>
-                          <TableHead className={`${tableHeadClass} text-right`}>Valor</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {payablesPreview.map((payable, index) => (
-                          <TableRow key={`${payable.label}-${index}`}>
-                            <TableCell className="px-4 py-3 text-[13.5px] font-semibold">
-                              {payable.label}
+                    <div className="overflow-hidden rounded-b-[13px]">
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="bg-[#fafafb]">
+                            <TableHead className={tableHeadClass}>Descrição</TableHead>
+                            <TableHead className={tableHeadClass}>Tipo</TableHead>
+                            <TableHead className={tableHeadClass}>Vencimento</TableHead>
+                            <TableHead className={`${tableHeadClass} text-right`}>Valor</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {payablesPreview.map((payable, index) => (
+                            <TableRow key={`${payable.label}-${index}`}>
+                              <TableCell className="px-4 py-3 text-[13.5px] font-semibold">
+                                {payable.label}
+                              </TableCell>
+                              <TableCell className="px-3 py-3">
+                                <span
+                                  className={`rounded-full px-[9px] py-[3px] text-[11.5px] font-bold ${payable.className}`}
+                                >
+                                  {payable.type}
+                                </span>
+                              </TableCell>
+                              <TableCell className="sales-ops-num px-3 py-3 text-[13px] text-[#57575f]">
+                                {payable.date}
+                              </TableCell>
+                              <TableCell className="sales-ops-num px-4 py-3 text-right text-[13.5px] font-bold">
+                                {formatMoneyBrl(payable.value)}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                          <TableRow className="border-t-2 border-[#e8e8ec] bg-[#fafafb]">
+                            <TableCell className="px-4 py-[13px] text-[13.5px] font-bold" colSpan={3}>
+                              Total previsto
                             </TableCell>
-                            <TableCell className="px-3 py-3">
-                              <span
-                                className={`rounded-full px-[9px] py-[3px] text-[11.5px] font-bold ${payable.className}`}
-                              >
-                                {payable.type}
-                              </span>
-                            </TableCell>
-                            <TableCell className="sales-ops-num px-3 py-3 text-[13px] text-[#57575f]">
-                              {payable.date}
-                            </TableCell>
-                            <TableCell className="sales-ops-num px-4 py-3 text-right text-[13.5px] font-bold">
-                              {formatMoneyBrl(payable.value)}
+                            <TableCell className="sales-ops-num px-4 py-[13px] text-right text-base font-bold text-[#b23a22]">
+                              {formatMoneyBrl(payablesPreview.reduce((sum, item) => sum + item.value, 0))}
                             </TableCell>
                           </TableRow>
-                        ))}
-                        <TableRow className="border-t-2 border-[#e8e8ec] bg-[#fafafb]">
-                          <TableCell className="px-4 py-[13px] text-[13.5px] font-bold" colSpan={3}>
-                            Total previsto
-                          </TableCell>
-                          <TableCell className="sales-ops-num px-4 py-[13px] text-right text-base font-bold text-[#b23a22]">
-                            {formatMoneyBrl(payablesPreview.reduce((sum, item) => sum + item.value, 0))}
-                          </TableCell>
-                        </TableRow>
-                      </TableBody>
-                    </Table>
+                        </TableBody>
+                      </Table>
+                    </div>
                   </div>
                 </div>
               ) : null}

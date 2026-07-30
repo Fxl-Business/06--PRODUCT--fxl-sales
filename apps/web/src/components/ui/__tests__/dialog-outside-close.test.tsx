@@ -129,10 +129,32 @@ describe('DialogContent outside-interaction contract', () => {
     expect(event.preventDefault).toHaveBeenCalledTimes(1);
   });
 
-  it('does not intercept the Escape key', async () => {
+  /**
+   * Escape is intercepted CONDITIONALLY, and the condition is the whole point:
+   * it is spent on an open inline layer (a `Combobox` panel, an `InfoHint`) if
+   * there is one, and otherwise falls through to the dialog, which is the
+   * affordance this file's header comment says stays working. The behavioural
+   * proof of both halves is `inline-layer-escape.test.tsx`; what is pinned here
+   * is that the handler exists and defaults to NOT intercepting.
+   */
+  it('leaves the Escape key alone when no inline layer is open', async () => {
     const props = await renderDialog();
 
-    expect('onEscapeKeyDown' in props).toBe(false);
+    expect(typeof props.onEscapeKeyDown).toBe('function');
+
+    const event = fakeEvent();
+    handler(props, 'onEscapeKeyDown')(event);
+
+    expect(event.preventDefault).not.toHaveBeenCalled();
+  });
+
+  it('ignores a call-site attempt to take over Escape', async () => {
+    const callSiteHandler = vi.fn();
+    const props = await renderDialog({ onEscapeKeyDown: callSiteHandler });
+
+    handler(props, 'onEscapeKeyDown')(fakeEvent());
+
+    expect(callSiteHandler).not.toHaveBeenCalled();
   });
 
   it('labels the close affordance in pt-BR', async () => {
