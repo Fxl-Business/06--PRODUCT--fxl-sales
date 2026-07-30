@@ -560,9 +560,13 @@ export const salesOpsProducts = pgTable(
     id: uuid('id').primaryKey().defaultRandom(),
     orgId: text('org_id').notNull(),
     name: text('name').notNull(),
-    type: text('type').notNull().default('SaaS'),
+    // Produto | Serviço. The ONLY classification axis on a product (renamed from
+    // `type`, which had degenerated into the constant 'SaaS' once Tipo left the UI).
+    kind: text('kind').notNull().default('product'), // 'product' | 'service'
     codeSuffix: text('code_suffix').notNull().default('0'),
     areaId: uuid('area_id').references(() => salesOpsAreas.id),
+    // Derived projection of `kind`, never authored independently. The
+    // sales_ops_products_kind_open_price_check CHECK keeps it == (kind = 'service').
     openPrice: boolean('open_price').notNull().default(false),
     setupBrl: integer('setup_brl').notNull().default(0),
     hasMonthly: boolean('has_monthly').notNull().default(false),
@@ -586,7 +590,17 @@ export const salesOpsProducts = pgTable(
       precision: 10,
       scale: 2,
     }).notNull(),
+    // ── Default payment plan TEMPLATE (no absolute dates) ──────────────────────
+    defaultPaymentMethod: text('default_payment_method').notNull().default('pix'),
+    defaultEntradaMode: text('default_entrada_mode').notNull().default('none'), // 'none'|'pct'|'fix'
+    defaultEntradaPct: numeric('default_entrada_pct', { precision: 5, scale: 2 }),
+    defaultEntradaBrl: integer('default_entrada_brl'), // cents
+    defaultRemainingInstallments: integer('default_remaining_installments').notNull().default(1),
+    // NULL = indefinite recurrence (CLAUDE.md `cycles: null`). Only meaningful when
+    // has_monthly is true; the recurring AMOUNT stays monthly_brl, never duplicated here.
+    defaultRecurringCycles: integer('default_recurring_cycles').default(12),
     modules: jsonb('modules').notNull().default(sql`'[]'::jsonb`),
+    /** @deprecated superseded by sales_ops_product_funcao_costs; drop after slice 10 lands. */
     providers: jsonb('providers').notNull().default(sql`'[]'::jsonb`),
     status: text('status').notNull().default('active'), // 'active' | 'archived'
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
@@ -595,6 +609,75 @@ export const salesOpsProducts = pgTable(
   (t) => [
     index('sales_ops_products_org_id_idx').on(t.orgId, t.name),
     uniqueIndex('sales_ops_products_org_code_suffix_idx').on(t.orgId, t.codeSuffix),
+    check('sales_ops_products_kind_check', sql`${t.kind} in ('product', 'service')`),
+    check(
+      'sales_ops_products_kind_open_price_check',
+      sql`(${t.kind} = 'service') = ${t.openPrice}`,
+    ),
+    check(
+      'sales_ops_products_service_no_fixed_value_check',
+      sql`${t.kind} <> 'service' or (${t.setupBrl} = 0 and ${t.monthlyBrl} = 0)`,
+    ),
+    check(
+      'sales_ops_products_default_entrada_mode_check',
+      sql`(${t.defaultEntradaMode} = 'none' and ${t.defaultEntradaPct} is null and ${t.defaultEntradaBrl} is null)
+        or (${t.defaultEntradaMode} = 'pct' and ${t.defaultEntradaPct} is not null and ${t.defaultEntradaBrl} is null)
+        or (${t.defaultEntradaMode} = 'fix' and ${t.defaultEntradaBrl} is not null and ${t.defaultEntradaPct} is null)`,
+    ),
+    check(
+      'sales_ops_products_default_installments_check',
+      sql`${t.defaultRemainingInstallments} between 1 and 120`,
+    ),
+    check(
+      'sales_ops_products_default_recurring_cycles_check',
+      sql`${t.defaultRecurringCycles} is null or ${t.defaultRecurringCycles} between 1 and 120`,
+    ),
+  ],
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// sales_ops_product_funcao_costs - default cost per função for one
+// produto/serviço. A child table, NOT jsonb, on purpose: funções are org-created
+// and archivable, so a dangling funcao_id inside jsonb would be an undetectable
+// silent failure, and the composite (org_id, funcao_id) FK is what makes a
+// cross-org funcao_id structurally impossible to store rather than merely
+// rejected by whichever code path remembered to check. It also lets the money
+// and the rate keep their conventional types (integer cents / numeric(5,2))
+// instead of collapsing into one ambiguous jsonb `number`.
+// ─────────────────────────────────────────────────────────────────────────────
+export const salesOpsProductFuncaoCosts = pgTable(
+  'sales_ops_product_funcao_costs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: text('org_id').notNull(),
+    productId: uuid('product_id')
+      .notNull()
+      .references(() => salesOpsProducts.id, { onDelete: 'cascade' }),
+    // FK declared as the composite (org_id, funcao_id) constraint below, not here.
+    funcaoId: uuid('funcao_id').notNull(),
+    mode: text('mode').notNull(), // 'pct' | 'fix' - same vocabulary as *_commission_type
+    valuePct: numeric('value_pct', { precision: 5, scale: 2 }), // rates are numeric(5,2)
+    valueBrl: integer('value_brl'), // money is integer cents
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex('sales_ops_product_funcao_costs_product_funcao_idx').on(t.productId, t.funcaoId),
+    index('sales_ops_product_funcao_costs_org_product_idx').on(t.orgId, t.productId),
+    // Composite FK, mirroring sales_ops_person_funcoes_org_funcao_fk. A
+    // single-column FK on funcao_id would NOT consult the RLS predicate, so org A
+    // could pin org B's função as a cost default. `restrict` matches the person
+    // join: a função that still backs a cost default cannot be deleted.
+    foreignKey({
+      columns: [t.orgId, t.funcaoId],
+      foreignColumns: [salesOpsFuncoes.orgId, salesOpsFuncoes.id],
+      name: 'sales_ops_product_funcao_costs_org_funcao_fk',
+    }).onDelete('restrict'),
+    check(
+      'sales_ops_product_funcao_costs_mode_check',
+      sql`(${t.mode} = 'pct' and ${t.valuePct} is not null and ${t.valueBrl} is null)
+        or (${t.mode} = 'fix' and ${t.valueBrl} is not null and ${t.valuePct} is null)`,
+    ),
   ],
 );
 

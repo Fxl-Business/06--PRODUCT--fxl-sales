@@ -64,7 +64,7 @@ describe('proposal write backend (create v2 + update + payable materialization)'
   async function seedAreaAndProduct(orgId: string, areaName: string) {
     const area = await createArea(db, orgId, AreaSchema.parse({ name: areaName }));
     if (area === 'duplicate') throw new Error('unexpected duplicate area');
-    const product = await createProduct(
+    const { product } = await createProduct(
       db,
       orgId,
       ProductSchema.parse({ name: `Produto ${areaName}`, areaId: area.id }),

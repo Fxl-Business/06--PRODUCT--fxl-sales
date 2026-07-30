@@ -8,6 +8,8 @@ import {
   ClientSchema,
   CreateSaleSchema,
   FuncaoSchema,
+  INVALID_PRODUCT_ENTRADA_VALUE,
+  INVALID_PRODUCT_KIND_VALUE,
   PersonSchema,
   ProductSchema,
   SaleInputError,
@@ -16,6 +18,7 @@ import {
   UpdateAreaSchema,
   UpdateFuncaoSchema,
   UpdatePersonSchema,
+  UpdateProductSchema,
   UpdateSaleSchema,
   cancelContract,
   createArea,
@@ -24,7 +27,6 @@ import {
   createPerson,
   createProduct,
   createSale,
-  getArea,
   getSalesOpsSnapshot,
   getSalesOpsSummary,
   getSettings,
@@ -32,8 +34,10 @@ import {
   listClients,
   listFuncoes,
   listPeople,
+  listProductFuncaoCosts,
   listProducts,
   listSales,
+  resolveProductRefs,
   transitionSale,
   updateArea,
   updateClient,
@@ -99,8 +103,10 @@ salesOpsRouter.patch('/people/:id', requireAdmin, async (c) => {
 });
 
 salesOpsRouter.get('/products', async (c) => {
-  const products = await listProducts(getDb(), c.get('orgId'));
-  return c.json({ products });
+  const orgId = c.get('orgId');
+  const products = await listProducts(getDb(), orgId);
+  const productFuncaoCosts = await listProductFuncaoCosts(getDb(), orgId);
+  return c.json({ products, productFuncaoCosts });
 });
 
 salesOpsRouter.post('/products', async (c) => {
@@ -108,24 +114,44 @@ salesOpsRouter.post('/products', async (c) => {
   if (!parsed.success) {
     return c.json({ error: 'validation_error', issues: parsed.error.flatten() }, 400);
   }
-  const area = await getArea(getDb(), c.get('orgId'), parsed.data.areaId);
-  if (!area) return c.json({ error: 'validation_error', reason: 'unknown_area' }, 400);
-  const product = await createProduct(getDb(), c.get('orgId'), parsed.data);
-  return c.json({ product }, 201);
+  const refs = await resolveProductRefs(getDb(), c.get('orgId'), parsed.data);
+  if (!refs.ok) {
+    return c.json(
+      refs.reason === 'unknown_funcao'
+        ? { error: 'validation_error', reason: refs.reason, funcaoId: refs.funcaoId }
+        : { error: 'validation_error', reason: refs.reason },
+      400,
+    );
+  }
+  const created = await createProduct(getDb(), c.get('orgId'), parsed.data);
+  return c.json(created, 201);
 });
 
 salesOpsRouter.patch('/products/:id', async (c) => {
-  const parsed = ProductSchema.partial().safeParse(await c.req.json().catch(() => ({})));
+  // UpdateProductSchema, not ProductSchema.partial(): a .superRefine-wrapped
+  // schema is a ZodEffects and has no .partial().
+  const parsed = UpdateProductSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) {
     return c.json({ error: 'validation_error', issues: parsed.error.flatten() }, 400);
   }
-  if (parsed.data.areaId !== undefined) {
-    const area = await getArea(getDb(), c.get('orgId'), parsed.data.areaId);
-    if (!area) return c.json({ error: 'validation_error', reason: 'unknown_area' }, 400);
+  const refs = await resolveProductRefs(getDb(), c.get('orgId'), parsed.data);
+  if (!refs.ok) {
+    return c.json(
+      refs.reason === 'unknown_funcao'
+        ? { error: 'validation_error', reason: refs.reason, funcaoId: refs.funcaoId }
+        : { error: 'validation_error', reason: refs.reason },
+      400,
+    );
   }
-  const product = await updateProduct(getDb(), c.get('orgId'), c.req.param('id'), parsed.data);
-  if (!product) return c.json({ error: 'not_found' }, 404);
-  return c.json({ product });
+  const updated = await updateProduct(getDb(), c.get('orgId'), c.req.param('id'), parsed.data);
+  if (updated === INVALID_PRODUCT_KIND_VALUE) {
+    return c.json({ error: 'validation_error', reason: 'service_cannot_have_fixed_value' }, 400);
+  }
+  if (updated === INVALID_PRODUCT_ENTRADA_VALUE) {
+    return c.json({ error: 'validation_error', reason: 'entrada_mode_value_mismatch' }, 400);
+  }
+  if (!updated) return c.json({ error: 'not_found' }, 404);
+  return c.json(updated);
 });
 
 salesOpsRouter.get('/clients', async (c) => {
