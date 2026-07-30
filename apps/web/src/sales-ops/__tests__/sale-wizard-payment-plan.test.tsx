@@ -4,6 +4,7 @@ import * as React from 'react';
 import type { HTMLAttributes } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { addMonthsToIsoDate } from '../calculations';
 import { SaleWizardDialog } from '../SalesOpsApp';
 import type {
   CreateSalePayload,
@@ -47,6 +48,7 @@ const act = (
 const areaId = '66666666-6666-4666-8666-666666666666';
 const fixedProductId = '11111111-1111-4111-8111-111111111111';
 const recurringProductId = '22222222-2222-4222-8222-222222222222';
+const templatedProductId = '55555555-5555-4555-8555-555555555555';
 
 function product(patch: Partial<SalesOpsProduct> = {}): SalesOpsProduct {
   return {
@@ -84,10 +86,24 @@ const recurringProduct = product({
   monthlyBrl: 100000,
   setupBrl: 100000,
 });
+/**
+ * Carries a stored default payment plan, unlike the two above. The six flat default
+ * columns are what the produto cadastro writes, and three of them describe the plan
+ * shape the wizard opens on.
+ */
+const templatedProduct = product({
+  id: templatedProductId,
+  name: 'FXL Template',
+  setupBrl: 250000,
+  defaultEntradaMode: 'pct',
+  defaultEntradaPct: '50',
+  defaultEntradaBrl: null,
+  defaultRemainingInstallments: 3,
+});
 
 const bootstrap: SalesOpsBootstrap = {
   sales: [],
-  products: [fixedProduct, recurringProduct],
+  products: [fixedProduct, recurringProduct, templatedProduct],
   clients: [
     {
       id: '33333333-3333-4333-8333-333333333333',
@@ -228,11 +244,86 @@ async function changeInput(input: HTMLInputElement, value: string) {
 }
 
 
+function buttonExists(label: string): boolean {
+  return [...container.querySelectorAll('button')].some(
+    (candidate) => candidate.textContent?.trim() === label,
+  );
+}
+
+function inputExists(label: string): boolean {
+  return container.querySelector(`input[aria-label="${label}"]`) !== null;
+}
+
+function parcelaCount(): number {
+  return container.querySelectorAll('input[aria-label^="Valor da parcela "]').length;
+}
+
+/** The whole `Nº | VENCIMENTO | VALOR | FORMA` table as `[date, amount, method]` triples. */
+function parcelaRows(): Array<[string, string, string]> {
+  return Array.from({ length: parcelaCount() }, (_, index) => [
+    labeledInput(`Vencimento da parcela ${index + 1}`).value,
+    labeledInput(`Valor da parcela ${index + 1}`).value,
+    comboboxText(`Forma de pagamento da parcela ${index + 1}`),
+  ]);
+}
+
+/**
+ * The proposta base date is "today", so these fixtures cannot hardcode due dates.
+ * The month-offset arithmetic itself, including the month-end clamp, is pinned
+ * against literal dates in `payment-plan-generation.test.ts` and
+ * `calculations.test.ts`; here it only expresses "one month after the anchor".
+ */
+function monthsAfter(iso: string, months: number): string {
+  return addMonthsToIsoDate(iso, months);
+}
+
+const mismatchWarning = 'A soma das parcelas precisa ser igual ao total da proposta.';
+const dirtyLine = 'Plano ajustado manualmente';
+
 describe('sale wizard payment plan', () => {
-  it('splits the plan into N equal monthly parcelas with the remainder on the last', async () => {
+  it('generates a single row for tudo pago em 1x', async () => {
     await click(buttonByText('Avançar'));
-    await changeInput(labeledInput('Número de parcelas'), '3');
-    await click(buttonByText('Dividir'));
+
+    // No interaction at all: the fixture's 2500,00 total opens as one cash parcela.
+    expect(comboboxText('Tipo de entrada')).toBe('nenhuma');
+    expect(labeledInput('Parcelas restantes').value).toBe('1');
+    expect(parcelaCount()).toBe(1);
+    expect(labeledInput('Valor da parcela 1').value).toBe('2500');
+    expect(container.textContent).toContain('sem entrada');
+    expect(container.textContent).not.toContain(mismatchWarning);
+
+    await click(buttonByText('Avançar'));
+    expect(container.textContent).toContain('Profissionais alocados');
+  });
+
+  it('seeds the header from the produto default payment plan', async () => {
+    // Positive control first: the fixture's default product carries no template, so
+    // step 2 opens on the app default of one cash parcela.
+    await click(buttonByText('Avançar'));
+    expect(comboboxText('Tipo de entrada')).toBe('nenhuma');
+    expect(labeledInput('Parcelas restantes').value).toBe('1');
+
+    await click(buttonByText('Voltar'));
+    await pickOption('Produto / serviço do item 1', 'FXL Template');
+    await click(buttonByText('Avançar'));
+
+    expect(comboboxText('Tipo de entrada')).toBe('%');
+    expect(labeledInput('Valor da entrada').value).toBe('50');
+    expect(labeledInput('Parcelas restantes').value).toBe('3');
+    const base = labeledInput('Vencimento da parcela 1').value;
+    expect(parcelaRows()).toEqual([
+      [base, '1250', 'Pix'],
+      [monthsAfter(base, 1), '416.66', 'Pix'],
+      [monthsAfter(base, 2), '416.66', 'Pix'],
+      [monthsAfter(base, 3), '416.68', 'Pix'],
+    ]);
+    expect(container.textContent).not.toContain(mismatchWarning);
+  });
+
+  it('generates restante rows live from Parcelas restantes with the remainder on the last row', async () => {
+    await click(buttonByText('Avançar'));
+    // One control, no Dividir click and no + parcela click.
+    await changeInput(labeledInput('Parcelas restantes'), '3');
 
     expect(labeledInput('Valor da parcela 1').value).toBe('833.33');
     expect(labeledInput('Valor da parcela 2').value).toBe('833.33');
@@ -243,28 +334,130 @@ describe('sale wizard payment plan', () => {
     expect(second).toBe(
       new Date(Date.UTC(year!, month! - 1 + 1, day!)).toISOString().slice(0, 10),
     );
+    // The hint quotes the row values, never a rounded figure the table lacks.
+    expect(container.textContent).toContain('3 x R$ 833,33 (última R$ 833,34)');
+
+    // The manual controls the declarative header replaced.
+    expect(buttonExists('Dividir')).toBe(false);
+    expect(buttonExists('+ parcela')).toBe(false);
+    expect(buttonExists('Adicionar recorrência')).toBe(false);
+    expect(buttonExists('Prazo indeterminado')).toBe(false);
+    expect(buttonExists('Remover parcela 1')).toBe(false);
+    expect(inputExists('Número de parcelas')).toBe(false);
+    // Positive control for the five negatives above: the declarative header really is
+    // there, so this is about controls that were removed and not about a broken query.
+    expect(inputExists('Parcelas restantes')).toBe(true);
 
     await click(buttonByText('Avançar'));
     expect(container.textContent).toContain('Profissionais alocados');
   });
 
+  it('generates an entrada row from a percentage plus the remaining parcelas', async () => {
+    await click(buttonByText('Avançar'));
+    await pickOption('Tipo de entrada', '%');
+    await changeInput(labeledInput('Valor da entrada'), '50');
+    await changeInput(labeledInput('Parcelas restantes'), '3');
+
+    const base = labeledInput('Vencimento da parcela 1').value;
+    expect(parcelaRows()).toEqual([
+      [base, '1250', 'Pix'],
+      [monthsAfter(base, 1), '416.66', 'Pix'],
+      [monthsAfter(base, 2), '416.66', 'Pix'],
+      [monthsAfter(base, 3), '416.68', 'Pix'],
+    ]);
+    expect(container.textContent).toContain('R$ 1.250,00');
+    expect(container.textContent).toContain('R$ 2.500,00 / R$ 2.500,00');
+    expect(container.textContent).not.toContain(mismatchWarning);
+  });
+
+  it('generates an entrada row from a fixed value plus one parcela one month later', async () => {
+    await click(buttonByText('Avançar'));
+    await pickOption('Tipo de entrada', 'R$ fixo');
+    await changeInput(labeledInput('Valor da entrada'), '500');
+    await changeInput(labeledInput('Parcelas restantes'), '1');
+
+    const base = labeledInput('Vencimento da parcela 1').value;
+    expect(parcelaRows()).toEqual([
+      [base, '500', 'Pix'],
+      [monthsAfter(base, 1), '2000', 'Pix'],
+    ]);
+    expect(container.textContent).not.toContain(mismatchWarning);
+  });
+
   it('blocks advancing while the parcelas do not sum to the total', async () => {
     await click(buttonByText('Avançar'));
+    expect(container.textContent).not.toContain(dirtyLine);
     await changeInput(labeledInput('Valor da parcela 1'), '100');
 
-    expect(container.textContent).toContain(
-      'A soma das parcelas precisa ser igual ao total da proposta.',
-    );
+    expect(container.textContent).toContain(mismatchWarning);
+    // A hand-typed amount freezes the plan instead of being overwritten.
+    expect(container.textContent).toContain(dirtyLine);
     await click(buttonByText('Avançar'));
     expect(container.textContent).toContain('Plano de pagamento');
     expect(container.textContent).not.toContain('Profissionais alocados');
 
     await changeInput(labeledInput('Valor da parcela 1'), '2500');
-    expect(container.textContent).not.toContain(
-      'A soma das parcelas precisa ser igual ao total da proposta.',
-    );
+    expect(container.textContent).not.toContain(mismatchWarning);
     await click(buttonByText('Avançar'));
     expect(container.textContent).toContain('Profissionais alocados');
+  });
+
+  it('does not silently discard a hand-edited row when a header control changes', async () => {
+    await click(buttonByText('Avançar'));
+    await changeInput(labeledInput('Parcelas restantes'), '2');
+    await changeInput(labeledInput('Valor da parcela 1'), '900');
+    expect(container.textContent).toContain(dirtyLine);
+    expect(container.textContent).not.toContain('vai substituir as parcelas editadas');
+
+    await changeInput(labeledInput('Parcelas restantes'), '4');
+    expect(container.textContent).toContain(
+      'Você ajustou as parcelas manualmente. Aplicar 4 x vai substituir as parcelas editadas.',
+    );
+    // Nothing regenerated: the typed value and the old row count both survive.
+    expect(labeledInput('Valor da parcela 1').value).toBe('900');
+    expect(parcelaCount()).toBe(2);
+
+    await click(buttonByText('Manter parcelas'));
+    expect(labeledInput('Parcelas restantes').value).toBe('2');
+    expect(labeledInput('Valor da parcela 1').value).toBe('900');
+    expect(parcelaCount()).toBe(2);
+    expect(container.textContent).not.toContain('vai substituir as parcelas editadas');
+    expect(container.textContent).toContain(dirtyLine);
+
+    await changeInput(labeledInput('Parcelas restantes'), '4');
+    await click(buttonByText('Aplicar'));
+    expect(parcelaCount()).toBe(4);
+    expect(labeledInput('Valor da parcela 1').value).toBe('625');
+    expect(container.textContent).not.toContain(dirtyLine);
+    expect(container.textContent).not.toContain(mismatchWarning);
+  });
+
+  it('recovers the formula from a hand-edited plan through Regerar plano', async () => {
+    await click(buttonByText('Avançar'));
+    await changeInput(labeledInput('Valor da parcela 1'), '100');
+    expect(container.textContent).toContain(dirtyLine);
+    expect(container.textContent).toContain(mismatchWarning);
+
+    // Same shape, same total: only clearing the flag can bring the rows back.
+    await click(buttonByText('Regerar plano'));
+    expect(labeledInput('Valor da parcela 1').value).toBe('2500');
+    expect(container.textContent).not.toContain(dirtyLine);
+    expect(container.textContent).not.toContain(mismatchWarning);
+  });
+
+  it('keeps a per-row forma through a regeneration', async () => {
+    await click(buttonByText('Avançar'));
+    await changeInput(labeledInput('Parcelas restantes'), '2');
+    await pickOption('Forma de pagamento da parcela 2', 'Boleto');
+    expect(container.textContent).not.toContain(dirtyLine);
+
+    await changeInput(labeledInput('Parcelas restantes'), '3');
+    // No confirm bar: forma carries no arithmetic, so it never blocks a regeneration.
+    expect(container.textContent).not.toContain('vai substituir as parcelas editadas');
+    expect(parcelaCount()).toBe(3);
+    expect(comboboxText('Forma de pagamento da parcela 1')).toBe('Pix');
+    expect(comboboxText('Forma de pagamento da parcela 2')).toBe('Boleto');
+    expect(comboboxText('Forma de pagamento da parcela 3')).toBe('Boleto');
   });
 
   it('prefills and submits the recurring block for a mensalidade product', async () => {
@@ -272,8 +465,9 @@ describe('sale wizard payment plan', () => {
     expect(comboboxText('Produto / serviço do item 1')).toBe('FXL Advisor');
     await click(buttonByText('Avançar'));
 
+    expect(comboboxText('Recorrência')).toBe('mensal');
     expect(labeledInput('Valor da mensalidade').value).toBe('1000');
-    await click(buttonByText('Prazo indeterminado'));
+    await changeInput(labeledInput('Número de ciclos'), '');
 
     await click(buttonByText('Avançar'));
     await click(buttonByText('Avançar'));
@@ -295,10 +489,46 @@ describe('sale wizard payment plan', () => {
     expect(payload.installments.reduce((sum, row) => sum + row.amountBrl, 0)).toBe(100000);
   });
 
+  it('generates no bounded rows for an indefinite recorrencia', async () => {
+    await pickOption('Produto / serviço do item 1', 'FXL Advisor');
+    await click(buttonByText('Avançar'));
+
+    // Bounded first, as the positive control: 2 ciclos really do reach step 4.
+    await changeInput(labeledInput('Número de ciclos'), '2');
+    expect(container.textContent).toContain('2 ciclos de R$ 1.000,00');
+    await click(buttonByText('Avançar'));
+    await click(buttonByText('Avançar'));
+    expect(container.textContent).toContain('Previsão de contas a pagar');
+    expect(container.textContent).toContain('parcela 2');
+    expect(container.textContent).toContain('parcela 3');
+
+    await click(buttonByText('Voltar'));
+    await click(buttonByText('Voltar'));
+    await changeInput(labeledInput('Número de ciclos'), '');
+    expect(container.textContent).toContain(
+      'Sem parcelas futuras geradas agora - a mensalidade entra como receita recorrente (MRR).',
+    );
+    expect(container.textContent).toContain(', por prazo indeterminado');
+    // The recurrence never contributes rows to the editable table.
+    expect(parcelaCount()).toBe(1);
+
+    await click(buttonByText('Avançar'));
+    await click(buttonByText('Avançar'));
+    expect(container.textContent).toContain('Previsão de contas a pagar');
+    expect(container.textContent).toContain('parcela 1');
+    expect(container.textContent).not.toContain('parcela 2');
+
+    await click(buttonByText('Salvar proposta'));
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recurring: expect.objectContaining({ cycles: null }),
+      }),
+    );
+  });
+
   it('submits the edited plan rows with per-parcela method and date', async () => {
     await click(buttonByText('Avançar'));
-    await changeInput(labeledInput('Número de parcelas'), '2');
-    await click(buttonByText('Dividir'));
+    await changeInput(labeledInput('Parcelas restantes'), '2');
     expect(comboboxText('Forma de pagamento da parcela 2')).toBe('Pix');
     await pickOption('Forma de pagamento da parcela 2', 'Boleto');
     expect(comboboxText('Forma de pagamento da parcela 2')).toBe('Boleto');

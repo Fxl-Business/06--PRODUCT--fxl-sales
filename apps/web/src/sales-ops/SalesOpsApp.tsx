@@ -111,13 +111,21 @@ import {
   addMonthsToIsoDate,
   buildDashboardModel,
   buildSalePayload,
+  defaultPlanShapeForProduct,
+  entradaCentsFor,
   formatMoneyBrl,
+  generateInstallmentPlan,
+  inferPaymentPlanShape,
   initials,
   installmentSumCents,
   isServiceProduct,
+  MAX_PLAN_INSTALLMENTS,
+  maxRemainingInstallments,
   parseCurrencyInputToCents,
   resolveSaleCommissionDefaults,
-  splitInstallmentsEqually,
+  restanteCountFor,
+  type PaymentPlanEntradaMode,
+  type PaymentPlanShape,
 } from './calculations';
 import type {
   SaveAreaPayload,
@@ -254,16 +262,15 @@ const entradaModeOptions: ComboboxOption[] = [
 ];
 
 /**
- * `installments: max(120)` on the sale write endpoints counts the entrada row too,
- * and `materializeDefaultPaymentPlan` puts the entrada ON TOP of
- * `defaultRemainingInstallments`. So a template with an entrada may configure at
- * most 119 remaining parcelas; without one, the full 120.
+ * `nenhuma | mensal`. Picking `mensal` is the ONLY way to enable recurrence now: the
+ * dashed add-recurrence placeholder is gone, so the control is always visible and
+ * never a toggle.
  */
-const MAX_PLAN_INSTALLMENTS = 120;
+const recurringModeOptions: ComboboxOption[] = [
+  { value: 'none', label: 'nenhuma' },
+  { value: 'monthly', label: 'mensal' },
+];
 
-function maxRemainingInstallments(entradaMode: 'none' | 'pct' | 'fix'): number {
-  return entradaMode === 'none' ? MAX_PLAN_INSTALLMENTS : MAX_PLAN_INSTALLMENTS - 1;
-}
 
 function titleForView(view: SalesOpsView, workspace: SalesOpsWorkspace) {
   const personal = workspace === 'meus-dados';
@@ -3287,12 +3294,11 @@ function ProductDialogBody({
   const usedFuncaoIds = new Set(form.funcaoCosts.map((row) => row.funcaoId).filter(Boolean));
   const noFuncoesAvailable = eligibleFuncoes.length === 0;
   /*
-      Counted against the ELIGIBLE pool only. A row carrying an archived (or otherwise
-      non-assignable) função consumes none of that pool, so counting it would disable
-      `Adicionar` while an assignable função is still free.
-    */
-    const usedEligibleCount = eligibleFuncoes.filter((funcao) => usedFuncaoIds.has(funcao.id))
-      .length;
+    Counted against the ELIGIBLE pool only. A row carrying an archived (or otherwise
+    non-assignable) função consumes none of that pool, so counting it would disable
+    `Adicionar` while an assignable função is still free.
+  */
+  const usedEligibleCount = eligibleFuncoes.filter((funcao) => usedFuncaoIds.has(funcao.id)).length;
   const allFuncoesUsed = !noFuncoesAvailable && usedEligibleCount >= eligibleFuncoes.length;
   const legacyProviderNames = (activeModal.product?.providers ?? [])
     .map((provider) => provider.personName.trim())
@@ -4697,13 +4703,107 @@ type WizardPrefill = {
   items: SaleItemForm[];
   professionals: ProfessionalForm[];
   installmentRows: InstallmentRowForm[];
+  /** The formula the stored rows were read back as, seeding the step-2 header. */
+  planShape: PaymentPlanShape;
+  /** True when no formula reproduces the stored rows, i.e. they were hand-tuned. */
+  planDirty: boolean;
   recurringEnabled: boolean;
   recurringMonthlyBrl: string;
-  recurringStartDate: string;
+  /** `''` means prazo indeterminado; there is no separate boolean. */
   recurringCycles: string;
-  recurringIndefinite: boolean;
+  recurringStartDate: string;
   recurringMethod: PaymentMethod;
 };
+
+/** Shared by `totalCents` and by the prefill, so the two can never disagree. */
+function itemsTotalCents(items: SaleItemForm[]): number {
+  return items.reduce(
+    (sum, item) => sum + Math.max(1, Number(item.quantity) || 1) * parseCurrencyToCents(item.unitBrl),
+    0,
+  );
+}
+
+/**
+ * The step-2 header controls as the operator typed them. The raw strings are the
+ * state, so a half-typed `50.` survives; `wizardPlanShape` is the only place they
+ * become numbers.
+ */
+type PlanShapeInputs = {
+  entradaMode: PaymentPlanEntradaMode;
+  entradaValueInput: string;
+  restanteCountInput: string;
+  anchorDate: string;
+};
+
+function wizardPlanShape(inputs: PlanShapeInputs): PaymentPlanShape {
+  return {
+    entradaMode: inputs.entradaMode,
+    entradaValue:
+      inputs.entradaMode === 'pct'
+        ? Math.max(0, parseDecimal(inputs.entradaValueInput, 0))
+        : inputs.entradaMode === 'fix'
+          ? parseCurrencyToCents(inputs.entradaValueInput)
+          : 0,
+    restanteCount: Math.max(
+      1,
+      Math.min(
+        maxRemainingInstallments(inputs.entradaMode),
+        Math.floor(parseDecimal(inputs.restanteCountInput, 1)) || 1,
+      ),
+    ),
+    anchorDate: inputs.anchorDate,
+  };
+}
+
+/** The inverse of `wizardPlanShape`: seeds the header controls from a formula. */
+function planShapeInputs(shape: PaymentPlanShape): PlanShapeInputs {
+  return {
+    entradaMode: shape.entradaMode,
+    entradaValueInput:
+      shape.entradaMode === 'pct'
+        ? pctToInput(shape.entradaValue)
+        : shape.entradaMode === 'fix'
+          ? centsToInput(shape.entradaValue)
+          : '0',
+    restanteCountInput: String(shape.restanteCount),
+    anchorDate: shape.anchorDate,
+  };
+}
+
+/**
+ * Identity of a generated plan: the total it was generated for plus the formula.
+ * The regeneration guard fires whenever this changes, which is what makes the table
+ * follow the header and the itens total without any explicit apply button.
+ */
+function planShapeKey(totalCents: number, shape: PaymentPlanShape): string {
+  return JSON.stringify([totalCents, shape]);
+}
+
+function planShapeFromKey(key: string): PaymentPlanShape | null {
+  try {
+    const parsed: unknown = JSON.parse(key);
+    if (!Array.isArray(parsed)) return null;
+    const shape = parsed[1] as PaymentPlanShape | undefined;
+    return shape && typeof shape.anchorDate === 'string' ? shape : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Keyed on the product ID plus its stored template, never on a list position, so a
+ * bootstrap refetch that reorders `products` cannot reseed a plan the operator is
+ * editing.
+ */
+function planShapeSourceKey(product: SalesOpsProduct | undefined): string {
+  return JSON.stringify([
+    product?.id,
+    product?.defaultEntradaMode,
+    product?.defaultEntradaPct,
+    product?.defaultEntradaBrl,
+    product?.defaultRemainingInstallments,
+  ]);
+}
 
 function deriveWizardPrefill(sale: SalesOpsSale, bootstrap: SalesOpsBootstrap): WizardPrefill {
   const receivables = bootstrap.receivables
@@ -4743,6 +4843,16 @@ function deriveWizardPrefill(sale: SalesOpsSale, bootstrap: SalesOpsBootstrap): 
     });
   const hasRecurring = sale.recurringBrl > 0;
   const bounded = hasRecurring && recurringRows.length > 0;
+  const storedInstallments = installmentReceivables.map((row) => ({
+    dueDate: row.dueDate.slice(0, 10),
+    amountBrl: row.amountBrl,
+    method: row.method,
+  }));
+  const inferred = inferPaymentPlanShape(
+    itemsTotalCents(items),
+    storedInstallments,
+    sale.baseDate.slice(0, 10),
+  );
   return {
     clientId: sale.clientId ?? '',
     clientName: sale.clientNameSnapshot,
@@ -4765,18 +4875,26 @@ function deriveWizardPrefill(sale: SalesOpsSale, bootstrap: SalesOpsBootstrap): 
         role: row.role,
         costBrl: centsToInput(row.costBrl),
       })),
-    installmentRows: installmentReceivables.map((row) => ({
-      dueDate: row.dueDate.slice(0, 10),
+    // Verbatim, so reopening and saving an untouched proposta round-trips the plan
+    // byte for byte. The inference above only describes these rows, it never edits them.
+    installmentRows: storedInstallments.map((row) => ({
+      dueDate: row.dueDate,
       amountBrl: centsToInput(row.amountBrl),
       method: row.method,
     })),
+    planShape: inferred.shape,
+    planDirty: !inferred.matchesFormula,
     recurringEnabled: hasRecurring,
     recurringMonthlyBrl: centsToInput(sale.recurringBrl),
     recurringStartDate: bounded
       ? recurringRows[0]!.dueDate.slice(0, 10)
       : addMonthsToIsoDate(sale.baseDate.slice(0, 10), 1),
-    recurringCycles: bounded ? String(recurringRows.length) : '12',
-    recurringIndefinite: hasRecurring && !bounded,
+    /*
+      A recurring sale with zero `M`-labelled receivables IS `cycles: null`, and blank
+      is the only way step 2 expresses prazo indeterminado now that the checkbox is
+      gone. `'12'` would silently invent a bounded plan the proposta does not have.
+    */
+    recurringCycles: bounded ? String(recurringRows.length) : '',
     recurringMethod: bounded ? recurringRows[0]!.method : 'pix',
   };
 }
@@ -4919,17 +5037,47 @@ function SaleWizardDialogBody({
       ? prefill.installmentRows
       : [{ dueDate: inputDateToday(), amountBrl: '0', method: 'pix' }],
   );
-  const [planAuto, setPlanAuto] = useState(!prefill || prefill.installmentRows.length === 0);
-  const [planAutoKey, setPlanAutoKey] = useState('');
-  const [splitCount, setSplitCount] = useState('3');
+  const initialPlanInputs = planShapeInputs(
+    prefill?.planShape ??
+      defaultPlanShapeForProduct(firstProduct, prefill?.baseDate ?? inputDateToday()),
+  );
+  const [entradaMode, setEntradaMode] = useState(initialPlanInputs.entradaMode);
+  const [entradaValueInput, setEntradaValueInput] = useState(initialPlanInputs.entradaValueInput);
+  const [restanteCountInput, setRestanteCountInput] = useState(
+    initialPlanInputs.restanteCountInput,
+  );
+  const [planAnchorDate, setPlanAnchorDate] = useState(initialPlanInputs.anchorDate);
+  /**
+   * A whole-plan flag rather than per-row pinning. Recomputing an entrada or a
+   * restante redistributes value across EVERY row to hold `Soma === total`, so
+   * honouring a pinned row 3 while regenerating rows 1-2 would either break that
+   * invariant or produce amounts following no stateable rule.
+   */
+  const [planDirty, setPlanDirty] = useState(prefill?.planDirty ?? false);
+  /**
+   * The key the current `installmentRows` were generated from. Seeded on the edit path
+   * so opening a proposta neither regenerates a clean plan nor raises the confirm bar
+   * over a hand-edited one; `''` on create, which is what makes the first render
+   * generate the opening single parcela.
+   */
+  const [appliedPlanKey, setAppliedPlanKey] = useState(() =>
+    prefill ? planShapeKey(itemsTotalCents(prefill.items), wizardPlanShape(initialPlanInputs)) : '',
+  );
+  const [planAnchorSourceBaseDate, setPlanAnchorSourceBaseDate] = useState(
+    prefill?.baseDate ?? inputDateToday(),
+  );
+  const [planShapeSource, setPlanShapeSource] = useState(() =>
+    planShapeSourceKey(prefill ? prefilledPrimaryProduct : firstProduct),
+  );
   const [showPlanErrors, setShowPlanErrors] = useState(false);
-  const [recurringEnabled, setRecurringEnabled] = useState(prefill?.recurringEnabled ?? false);
+  const [recurringMode, setRecurringMode] = useState<'none' | 'monthly'>(
+    prefill?.recurringEnabled ? 'monthly' : 'none',
+  );
   const [recurringMonthlyBrl, setRecurringMonthlyBrl] = useState(prefill?.recurringMonthlyBrl ?? '0');
   const [recurringStartDate, setRecurringStartDate] = useState(
     prefill?.recurringStartDate ?? addMonthsToIsoDate(inputDateToday(), 1),
   );
   const [recurringCycles, setRecurringCycles] = useState(prefill?.recurringCycles ?? '12');
-  const [recurringIndefinite, setRecurringIndefinite] = useState(prefill?.recurringIndefinite ?? false);
   const [recurringSource, setRecurringSource] = useState(() =>
     prefill
       ? JSON.stringify([
@@ -4962,16 +5110,60 @@ function SaleWizardDialogBody({
   }
 
   const canSave = Boolean(clientName.trim() && sellerPersonId && items.length > 0);
-  const totalCents = items.reduce(
-    (sum, item) => sum + Math.max(1, Number(item.quantity) || 1) * parseCurrencyToCents(item.unitBrl),
-    0,
-  );
+  const totalCents = itemsTotalCents(items);
 
-  const planAutoKeyNow = JSON.stringify([totalCents, baseDate]);
-  if (planAuto && planAutoKey !== planAutoKeyNow) {
-    setPlanAutoKey(planAutoKeyNow);
-    setInstallmentRows([{ dueDate: baseDate, amountBrl: centsToInput(totalCents), method: 'pix' }]);
+  /*
+    Three render-phase guards, each writing its own source key first, exactly like the
+    commission-defaults guard above and the recurrence guard below. Every key is a
+    JSON.stringify of primitives and the generator is deterministic, so the next render
+    always finds the keys equal and the sequence terminates.
+  */
+  if (baseDate !== planAnchorSourceBaseDate) {
+    setPlanAnchorSourceBaseDate(baseDate);
+    setPlanAnchorDate(baseDate);
   }
+
+  const planShapeSourceNow = planShapeSourceKey(primaryItemProduct);
+  if (planShapeSource !== planShapeSourceNow) {
+    setPlanShapeSource(planShapeSourceNow);
+    // A hand-edited plan is never reseeded from a cadastro default behind the
+    // operator's back; switching the produto only re-proposes the formula.
+    if (!planDirty) {
+      const seeded = planShapeInputs(defaultPlanShapeForProduct(primaryItemProduct, baseDate));
+      setEntradaMode(seeded.entradaMode);
+      setEntradaValueInput(seeded.entradaValueInput);
+      setRestanteCountInput(seeded.restanteCountInput);
+      setPlanAnchorDate(seeded.anchorDate);
+    }
+  }
+
+  const planShape = wizardPlanShape({
+    entradaMode,
+    entradaValueInput,
+    restanteCountInput,
+    anchorDate: planAnchorDate,
+  });
+  const currentPlanKey = planShapeKey(totalCents, planShape);
+  if (!planDirty && currentPlanKey !== appliedPlanKey) {
+    setAppliedPlanKey(currentPlanKey);
+    setInstallmentRows(
+      generateInstallmentPlan(
+        totalCents,
+        planShape,
+        installmentRows.map((row) => row.method),
+      ).map((row) => ({
+        dueDate: row.dueDate,
+        amountBrl: centsToInput(row.amountBrl),
+        method: row.method,
+      })),
+    );
+  }
+  /**
+   * The operator hand-edited the rows AND then moved a header control, so the header
+   * no longer describes the table. Nothing is regenerated until they say which one
+   * they meant.
+   */
+  const planPendingRegeneration = planDirty && currentPlanKey !== appliedPlanKey;
 
   const recurringSourceNow = JSON.stringify([
     primaryItemProduct?.id,
@@ -4981,10 +5173,10 @@ function SaleWizardDialogBody({
   if (recurringSource !== recurringSourceNow) {
     const suggested = Boolean(primaryItemProduct?.hasMonthly && primaryItemProduct.monthlyBrl > 0);
     setRecurringSource(recurringSourceNow);
-    setRecurringEnabled(suggested);
+    setRecurringMode(suggested ? 'monthly' : 'none');
     setRecurringMonthlyBrl(centsToInput(primaryItemProduct?.monthlyBrl));
     setRecurringStartDate(addMonthsToIsoDate(baseDate, 1));
-    setRecurringIndefinite(false);
+    setRecurringCycles('12');
   }
 
   const activeAreas = bootstrap.areas.filter((area) => area.status === 'active');
@@ -5003,13 +5195,27 @@ function SaleWizardDialogBody({
       (row) => /^\d{4}-\d{2}-\d{2}$/.test(row.dueDate) && parseCurrencyToCents(row.amountBrl) > 0,
     );
   const planValid = planRowsValid && planDeltaCents === 0;
+  const entradaCents = entradaCentsFor(totalCents, planShape);
+  const restanteCents = Math.max(0, totalCents - entradaCents);
+  const restanteCount = restanteCountFor(planShape);
+  /*
+    The hint values are the SAME arithmetic the table rows come from - floor base,
+    whole remainder on the last row - so the header can never advertise an amount the
+    table does not contain. The mock's `3 x R$ 12.166,67` was one cent above the real
+    total and is deliberately not reproduced.
+  */
+  const restanteBaseCents = Math.floor(restanteCents / restanteCount);
+  const restanteLastCents = restanteCents - restanteBaseCents * (restanteCount - 1);
   const recurringMonthlyCents = parseCurrencyToCents(recurringMonthlyBrl);
+  /** Blank ciclos is the ONLY expression of prazo indeterminado; there is no checkbox. */
+  const recurringIndefinite = recurringCycles.trim() === '';
   const recurringCyclesCount = Math.max(1, Math.min(120, Math.floor(Number(recurringCycles) || 0)));
+  const recurringCyclesValid = recurringIndefinite || Math.floor(Number(recurringCycles)) >= 1;
   const recurringValid =
-    !recurringEnabled ||
+    recurringMode === 'none' ||
     (recurringMonthlyCents > 0 &&
       /^\d{4}-\d{2}-\d{2}$/.test(recurringStartDate) &&
-      (recurringIndefinite || Math.floor(Number(recurringCycles) || 0) >= 1));
+      recurringCyclesValid);
   const canAdvanceStepTwo = planValid && recurringValid;
 
   const itemsValid = items.every((item) => {
@@ -5061,7 +5267,9 @@ function SaleWizardDialogBody({
       dueDate: row.dueDate,
       amountCents: parseCurrencyToCents(row.amountBrl),
     })),
-    ...(recurringEnabled && !recurringIndefinite && settings.commissionOnRecurring
+    // `cycles: null` generates no bounded rows anywhere, so an indefinite
+    // mensalidade contributes nothing to this preview either.
+    ...(recurringMode === 'monthly' && !recurringIndefinite && settings.commissionOnRecurring
       ? Array.from({ length: recurringCyclesCount }, (_, index) => ({
           dueDate: addMonthsToIsoDate(recurringStartDate, index),
           amountCents: recurringMonthlyCents,
@@ -5198,27 +5406,40 @@ function SaleWizardDialogBody({
     ]);
   }
 
-  function applySplit() {
-    const count = Math.max(1, Math.min(120, Math.floor(Number(splitCount) || 1)));
-    setPlanAuto(false);
-    setInstallmentRows(
-      splitInstallmentsEqually(totalCents, count, baseDate, installmentRows[0]?.method ?? 'pix').map((row) => ({
-        dueDate: row.dueDate,
-        amountBrl: centsToInput(row.amountBrl),
-        method: row.method,
-      })),
+  function setInstallmentRow(index: number, patch: Partial<InstallmentRowForm>) {
+    setInstallmentRows((current) =>
+      current.map((row, rowIndex) => (rowIndex === index ? { ...row, ...patch } : row)),
     );
   }
 
-  function addInstallmentRow() {
-    setPlanAuto(false);
-    setInstallmentRows((current) => {
-      const last = current.at(-1);
-      return [
-        ...current,
-        { dueDate: addMonthsToIsoDate(last?.dueDate ?? baseDate, 1), amountBrl: '0', method: last?.method ?? 'pix' },
-      ];
-    });
+  /**
+   * A date or amount edit freezes the plan: the typed value is kept and no
+   * regeneration happens until the operator asks for one. A `Forma` edit deliberately
+   * does NOT come through here - it carries no arithmetic and is carried positionally
+   * through a regeneration, so blocking one over it would be pure friction.
+   */
+  function markPlanDirty() {
+    setPlanDirty(true);
+  }
+
+  /**
+   * Back to the formula, for both `Regerar plano` and the confirm bar's `Aplicar`.
+   * `appliedPlanKey` is cleared as well as the flag, because a row edit alone leaves
+   * the key untouched and the regeneration guard would otherwise find nothing to do.
+   */
+  function regeneratePlan() {
+    setPlanDirty(false);
+    setAppliedPlanKey('');
+  }
+
+  /** Keep the hand-edited rows and rewind the header to the formula that produced them. */
+  function keepEditedRows() {
+    const inputs = planShapeInputs(planShapeFromKey(appliedPlanKey) ?? planShape);
+    setEntradaMode(inputs.entradaMode);
+    setEntradaValueInput(inputs.entradaValueInput);
+    setRestanteCountInput(inputs.restanteCountInput);
+    setPlanAnchorDate(inputs.anchorDate);
+    setAppliedPlanKey(planShapeKey(totalCents, wizardPlanShape(inputs)));
   }
 
   function handleSellerChange(value: string) {
@@ -5319,14 +5540,15 @@ function SaleWizardDialogBody({
         amountBrl: parseCurrencyToCents(row.amountBrl),
         method: row.method,
       })),
-      recurring: recurringEnabled
-        ? {
-            monthlyBrl: parseCurrencyToCents(recurringMonthlyBrl),
-            startDate: recurringStartDate,
-            cycles: recurringIndefinite ? null : recurringCyclesCount,
-            method: recurringMethod,
-          }
-        : null,
+      recurring:
+        recurringMode === 'monthly'
+          ? {
+              monthlyBrl: parseCurrencyToCents(recurringMonthlyBrl),
+              startDate: recurringStartDate,
+              cycles: recurringIndefinite ? null : recurringCyclesCount,
+              method: recurringMethod,
+            }
+          : null,
       items: items.map((item) => {
         if (item.kind === 'free') {
           return {
@@ -5850,233 +6072,296 @@ function SaleWizardDialogBody({
                   <div className="rounded-[14px] border border-[#e8e8ec] bg-white p-4">
                     <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                       <div className="text-[13px] font-bold">Plano de pagamento</div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-[12.5px] font-semibold text-[#8b8b92]">Dividir em</span>
-                        <Input
-                          aria-label="Número de parcelas"
-                          className={`sales-ops-num h-9 w-16 rounded-[9px] text-center ${formInputClass}`}
-                          min={1}
-                          onChange={(event) => setSplitCount(event.target.value)}
-                          type="number"
-                          value={splitCount}
-                        />
-                        <span className="text-[12.5px] font-semibold text-[#8b8b92]">x</span>
+                      {planDirty ? (
                         <button
-                          className="rounded-[9px] border border-[#dcdce2] bg-white px-3 py-[7px] text-[12.5px] font-semibold text-[#9c7210] transition hover:bg-[#f2f2f4]"
-                          onClick={applySplit}
+                          className="text-[12.5px] font-semibold text-[#9c7210] underline-offset-2 transition hover:underline"
+                          onClick={regeneratePlan}
                           type="button"
                         >
-                          Dividir
-                        </button>
-                        <button
-                          className="rounded-[9px] bg-[#201f24] px-3 py-[7px] text-[12.5px] font-semibold text-white transition hover:bg-[#33333a]"
-                          onClick={addInstallmentRow}
-                          type="button"
-                        >
-                          + parcela
-                        </button>
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-[44px_minmax(0,1fr)_150px_150px_36px] gap-[9px] px-0.5 pb-[7px] text-[11px] font-bold uppercase tracking-[0.05em] text-[#9b9ba3]">
-                      <span>Nº</span>
-                      <span>Vencimento</span>
-                      <span className="text-right">Valor</span>
-                      <span>Forma</span>
-                      <span />
-                    </div>
-                    <div className="flex flex-col gap-2">
-                      {installmentRows.map((row, index) => {
-                        const dateValid = /^\d{4}-\d{2}-\d{2}$/.test(row.dueDate);
-                        const amountValid = parseCurrencyToCents(row.amountBrl) > 0;
-                        return (
-                          <div
-                            className="grid grid-cols-[44px_minmax(0,1fr)_150px_150px_36px] items-center gap-[9px]"
-                            key={index}
-                          >
-                            <div className="sales-ops-num text-[13px] font-semibold">{index + 1}</div>
-                            <Input
-                              aria-invalid={showPlanErrors && !dateValid}
-                              aria-label={`Vencimento da parcela ${index + 1}`}
-                              className={cn(
-                                'sales-ops-num h-10 rounded-[9px]',
-                                formInputClass,
-                                showPlanErrors && !dateValid && 'border-destructive',
-                              )}
-                              onChange={(event) => {
-                                const value = event.target.value;
-                                setPlanAuto(false);
-                                setInstallmentRows((current) =>
-                                  current.map((rowItem, rowIndex) =>
-                                    rowIndex === index ? { ...rowItem, dueDate: value } : rowItem,
-                                  ),
-                                );
-                              }}
-                              type="date"
-                              value={row.dueDate}
-                            />
-                            <Input
-                              aria-invalid={showPlanErrors && !amountValid}
-                              aria-label={`Valor da parcela ${index + 1}`}
-                              className={cn(
-                                'sales-ops-num h-10 rounded-[9px] text-right',
-                                formInputClass,
-                                showPlanErrors && !amountValid && 'border-destructive',
-                              )}
-                              onChange={(event) => {
-                                const value = event.target.value;
-                                setPlanAuto(false);
-                                setInstallmentRows((current) =>
-                                  current.map((rowItem, rowIndex) =>
-                                    rowIndex === index ? { ...rowItem, amountBrl: value } : rowItem,
-                                  ),
-                                );
-                              }}
-                              value={row.amountBrl}
-                            />
-                            <Combobox
-                              aria-label={`Forma de pagamento da parcela ${index + 1}`}
-                              className={formSelectClass}
-                              onChange={(value) => {
-                                setPlanAuto(false);
-                                setInstallmentRows((current) =>
-                                  current.map((rowItem, rowIndex) =>
-                                    rowIndex === index ? { ...rowItem, method: value as PaymentMethod } : rowItem,
-                                  ),
-                                );
-                              }}
-                              options={paymentMethodOptions}
-                              searchPlaceholder="Buscar forma..."
-                              value={row.method}
-                            />
-                            <button
-                              aria-label={`Remover parcela ${index + 1}`}
-                              className="flex h-8 w-8 items-center justify-center rounded-[8px] border border-[#f0dcd5] bg-[#fbeee9] text-[#b23a22] transition hover:bg-[#f6e0d9] disabled:cursor-not-allowed disabled:opacity-40"
-                              disabled={installmentRows.length === 1}
-                              onClick={() => {
-                                setPlanAuto(false);
-                                setInstallmentRows((current) =>
-                                  current.filter((_, rowIndex) => rowIndex !== index),
-                                );
-                              }}
-                              type="button"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                    <div className="mt-3 flex items-center justify-between border-t border-[#eeeef1] pt-3 text-[12.5px]">
-                      <span className="font-semibold text-[#8b8b92]">Soma das parcelas</span>
-                      <span
-                        className={`sales-ops-num font-bold ${planDeltaCents === 0 ? 'text-[#2f7d4b]' : 'text-[#b23a22]'}`}
-                      >
-                        {formatMoneyBrl(planSumCents)} / {formatMoneyBrl(totalCents)}
-                      </span>
-                    </div>
-                    {planDeltaCents !== 0 ? (
-                      <div className="mt-2 rounded-[10px] border border-[#f0dcd5] bg-[#fbeee9] px-3 py-2 text-[12.5px] font-semibold text-[#b23a22]">
-                        A soma das parcelas precisa ser igual ao total da proposta. Diferença:{' '}
-                        {formatMoneyBrl(Math.abs(planDeltaCents))}
-                      </div>
-                    ) : null}
-                  </div>
-
-                  <div className="rounded-[14px] border border-[#e8e8ec] bg-white p-4">
-                    <div className="mb-3 flex items-center justify-between">
-                      <div className="text-[13px] font-bold">Recorrência</div>
-                      {recurringEnabled ? (
-                        <button
-                          className="text-xs font-semibold text-[#b23a22]"
-                          onClick={() => setRecurringEnabled(false)}
-                          type="button"
-                        >
-                          remover
+                          Regerar plano
                         </button>
                       ) : null}
                     </div>
-                    {recurringEnabled ? (
-                      <>
-                        <div className="grid gap-3 md:grid-cols-3">
-                          <Field label="Mensalidade (R$)">
-                            <Input
-                              aria-label="Valor da mensalidade"
-                              className={`sales-ops-num text-right ${formInputClass}`}
-                              onChange={(event) => setRecurringMonthlyBrl(event.target.value)}
-                              value={recurringMonthlyBrl}
+
+                    {/*
+                      Declarative and always visible: nothing to toggle and no per-row add
+                      or remove affordance. "50% de entrada + o resto em 3x" is two
+                      controls, and the table below follows them as they are typed.
+                    */}
+                    <div className="grid gap-[9px] md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                      <FieldBlock label="Entrada">
+                        <div className="flex items-center gap-[9px]">
+                          <div className="w-[132px] flex-none">
+                            <Combobox
+                              aria-label="Tipo de entrada"
+                              className={formSelectClass}
+                              onChange={(value) => setEntradaMode(value as PaymentPlanEntradaMode)}
+                              options={entradaModeOptions}
+                              searchPlaceholder="Buscar tipo de entrada..."
+                              value={entradaMode}
                             />
-                          </Field>
-                          <Field label="Início">
-                            <Input
-                              aria-label="Início da recorrência"
-                              className={`sales-ops-num ${formInputClass}`}
-                              onChange={(event) => setRecurringStartDate(event.target.value)}
-                              type="date"
-                              value={recurringStartDate}
+                          </div>
+                          {entradaMode === 'none' ? null : (
+                            <UnitInput
+                              ariaLabel="Valor da entrada"
+                              onChange={setEntradaValueInput}
+                              unit={entradaMode === 'fix' ? 'R$' : '%'}
+                              value={entradaValueInput}
                             />
-                          </Field>
-                          <Field label="Nº de ciclos">
-                            <Input
-                              aria-label="Número de ciclos"
-                              className={`sales-ops-num ${formInputClass}`}
-                              disabled={recurringIndefinite}
-                              min={1}
-                              onChange={(event) => setRecurringCycles(event.target.value)}
-                              type="number"
-                              value={recurringCycles}
-                            />
-                          </Field>
+                          )}
                         </div>
-                        <button
-                          className="mt-[9px] flex items-center gap-2 text-[13px] text-[#57575f]"
-                          onClick={() => setRecurringIndefinite((current) => !current)}
-                          type="button"
+                        <div
+                          className={cn(
+                            'sales-ops-num text-right text-[12.5px] font-bold',
+                            entradaMode === 'none' ? 'text-[#9b9ba3]' : 'text-[#2f7d4b]',
+                          )}
                         >
-                          <span
-                            className={`flex h-[18px] w-[18px] items-center justify-center rounded-[5px] border ${
-                              recurringIndefinite
-                                ? 'border-[#eaa81a] bg-[#eaa81a]'
-                                : 'border-[#c9c3b4] bg-white'
-                            }`}
-                          >
-                            {recurringIndefinite ? <Check className="h-3 w-3 text-white" /> : null}
+                          {entradaMode === 'none' ? 'sem entrada' : formatMoneyBrl(entradaCents)}
+                        </div>
+                      </FieldBlock>
+
+                      <FieldBlock label="Restante">
+                        <div className="flex items-center gap-[9px]">
+                          <Input
+                            aria-label="Parcelas restantes"
+                            className={`sales-ops-num w-[72px] text-center ${formInputClass}`}
+                            max={maxRemainingInstallments(entradaMode)}
+                            min={1}
+                            onChange={(event) => setRestanteCountInput(event.target.value)}
+                            type="number"
+                            value={restanteCountInput}
+                          />
+                          <span className="text-[13px] font-bold text-[#9b9ba3]">x</span>
+                        </div>
+                        <div
+                          className={cn(
+                            'sales-ops-num text-right text-[12.5px] font-bold',
+                            restanteCents === 0 ? 'text-[#9b9ba3]' : 'text-[#2f7d4b]',
+                          )}
+                        >
+                          {restanteCents === 0
+                            ? 'entrada cobre o total'
+                            : `${restanteCount} x ${formatMoneyBrl(restanteBaseCents)}${
+                                restanteLastCents === restanteBaseCents
+                                  ? ''
+                                  : ` (última ${formatMoneyBrl(restanteLastCents)})`
+                              }`}
+                        </div>
+                      </FieldBlock>
+                    </div>
+
+                    <div className="mt-[14px]">
+                      <FieldBlock label="Recorrência">
+                        <div className="w-[132px]">
+                          <Combobox
+                            aria-label="Recorrência"
+                            className={formSelectClass}
+                            onChange={(value) => setRecurringMode(value as 'none' | 'monthly')}
+                            options={recurringModeOptions}
+                            searchPlaceholder="Buscar recorrência..."
+                            value={recurringMode}
+                          />
+                        </div>
+                      </FieldBlock>
+                      {recurringMode === 'monthly' ? (
+                        <>
+                          <div className="mt-[9px] grid gap-3 md:grid-cols-3">
+                            <Field label="Mensalidade (R$)">
+                              <Input
+                                aria-label="Valor da mensalidade"
+                                className={`sales-ops-num text-right ${formInputClass}`}
+                                onChange={(event) => setRecurringMonthlyBrl(event.target.value)}
+                                value={recurringMonthlyBrl}
+                              />
+                            </Field>
+                            <Field label="Início">
+                              <Input
+                                aria-label="Início da recorrência"
+                                className={`sales-ops-num ${formInputClass}`}
+                                onChange={(event) => setRecurringStartDate(event.target.value)}
+                                type="date"
+                                value={recurringStartDate}
+                              />
+                            </Field>
+                            <Field label="Nº de ciclos">
+                              <Input
+                                aria-label="Número de ciclos"
+                                className={`sales-ops-num ${formInputClass}`}
+                                max={MAX_PLAN_INSTALLMENTS}
+                                min={1}
+                                onChange={(event) => setRecurringCycles(event.target.value)}
+                                placeholder="Indeterminado"
+                                type="number"
+                                value={recurringCycles}
+                              />
+                            </Field>
+                          </div>
+                          <div className="mt-[9px] text-[11.5px] text-[#8b8b92]">
+                            Deixe em branco para prazo indeterminado
+                          </div>
+                          {showPlanErrors ? (
+                            <div className="mt-2 flex flex-col gap-1 text-[11.5px] font-semibold text-destructive">
+                              {recurringMonthlyCents <= 0 ? (
+                                <span>Informe uma mensalidade maior que zero.</span>
+                              ) : null}
+                              {recurringCyclesValid ? null : (
+                                <span>
+                                  Informe um número de ciclos válido ou deixe em branco para prazo
+                                  indeterminado.
+                                </span>
+                              )}
+                            </div>
+                          ) : null}
+                          {recurringMonthlyCents > 0 &&
+                          /^\d{4}-\d{2}-\d{2}$/.test(recurringStartDate) ? (
+                            <div className="mt-[14px] flex items-center gap-2.5 rounded-[11px] border border-[#cfe4cf] bg-[#e2efe2] px-[14px] py-[11px] text-[13px] font-semibold text-[#2f7d4b]">
+                              <RotateCcw className="h-4 w-4 flex-none" />
+                              Mensalidade de{' '}
+                              {formatMoneyBrl(recurringMonthlyCents, {
+                                maximumFractionDigits: 0,
+                              })}{' '}
+                              a partir de {displayDate(recurringStartDate)}
+                              {recurringIndefinite
+                                ? ', por prazo indeterminado'
+                                : `, por ${recurringCyclesCount} ciclos`}
+                            </div>
+                          ) : null}
+                          {recurringIndefinite ? (
+                            <div className="mt-2 text-[12px] font-semibold text-[#9b9ba3]">
+                              Sem parcelas futuras geradas agora - a mensalidade entra como receita
+                              recorrente (MRR).
+                            </div>
+                          ) : (
+                            <div className="mt-2 text-[12px] font-semibold text-[#9b9ba3]">
+                              {recurringCyclesCount} ciclos de{' '}
+                              {formatMoneyBrl(recurringMonthlyCents)}, de{' '}
+                              {displayDate(recurringStartDate)} a{' '}
+                              {displayDate(
+                                addMonthsToIsoDate(recurringStartDate, recurringCyclesCount - 1),
+                              )}
+                            </div>
+                          )}
+                        </>
+                      ) : null}
+                    </div>
+
+                    <div className="mt-4 border-t border-[#eeeef1] pt-3">
+                      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                        <div className="text-[12.5px] font-bold text-[#57575f]">
+                          Parcelas a receber
+                        </div>
+                        {planDirty ? (
+                          <div className="text-[12px] font-semibold text-[#9b9ba3]">
+                            Plano ajustado manualmente
+                          </div>
+                        ) : null}
+                      </div>
+                      {planPendingRegeneration ? (
+                        <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2 rounded-[10px] border border-[#f0dfae] bg-[#fdf0cf] px-3 py-2 text-[12.5px] font-semibold text-[#9c7210]">
+                          <span>
+                            Você ajustou as parcelas manualmente. Aplicar{' '}
+                            {entradaMode === 'none' ? '' : 'entrada + '}
+                            {restanteCount} x vai substituir as parcelas editadas.
                           </span>
-                          Prazo indeterminado
-                        </button>
-                        {showPlanErrors ? (
-                          <div className="mt-2 flex flex-col gap-1 text-[11.5px] font-semibold text-destructive">
-                            {recurringMonthlyCents <= 0 ? (
-                              <span>Informe uma mensalidade maior que zero.</span>
-                            ) : null}
-                            {!recurringIndefinite && Math.floor(Number(recurringCycles) || 0) < 1 ? (
-                              <span>Informe o número de ciclos ou marque prazo indeterminado.</span>
-                            ) : null}
-                          </div>
-                        ) : null}
-                        {recurringMonthlyCents > 0 && /^\d{4}-\d{2}-\d{2}$/.test(recurringStartDate) ? (
-                          <div className="mt-[14px] flex items-center gap-2.5 rounded-[11px] border border-[#cfe4cf] bg-[#e2efe2] px-[14px] py-[11px] text-[13px] font-semibold text-[#2f7d4b]">
-                            <RotateCcw className="h-4 w-4 flex-none" />
-                            Mensalidade de {formatMoneyBrl(recurringMonthlyCents, { maximumFractionDigits: 0 })} a
-                            partir de {displayDate(recurringStartDate)}
-                            {recurringIndefinite ? ', por prazo indeterminado' : `, por ${recurringCyclesCount} ciclos`}
-                          </div>
-                        ) : null}
-                        {recurringIndefinite ? (
-                          <div className="mt-2 text-[12px] font-semibold text-[#9b9ba3]">
-                            Sem parcelas futuras geradas agora - a mensalidade entra como receita recorrente (MRR).
-                          </div>
-                        ) : null}
-                      </>
-                    ) : (
-                      <button
-                        className="flex h-11 w-full items-center justify-center gap-2 rounded-[10px] border border-dashed border-[#d8cdb0] bg-[#fafafb] px-3 text-[13.5px] font-semibold text-[#9c7210] transition hover:bg-[#f4efe2]"
-                        onClick={() => setRecurringEnabled(true)}
-                        type="button"
-                      >
-                        <Plus className="h-[15px] w-[15px]" />
-                        Adicionar recorrência
-                      </button>
-                    )}
+                          <span className="flex items-center gap-2">
+                            <button
+                              className="rounded-[9px] bg-[#201f24] px-3 py-[7px] text-[12.5px] font-semibold text-white transition hover:bg-[#33333a]"
+                              onClick={regeneratePlan}
+                              type="button"
+                            >
+                              Aplicar
+                            </button>
+                            <button
+                              className="rounded-[9px] border border-[#dcdce2] bg-white px-3 py-[7px] text-[12.5px] font-semibold text-[#57575f] transition hover:bg-[#f2f2f4]"
+                              onClick={keepEditedRows}
+                              type="button"
+                            >
+                              Manter parcelas
+                            </button>
+                          </span>
+                        </div>
+                      ) : null}
+                      {/*
+                        Four columns, not five: `Restante em N x` owns the row count now, so a
+                        manual remove would desynchronise the header from the table.
+                      */}
+                      <div className="grid grid-cols-[44px_minmax(0,1fr)_150px_150px] gap-[9px] px-0.5 pb-[7px] text-[11px] font-bold uppercase tracking-[0.05em] text-[#9b9ba3]">
+                        <span>Nº</span>
+                        <span>Vencimento</span>
+                        <span className="text-right">Valor</span>
+                        <span>Forma</span>
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        {installmentRows.map((row, index) => {
+                          const dateValid = /^\d{4}-\d{2}-\d{2}$/.test(row.dueDate);
+                          const amountValid = parseCurrencyToCents(row.amountBrl) > 0;
+                          return (
+                            <div
+                              className="grid grid-cols-[44px_minmax(0,1fr)_150px_150px] items-center gap-[9px]"
+                              key={index}
+                            >
+                              <div className="sales-ops-num text-[13px] font-semibold">
+                                {index + 1}
+                              </div>
+                              <Input
+                                aria-invalid={showPlanErrors && !dateValid}
+                                aria-label={`Vencimento da parcela ${index + 1}`}
+                                className={cn(
+                                  'sales-ops-num h-10 rounded-[9px]',
+                                  formInputClass,
+                                  showPlanErrors && !dateValid && 'border-destructive',
+                                )}
+                                onChange={(event) => {
+                                  markPlanDirty();
+                                  setInstallmentRow(index, { dueDate: event.target.value });
+                                }}
+                                type="date"
+                                value={row.dueDate}
+                              />
+                              <Input
+                                aria-invalid={showPlanErrors && !amountValid}
+                                aria-label={`Valor da parcela ${index + 1}`}
+                                className={cn(
+                                  'sales-ops-num h-10 rounded-[9px] text-right',
+                                  formInputClass,
+                                  showPlanErrors && !amountValid && 'border-destructive',
+                                )}
+                                onChange={(event) => {
+                                  markPlanDirty();
+                                  setInstallmentRow(index, { amountBrl: event.target.value });
+                                }}
+                                value={row.amountBrl}
+                              />
+                              {/* No markPlanDirty: forma carries positionally through a regeneration. */}
+                              <Combobox
+                                aria-label={`Forma de pagamento da parcela ${index + 1}`}
+                                className={formSelectClass}
+                                onChange={(value) =>
+                                  setInstallmentRow(index, { method: value as PaymentMethod })
+                                }
+                                options={paymentMethodOptions}
+                                searchPlaceholder="Buscar forma..."
+                                value={row.method}
+                              />
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div className="mt-3 flex items-center justify-between border-t border-[#eeeef1] pt-3 text-[12.5px]">
+                        <span className="font-semibold text-[#8b8b92]">Soma das parcelas</span>
+                        <span
+                          className={`sales-ops-num font-bold ${planDeltaCents === 0 ? 'text-[#2f7d4b]' : 'text-[#b23a22]'}`}
+                        >
+                          {formatMoneyBrl(planSumCents)} / {formatMoneyBrl(totalCents)}
+                        </span>
+                      </div>
+                      {planDeltaCents !== 0 ? (
+                        <div className="mt-2 rounded-[10px] border border-[#f0dcd5] bg-[#fbeee9] px-3 py-2 text-[12.5px] font-semibold text-[#b23a22]">
+                          A soma das parcelas precisa ser igual ao total da proposta. Diferença:{' '}
+                          {formatMoneyBrl(Math.abs(planDeltaCents))}
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
                 </div>
               ) : null}
@@ -6331,7 +6616,7 @@ function SaleWizardDialogBody({
                             {installmentRows.length} parcela{installmentRows.length > 1 ? 's' : ''}
                           </span>
                         </div>
-                        {recurringEnabled ? (
+                        {recurringMode === 'monthly' ? (
                           <div className="flex justify-between gap-4">
                             <span className="text-[#8b8b92]">Recorrência</span>
                             <span className="font-semibold">

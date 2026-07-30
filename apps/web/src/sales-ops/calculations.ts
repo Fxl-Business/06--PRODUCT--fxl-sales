@@ -137,10 +137,29 @@ export function formatMoneyBrl(
     .replace(/\u00a0/g, ' ');
 }
 
+/**
+ * Adds whole months and CLAMPS to the last valid day of the target month, so
+ * `2026-01-31` plus one month is `2026-02-28` and not the native
+ * `Date.UTC(y, m + 1, 31)` rollover into March.
+ *
+ * This is character for character what the API's own `addMonths` in
+ * `apps/api/src/domains/sales-ops/service.ts` does. Before the clamp the two
+ * disagreed for every base day of 29-31, which meant the wizard previewed
+ * recurring due dates the API would never persist.
+ *
+ * Callers must pass an ABSOLUTE offset from one anchor rather than stepping one
+ * month at a time: `addMonthsToIsoDate('2026-01-31', 2)` is `2026-03-31`, while
+ * clamping twice in a row would drift to `2026-03-28`.
+ */
 export function addMonthsToIsoDate(value: string, months: number): string {
   const [year, month, day] = value.slice(0, 10).split('-').map(Number);
   if (!year || !month || !day) return value;
-  return new Date(Date.UTC(year, month - 1 + months, day)).toISOString().slice(0, 10);
+  const target = new Date(Date.UTC(year, month - 1 + months, 1));
+  const lastDay = new Date(
+    Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0),
+  ).getUTCDate();
+  target.setUTCDate(Math.min(day, lastDay));
+  return target.toISOString().slice(0, 10);
 }
 
 export function splitInstallmentsEqually(
@@ -160,6 +179,254 @@ export function splitInstallmentsEqually(
 
 export function installmentSumCents(rows: Array<{ amountBrl: string | number }>): number {
   return rows.reduce((sum, row) => sum + parseCurrencyInputToCents(row.amountBrl), 0);
+}
+
+/**
+ * `installments: max(120)` on the sale write endpoints counts the entrada row too,
+ * so this is the ceiling on the whole generated array and not on the restante alone.
+ */
+export const MAX_PLAN_INSTALLMENTS = 120;
+
+export type PaymentPlanEntradaMode = 'none' | 'pct' | 'fix';
+
+/**
+ * The declarative description of a payment plan: an optional entrada plus the
+ * restante split over N monthly parcelas, anchored on one date.
+ *
+ * It is a FORMULA, not the plan: `generateInstallmentPlan` turns it into the
+ * persisted `installments[]` rows and `inferPaymentPlanShape` reads it back out of
+ * them. The persisted shape is untouched by this vocabulary.
+ *
+ * `entradaMode` uses `fix` rather than `fixed` on purpose: those are the literals
+ * the produto cadastro already persists in `defaultEntradaMode` (CLAUDE.md), and one
+ * spelling across the whole app beats a translation layer between two.
+ */
+export type PaymentPlanShape = {
+  entradaMode: PaymentPlanEntradaMode;
+  /** Percent (0-100) when `pct`, integer CENTS when `fix`, ignored when `none`. */
+  entradaValue: number;
+  /** Parcelas the restante is split into, 1-120. The entrada row is not one of them. */
+  restanteCount: number;
+  /** yyyy-mm-dd. The due date of row 1, whether that row is the entrada or not. */
+  anchorDate: string;
+};
+
+function finiteOrZero(value: number): number {
+  return Number.isFinite(value) ? value : 0;
+}
+
+/**
+ * The entrada in integer cents, clamped into `[0, totalCents]`.
+ *
+ * A percentage is rounded half-up on integer cents rather than on reais, and a fixed
+ * entrada above the total is clamped down rather than rejected, so no cadastro
+ * default can make a small proposta unsavable. Both rules match the API's
+ * `materializeDefaultPaymentPlan`.
+ */
+export function entradaCentsFor(totalCents: number, shape: PaymentPlanShape): number {
+  const total = Math.max(0, Math.floor(finiteOrZero(totalCents)));
+  const value = finiteOrZero(shape.entradaValue);
+  const raw =
+    shape.entradaMode === 'pct'
+      ? Math.round((total * value) / 100)
+      : shape.entradaMode === 'fix'
+        ? Math.floor(value)
+        : 0;
+  return Math.min(Math.max(raw, 0), total);
+}
+
+function methodAt(methods: PaymentMethod[], index: number): PaymentMethod {
+  return methods[index] ?? methods.at(-1) ?? 'pix';
+}
+
+/**
+ * How many restante parcelas a plan may configure. The entrada row counts against
+ * the sale endpoints' `installments: max(120)`, so a plan with one gets 119 and a
+ * plan without gets the full 120.
+ *
+ * Keyed on the MODE rather than on the computed entrada cents, so the number the
+ * `Restante` input caps at does not jump around while the operator is still typing
+ * the entrada value.
+ */
+export function maxRemainingInstallments(entradaMode: PaymentPlanEntradaMode): number {
+  return entradaMode === 'none' ? MAX_PLAN_INSTALLMENTS : MAX_PLAN_INSTALLMENTS - 1;
+}
+
+export function restanteCountFor(shape: PaymentPlanShape): number {
+  const raw = Math.floor(finiteOrZero(shape.restanteCount));
+  return Math.max(1, Math.min(maxRemainingInstallments(shape.entradaMode), raw || 1));
+}
+
+/**
+ * Turns a `PaymentPlanShape` into the exact `installments[]` rows the proposta will
+ * persist.
+ *
+ * `sum(rows) === totalCents` holds for EVERY input, with no precondition on the
+ * caller: the restante split delegates to `splitInstallmentsEqually`, whose last row
+ * absorbs the whole floor remainder, and `restanteCountFor` caps the count low enough
+ * that the entrada row still fits under `MAX_PLAN_INSTALLMENTS`. The array is never
+ * truncated after the fact, because the row that would be dropped is precisely the
+ * one carrying the remainder.
+ *
+ * `methods` carries the operator's per-row `Forma` choices POSITIONALLY, because
+ * Forma is genuinely free per row and must survive a regeneration instead of
+ * blocking it. Row `i` keeps `methods[i]`, and the tail inherits the last known one.
+ */
+export function generateInstallmentPlan(
+  totalCents: number,
+  shape: PaymentPlanShape,
+  methods: PaymentMethod[],
+): Array<{ dueDate: string; amountBrl: number; method: PaymentMethod }> {
+  const total = Math.max(0, Math.floor(finiteOrZero(totalCents)));
+  const entradaCents = entradaCentsFor(total, shape);
+  const restanteCents = total - entradaCents;
+  const anchorDate = shape.anchorDate;
+  const rows: Array<{ dueDate: string; amountBrl: number }> = [];
+
+  if (entradaCents > 0) rows.push({ dueDate: anchorDate, amountBrl: entradaCents });
+  if (restanteCents > 0) {
+    const offset = entradaCents > 0 ? 1 : 0;
+    // The amounts come from splitInstallmentsEqually, but the dates are recomputed
+    // from the anchor with an absolute offset so month-end clamping cannot drift.
+    splitInstallmentsEqually(restanteCents, restanteCountFor(shape), anchorDate, 'pix').forEach(
+      (row, index) => {
+        rows.push({
+          dueDate: addMonthsToIsoDate(anchorDate, index + offset),
+          amountBrl: row.amountBrl,
+        });
+      },
+    );
+  }
+  // A 100 percent entrada must not leave a trailing 0-cent parcela, but the array
+  // still has to satisfy `installments: min(1)`.
+  if (rows.length === 0) rows.push({ dueDate: anchorDate, amountBrl: 0 });
+
+  return rows.map((row, index) => ({ ...row, method: methodAt(methods, index) }));
+}
+
+/**
+ * Reads a `PaymentPlanShape` back out of stored installment rows by
+ * REGENERATE-AND-COMPARE over three ordered candidates, never by bespoke pattern
+ * matching. A candidate wins only when it reproduces every stored `dueDate` and
+ * `amountBrl` exactly, which makes a false positive impossible.
+ *
+ * `method` is excluded from the comparison because it is free per row and carried
+ * positionally by the generator.
+ *
+ * `matchesFormula: false` means the rows are hand-tuned. The caller must then keep
+ * them verbatim and treat the returned shape as a best-effort DESCRIPTION of the
+ * table rather than as its source, so a false negative costs an extra "adjusted
+ * manually" line and never a rewritten schedule.
+ */
+export function inferPaymentPlanShape(
+  totalCents: number,
+  rows: Array<{ dueDate: string; amountBrl: number; method: PaymentMethod }>,
+  fallbackAnchorDate: string,
+): { shape: PaymentPlanShape; matchesFormula: boolean } {
+  const first = rows[0];
+  if (!first) {
+    return {
+      shape: {
+        entradaMode: 'none',
+        entradaValue: 0,
+        restanteCount: 1,
+        anchorDate: fallbackAnchorDate,
+      },
+      matchesFormula: true,
+    };
+  }
+
+  // The anchor comes from the rows, not from the proposta base date, so a plan whose
+  // first parcela is later than the proposal still infers cleanly.
+  const anchorDate = first.dueDate;
+  const count = rows.length;
+  const candidates: PaymentPlanShape[] = [
+    { entradaMode: 'none', entradaValue: 0, restanteCount: count, anchorDate },
+  ];
+
+  if (count >= 2) {
+    const entradaCents = first.amountBrl;
+    const pct = totalCents > 0 ? (entradaCents * 100) / totalCents : 0;
+    // "Clean" means an operator could have typed it: at most two decimals, and it has
+    // to reproduce the entrada to the cent. Otherwise `%` would show a rounded lie.
+    const cleanPct =
+      totalCents > 0 &&
+      Math.abs(pct * 100 - Math.round(pct * 100)) < 1e-9 &&
+      Math.round((totalCents * pct) / 100) === entradaCents;
+    if (cleanPct) {
+      candidates.push({
+        entradaMode: 'pct',
+        entradaValue: pct,
+        restanteCount: count - 1,
+        anchorDate,
+      });
+    }
+    // A fixed entrada always reproduces itself exactly, so it is the reliable
+    // fallback and `%` is only ever preferred when it is genuinely lossless.
+    candidates.push({
+      entradaMode: 'fix',
+      entradaValue: entradaCents,
+      restanteCount: count - 1,
+      anchorDate,
+    });
+  }
+
+  const methods = rows.map((row) => row.method);
+  for (const candidate of candidates) {
+    const generated = generateInstallmentPlan(totalCents, candidate, methods);
+    const matches =
+      generated.length === count &&
+      generated.every(
+        (row, index) =>
+          row.dueDate === rows[index]!.dueDate && row.amountBrl === rows[index]!.amountBrl,
+      );
+    if (matches) return { shape: candidate, matchesFormula: true };
+  }
+
+  return { shape: candidates.at(-1)!, matchesFormula: false };
+}
+
+/**
+ * The ONE seam between the produto cadastro's default payment plan and the proposta
+ * wizard's builder. The cadastro persists the template as six flat columns
+ * (CLAUDE.md); three of them describe the shape, and this is where they are read.
+ *
+ * `defaultEntradaMode: 'none'` plus `defaultRemainingInstallments: 1` IS the app
+ * default and reproduces a single cash parcela, so a product with no stored template
+ * and a product with the default one behave identically.
+ *
+ * `defaultPaymentMethod` and `defaultRecurringCycles` are deliberately NOT read
+ * here: neither is part of the shape, and per-proposta overrides of the remaining
+ * defaults are their own slice.
+ */
+export function defaultPlanShapeForProduct(
+  product:
+    | Pick<
+        SalesOpsProduct,
+        | 'defaultEntradaMode'
+        | 'defaultEntradaPct'
+        | 'defaultEntradaBrl'
+        | 'defaultRemainingInstallments'
+      >
+    | undefined,
+  baseDate: string,
+): PaymentPlanShape {
+  const entradaMode = product?.defaultEntradaMode ?? 'none';
+  const entradaValue =
+    entradaMode === 'pct'
+      ? Math.max(0, toNumber(product?.defaultEntradaPct ?? undefined, 0))
+      : entradaMode === 'fix'
+        ? Math.max(0, Math.floor(product?.defaultEntradaBrl ?? 0))
+        : 0;
+  return {
+    entradaMode,
+    entradaValue,
+    restanteCount: Math.max(
+      1,
+      Math.min(MAX_PLAN_INSTALLMENTS, Math.floor(product?.defaultRemainingInstallments ?? 1) || 1),
+    ),
+    anchorDate: baseDate,
+  };
 }
 
 export function buildSalePayload(draft: SaleDraft): CreateSalePayload {

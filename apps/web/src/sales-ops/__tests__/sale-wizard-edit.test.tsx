@@ -329,6 +329,27 @@ async function changeInput(input: HTMLInputElement, value: string) {
   });
 }
 
+/**
+ * A schedule no entrada-plus-restante formula can produce: an uneven first parcela AND
+ * a third one four months out. It is the fixture for the hand-edited branch, and the
+ * itens total of 300000 still matches it exactly so `planValid` holds.
+ */
+const handEditedReceivables: SalesOpsBootstrap['receivables'] = [
+  { id: 'rec-1', saleId, label: '1/3', dueDate: '2026-07-10', amountBrl: 200000, method: 'pix', status: 'open' },
+  { id: 'rec-2', saleId, label: '2/3', dueDate: '2026-08-10', amountBrl: 50000, method: 'boleto', status: 'open' },
+  { id: 'rec-3', saleId, label: '3/3', dueDate: '2026-11-30', amountBrl: 50000, method: 'boleto', status: 'open' },
+  { id: 'rec-4', saleId, label: 'M1/2', dueDate: '2026-08-10', amountBrl: 100000, method: 'boleto', status: 'open' },
+  { id: 'rec-5', saleId, label: 'M2/2', dueDate: '2026-09-10', amountBrl: 100000, method: 'boleto', status: 'open' },
+];
+
+function handEditedRowValues(): Array<[string, string]> {
+  const count = container.querySelectorAll('input[aria-label^="Valor da parcela "]').length;
+  return Array.from({ length: count }, (_, index) => [
+    labeledInput(`Vencimento da parcela ${index + 1}`).value,
+    labeledInput(`Valor da parcela ${index + 1}`).value,
+  ]);
+}
+
 describe('sale wizard edit path', () => {
   it('prefills every step from the existing proposta', async () => {
     expect(container.textContent).toContain('Editar proposta');
@@ -342,6 +363,16 @@ describe('sale wizard edit path', () => {
     expect(labeledInput('Valor da parcela 1').value).toBe('1500');
     expect(labeledInput('Valor da parcela 2').value).toBe('1500');
     expect(comboboxText('Forma de pagamento da parcela 2')).toBe('Boleto');
+    /*
+      The two stored receivables are an even 2x split of the 3000,00 itens total, so
+      the builder reads them back as `nenhuma + 2 x` and says so in the header. The
+      absence of the adjusted-manually line is what proves the inference succeeded
+      rather than falling through to the hand-edited branch.
+    */
+    expect(comboboxText('Tipo de entrada')).toBe('nenhuma');
+    expect(labeledInput('Parcelas restantes').value).toBe('2');
+    expect(container.textContent).not.toContain('Plano ajustado manualmente');
+    expect(comboboxText('Recorrência')).toBe('mensal');
     expect(labeledInput('Valor da mensalidade').value).toBe('1000');
     expect(labeledInput('Número de ciclos').value).toBe('2');
 
@@ -393,19 +424,122 @@ describe('sale wizard edit path', () => {
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ status: 'draft' }));
   });
 
-  it('keeps the prefilled plan when the total changes mid-edit', async () => {
+  /*
+    This test inverts the old `keeps the prefilled plan when the total changes mid-edit`
+    deliberately. That plan is an even 2x split, so the builder proved it matches a
+    formula; regenerating it live is exactly the "more automatic" behaviour that was
+    asked for, and leaving the operator with a red mismatch warning they did not cause
+    is not. The old intent - a plan that must NOT be rewritten - moves to
+    `keeps a hand-edited plan when the total changes mid-edit` below, where the rows
+    really are human-authored.
+  */
+  it('regenerates a formula plan when the total changes mid-edit', async () => {
     await changeInput(labeledInput('Quantidade do item 1'), '2');
     await click(buttonByText('Avançar'));
 
     expect(container.textContent).toContain('Plano de pagamento');
-    expect(labeledInput('Valor da parcela 1').value).toBe('1500');
-    expect(labeledInput('Valor da parcela 2').value).toBe('1500');
+    expect(labeledInput('Valor da parcela 1').value).toBe('2750');
+    expect(labeledInput('Valor da parcela 2').value).toBe('2750');
+    expect(container.textContent).toContain('R$ 5.500,00 / R$ 5.500,00');
+    expect(container.textContent).not.toContain(
+      'A soma das parcelas precisa ser igual ao total da proposta.',
+    );
+    expect(container.textContent).not.toContain('Plano ajustado manualmente');
+
+    await click(buttonByText('Avançar'));
+    expect(container.textContent).toContain('Profissionais alocados');
+  });
+
+  it('keeps a hand-edited plan when the total changes mid-edit', async () => {
+    await act(async () => root.unmount());
+    container.remove();
+    await renderWizard(editSale, bootstrap({ receivables: handEditedReceivables }));
+
+    await click(buttonByText('Avançar'));
+    // No formula produces 2000 / 500 / 500 with a 2026-11-30 third parcela, so the
+    // plan opens frozen.
+    expect(container.textContent).toContain('Plano ajustado manualmente');
+    expect(container.textContent).not.toContain('vai substituir as parcelas editadas');
+    expect(handEditedRowValues()).toEqual([
+      ['2026-07-10', '2000'],
+      ['2026-08-10', '500'],
+      ['2026-11-30', '500'],
+    ]);
+
+    await click(buttonByText('Voltar'));
+    await changeInput(labeledInput('Quantidade do item 1'), '2');
+    await click(buttonByText('Avançar'));
+
+    // Byte-identical to the stored rows, and it is the mismatch that blocks Avançar.
+    expect(handEditedRowValues()).toEqual([
+      ['2026-07-10', '2000'],
+      ['2026-08-10', '500'],
+      ['2026-11-30', '500'],
+    ]);
     expect(container.textContent).toContain(
       'A soma das parcelas precisa ser igual ao total da proposta.',
     );
+    await click(buttonByText('Avançar'));
+    expect(container.textContent).not.toContain('Profissionais alocados');
+  });
+
+  it('round-trips a hand-edited plan through save without rewriting it', async () => {
+    await act(async () => root.unmount());
+    container.remove();
+    await renderWizard(editSale, bootstrap({ receivables: handEditedReceivables }));
+
+    // The itens are left alone, so the hand-edited rows already sum to the total.
+    await click(buttonByText('Avançar'));
+    expect(container.textContent).not.toContain(
+      'A soma das parcelas precisa ser igual ao total da proposta.',
+    );
+    await click(buttonByText('Avançar'));
+    await click(buttonByText('Avançar'));
+    await click(buttonByText('Salvar proposta'));
+
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        installments: [
+          { dueDate: '2026-07-10', amountBrl: 200000, method: 'pix' },
+          { dueDate: '2026-08-10', amountBrl: 50000, method: 'boleto' },
+          // The date no formula would ever generate, persisted untouched.
+          { dueDate: '2026-11-30', amountBrl: 50000, method: 'boleto' },
+        ],
+      }),
+    );
+  });
+
+  it('prefills a blank ciclos field for an indefinite recorrencia', async () => {
+    await act(async () => root.unmount());
+    container.remove();
+    // `recurringBrl > 0` with zero `M`-labelled receivables IS `cycles: null`.
+    await renderWizard(
+      editSale,
+      bootstrap({
+        receivables: [
+          { id: 'rec-1', saleId, label: '1/2', dueDate: '2026-07-10', amountBrl: 150000, method: 'pix', status: 'open' },
+          { id: 'rec-2', saleId, label: '2/2', dueDate: '2026-08-10', amountBrl: 150000, method: 'pix', status: 'open' },
+        ],
+      }),
+    );
 
     await click(buttonByText('Avançar'));
-    expect(container.textContent).toContain('Plano de pagamento');
-    expect(container.textContent).not.toContain('Profissionais alocados');
+    expect(comboboxText('Recorrência')).toBe('mensal');
+    expect(labeledInput('Número de ciclos').value).toBe('');
+    expect(labeledInput('Valor da mensalidade').value).toBe('1000');
+    expect(container.textContent).toContain(
+      'Sem parcelas futuras geradas agora - a mensalidade entra como receita recorrente (MRR).',
+    );
+    expect(container.textContent).toContain(', por prazo indeterminado');
+
+    await click(buttonByText('Avançar'));
+    await click(buttonByText('Avançar'));
+    await click(buttonByText('Salvar proposta'));
+
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recurring: { monthlyBrl: 100000, startDate: '2026-08-10', cycles: null, method: 'pix' },
+      }),
+    );
   });
 });
