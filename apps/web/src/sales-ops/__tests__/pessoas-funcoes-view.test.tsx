@@ -95,6 +95,7 @@ function bootstrap(patch: Partial<SalesOpsBootstrap> = {}): SalesOpsBootstrap {
     payables: [],
     saleItems: [],
     receivables: [],
+    productFuncaoCosts: [],
     saleProfessionals: [],
     settings: null,
     ...patch,

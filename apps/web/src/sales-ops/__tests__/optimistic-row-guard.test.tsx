@@ -121,6 +121,7 @@ function snapshot(patch: Partial<SalesOpsBootstrap> = {}): SalesOpsBootstrap {
     payables: [],
     saleItems: [],
     receivables: [],
+    productFuncaoCosts: [],
     saleProfessionals: [],
     settings: null,
     ...patch,
@@ -175,7 +176,6 @@ const persistedProduct: SalesOpsProduct = {
   id: '13131313-1313-4131-8131-131313131313',
   orgId,
   name: 'FXL Produto Novo',
-  type: '',
   codeSuffix: '0',
   areaId,
   openPrice: false,
@@ -538,8 +538,12 @@ describe('an unsaved row is never offered to a picker', () => {
 
     await click(buttonByText('Cancelar'));
 
-    const produtosNav = container.querySelector('nav button[aria-label="Produtos"]');
-    if (!(produtosNav instanceof HTMLButtonElement)) throw new Error('nav Produtos not found');
+    const produtosNav = container.querySelector(
+      'nav button[aria-label="Produtos & Serviços"]',
+    );
+    if (!(produtosNav instanceof HTMLButtonElement)) {
+      throw new Error('nav Produtos & Serviços not found');
+    }
     await click(produtosNav);
 
     // The create POST is still in flight, so the optimistic área is still cached.
@@ -570,72 +574,54 @@ describe('an unsaved row is never offered to a picker', () => {
 });
 
 /**
- * The produto Prestador field stores a NAME SNAPSHOT rather than a person id, so an
- * inactive pessoa who already provides a produto has to stay selectable. This pins
- * the pool the app hands `ProductDialog`, which is a wiring contract no
- * ProductDialog-level test can see. It exists because the funções rework briefly
- * narrowed this pool to active pessoas only.
+ * A produto default cost now keys on a FUNÇÃO rather than a free-text person name, so
+ * the pool the app hands `ProductDialog` is `bootstrap.funcoes`, not a filtered slice
+ * of `people`. This pins that wiring contract, which no ProductDialog-level test can
+ * see, and replaces the old prestador-pool test whose editor this screen removed.
  */
-describe('the produto prestador pool', () => {
-  const inactivePrestador: SalesOpsPerson = {
-    id: '18181818-1818-4181-8181-181818181818',
-    orgId,
-    displayName: 'Prestadora Inativa',
-    contactEmail: null,
-    status: 'inactive',
-    funcaoIds: [funcaoPrestador.id],
-    funcoes: [funcaoPrestador],
-    createdAt: '2026-07-29T12:00:00.000Z',
-    updatedAt: null,
-  };
-  const activeSeller: SalesOpsPerson = {
-    id: '19191919-1919-4191-8191-191919191919',
-    orgId,
-    displayName: 'Vendedor Ativo',
-    contactEmail: null,
-    status: 'active',
-    funcaoIds: [funcaoVendedor.id],
-    funcoes: [funcaoVendedor],
-    createdAt: '2026-07-29T12:00:00.000Z',
-    updatedAt: null,
+describe('the produto função cost pool', () => {
+  const funcaoArquivada: SalesOpsFuncao = {
+    ...funcaoPrestador,
+    id: 'fc000004-0000-4000-8000-000000000004',
+    name: 'Função Arquivada',
+    slug: 'funcao-arquivada',
+    status: 'archived',
   };
 
-  it('offers an inactive pessoa carrying a custom função, and never a vendedor', async () => {
+  it('offers the org custom funções, and never a system função or an archived one', async () => {
     await renderApp('/cadastros/produtos');
     await resolveBootstrap(
       0,
       snapshot({
         areas: [existingArea],
-        funcoes: [funcaoVendedor, funcaoPrestador],
-        people: [inactivePrestador, activeSeller, persistedPerson],
+        funcoes: [funcaoVendedor, funcaoPrestador, funcaoArquivada],
+        people: [persistedPerson],
       }),
     );
 
     await click(buttonByText('Novo produto'));
 
-    const addProvider = [...container.querySelectorAll('button')].find(
+    const addCost = [...container.querySelectorAll('button')].find(
       (candidate) =>
         candidate.textContent?.trim() === 'Adicionar' &&
-        candidate
-          .closest('div.border-t')
-          ?.textContent?.includes('Prestadores de serviço'),
+        candidate.closest('div.border-t')?.textContent?.includes('Custos padrão por função'),
     );
-    if (!(addProvider instanceof HTMLButtonElement)) {
-      throw new Error('Adicionar prestador button not found');
+    if (!(addCost instanceof HTMLButtonElement)) {
+      throw new Error('Adicionar custo padrão button not found');
     }
-    await click(addProvider);
+    await click(addCost);
 
-    await click(comboboxTrigger('Prestador 1'));
+    await click(comboboxTrigger('Função do custo padrão 1'));
     const offered = [...container.querySelectorAll<HTMLElement>('[role="option"]')].map((row) =>
       row.textContent?.trim(),
     );
 
-    // The inactive prestadora is offered: status is not part of who is a prestador.
-    expect(offered).toContain('Prestadora Inativa');
-    // Positive control: an active pessoa carrying a custom função is offered too, so a
-    // pool that had collapsed to empty could not pass this test.
-    expect(offered).toContain(persistedPerson.displayName);
-    // Negative with the control above: carrying only a system função is not enough.
-    expect(offered).not.toContain('Vendedor Ativo');
+    // Positive control: the org's custom função really does reach the picker, so a pool
+    // that had collapsed to empty could not pass this test.
+    expect(offered).toContain('Prestador');
+    // A vendedor is already paid by the Comissionamento padrão block; offering it here
+    // would create two competing ways to pay the same role.
+    expect(offered).not.toContain('Vendedor');
+    expect(offered).not.toContain('Função Arquivada');
   });
 });

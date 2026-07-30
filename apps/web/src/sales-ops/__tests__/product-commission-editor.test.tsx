@@ -41,7 +41,6 @@ const product = (patch: Partial<SalesOpsProduct> = {}): SalesOpsProduct => ({
   id: '11111111-1111-4111-8111-111111111111',
   orgId: 'org-test',
   name: 'FXL Finance',
-  type: 'SaaS',
   codeSuffix: '7',
   areaId: areaFixture.id,
   openPrice: false,
@@ -86,7 +85,8 @@ async function renderDialog(existing?: SalesOpsProduct, onSave = vi.fn()) {
     root.render(
       <ProductDialog
         areas={[areaFixture]}
-        collaborators={[]}
+        funcaoCosts={[]}
+        funcoes={[]}
         modal={{ kind: 'product', product: existing }}
         onClose={vi.fn()}
         onSave={onSave}
@@ -233,7 +233,8 @@ describe('product commission editor', () => {
       root.render(
         <ProductDialog
           areas={[areaFixture]}
-          collaborators={[]}
+          funcaoCosts={[]}
+          funcoes={[]}
           modal={{
             kind: 'product',
             product: product({
@@ -270,7 +271,11 @@ describe('product commission editor', () => {
       root.render(
         <ProductsView
           areas={[areaFixture]}
+          funcaoCosts={[]}
+          funcoes={[]}
+          kind="product"
           onEdit={vi.fn()}
+          onKindChange={vi.fn()}
           products={[
             product(),
             product({

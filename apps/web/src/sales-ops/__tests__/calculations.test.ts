@@ -87,6 +87,7 @@ describe('sales operations web calculations', () => {
       payables: [],
       saleItems: [],
       receivables: [],
+      productFuncaoCosts: [],
       saleProfessionals: [],
       settings: null,
     };
@@ -121,6 +122,7 @@ describe('sales operations web calculations', () => {
       payables: [],
       saleItems: [],
       receivables: [],
+      productFuncaoCosts: [],
       saleProfessionals: [],
       settings: null,
     };

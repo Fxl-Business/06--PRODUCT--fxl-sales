@@ -63,7 +63,6 @@ function product(
     id,
     orgId: 'org-test',
     name,
-    type: 'SaaS',
     codeSuffix: id.endsWith('1') ? '1' : '2',
     areaId,
     openPrice: false,
@@ -140,6 +139,7 @@ const bootstrap: SalesOpsBootstrap = {
   payables: [],
   saleItems: [],
   receivables: [],
+  productFuncaoCosts: [],
   saleProfessionals: [],
   settings: {
     orgId: 'org-test',

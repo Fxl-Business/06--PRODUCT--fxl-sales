@@ -42,6 +42,7 @@ function selectSalesOpsBootstrap(data: SalesOpsBootstrap): SalesOpsBootstrap {
   return {
     sales: Array.isArray(data.sales) ? data.sales : [],
     products: Array.isArray(data.products) ? data.products : [],
+    productFuncaoCosts: Array.isArray(data.productFuncaoCosts) ? data.productFuncaoCosts : [],
     clients: Array.isArray(data.clients) ? data.clients : [],
     areas: Array.isArray(data.areas) ? data.areas : [],
     funcoes: Array.isArray(data.funcoes) ? data.funcoes : [],

@@ -101,7 +101,6 @@ function bootstrap(patch: Partial<SalesOpsBootstrap> = {}): SalesOpsBootstrap {
         id: productId,
         orgId: 'org-test',
         name: 'FXL Finance',
-        type: 'SaaS',
         codeSuffix: 'FIN',
         areaId: areaOneId,
         openPrice: false,
@@ -206,6 +205,7 @@ function bootstrap(patch: Partial<SalesOpsBootstrap> = {}): SalesOpsBootstrap {
       { id: 'rec-3', saleId, label: 'M1/2', dueDate: '2026-08-10', amountBrl: 100000, method: 'boleto', status: 'open' },
       { id: 'rec-4', saleId, label: 'M2/2', dueDate: '2026-09-10', amountBrl: 100000, method: 'boleto', status: 'open' },
     ],
+    productFuncaoCosts: [],
     saleProfessionals: [
       { saleId, personId: null, personNameSnapshot: 'Dev Externo', role: 'Operacional', costBrl: 50000 },
     ],

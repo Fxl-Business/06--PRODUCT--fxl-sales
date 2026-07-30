@@ -1,0 +1,878 @@
+// @vitest-environment happy-dom
+
+import * as React from 'react';
+import type { HTMLAttributes } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type {
+  SalesOpsArea,
+  SalesOpsFuncao,
+  SalesOpsProduct,
+  SalesOpsProductFuncaoCost,
+  SalesOpsProductKind,
+} from '../types';
+
+vi.mock('@/components/ui/dialog', () => ({
+  Dialog: ({ children }: HTMLAttributes<HTMLDivElement>) => <div>{children}</div>,
+  DialogContent: ({ children, className }: HTMLAttributes<HTMLDivElement>) => (
+    <div className={className}>{children}</div>
+  ),
+  DialogDescription: ({ children, ...props }: HTMLAttributes<HTMLParagraphElement>) => (
+    <p {...props}>{children}</p>
+  ),
+  DialogHeader: ({ children, ...props }: HTMLAttributes<HTMLDivElement>) => (
+    <div {...props}>{children}</div>
+  ),
+  DialogTitle: ({ children, ...props }: HTMLAttributes<HTMLHeadingElement>) => (
+    <h2 {...props}>{children}</h2>
+  ),
+}));
+
+import { ProductDialog } from '../SalesOpsApp';
+
+const act = (
+  React as typeof React & { act: typeof import('react-dom/test-utils').act }
+).act;
+
+const areaFixture: SalesOpsArea = {
+  id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  orgId: 'org-test',
+  name: 'FXL Tech',
+  status: 'active',
+  createdAt: '2026-07-29T12:00:00.000Z',
+  updatedAt: null,
+};
+
+const product = (patch: Partial<SalesOpsProduct> = {}): SalesOpsProduct => ({
+  id: '11111111-1111-4111-8111-111111111111',
+  orgId: 'org-test',
+  name: 'FXL Finance',
+  kind: 'product',
+  codeSuffix: '7',
+  areaId: areaFixture.id,
+  openPrice: false,
+  setupBrl: 100000,
+  hasMonthly: false,
+  monthlyBrl: 0,
+  recurringCommission: false,
+  hasFinderCommission: false,
+  sellerCommissionType: 'pct',
+  sellerCommissionValue: '10.00',
+  sellerWithFinderCommissionType: 'pct',
+  sellerWithFinderCommissionValue: '7.00',
+  finderCommissionType: 'pct',
+  finderCommissionValue: '3.00',
+  defaultPaymentMethod: 'pix',
+  defaultEntradaMode: 'none',
+  defaultEntradaPct: null,
+  defaultEntradaBrl: null,
+  defaultRemainingInstallments: 1,
+  defaultRecurringCycles: null,
+  modules: [],
+  providers: [],
+  status: 'active',
+  createdAt: '2026-07-13T12:00:00.000Z',
+  updatedAt: null,
+  ...patch,
+});
+
+const funcao = (patch: Partial<SalesOpsFuncao> = {}): SalesOpsFuncao => ({
+  id: 'ffffffff-ffff-4fff-8fff-ffffffffff01',
+  orgId: 'org-test',
+  name: 'Desenvolvedor',
+  slug: 'desenvolvedor',
+  isSystem: false,
+  status: 'active',
+  createdAt: '2026-07-29T12:00:00.000Z',
+  updatedAt: null,
+  ...patch,
+});
+
+const devFuncao = funcao();
+const testerFuncao = funcao({
+  id: 'ffffffff-ffff-4fff-8fff-ffffffffff02',
+  name: 'Testador',
+  slug: 'testador',
+});
+const vendedorFuncao = funcao({
+  id: 'ffffffff-ffff-4fff-8fff-ffffffffff03',
+  name: 'Vendedor',
+  slug: 'vendedor',
+  isSystem: true,
+});
+const archivedFuncao = funcao({
+  id: 'ffffffff-ffff-4fff-8fff-ffffffffff05',
+  name: 'Redator',
+  slug: 'redator',
+  status: 'archived',
+});
+
+const funcaoCost = (
+  patch: Partial<SalesOpsProductFuncaoCost> = {},
+): SalesOpsProductFuncaoCost => ({
+  id: 'cccccccc-cccc-4ccc-8ccc-cccccccccc01',
+  orgId: 'org-test',
+  productId: product().id,
+  funcaoId: devFuncao.id,
+  mode: 'pct',
+  valuePct: '5.00',
+  valueBrl: null,
+  createdAt: '2026-07-29T12:00:00.000Z',
+  updatedAt: null,
+  ...patch,
+});
+
+let container: HTMLDivElement;
+let root: Root;
+
+beforeEach(() => {
+  (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean })
+    .IS_REACT_ACT_ENVIRONMENT = true;
+  container = document.createElement('div');
+  document.body.append(container);
+  root = createRoot(container);
+});
+
+afterEach(async () => {
+  await act(async () => root.unmount());
+  container.remove();
+  vi.restoreAllMocks();
+});
+
+type RenderOptions = {
+  existing?: SalesOpsProduct;
+  productKind?: SalesOpsProductKind;
+  funcoes?: SalesOpsFuncao[];
+  funcaoCosts?: SalesOpsProductFuncaoCost[];
+  onSave?: ReturnType<typeof vi.fn>;
+};
+
+async function renderDialog(options: RenderOptions = {}) {
+  const onSave = options.onSave ?? vi.fn();
+  await act(async () => {
+    root.render(
+      <ProductDialog
+        areas={[areaFixture]}
+        funcaoCosts={options.funcaoCosts ?? []}
+        funcoes={options.funcoes ?? [devFuncao, testerFuncao]}
+        modal={{
+          kind: 'product',
+          product: options.existing,
+          productKind: options.productKind,
+        }}
+        onClose={vi.fn()}
+        onSave={onSave}
+        saving={false}
+      />,
+    );
+  });
+  return onSave;
+}
+
+function text(): string {
+  return container.textContent ?? '';
+}
+
+function button(label: string): HTMLButtonElement {
+  const match = [...container.querySelectorAll('button')].find(
+    (candidate) => candidate.textContent?.trim() === label,
+  );
+  if (!(match instanceof HTMLButtonElement)) throw new Error(`button not found: ${label}`);
+  return match;
+}
+
+function maybeButton(label: string): HTMLButtonElement | undefined {
+  return [...container.querySelectorAll('button')].find(
+    (candidate) => candidate.textContent?.trim() === label,
+  );
+}
+
+function labeledInput(label: string): HTMLInputElement {
+  const match = container.querySelector(`input[aria-label="${label}"]`);
+  if (!(match instanceof HTMLInputElement)) throw new Error(`input not found: ${label}`);
+  return match;
+}
+
+function labeledButton(label: string): HTMLButtonElement {
+  const match = container.querySelector(`button[aria-label="${label}"]`);
+  if (!(match instanceof HTMLButtonElement)) throw new Error(`button not found: ${label}`);
+  return match;
+}
+
+async function click(element: Element) {
+  await act(async () => {
+    element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  });
+}
+
+async function change(input: HTMLInputElement, value: string) {
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+    setter?.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
+async function submit() {
+  const form = container.querySelector('form');
+  if (!(form instanceof HTMLFormElement)) throw new Error('form not found');
+  await act(async () =>
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })),
+  );
+}
+
+function comboboxTrigger(ariaLabel: string): HTMLButtonElement {
+  const match = container.querySelector(`button[role="combobox"][aria-label="${ariaLabel}"]`);
+  if (!(match instanceof HTMLButtonElement)) throw new Error(`combobox not found: ${ariaLabel}`);
+  return match;
+}
+
+function comboboxText(ariaLabel: string): string {
+  return comboboxTrigger(ariaLabel).textContent?.trim() ?? '';
+}
+
+/** Open the picker, read the labels it is offering, then close it again. */
+async function comboboxOptions(ariaLabel: string): Promise<string[]> {
+  await click(comboboxTrigger(ariaLabel));
+  const rows = [...container.querySelectorAll('[role="option"]')].map(
+    (row) => row.textContent?.trim() ?? '',
+  );
+  await click(comboboxTrigger(ariaLabel));
+  return rows;
+}
+
+async function pickOption(ariaLabel: string, optionLabel: string) {
+  await click(comboboxTrigger(ariaLabel));
+  const row = [...container.querySelectorAll('[role="option"]')].find(
+    (candidate) => candidate.textContent?.trim() === optionLabel,
+  );
+  if (!(row instanceof HTMLElement)) throw new Error(`option not found: ${optionLabel}`);
+  await click(row);
+}
+
+async function chooseArea() {
+  await pickOption('Área do produto', areaFixture.name);
+  expect(comboboxText('Área do produto')).toBe(areaFixture.name);
+}
+
+/** The `Adicionar` button of one `DialogSection`, found through its section title. */
+function addButtonOf(sectionTitle: string): HTMLButtonElement {
+  const match = [...container.querySelectorAll('button')].find(
+    (candidate) =>
+      candidate.textContent?.trim() === 'Adicionar' &&
+      candidate.closest('div.border-t')?.textContent?.includes(sectionTitle),
+  );
+  if (!(match instanceof HTMLButtonElement)) {
+    throw new Error(`Adicionar button not found for section: ${sectionTitle}`);
+  }
+  return match;
+}
+
+const COSTS_SECTION = 'Custos padrão por função';
+
+async function addCostRow(index: number, funcaoName: string, unit: '%' | 'R$', value: string) {
+  await click(addButtonOf(COSTS_SECTION));
+  await pickOption(`Função do custo padrão ${index}`, funcaoName);
+  await click(
+    labeledButton(
+      `Custo da função ${index} em ${unit === '%' ? 'porcentagem' : 'reais'}`,
+    ),
+  );
+  await change(labeledInput(`Custo da função ${index}`), value);
+}
+
+describe('product and service dialog', () => {
+  it('titles and describes the dialog from the selected kind', async () => {
+    await renderDialog({ productKind: 'service' });
+
+    expect(container.querySelector('h2')?.textContent?.trim()).toBe('Novo serviço');
+    expect(text()).toContain('custos por função');
+
+    await click(labeledButton('Classificar como produto'));
+    expect(container.querySelector('h2')?.textContent?.trim()).toBe('Novo produto');
+    expect(text()).toContain('Catálogo, valores e comissões padrão');
+  });
+
+  it('titles an existing record from its stored kind', async () => {
+    // Distinct ids so the dialog's remount key really changes between the two renders.
+    await renderDialog({
+      existing: product({
+        id: '99999999-9999-4999-8999-999999999999',
+        kind: 'service',
+        openPrice: true,
+        setupBrl: 0,
+      }),
+    });
+    expect(container.querySelector('h2')?.textContent?.trim()).toBe('Editar serviço');
+
+    await renderDialog({ existing: product() });
+    expect(container.querySelector('h2')?.textContent?.trim()).toBe('Editar produto');
+  });
+
+  it('has no preço em aberto switch', async () => {
+    await renderDialog({ productKind: 'product' });
+    expect(text()).not.toContain('Preço em aberto');
+    // Positive control: the control that replaced it is on screen.
+    expect(labeledButton('Classificar como serviço')).toBeInstanceOf(HTMLButtonElement);
+
+    await renderDialog({ productKind: 'service' });
+    expect(text()).not.toContain('Preço em aberto');
+    expect(labeledButton('Classificar como produto')).toBeInstanceOf(HTMLButtonElement);
+  });
+
+  it('sends kind and never sends openPrice', async () => {
+    const onSave = await renderDialog({ productKind: 'product' });
+
+    await chooseArea();
+    await submit();
+
+    const payload = onSave.mock.calls[0]?.[0];
+    expect(payload).toMatchObject({ kind: 'product' });
+    expect(payload).not.toHaveProperty('openPrice');
+  });
+
+  it('sends kind service when the serviço segment is active', async () => {
+    const onSave = await renderDialog({ productKind: 'service' });
+
+    await chooseArea();
+    await submit();
+
+    const payload = onSave.mock.calls[0]?.[0];
+    expect(payload).toMatchObject({ kind: 'service', setupBrl: 0, monthlyBrl: 0 });
+    expect(payload).not.toHaveProperty('openPrice');
+  });
+
+  it('replaces every own-value input with the definido na venda notice for a serviço', async () => {
+    await renderDialog({ productKind: 'service' });
+    await click(labeledButton('Possui mensalidade'));
+
+    expect(text()).toContain('Serviços têm valor variável, definido em cada proposta.');
+    expect(text()).toContain('Valor da mensalidade (R$)');
+    expect(text().match(/Definido na venda/g)?.length).toBe(2);
+
+    await click(labeledButton('Classificar como produto'));
+    // Positive control: a produto really does render two editable money inputs there,
+    // so the absence above is about the kind and not about a field that never existed.
+    expect(text()).not.toContain('Definido na venda');
+    expect(container.querySelectorAll('input[type="number"]').length).toBeGreaterThan(0);
+  });
+
+  it('zeroes the own value when a produto is reclassified as a serviço', async () => {
+    const onSave = await renderDialog({
+      existing: product({ setupBrl: 100000, hasMonthly: true, monthlyBrl: 50000 }),
+    });
+
+    await click(labeledButton('Classificar como serviço'));
+    await submit();
+
+    expect(onSave.mock.calls[0]?.[0]).toMatchObject({
+      kind: 'service',
+      setupBrl: 0,
+      monthlyBrl: 0,
+    });
+  });
+
+  it('keeps the own-value inputs editable for a produto', async () => {
+    const onSave = await renderDialog({ productKind: 'product' });
+
+    const setupInput = [...container.querySelectorAll('input[type="number"]')].find(
+      (candidate) => candidate.closest('label')?.textContent?.includes('Setup (R$)'),
+    );
+    if (!(setupInput instanceof HTMLInputElement)) throw new Error('setup input not found');
+    await change(setupInput, '2500');
+    await chooseArea();
+    await submit();
+
+    expect(onSave.mock.calls[0]?.[0]).toMatchObject({ setupBrl: 250000 });
+  });
+
+  it('states that every value here is only a default', async () => {
+    await renderDialog({ productKind: 'service' });
+
+    expect(text()).toContain(
+      'Tudo aqui é padrão: dentro da proposta você pode alterar qualquer valor sem mexer no cadastro.',
+    );
+    expect(text()).toContain('Comissionamento padrão');
+  });
+
+  it('submits the app-default plan when nothing is touched', async () => {
+    const onSave = await renderDialog({ productKind: 'product' });
+
+    await chooseArea();
+    await submit();
+
+    expect(onSave.mock.calls[0]?.[0]).toMatchObject({
+      defaultEntradaMode: 'none',
+      defaultEntradaPct: null,
+      defaultEntradaBrl: null,
+      defaultRemainingInstallments: 1,
+      defaultPaymentMethod: 'pix',
+      defaultRecurringCycles: null,
+    });
+  });
+
+  it('submits a percentage entrada into defaultEntradaPct only', async () => {
+    const onSave = await renderDialog({ productKind: 'service' });
+
+    await pickOption('Tipo de entrada', '%');
+    await change(labeledInput('Valor da entrada'), '50');
+    await change(labeledInput('Parcelas restantes'), '3');
+    await pickOption('Forma de pagamento padrão', 'Boleto');
+    await chooseArea();
+    await submit();
+
+    expect(onSave.mock.calls[0]?.[0]).toMatchObject({
+      defaultEntradaMode: 'pct',
+      defaultEntradaPct: 50,
+      defaultEntradaBrl: null,
+      defaultRemainingInstallments: 3,
+      defaultPaymentMethod: 'boleto',
+    });
+  });
+
+  it('submits a fixed entrada into defaultEntradaBrl as integer cents', async () => {
+    const onSave = await renderDialog({ productKind: 'service' });
+
+    await pickOption('Tipo de entrada', 'R$ fixo');
+    await change(labeledInput('Valor da entrada'), '1500');
+    await chooseArea();
+    await submit();
+
+    expect(onSave.mock.calls[0]?.[0]).toMatchObject({
+      defaultEntradaMode: 'fix',
+      defaultEntradaBrl: 150000,
+      defaultEntradaPct: null,
+    });
+  });
+
+  it('unmounts the entrada value input when the mode is nenhuma', async () => {
+    await renderDialog({ productKind: 'service' });
+
+    await pickOption('Tipo de entrada', '%');
+    // Positive control: the input exists while a value-carrying mode is selected.
+    expect(container.querySelector('input[aria-label="Valor da entrada"]')).not.toBeNull();
+
+    await pickOption('Tipo de entrada', 'nenhuma');
+    expect(container.querySelector('input[aria-label="Valor da entrada"]')).toBeNull();
+  });
+
+  it('caps the entrada plus parcelas pair at the 120 installment ceiling', async () => {
+    const onSave = await renderDialog({ productKind: 'service' });
+
+    await change(labeledInput('Parcelas restantes'), '120');
+    // With no entrada row, 120 parcelas is exactly the API ceiling.
+    expect(labeledInput('Parcelas restantes').getAttribute('max')).toBe('120');
+
+    await pickOption('Tipo de entrada', '%');
+    await change(labeledInput('Valor da entrada'), '10');
+    // The entrada row sits on top, so the pair may only reach 120 rows in total.
+    expect(labeledInput('Parcelas restantes').getAttribute('max')).toBe('119');
+    expect(labeledInput('Parcelas restantes').value).toBe('119');
+
+    await chooseArea();
+    await submit();
+    expect(onSave.mock.calls[0]?.[0]).toMatchObject({ defaultRemainingInstallments: 119 });
+  });
+
+  /**
+   * The `max` attribute and the mode-change clamp both stop at the ceiling, but neither
+   * can stop a hand-typed value: `max` does not block a programmatic set, and the value
+   * never passes through `setEntradaMode`. This pins the third layer, the submit clamp,
+   * which is the only one standing between a typed 500 and a 501-row plan the sale write
+   * endpoints would reject.
+   */
+  it('clamps a hand-typed parcela count to the ceiling at submit', async () => {
+    const onSave = await renderDialog({ productKind: 'service' });
+
+    await change(labeledInput('Parcelas restantes'), '500');
+    await chooseArea();
+    await submit();
+    expect(onSave.mock.calls[0]?.[0]).toMatchObject({ defaultRemainingInstallments: 120 });
+
+    // With an entrada the row budget is one smaller, so the same typed value clamps lower.
+    const onSaveWithEntrada = await renderDialog({ productKind: 'service' });
+    await pickOption('Tipo de entrada', 'R$ fixo');
+    await change(labeledInput('Valor da entrada'), '1000');
+    await change(labeledInput('Parcelas restantes'), '500');
+    await chooseArea();
+    await submit();
+    expect(onSaveWithEntrada.mock.calls[0]?.[0]).toMatchObject({
+      defaultRemainingInstallments: 119,
+    });
+  });
+
+  it('floors a hand-typed parcela count at one', async () => {
+    const onSave = await renderDialog({ productKind: 'service' });
+
+    await change(labeledInput('Parcelas restantes'), '0');
+    await chooseArea();
+    await submit();
+
+    expect(onSave.mock.calls[0]?.[0]).toMatchObject({ defaultRemainingInstallments: 1 });
+  });
+
+  it('treats a blank ciclos as prazo indeterminado and shows no checkbox', async () => {
+    const onSave = await renderDialog({ productKind: 'service' });
+
+    await click(labeledButton('Possui mensalidade'));
+    expect(labeledInput('Número de ciclos').value).toBe('');
+    expect(text()).toContain('Deixe em branco para prazo indeterminado');
+    expect(maybeButton('Prazo indeterminado')).toBeUndefined();
+
+    await chooseArea();
+    await submit();
+    expect(onSave.mock.calls[0]?.[0]).toMatchObject({ defaultRecurringCycles: null });
+  });
+
+  it('submits a bounded cycle count', async () => {
+    const onSave = await renderDialog({ productKind: 'service' });
+
+    await click(labeledButton('Possui mensalidade'));
+    await change(labeledInput('Número de ciclos'), '12');
+    await chooseArea();
+    await submit();
+
+    expect(onSave.mock.calls[0]?.[0]).toMatchObject({ defaultRecurringCycles: 12 });
+  });
+
+  it('hides the ciclos field and nulls the column when the product has no mensalidade', async () => {
+    const onSave = await renderDialog({ productKind: 'service' });
+
+    expect(container.querySelector('input[aria-label="Número de ciclos"]')).toBeNull();
+    await chooseArea();
+    await submit();
+    expect(onSave.mock.calls[0]?.[0]).toMatchObject({ defaultRecurringCycles: null });
+  });
+
+  it('never puts a date in the default payment plan controls', async () => {
+    const onSave = await renderDialog({ productKind: 'service' });
+
+    await click(labeledButton('Possui mensalidade'));
+    expect(container.querySelectorAll('input[type="date"]').length).toBe(0);
+
+    await chooseArea();
+    await submit();
+    const payload = onSave.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(Object.keys(payload).filter((key) => /date/i.test(key))).toEqual([]);
+  });
+
+  it('saves função costs as a discriminated pct row and a fix row in cents', async () => {
+    const onSave = await renderDialog({ productKind: 'service' });
+
+    await addCostRow(1, 'Desenvolvedor', '%', '5');
+    await addCostRow(2, 'Testador', 'R$', '300');
+    await chooseArea();
+    await submit();
+
+    expect(onSave.mock.calls[0]?.[0]?.productFuncaoCosts).toEqual([
+      { funcaoId: devFuncao.id, mode: 'pct', valuePct: 5 },
+      { funcaoId: testerFuncao.id, mode: 'fix', valueBrl: 30000 },
+    ]);
+  });
+
+  it('never offers a system função as a cost default', async () => {
+    await renderDialog({ productKind: 'service', funcoes: [devFuncao, vendedorFuncao] });
+
+    await click(addButtonOf(COSTS_SECTION));
+    const offered = await comboboxOptions('Função do custo padrão 1');
+
+    // Positive control: a non-system função is offered, so an empty pool could not pass.
+    expect(offered).toContain('Desenvolvedor');
+    expect(offered).not.toContain('Vendedor');
+  });
+
+  it('never offers an archived função as a cost default', async () => {
+    const archived = funcao({
+      id: 'ffffffff-ffff-4fff-8fff-ffffffffff04',
+      name: 'Arquivada',
+      slug: 'arquivada',
+      status: 'archived',
+    });
+    await renderDialog({ productKind: 'service', funcoes: [devFuncao, archived] });
+
+    await click(addButtonOf(COSTS_SECTION));
+    const offered = await comboboxOptions('Função do custo padrão 1');
+
+    expect(offered).toContain('Desenvolvedor');
+    expect(offered).not.toContain('Arquivada');
+  });
+
+  it('does not offer the same função twice', async () => {
+    await renderDialog({ productKind: 'service' });
+
+    await addCostRow(1, 'Desenvolvedor', '%', '5');
+    await click(addButtonOf(COSTS_SECTION));
+
+    const offered = await comboboxOptions('Função do custo padrão 2');
+    expect(offered).toContain('Testador');
+    expect(offered).not.toContain('Desenvolvedor');
+
+    await pickOption('Função do custo padrão 2', 'Testador');
+    expect(addButtonOf(COSTS_SECTION).disabled).toBe(true);
+    expect(addButtonOf(COSTS_SECTION).getAttribute('title')).toBe(
+      'Todas as funções já têm custo padrão',
+    );
+  });
+
+  /**
+   * A função is never deleted, only archived, so a cost row pointing at an archived
+   * função is the expected end state of archiving one that carries money. It has to
+   * keep naming that função: a row reading "R$ 300,00 for no função" both misstates
+   * stored configuration and invites the operator to silently retarget the cost.
+   */
+  it('keeps naming an archived função on the cost row that already carries it', async () => {
+    const onSave = await renderDialog({
+      existing: product({ kind: 'service', openPrice: true, setupBrl: 0 }),
+      funcoes: [devFuncao, archivedFuncao],
+      funcaoCosts: [
+        funcaoCost({
+          funcaoId: archivedFuncao.id,
+          mode: 'fix',
+          valuePct: null,
+          valueBrl: 30000,
+        }),
+      ],
+    });
+
+    // The trigger names the função rather than falling back to the placeholder, and
+    // says it is archived so the operator can tell it is no longer assignable.
+    expect(comboboxText('Função do custo padrão 1')).toBe('Redator (arquivada)');
+    expect(labeledInput('Custo da função 1').value).toBe('300');
+
+    // It is offered on its own row, so the value stays restorable after a stray edit.
+    const offered = await comboboxOptions('Função do custo padrão 1');
+    expect(offered).toContain('Redator (arquivada)');
+    // Positive control: an active função carries no marker, so the suffix above is
+    // about the archived status and not about every label.
+    expect(offered).toContain('Desenvolvedor');
+
+    await submit();
+    expect(onSave.mock.calls[0]?.[0]?.productFuncaoCosts).toEqual([
+      { funcaoId: archivedFuncao.id, mode: 'fix', valueBrl: 30000 },
+    ]);
+  });
+
+  it('names a cost row whose função is missing from the bootstrap instead of showing the placeholder', async () => {
+    await renderDialog({
+      existing: product({ kind: 'service', openPrice: true, setupBrl: 0 }),
+      // The stored cost points at a função this bootstrap does not carry at all.
+      funcoes: [devFuncao],
+      funcaoCosts: [
+        funcaoCost({
+          funcaoId: '00000000-0000-4000-8000-00000000dead',
+          mode: 'fix',
+          valuePct: null,
+          valueBrl: 30000,
+        }),
+      ],
+    });
+
+    const trigger = comboboxText('Função do custo padrão 1');
+    expect(trigger).toBe('Função não encontrada');
+    // Positive control: the row is really rendered and still holds its money.
+    expect(labeledInput('Custo da função 1').value).toBe('300');
+    // And never the raw uuid.
+    expect(trigger).not.toContain('0000');
+  });
+
+  it('never offers an archived função to a row that does not already carry it', async () => {
+    await renderDialog({
+      existing: product({ kind: 'service', openPrice: true, setupBrl: 0 }),
+      funcoes: [devFuncao, archivedFuncao],
+      funcaoCosts: [
+        funcaoCost({ funcaoId: archivedFuncao.id, mode: 'pct', valuePct: '5.00' }),
+      ],
+    });
+
+    await click(addButtonOf(COSTS_SECTION));
+    const offered = await comboboxOptions('Função do custo padrão 2');
+
+    // Positive control: the fresh row does get the assignable pool.
+    expect(offered).toContain('Desenvolvedor');
+    // The archived one stays out of the pool a NEW row draws from, matching the rule
+    // the pessoa assignment picker already follows.
+    expect(offered.some((label) => label.includes('Redator'))).toBe(false);
+  });
+
+  it('explains where to register funções when none exist', async () => {
+    await renderDialog({ productKind: 'service', funcoes: [] });
+
+    expect(text()).toContain(
+      'Nenhuma função cadastrada ainda. Cadastre as funções em Cadastros > Funções para definir custos padrão.',
+    );
+    expect(addButtonOf(COSTS_SECTION).disabled).toBe(true);
+  });
+
+  it('removes a função cost row', async () => {
+    const onSave = await renderDialog({ productKind: 'service' });
+
+    await addCostRow(1, 'Desenvolvedor', '%', '5');
+    await addCostRow(2, 'Testador', 'R$', '300');
+    await click(labeledButton('Remover custo padrão 1'));
+    await chooseArea();
+    await submit();
+
+    expect(onSave.mock.calls[0]?.[0]?.productFuncaoCosts).toEqual([
+      { funcaoId: testerFuncao.id, mode: 'fix', valueBrl: 30000 },
+    ]);
+  });
+
+  it('does not reintroduce any control the payment plan builder removes', async () => {
+    await renderDialog({ productKind: 'service' });
+    await click(labeledButton('Possui mensalidade'));
+
+    const rendered = text();
+    for (const forbidden of [
+      'Dividir em',
+      '+ parcela',
+      'Número de parcelas',
+      'Remover parcela',
+      'Adicionar recorrência',
+    ]) {
+      expect(rendered).not.toContain(forbidden);
+    }
+    // Positive control: the controls this slice is supposed to render ARE mounted under
+    // slice 11's own labels, so the negatives above cannot pass by way of an empty dialog.
+    expect(labeledInput('Parcelas restantes')).toBeInstanceOf(HTMLInputElement);
+    expect(labeledInput('Número de ciclos')).toBeInstanceOf(HTMLInputElement);
+    expect(rendered).toContain('Plano de pagamento padrão');
+  });
+
+  it('drops the free-text prestador picker and never writes providers', async () => {
+    const onSave = await renderDialog({ productKind: 'product' });
+
+    expect(container.querySelector('datalist#sales-ops-collaborators')).toBeNull();
+    expect(text()).not.toContain('Prestadores de serviço');
+    // Positive control: the editor that replaced it is on screen.
+    expect(text()).toContain(COSTS_SECTION);
+
+    await chooseArea();
+    await submit();
+    expect(onSave.mock.calls[0]?.[0]).not.toHaveProperty('providers');
+  });
+
+  it('surfaces legacy prestador names read-only inside the função cost section', async () => {
+    const onSave = await renderDialog({
+      existing: product({
+        providers: [{ personName: 'Ana', commissionType: 'pct', commissionValue: 5 }],
+      }),
+    });
+
+    expect(text()).toContain(
+      'Prestadores antigos deste cadastro não foram convertidos automaticamente: Ana. Recadastre o custo por função acima.',
+    );
+
+    await submit();
+    expect(onSave.mock.calls[0]?.[0]).not.toHaveProperty('providers');
+  });
+
+  it('renders módulos only for a produto and preserves them when reclassified', async () => {
+    const onSave = await renderDialog({
+      existing: product({ modules: [{ name: 'Extra BI', type: 'Upsell', valueBrl: 50000 }] }),
+    });
+
+    expect(text()).toContain('Módulos');
+    const moduleName = container.querySelector('input[placeholder="Nome do módulo"]');
+    expect(moduleName instanceof HTMLInputElement && moduleName.value).toBe('Extra BI');
+
+    await click(labeledButton('Classificar como serviço'));
+    expect(text()).not.toContain('Módulos');
+    expect(container.querySelector('input[placeholder="Nome do módulo"]')).toBeNull();
+
+    await submit();
+    expect(onSave.mock.calls[0]?.[0]?.modules).toEqual([
+      { name: 'Extra BI', type: 'Upsell', valueBrl: 50000 },
+    ]);
+  });
+
+  it('rehydrates the stored plan columns and the funcaoCosts prop when reopened', async () => {
+    await renderDialog({
+      existing: product({
+        kind: 'service',
+        openPrice: true,
+        setupBrl: 0,
+        defaultEntradaMode: 'pct',
+        defaultEntradaPct: '50.00',
+        defaultEntradaBrl: null,
+        defaultRemainingInstallments: 3,
+        defaultPaymentMethod: 'boleto',
+        defaultRecurringCycles: null,
+        hasMonthly: true,
+      }),
+      funcaoCosts: [
+        funcaoCost(),
+        funcaoCost({
+          id: 'cccccccc-cccc-4ccc-8ccc-cccccccccc02',
+          funcaoId: testerFuncao.id,
+          mode: 'fix',
+          valuePct: null,
+          valueBrl: 30000,
+        }),
+      ],
+    });
+
+    expect(comboboxText('Tipo de entrada')).toBe('%');
+    expect(labeledInput('Valor da entrada').value).toBe('50');
+    expect(labeledInput('Parcelas restantes').value).toBe('3');
+    expect(comboboxText('Forma de pagamento padrão')).toBe('Boleto');
+    expect(labeledInput('Número de ciclos').value).toBe('');
+
+    expect(comboboxText('Função do custo padrão 1')).toBe('Desenvolvedor');
+    expect(labeledInput('Custo da função 1').value).toBe('5');
+    expect(labeledButton('Custo da função 1 em porcentagem').className).toContain('bg-[#201f24]');
+
+    expect(comboboxText('Função do custo padrão 2')).toBe('Testador');
+    expect(labeledInput('Custo da função 2').value).toBe('300');
+    expect(labeledButton('Custo da função 2 em reais').className).toContain('bg-[#201f24]');
+  });
+
+  it('resubmits rehydrated função costs without changing their units', async () => {
+    const onSave = await renderDialog({
+      existing: product({ kind: 'service', openPrice: true, setupBrl: 0 }),
+      funcaoCosts: [
+        funcaoCost(),
+        funcaoCost({
+          id: 'cccccccc-cccc-4ccc-8ccc-cccccccccc02',
+          funcaoId: testerFuncao.id,
+          mode: 'fix',
+          valuePct: null,
+          valueBrl: 30000,
+        }),
+      ],
+    });
+
+    await submit();
+
+    expect(onSave.mock.calls[0]?.[0]?.productFuncaoCosts).toEqual([
+      { funcaoId: devFuncao.id, mode: 'pct', valuePct: 5 },
+      { funcaoId: testerFuncao.id, mode: 'fix', valueBrl: 30000 },
+    ]);
+  });
+
+  it('keeps the commission editor working unchanged for a serviço', async () => {
+    await renderDialog({ productKind: 'service' });
+
+    expect(labeledInput('Comissão do vendedor - somente vendedor').value).toBe('10');
+    await click(button('Vendedor + Finder'));
+    expect(labeledInput('Comissão do vendedor - com finder').value).toBe('7');
+    expect(labeledInput('Comissão do finder').value).toBe('3');
+    await click(button('Somente vendedor'));
+    expect(labeledInput('Comissão do vendedor - somente vendedor').value).toBe('10');
+  });
+
+  it('summarises the default plan back to the operator', async () => {
+    await renderDialog({ productKind: 'service' });
+
+    expect(text()).toContain('1x · PIX');
+
+    await pickOption('Tipo de entrada', '%');
+    await change(labeledInput('Valor da entrada'), '50');
+    await change(labeledInput('Parcelas restantes'), '3');
+    expect(text()).toContain('Entrada de 50% + 3x do restante · PIX');
+
+    await click(labeledButton('Possui mensalidade'));
+    expect(text()).toContain('· mensal por prazo indeterminado');
+    await change(labeledInput('Número de ciclos'), '12');
+    expect(text()).toContain('· mensal por 12 ciclos');
+  });
+});

@@ -13,6 +13,7 @@ import type {
   SalesOpsArea,
   SalesOpsBootstrap,
   SalesOpsClient,
+  SalesOpsFuncao,
   SalesOpsPersonFuncao,
   SalesOpsProduct,
 } from '../types';
@@ -74,7 +75,6 @@ function product(patch: Partial<SalesOpsProduct> = {}): SalesOpsProduct {
     id: financeProductId,
     orgId: 'org-test',
     name: 'FXL Finance',
-    type: 'SaaS',
     codeSuffix: 'FIN',
     areaId: areaTechId,
     openPrice: false,
@@ -159,6 +159,7 @@ function baseBootstrap(patch: Partial<SalesOpsBootstrap> = {}): SalesOpsBootstra
     payables: [],
     saleItems: [],
     receivables: [],
+    productFuncaoCosts: [],
     saleProfessionals: [],
     settings: {
       orgId: 'org-test',
@@ -608,29 +609,31 @@ describe('combobox adoption in the proposta wizard', () => {
 describe('combobox adoption in the produto dialog', () => {
   let onSaveProduct: ReturnType<typeof vi.fn<(payload: SaveProductPayload) => void>>;
 
-  const collaborator = {
-    id: collaboratorId,
+  /** The prestador função as the produto dialog receives it: a full org-scoped row. */
+  const prestadorFuncao: SalesOpsFuncao = {
+    id: funcaoPrestador.id,
     orgId: 'org-test',
-    displayName: 'Carla Prestadora',
-    contactEmail: null,
-    status: 'active' as const,
-    funcaoIds: [funcaoPrestador.id],
-    funcoes: [funcaoPrestador],
+    name: funcaoPrestador.name,
+    slug: funcaoPrestador.slug,
+    isSystem: false,
+    status: 'active',
     createdAt: '2026-07-29T12:00:00.000Z',
     updatedAt: null,
   };
 
   async function renderProductDialog(
-    props: { collaborators?: typeof collaborator[] } = {},
+    props: { funcoes?: SalesOpsFuncao[]; onCreateArea?: (name: string) => Promise<null> } = {},
   ) {
     onSaveProduct = vi.fn<(payload: SaveProductPayload) => void>();
     await act(async () => {
       root.render(
         <ProductDialog
           areas={[area()]}
-          collaborators={props.collaborators ?? []}
+          funcaoCosts={[]}
+          funcoes={props.funcoes ?? []}
           modal={{ kind: 'product' }}
           onClose={vi.fn()}
+          onCreateArea={props.onCreateArea}
           onSave={onSaveProduct}
           saving={false}
         />,
@@ -685,35 +688,35 @@ describe('combobox adoption in the produto dialog', () => {
     await click(button);
   }
 
-  it('keeps a free-text prestador name, which is what the deleted datalist allowed', async () => {
-    await renderProductDialog({ collaborators: [collaborator] });
+  /**
+   * Replaces the old `keeps a free-text prestador name` test, whose subject (the
+   * free-text Prestadores de serviço editor) this slice deleted. The create-row
+   * mechanism it guarded is still asserted, on the picker in the same dialog that
+   * legitimately has one, and the assertion is now two-sided: the função cost picker
+   * deliberately offers NO create row, because creating a função is admin-gated and
+   * belongs to Cadastros > Funções.
+   */
+  it('offers a create row on the área picker and never on the função cost picker', async () => {
+    await renderProductDialog({
+      funcoes: [prestadorFuncao],
+      onCreateArea: async () => null,
+    });
 
-    const nameInput = container.querySelector('input[placeholder="Nome"]');
-    if (!(nameInput instanceof HTMLInputElement)) throw new Error('name input not found');
-    await changeInput(nameInput, 'FXL New Product');
-    await pickOption('Área do produto', 'FXL Tech');
+    // Positive control: a name in no list still produces a create row here.
+    await click(comboboxTrigger('Área do produto'));
+    await typeInPanel('FXL Serviços');
+    expect(createRow()?.textContent?.trim()).toBe('+ Criar nova área "FXL Serviços"');
+    await key(panelSearch(), 'Escape');
 
-    await addListRow('Prestadores de serviço');
+    await addListRow('Custos padrão por função');
 
-    // Positive control: the registered prestador is offered by name, and is what the row
-    // starts on.
-    await click(comboboxTrigger('Prestador 1'));
-    expect(optionRows().map((row) => row.textContent?.trim())).toEqual(['Carla Prestadora']);
-    expect(comboboxText('Prestador 1')).toBe('Carla Prestadora');
+    await click(comboboxTrigger('Função do custo padrão 1'));
+    // The registered função is offered by name.
+    expect(optionRows().map((row) => row.textContent?.trim())).toEqual(['Prestador']);
 
-    // And a name that is in no list still commits, because the stored field is a name
-    // snapshot rather than an id. This is what the deleted datalist allowed.
     await typeInPanel('Estúdio Externo');
-    expect(createRow()?.textContent?.trim()).toBe('+ Criar novo prestador "Estúdio Externo"');
-    await click(createRow()!);
-    expect(comboboxText('Prestador 1')).toBe('Estúdio Externo');
-
-    await submitForm();
-
-    expect(onSaveProduct).toHaveBeenCalledTimes(1);
-    expect(onSaveProduct.mock.calls[0]?.[0].providers).toEqual([
-      expect.objectContaining({ personName: 'Estúdio Externo' }),
-    ]);
+    expect(createRow()).toBeNull();
+    expect(listbox()?.textContent).toContain('Nenhuma função disponível');
   });
 });
 

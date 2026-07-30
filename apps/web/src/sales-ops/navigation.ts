@@ -63,7 +63,7 @@ const operational: SalesOpsNavigationItem[] = [
 ];
 
 const cadastros: SalesOpsNavigationItem[] = [
-  { id: 'produtos', label: 'Produtos', icon: Database },
+  { id: 'produtos', label: 'Produtos & Serviços', icon: Database },
   { id: 'areas', label: 'Áreas', icon: Layers },
   { id: 'clientes', label: 'Clientes', icon: ContactRound },
   { id: 'pessoas', label: 'Pessoas', icon: UsersRound },

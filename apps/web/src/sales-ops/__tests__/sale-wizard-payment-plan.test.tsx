@@ -53,7 +53,6 @@ function product(patch: Partial<SalesOpsProduct> = {}): SalesOpsProduct {
     id: fixedProductId,
     orgId: 'org-test',
     name: 'FXL Finance',
-    type: 'SaaS',
     codeSuffix: 'FIN',
     areaId,
     openPrice: false,
@@ -126,6 +125,7 @@ const bootstrap: SalesOpsBootstrap = {
   payables: [],
   saleItems: [],
   receivables: [],
+  productFuncaoCosts: [],
   saleProfessionals: [],
   settings: {
     orgId: 'org-test',
