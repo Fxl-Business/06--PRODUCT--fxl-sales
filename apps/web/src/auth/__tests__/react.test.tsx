@@ -117,6 +117,32 @@ async function flushReact() {
   });
 }
 
+function workspaceTrigger(host: HTMLElement): HTMLButtonElement {
+  const match = host.querySelector('button[role="combobox"][aria-label="Workspace"]');
+  if (!(match instanceof HTMLButtonElement)) throw new Error('workspace combobox not found');
+  return match;
+}
+
+/**
+ * Drive the workspace picker the way an operator does: open it, then commit the row
+ * whose visible label is the workspace name. `orgLabel` is what renders, so a raw
+ * workspace id never appears in the assertion or on screen.
+ */
+async function switchWorkspace(host: HTMLElement, workspaceName: string) {
+  const trigger = workspaceTrigger(host);
+  await act(async () => {
+    trigger.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  });
+  const row = [...host.querySelectorAll('[role="option"]')].find(
+    (candidate) => candidate.textContent?.trim() === workspaceName,
+  );
+  if (!(row instanceof HTMLElement)) throw new Error(`workspace option not found: ${workspaceName}`);
+  await act(async () => {
+    row.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    await Promise.resolve();
+  });
+}
+
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
 
@@ -175,14 +201,10 @@ describe('AppAuthProvider token cache wiring', () => {
     ({ container, root } = renderProvider(observeWorkspace));
     await flushReact();
 
-    const select = container.querySelector('select');
-    expect(select).not.toBeNull();
-    await act(async () => {
-      if (!select) return;
-      select.value = 'workspace-beta';
-      select.dispatchEvent(new Event('change', { bubbles: true }));
-      await Promise.resolve();
-    });
+    // The picker renders workspace names, never raw ids (CLAUDE.md, UI Identifiers).
+    expect(workspaceTrigger(container).textContent?.trim()).toBe('Alpha');
+    expect(container.textContent).not.toContain('workspace-beta');
+    await switchWorkspace(container, 'Beta');
 
     expect(mocks.client.setActive).toHaveBeenCalledWith('workspace-beta');
     expect(mocks.cache.seed).toHaveBeenCalledTimes(1);
@@ -232,16 +254,9 @@ describe('AppAuthProvider token cache wiring', () => {
     ({ container, root } = renderProvider(observeWorkspace));
     await flushReact();
 
-    const select = container.querySelector('select');
     const button = container.querySelector<HTMLButtonElement>('button[aria-label="Sair"]');
-    expect(select).not.toBeNull();
     expect(button).not.toBeNull();
-    await act(async () => {
-      if (!select) return;
-      select.value = 'workspace-beta';
-      select.dispatchEvent(new Event('change', { bubbles: true }));
-      await Promise.resolve();
-    });
+    await switchWorkspace(container, 'Beta');
     expect(mocks.client.setActive).toHaveBeenCalledWith('workspace-beta');
 
     await act(async () => {
@@ -286,17 +301,8 @@ describe('AppAuthProvider token cache wiring', () => {
     ({ container, root } = renderProvider(observeWorkspace));
     await flushReact();
 
-    const select = container.querySelector('select');
-    expect(select).not.toBeNull();
-    await act(async () => {
-      if (!select) return;
-      select.value = 'workspace-beta';
-      select.dispatchEvent(new Event('change', { bubbles: true }));
-      await Promise.resolve();
-      select.value = 'workspace-gamma';
-      select.dispatchEvent(new Event('change', { bubbles: true }));
-      await Promise.resolve();
-    });
+    await switchWorkspace(container, 'Beta');
+    await switchWorkspace(container, 'Gamma');
     expect(mocks.client.setActive).toHaveBeenNthCalledWith(1, 'workspace-beta');
     expect(mocks.client.setActive).toHaveBeenNthCalledWith(2, 'workspace-gamma');
 

@@ -73,10 +73,25 @@
   }
 
   .sales-ops input,
-  .sales-ops select,
   .sales-ops textarea,
   .sales-ops button {
     font-family: inherit;
+  }
+
+  /**
+   * The OS number spin buttons are the last browser-native picker widget in the app.
+   * This lives in the base layer rather than on `components/ui/input.tsx` so it also
+   * reaches inputs rendered inside a Radix Dialog portal, which sits outside
+   * `.sales-ops`.
+   */
+  input[type='number'] {
+    appearance: textfield;
+  }
+
+  input[type='number']::-webkit-outer-spin-button,
+  input[type='number']::-webkit-inner-spin-button {
+    appearance: none;
+    margin: 0;
   }
 
   .sales-ops ::-webkit-scrollbar {

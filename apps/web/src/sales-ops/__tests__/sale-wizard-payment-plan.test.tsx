@@ -178,10 +178,24 @@ function labeledInput(label: string): HTMLInputElement {
   return match;
 }
 
-function labeledSelect(label: string): HTMLSelectElement {
-  const match = container.querySelector(`select[aria-label="${label}"]`);
-  if (!(match instanceof HTMLSelectElement)) throw new Error(`select not found: ${label}`);
+function comboboxTrigger(ariaLabel: string): HTMLButtonElement {
+  const match = container.querySelector(`button[role="combobox"][aria-label="${ariaLabel}"]`);
+  if (!(match instanceof HTMLButtonElement)) throw new Error(`combobox not found: ${ariaLabel}`);
   return match;
+}
+
+function comboboxText(ariaLabel: string): string {
+  return comboboxTrigger(ariaLabel).textContent?.trim() ?? '';
+}
+
+/** Open the picker and commit the row whose visible label starts with `optionLabel`. */
+async function pickOption(ariaLabel: string, optionLabel: string) {
+  await click(comboboxTrigger(ariaLabel));
+  const row = [...container.querySelectorAll('[role="option"]')].find((candidate) =>
+    candidate.textContent?.trim().startsWith(optionLabel),
+  );
+  if (!(row instanceof HTMLElement)) throw new Error(`option not found: ${optionLabel}`);
+  await click(row);
 }
 
 async function click(element: HTMLElement) {
@@ -196,13 +210,6 @@ async function changeInput(input: HTMLInputElement, value: string) {
   });
 }
 
-async function changeSelect(select: HTMLSelectElement, value: string) {
-  await act(async () => {
-    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
-    setter?.call(select, value);
-    select.dispatchEvent(new Event('change', { bubbles: true }));
-  });
-}
 
 describe('sale wizard payment plan', () => {
   it('splits the plan into N equal monthly parcelas with the remainder on the last', async () => {
@@ -244,7 +251,8 @@ describe('sale wizard payment plan', () => {
   });
 
   it('prefills and submits the recurring block for a mensalidade product', async () => {
-    await changeSelect(labeledSelect('Produto / serviço do item 1'), recurringProductId);
+    await pickOption('Produto / serviço do item 1', 'FXL Advisor');
+    expect(comboboxText('Produto / serviço do item 1')).toBe('FXL Advisor');
     await click(buttonByText('Avançar'));
 
     expect(labeledInput('Valor da mensalidade').value).toBe('1000');
@@ -274,7 +282,9 @@ describe('sale wizard payment plan', () => {
     await click(buttonByText('Avançar'));
     await changeInput(labeledInput('Número de parcelas'), '2');
     await click(buttonByText('Dividir'));
-    await changeSelect(labeledSelect('Forma de pagamento da parcela 2'), 'boleto');
+    expect(comboboxText('Forma de pagamento da parcela 2')).toBe('Pix');
+    await pickOption('Forma de pagamento da parcela 2', 'Boleto');
+    expect(comboboxText('Forma de pagamento da parcela 2')).toBe('Boleto');
 
     await click(buttonByText('Avançar'));
     await click(buttonByText('Avançar'));

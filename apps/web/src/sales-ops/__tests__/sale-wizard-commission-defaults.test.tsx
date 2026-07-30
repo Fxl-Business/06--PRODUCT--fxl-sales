@@ -190,23 +190,35 @@ function fieldInput(label: string): HTMLInputElement {
   return input;
 }
 
-function productSelects(): HTMLSelectElement[] {
-  return [...container.querySelectorAll('select')].filter((select) => {
-    const options = [...select.options].map((option) => option.textContent?.trim());
-    return options.includes('Product A') && options.includes('Product B');
-  });
+function productTriggers(): HTMLButtonElement[] {
+  return [
+    ...container.querySelectorAll<HTMLButtonElement>(
+      'button[role="combobox"][aria-label^="Produto / serviço do item "]',
+    ),
+  ];
+}
+
+function comboboxTrigger(ariaLabel: string): HTMLButtonElement {
+  const match = container.querySelector(`button[role="combobox"][aria-label="${ariaLabel}"]`);
+  if (!(match instanceof HTMLButtonElement)) throw new Error(`combobox not found: ${ariaLabel}`);
+  return match;
+}
+
+function comboboxText(ariaLabel: string): string {
+  return comboboxTrigger(ariaLabel).textContent?.trim() ?? '';
+}
+
+async function pickOption(ariaLabel: string, optionLabel: string) {
+  await click(comboboxTrigger(ariaLabel));
+  const row = [...container.querySelectorAll('[role="option"]')].find((candidate) =>
+    candidate.textContent?.trim().startsWith(optionLabel),
+  );
+  if (!(row instanceof HTMLElement)) throw new Error(`option not found: ${optionLabel}`);
+  await click(row);
 }
 
 async function click(element: HTMLElement) {
   await act(async () => element.dispatchEvent(new MouseEvent('click', { bubbles: true })));
-}
-
-async function changeSelect(select: HTMLSelectElement, value: string) {
-  await act(async () => {
-    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
-    setter?.call(select, value);
-    select.dispatchEvent(new Event('change', { bubbles: true }));
-  });
 }
 
 async function flushReact() {
@@ -260,9 +272,11 @@ describe('sale wizard product commission defaults', () => {
     await click(buttonByText('+ item'));
     await flushReact();
 
-    const initialSelects = productSelects();
-    expect(initialSelects).toHaveLength(2);
-    await changeSelect(initialSelects[1]!, productB.id);
+    expect(productTriggers()).toHaveLength(2);
+    await pickOption('Produto / serviço do item 2', 'Product B');
+    expect(comboboxText('Produto / serviço do item 2')).toBe('Product B');
+    // The primary item is untouched, which is exactly what this test is about.
+    expect(comboboxText('Produto / serviço do item 1')).toBe('Product A');
     await flushReact();
     await click(buttonByText('Avançar'));
     await click(buttonByText('Avançar'));
@@ -271,7 +285,8 @@ describe('sale wizard product commission defaults', () => {
 
     await click(buttonByText('Voltar'));
     await click(buttonByText('Voltar'));
-    await changeSelect(productSelects()[0]!, productB.id);
+    await pickOption('Produto / serviço do item 1', 'Product B');
+    expect(comboboxText('Produto / serviço do item 1')).toBe('Product B');
     await flushReact();
     await click(buttonByText('Avançar'));
     await click(buttonByText('Avançar'));

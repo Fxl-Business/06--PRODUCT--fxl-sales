@@ -259,8 +259,33 @@ describe('Combobox', () => {
     expect(row(1)).toBe(createRow());
     // Pinned footer: inside the listbox, but outside the scrollable options
     // area, so it stays on screen however long the option list gets.
+    const scrollArea = listbox()!.querySelector('.overflow-y-auto');
+    expect(scrollArea).not.toBeNull();
+    expect(scrollArea!.contains(createRow())).toBe(false);
+    // Positive control for the line above. Without it the negative would also pass if
+    // the scroll area stopped existing, or if no row were inside it at all.
+    expect(scrollArea!.contains(row(0))).toBe(true);
     expect(createRow()!.closest('.overflow-y-auto')).toBeNull();
     expect(listbox()!.contains(createRow())).toBe(true);
+  });
+
+  it('hands onCreate the trimmed query, not the raw input value', async () => {
+    const { onChange, onCreate } = await renderCombobox({
+      withCreate: true,
+      entityLabel: 'contato',
+    });
+    await open();
+    await type('  Maria  ');
+
+    // The label the operator reads is already trimmed, and so is the committed value.
+    expect(createRow()!.textContent!.trim()).toBe('+ Criar novo contato "Maria"');
+    expect(panelSearch().value).toBe('  Maria  ');
+
+    await click(createRow()!);
+
+    expect(onCreate).toHaveBeenCalledTimes(1);
+    expect(onCreate).toHaveBeenCalledWith('Maria');
+    expect(onChange).not.toHaveBeenCalled();
   });
 
   it('hides the create row when the query exactly matches an existing option label', async () => {

@@ -145,12 +145,49 @@ async function changeInput(input: HTMLInputElement, value: string) {
   });
 }
 
-function clientInput(): HTMLInputElement {
-  const match = container.querySelector(
-    'input[placeholder="Buscar ou digitar um novo cliente..."]',
-  );
-  if (!(match instanceof HTMLInputElement)) throw new Error('cliente input not found');
+async function click(element: Element) {
+  await act(async () => {
+    element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  });
+  await act(async () => {
+    await Promise.resolve();
+  });
+}
+
+function comboboxTrigger(ariaLabel: string): HTMLButtonElement {
+  const match = container.querySelector(`button[role="combobox"][aria-label="${ariaLabel}"]`);
+  if (!(match instanceof HTMLButtonElement)) throw new Error(`combobox not found: ${ariaLabel}`);
   return match;
+}
+
+function comboboxText(ariaLabel: string): string {
+  return comboboxTrigger(ariaLabel).textContent?.trim() ?? '';
+}
+
+function labeledInput(label: string): HTMLInputElement {
+  const match = container.querySelector(`input[aria-label="${label}"]`);
+  if (!(match instanceof HTMLInputElement)) throw new Error(`input not found: ${label}`);
+  return match;
+}
+
+function panelSearch(): HTMLInputElement {
+  const panel = container.querySelector('[role="listbox"]')?.parentElement;
+  const match = panel?.querySelector('input[type="text"]');
+  if (!(match instanceof HTMLInputElement)) throw new Error('panel search field not found');
+  return match;
+}
+
+/**
+ * Commit a cliente name that is not in the list, through the picker's create row. With
+ * no `onCreateClient` wired this is the fallback path: it sets `clientName` and leaves
+ * `clientId` empty, which is the wizard state this file exists to protect.
+ */
+async function typeCliente(name: string) {
+  await click(comboboxTrigger('Cliente'));
+  await changeInput(panelSearch(), name);
+  const row = container.querySelector('[data-combobox-create="true"]');
+  if (!(row instanceof HTMLElement)) throw new Error('create row not found');
+  await click(row);
 }
 
 async function renderWizard(snapshot: SalesOpsBootstrap) {
@@ -171,24 +208,30 @@ async function renderWizard(snapshot: SalesOpsBootstrap) {
 describe('sale wizard state preservation across bootstrap refetches', () => {
   it('keeps typed wizard state when a bootstrap refetch changes the first cliente', async () => {
     await renderWizard(bootstrap());
-    expect(clientInput().value).toBe('Zeta Seguros');
+    expect(comboboxText('Cliente')).toBe('Zeta Seguros');
 
-    await changeInput(clientInput(), 'Cliente Digitado');
-    expect(clientInput().value).toBe('Cliente Digitado');
+    await typeCliente('Cliente Digitado');
+    await changeInput(labeledInput('Valor unitário do item 1'), '4321');
+    expect(comboboxText('Cliente')).toBe('Cliente Digitado');
+    expect(labeledInput('Valor unitário do item 1').value).toBe('4321');
 
     await renderWizard(bootstrap({ clients: [alfaClient, zetaClient] }));
 
-    expect(clientInput().value).toBe('Cliente Digitado');
+    expect(comboboxText('Cliente')).toBe('Cliente Digitado');
+    expect(labeledInput('Valor unitário do item 1').value).toBe('4321');
   });
 
   it('keeps typed wizard state when a bootstrap refetch changes the people count', async () => {
     await renderWizard(bootstrap());
 
-    await changeInput(clientInput(), 'Cliente Digitado');
-    expect(clientInput().value).toBe('Cliente Digitado');
+    await typeCliente('Cliente Digitado');
+    await changeInput(labeledInput('Valor unitário do item 1'), '4321');
+    expect(comboboxText('Cliente')).toBe('Cliente Digitado');
+    expect(labeledInput('Valor unitário do item 1').value).toBe('4321');
 
     await renderWizard(bootstrap({ people: [seller, extraSeller] }));
 
-    expect(clientInput().value).toBe('Cliente Digitado');
+    expect(comboboxText('Cliente')).toBe('Cliente Digitado');
+    expect(labeledInput('Valor unitário do item 1').value).toBe('4321');
   });
 });

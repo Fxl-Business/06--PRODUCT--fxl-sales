@@ -184,10 +184,24 @@ function labeledInput(label: string): HTMLInputElement {
   return match;
 }
 
-function labeledSelect(label: string): HTMLSelectElement {
-  const match = container.querySelector(`select[aria-label="${label}"]`);
-  if (!(match instanceof HTMLSelectElement)) throw new Error(`select not found: ${label}`);
+function comboboxTrigger(ariaLabel: string): HTMLButtonElement {
+  const match = container.querySelector(`button[role="combobox"][aria-label="${ariaLabel}"]`);
+  if (!(match instanceof HTMLButtonElement)) throw new Error(`combobox not found: ${ariaLabel}`);
   return match;
+}
+
+function comboboxText(ariaLabel: string): string {
+  return comboboxTrigger(ariaLabel).textContent?.trim() ?? '';
+}
+
+/** Open the picker and commit the row whose visible label starts with `optionLabel`. */
+async function pickOption(ariaLabel: string, optionLabel: string) {
+  await click(comboboxTrigger(ariaLabel));
+  const row = [...container.querySelectorAll('[role="option"]')].find((candidate) =>
+    candidate.textContent?.trim().startsWith(optionLabel),
+  );
+  if (!(row instanceof HTMLElement)) throw new Error(`option not found: ${optionLabel}`);
+  await click(row);
 }
 
 async function click(element: HTMLElement) {
@@ -202,18 +216,12 @@ async function changeInput(input: HTMLInputElement, value: string) {
   });
 }
 
-async function changeSelect(select: HTMLSelectElement, value: string) {
-  await act(async () => {
-    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
-    setter?.call(select, value);
-    select.dispatchEvent(new Event('change', { bubbles: true }));
-  });
-}
 
 describe('sale wizard free-form items', () => {
   it('adds a free-form item and submits it without productId', async () => {
     await click(buttonByText('+ item avulso'));
-    await changeSelect(labeledSelect('Área do item 2'), areaTwoId);
+    await pickOption('Área do item 2', 'FXL Advisor');
+    expect(comboboxText('Área do item 2')).toBe('FXL Advisor');
     await changeInput(labeledInput('Descrição do item 2'), 'Consultoria de processos');
     await changeInput(labeledInput('Valor unitário do item 2'), '5000');
 

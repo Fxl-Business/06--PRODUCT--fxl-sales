@@ -39,6 +39,9 @@ vi.mock('@/auth/react', () => ({
 const mutation = {
   isPending: false,
   mutate: vi.fn(),
+  // The inline picker create paths call `mutateAsync`. No test here clicks a create row,
+  // but the mock should not be a landmine for whoever does next.
+  mutateAsync: vi.fn(async () => ({})),
 };
 
 const personFixture = {

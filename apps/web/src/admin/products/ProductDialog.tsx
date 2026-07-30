@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
+import { Combobox } from '@/components/ui/combobox';
 import {
   Dialog,
   DialogContent,
@@ -100,18 +101,13 @@ function ProductDialogForm({
         {!isEdit ? (
           <div className="space-y-2">
             <Label htmlFor="product-app">{t('admin.products.field.app')}</Label>
-            <Select value={appId} onValueChange={setAppId}>
-              <SelectTrigger id="product-app">
-                <SelectValue placeholder={t('admin.products.field.appPlaceholder')} />
-              </SelectTrigger>
-              <SelectContent>
-                {(apps ?? []).map((app) => (
-                  <SelectItem key={app.id} value={app.id}>
-                    {app.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Combobox
+              id="product-app"
+              onChange={setAppId}
+              options={(apps ?? []).map((app) => ({ value: app.id, label: app.name }))}
+              placeholder={t('admin.products.field.appPlaceholder')}
+              value={appId}
+            />
           </div>
         ) : null}
         <div className="space-y-2">
