@@ -1,0 +1,1 @@
+{"agent":"exec","slice":"01-funcao-optimistic","status":"PASS","report":"nexo/runs/batch-01K9NX4QPTUI0730CADPRODWIZ/exec-01.md","summary":"Optimistic write for the funcoes cadastro shipped with the composed-snapshot fix and the pending edit guard; 361 web / 300 api tests, lint and type-check all green.","done":true,"ts":"2026-07-30T16:12:00Z"}

@@ -713,6 +713,20 @@ export function SalesOpsApp() {
    * is the same object by reference whenever nothing is optimistic.
    */
   const persistedBootstrap = useMemo(() => withoutOptimisticRows(bootstrap), [bootstrap]);
+  /**
+   * The funções cadastro is the one screen that must see its OWN optimistic funções and
+   * nobody else's optimistic rows: the `Nº pessoas` column counts `people`, and an
+   * in-flight optimistic PESSOA belongs to `cadastros/pessoas`, not here. The identity
+   * short-circuit means nothing changes by reference while no função is in flight, which
+   * is the normal case.
+   */
+  const funcoesBootstrap = useMemo(
+    () =>
+      bootstrap.funcoes === persistedBootstrap.funcoes
+        ? persistedBootstrap
+        : { ...persistedBootstrap, funcoes: bootstrap.funcoes },
+    [bootstrap.funcoes, persistedBootstrap],
+  );
   const dashboard = useMemo(() => buildDashboardModel(persistedBootstrap), [persistedBootstrap]);
   const filteredSales = useMemo(() => {
     return bootstrap.sales.filter((sale) => {
@@ -1306,13 +1320,13 @@ export function SalesOpsApp() {
                 ) : null}
                 {view === 'funcoes' ? (
                   /*
-                    persistedBootstrap: no função is ever written optimistically, so
-                    `funcoes` is identical either way, and this keeps an in-flight
-                    optimistic pessoa out of the "Nº pessoas" column - an optimistic row
+                    funcoesBootstrap: raw `funcoes` so an optimistic função created here
+                    is visible immediately, persisted `people` so an in-flight optimistic
+                    pessoa never inflates the "Nº pessoas" column - an optimistic row
                     belongs only to the cadastro that created it.
                   */
                   <FuncoesView
-                    bootstrap={persistedBootstrap}
+                    bootstrap={funcoesBootstrap}
                     onEdit={(funcao) => setModal({ kind: 'funcao', funcao })}
                   />
                 ) : null}
@@ -2702,6 +2716,9 @@ export function PessoasView({
  * edit affordance for them at all rather than offering one that must fail.
  * There is no delete affordance anywhere: removal is `status: 'archived'`, matching
  * áreas and the fact that the sales-ops router has no DELETE verb.
+ * An optimistic row is visible but not editable: its placeholder id would fail the
+ * uuid cast on the PATCH path, so the affordance stays disabled until the reconcile
+ * swaps in the persisted uuid.
  */
 export function FuncoesView({
   bootstrap,
@@ -2737,6 +2754,7 @@ export function FuncoesView({
             const personCount = bootstrap.people.filter((person) =>
               person.funcoes.some((assigned) => assigned.id === funcao.id),
             ).length;
+            const pending = isOptimisticId(funcao.id);
             return (
               <TableRow key={funcao.id}>
                 <TableCell className="px-4 py-3 text-sm font-semibold">{funcao.name}</TableCell>
@@ -2772,10 +2790,11 @@ export function FuncoesView({
                     </button>
                   ) : (
                     <button
-                      aria-label={`Editar ${funcao.name}`}
-                      className={iconButtonClass}
+                      aria-label={pending ? `Salvando ${funcao.name}` : `Editar ${funcao.name}`}
+                      className={pending ? iconButtonPendingClass : iconButtonClass}
+                      disabled={pending}
                       onClick={() => onEdit(funcao)}
-                      title="Editar"
+                      title={pending ? 'Salvando...' : 'Editar'}
                       type="button"
                     >
                       <Edit3 className="h-[15px] w-[15px]" />

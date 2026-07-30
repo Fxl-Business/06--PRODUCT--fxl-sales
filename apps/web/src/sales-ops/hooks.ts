@@ -15,6 +15,7 @@ import {
 import {
   optimisticArea,
   optimisticClient,
+  optimisticFuncao,
   optimisticPerson,
   reconcileOptimisticRow,
   type CollectionRow,
@@ -26,6 +27,7 @@ import type {
   SalesOpsArea,
   SalesOpsBootstrap,
   SalesOpsClient,
+  SalesOpsFuncao,
   SalesOpsPerson,
 } from './types';
 
@@ -65,7 +67,7 @@ export function useSalesOpsBootstrap() {
 }
 
 /**
- * Shared optimistic plumbing for the three cadastros whose row the client can
+ * Shared optimistic plumbing for the four cadastros whose row the client can
  * compute in full. The patch is written into the raw cache entry (`select` runs on
  * top of it), rolled back from `previous` on failure, and reconciled with the row
  * the server returned on success so the real id lands before the refetch arrives.
@@ -77,7 +79,6 @@ function useOptimisticBootstrapWrite<
 >(
   collection: K,
   build: (previous: SalesOpsBootstrap, payload: TPayload) => OptimisticPatch,
-  label: (row: CollectionRow<K>) => string,
   persistedRow: (response: TResponse) => CollectionRow<K>,
 ) {
   const queryClient = useQueryClient();
@@ -110,7 +111,7 @@ function useOptimisticBootstrapWrite<
       if (!current) return;
       queryClient.setQueryData(
         queryKeys.salesOps.bootstrap(),
-        reconcileOptimisticRow(current, collection, patch.rowId, persistedRow(response), label),
+        reconcileOptimisticRow(current, collection, patch.rowId, persistedRow(response)),
       );
     },
   };
@@ -122,7 +123,7 @@ export function useSaveSalesOpsPerson() {
     'people',
     SavePersonPayload,
     { person: SalesOpsPerson }
-  >('people', optimisticPerson, (row) => row.displayName, (response) => response.person);
+  >('people', optimisticPerson, (response) => response.person);
   return useAppMutation<
     { person: SalesOpsPerson },
     Error,
@@ -153,7 +154,7 @@ export function useSaveSalesOpsClient() {
     'clients',
     SaveClientPayload,
     { client: SalesOpsClient }
-  >('clients', optimisticClient, (row) => row.name, (response) => response.client);
+  >('clients', optimisticClient, (response) => response.client);
   return useAppMutation<
     { client: SalesOpsClient },
     Error,
@@ -171,7 +172,6 @@ export function useSaveSalesOpsArea() {
   const optimistic = useOptimisticBootstrapWrite<'areas', SaveAreaPayload, { area: SalesOpsArea }>(
     'areas',
     optimisticArea,
-    (row) => row.name,
     (response) => response.area,
   );
   return useAppMutation<{ area: SalesOpsArea }, Error, SaveAreaPayload, OptimisticPatch | undefined>(
@@ -185,12 +185,25 @@ export function useSaveSalesOpsArea() {
 
 export function useSaveSalesOpsFuncao() {
   const { getToken } = useAccessToken();
-  // No optimistic write: the server derives `slug` from `name`, so the client cannot
-  // build the persisted row.
-  return useAppMutation({
-    mutationFn: async (payload: SaveFuncaoPayload) =>
-      salesOpsApi.saveFuncao(payload, await requireToken(getToken)),
+  /**
+   * The provisional slug in `optimisticFuncao` is the only value the client cannot derive
+   * exactly, and it is invisible: nothing renders a slug, and the onSuccess reconcile
+   * replaces the whole row with the persisted one before the refetch lands.
+   */
+  const optimistic = useOptimisticBootstrapWrite<
+    'funcoes',
+    SaveFuncaoPayload,
+    { funcao: SalesOpsFuncao }
+  >('funcoes', optimisticFuncao, (response) => response.funcao);
+  return useAppMutation<
+    { funcao: SalesOpsFuncao },
+    Error,
+    SaveFuncaoPayload,
+    OptimisticPatch | undefined
+  >({
+    mutationFn: async (payload) => salesOpsApi.saveFuncao(payload, await requireToken(getToken)),
     invalidates: [queryKeys.salesOps.all],
+    ...optimistic,
   });
 }
 
