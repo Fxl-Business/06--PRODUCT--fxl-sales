@@ -34,7 +34,7 @@ directly, one slice at a time, each gated by a separate local Verify agent (Gate
 | 09 | pessoas-funcoes-web | done | feat/09-pessoas-funcoes-web | PASS 2/3 | 12aa1dc | wave 3 |
 | 10 | produtos-servicos-web | done | feat/10-produtos-servicos-web | PASS 3/3 | e356c99 | wave 3 |
 | 11 | payment-plan-builder | done | feat/11-payment-plan-builder | PASS 2/3 | 39103eb | wave 3 |
-| 12 | proposta-overrides | todo | | | | wave 4 |
+| 12 | proposta-overrides | done | feat/12-proposta-overrides | PASS 2/3 | 9aa8350 | wave 4 |
 
 ## Oracle command forms (verified 2026-07-29 - overrides any plan file that says otherwise)
 
@@ -362,6 +362,72 @@ recoverable with one nudge of `Parcelas restantes`, and nothing invalid can be s
 `defaultPlanShapeForProduct` clamps to the raw 120 rather than the entrada-aware ceiling, so a template with
 an entrada plus 120 parcelas would display 120 while generating 119; money stays exact and the cadastro
 clamps on save, so it is unreachable through the UI.
+
+### 12-proposta-overrides - Gate 2 PASS, then an orchestrator-requested amendment, merged at `9aa8350`
+
+User item 8 plus the Profissionais alocados rework. The final slice of the batch.
+web 35 files / 320 tests to 38 / 354; api 27 / 283 to 29 / 300; integration 18 / 88 to 19 / 101;
+shared-utils 1 / 17 to 2 / 23.
+
+**The gap was not "fields are read-only".** Every override column and all four editable inputs already
+existed. The real defects were: the render-phase defaults guard silently clobbering a hand-typed value
+whenever its source key moved; per-função cost defaults having no representation in a proposta at all; free
+text twice over (`Digite manualmente` and a `role` seeded with the literal `'Operacional'`); and the wizard
+margin disagreeing with the persisted `net_margin_brl`.
+
+**The margin bug was real and user-visible.** Driving the real wizard with a bounded recorrência and uneven
+parcelas, the branch shows `R$ 21.227 (70,76%)`, exactly the persisted `2122658` / `'70.76'`. `master` showed
+`R$ 13.677 (68,4%)` - under-reporting by R$ 7.550 on that shape. Both sides now call one
+`computeSaleFinancials` in `packages/shared-utils` using the server's algorithm verbatim.
+
+**The cross-tenant hole is closed, provably.** `professionals[].personId`, `sellerPersonId` and
+`finderPersonId` were accepted from the request body as bare uuids and written through with no org check.
+The verifier deleted each new `orgId` filter in turn and a test went Red each time - the people filter turned
+a cross-org write into an *accepted* write, the funções filter into a raw `23503` - and confirmed a real HTTP
+cross-tenant write is a clean 400 with body-supplied `orgId` / `workspaceId` / `accountId` ignored.
+
+**The RLS-masking trap bit a third time.** Deleting each new filter left all 11 app-connection tests green;
+only the `app.fxl_admin`-connection tests catch it. Three occurrences across three slices makes this a
+property of this test suite rather than a coincidence - see the follow-up on `areas-rls.test.ts`.
+
+**No persisted number moved**, verified by materializing master's own `service.ts` and deep-equalling the
+entire persisted sale plus receivables and items across 8 shapes. Payables generation is byte-unchanged and
+`professional_cost` at `won` matches the overridden values. Migration 0014 replays clean twice.
+
+**Two of the executor's own mutations initially failed to go Red**, exposing real coverage gaps it then
+closed: `costManual` ignored on a *função* change, and `Restaurar padrão` not clearing the pin - invisible
+because a restored value equals its default, so the chip hides either way. Its test now changes the produto
+afterwards to make it observable.
+
+**First Gate 2 PASS**, with four non-blocking findings. **The orchestrator declined to merge on the pass** and
+requested two be closed:
+
+1. **The Revisão screen was self-contradictory** - `Total R$ 20.000,00` beside `Margem líquida R$ 21.227`, a
+   margin larger than the total. The `Total` line was byte-identical to master and already disagreed with
+   `total_brl` by excluding the bounded recorrência; making the margin correct merely surfaced it.
+2. **The new integration test leaked orphan rows** by omitting `sales_ops_people` from its `afterAll`.
+
+**Amendment PASS.** The executor fixed the Revisão basis Red-first, and added a second test that
+**deliberately passes before the fix** - an indeterminada recorrência must leave the total at the itens total
+- as a control against over-reach. Both mutations invert independently. It also **checked rather than
+assumed** on step 2: it left `Soma das parcelas / total` on the itens basis because the API's
+`validatePaymentPlan` hard-requires `planTotalBrl === itemsTotalBrl`, so "making the screens consistent"
+would have rendered valid plans red and led operators to author payloads the API rejects. The verifier read
+that function independently and upheld it.
+The amendment's only production change is one render expression, so the previous PASS transferred for
+tenancy, margin, migration and payables.
+The verifier also found the leak was **95 rows, not 19** (19 people, 19 person_funcoes, 57 funcoes), because
+the people-delete's cascade is what unblocks the `RESTRICT`-guarded funções delete - the fix's rationale was
+right and only the reported count was conservative.
+Reports: `verify-12.md`, `verify-12-amendment.md`.
+
+**Recorded, not fixed:** 80 of 90 concurrent `POST /sales` calls 500 on `23505
+sales_ops_sales_org_sequence_idx`, proven pre-existing by running the same probe against master's own
+`createSale` where 86 of 90 fail; the new write path returned 60 of 60 clean 400s under the same load. Also
+the `Alterado manualmente` chip requires pin *and* divergence for the four step-3 fields but pin alone on a
+profissional cost row, so every prefilled row is labelled manually-changed - only the label overstates. And
+`Comissão finder (2%)` renders its percentage even when the proposta has no finder, byte-identical to master,
+with the margin correctly excluding it.
 
 ### SAFETY: `db:migrate` reads the staging `DATABASE_URL`
 
