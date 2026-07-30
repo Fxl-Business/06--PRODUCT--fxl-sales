@@ -1,0 +1,1 @@
+{"agent":"verify","slice":"03-wizard-itens-row","status":"PASS","report":"nexo/runs/batch-01K9NX4QPTUI0730CADPRODWIZ/verify-03.md","summary":"PASS - lint/type-check/tests green (web 365/39 up from 363, api 300/29 flat); all four traps proved falsifiable by mutation; no assertion weakened.","done":true,"ts":"2026-07-30T16:40:00Z"}

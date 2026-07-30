@@ -184,6 +184,29 @@ const comboboxTriggerClass =
  * rounded-md/rounded-[10px] pairs in favour of the later token.
  */
 const formSelectClass = `${comboboxTriggerClass} h-11 rounded-[10px]`;
+/**
+ * The one grid the step-1 `Itens` header and every item row share. Before this
+ * constant the template was copy-pasted six times and the header carried an extra
+ * `px-0.5`, so a column label never sat exactly over the control it named.
+ */
+const saleItemGridClass = 'grid grid-cols-[minmax(0,1fr)_70px_130px_120px_36px] gap-[9px]';
+/**
+ * The header strip. `border border-transparent` reproduces the 1px border of the
+ * item block below it and `px-3` reproduces that block's padding, so the header's
+ * column edges land exactly on the rows' column edges. Each cell then repeats the
+ * horizontal padding of the control in its own column - see the cells below.
+ */
+const saleItemHeaderClass =
+  'border border-transparent px-3 pb-[7px] text-[11px] font-bold uppercase tracking-[0.05em] text-[#9b9ba3]';
+/**
+ * One item, bounded. Two items are two blocks and the description can no longer be
+ * misread as a third product row.
+ */
+const saleItemBlockClass =
+  'flex flex-col gap-[7px] rounded-[12px] border border-[#e8e8ec] bg-[#fcfcfd] p-3';
+/** The caption above a description input, in the same idiom as the column headers. */
+const saleItemFieldLabelClass =
+  'text-[11px] font-bold uppercase tracking-[0.04em] text-[#9b9ba3]';
 
 const workspaceVisuals: Record<
   SalesOpsWorkspace,
@@ -4673,6 +4696,13 @@ type SaleItemForm = {
   customLabel: string; // open-price custom label on product rows; the description on free rows
   quantity: string; // always '1' on free rows
   unitBrl: string;
+  /**
+   * UI only, never sent. `true` once the operator opened the optional description
+   * on THIS row. It rides on the row rather than in an index-keyed set because rows
+   * are deleted with `filter((_, i) => i !== index)`, so index-keyed state would
+   * slide onto the wrong row after a delete.
+   */
+  descriptionOpen: boolean;
 };
 
 type InstallmentRowForm = { dueDate: string; amountBrl: string; method: PaymentMethod };
@@ -4870,6 +4900,10 @@ function deriveWizardPrefill(sale: SalesOpsSale, bootstrap: SalesOpsBootstrap): 
           customLabel: item.productNameSnapshot,
           quantity: '1',
           unitBrl: centsToInput(item.unitBrl),
+          // Deliberately `false` even for a row that HAS a description: the
+          // visibility predicate ORs on the text, so the edit path opens without
+          // the flag and `deriveWizardPrefill` stays free of UI reasoning.
+          descriptionOpen: false,
         };
       }
       const product = bootstrap.products.find((candidate) => candidate.id === item.productId);
@@ -4883,6 +4917,7 @@ function deriveWizardPrefill(sale: SalesOpsSale, bootstrap: SalesOpsBootstrap): 
             : '',
         quantity: String(item.quantity),
         unitBrl: centsToInput(item.unitBrl),
+        descriptionOpen: false,
       };
     });
   const hasRecurring = sale.recurringBrl > 0;
@@ -5114,10 +5149,18 @@ function SaleWizardDialogBody({
             unitBrl: centsToInput(
               firstProduct.openPrice ? 0 : firstProduct.setupBrl || firstProduct.monthlyBrl,
             ),
+            descriptionOpen: false,
           },
         ]
       : []),
   );
+  /**
+   * Index whose description input should take focus on its next mount. A callback
+   * ref rather than `autoFocus`, because `autoFocus` fires on every mount and would
+   * steal focus when the wizard returns to step 1 or when the edit path mounts a
+   * prefilled row.
+   */
+  const pendingDescriptionFocus = useRef<number | null>(null);
   const [professionals, setProfessionals] = useState<ProfessionalForm[]>(prefill?.professionals ?? []);
   /** Source key for the per-função cost re-prefill; see the sync block below. */
   const [funcaoCostKey, setFuncaoCostKey] = useState('');
@@ -5617,6 +5660,8 @@ function SaleWizardDialogBody({
         const next = { ...item, ...patch };
         if (patch.productId && patch.productId !== item.productId) {
           next.customLabel = '';
+          // Swapping the produto is a fresh row, so a stale reveal must not survive it.
+          next.descriptionOpen = false;
           const product = bootstrap.products.find((candidate) => candidate.id === patch.productId);
           if (product) {
             next.unitBrl = centsToInput(product.openPrice ? 0 : product.setupBrl || product.monthlyBrl);
@@ -5639,6 +5684,7 @@ function SaleWizardDialogBody({
         customLabel: '',
         quantity: '1',
         unitBrl: centsToInput(product.openPrice ? 0 : product.setupBrl || product.monthlyBrl),
+        descriptionOpen: false,
       },
     ]);
   }
@@ -5647,8 +5693,21 @@ function SaleWizardDialogBody({
     if (activeAreas.length === 0) return;
     setItems((current) => [
       ...current,
-      { kind: 'free', productId: '', areaId: activeAreas[0]!.id, customLabel: '', quantity: '1', unitBrl: '0' },
+      {
+        kind: 'free',
+        productId: '',
+        areaId: activeAreas[0]!.id,
+        customLabel: '',
+        quantity: '1',
+        unitBrl: '0',
+        descriptionOpen: false,
+      },
     ]);
+  }
+
+  function revealDescription(index: number) {
+    pendingDescriptionFocus.current = index;
+    setItem(index, { descriptionOpen: true });
   }
 
   function setInstallmentRow(index: number, patch: Partial<InstallmentRowForm>) {
@@ -6060,14 +6119,22 @@ function SaleWizardDialogBody({
                         </button>
                       </div>
                     </div>
-                    <div className="grid grid-cols-[minmax(0,1fr)_70px_130px_120px_36px] gap-[9px] px-0.5 pb-[7px] text-[11px] font-bold uppercase tracking-[0.05em] text-[#9b9ba3]">
-                      <span>Produto / serviço</span>
+                    {/*
+                      `pl-3` and `pr-3` are the `px-3` of `formSelectClass` and
+                      `formInputClass`, so each label sits exactly over the text of the
+                      control it names. `Qtd.` needs none because its `Input` is
+                      `text-center` inside a symmetric `px-3`; `Subtotal` needs none
+                      because the cell under it is a bare `<div>` with no padding.
+                    */}
+                    <div className={`${saleItemGridClass} ${saleItemHeaderClass}`}>
+                      <span className="pl-3">Produto / serviço</span>
                       <span className="text-center">Qtd.</span>
-                      <span className="text-right">Valor unit.</span>
+                      <span className="pr-3 text-right">Valor unit.</span>
                       <span className="text-right">Subtotal</span>
                       <span />
                     </div>
-                    <div className="flex flex-col gap-2">
+                    {/* Larger than the `gap-[7px]` inside one block, so the boundary reads. */}
+                    <div className="flex flex-col gap-[10px]">
                       {items.map((item, index) => {
                         if (item.kind === 'free') {
                           const areaValid = Boolean(item.areaId);
@@ -6075,8 +6142,8 @@ function SaleWizardDialogBody({
                           const unitValid = parseCurrencyToCents(item.unitBrl) > 0;
                           const subtotal = parseCurrencyToCents(item.unitBrl);
                           return (
-                            <div className="flex flex-col gap-[5px]" key={`free-${index}`}>
-                              <div className="grid grid-cols-[minmax(0,1fr)_70px_130px_120px_36px] items-center gap-[9px]">
+                            <div className={saleItemBlockClass} key={`free-${index}`}>
+                              <div className={`${saleItemGridClass} items-center`}>
                                 <Combobox
                                   aria-label={`Área do item ${index + 1}`}
                                   className={formSelectClass}
@@ -6099,7 +6166,7 @@ function SaleWizardDialogBody({
                                   aria-invalid={showItemErrors && !unitValid}
                                   aria-label={`Valor unitário do item ${index + 1}`}
                                   className={cn(
-                                    'sales-ops-num h-10 rounded-[9px] text-right',
+                                    'sales-ops-num text-right',
                                     formInputClass,
                                     showItemErrors && !unitValid && 'border-destructive',
                                   )}
@@ -6120,9 +6187,14 @@ function SaleWizardDialogBody({
                                   <Trash2 className="h-3.5 w-3.5" />
                                 </button>
                               </div>
-                              <div className="grid grid-cols-[minmax(0,1fr)_70px_130px_120px_36px] gap-[9px]">
+                              {/*
+                                A free row's description IS the item's name, so it is
+                                required and renders open unconditionally, with no
+                                reveal affordance.
+                              */}
+                              <div className={saleItemGridClass}>
                                 <label className="flex min-w-0 flex-col gap-[6px]">
-                                  <span className="text-xs font-semibold text-[#8b8b92]">Descrição do item</span>
+                                  <span className={saleItemFieldLabelClass}>Descrição do item</span>
                                   <Input
                                     aria-invalid={showItemErrors && !descriptionValid}
                                     aria-label={`Descrição do item ${index + 1}`}
@@ -6136,23 +6208,26 @@ function SaleWizardDialogBody({
                                     placeholder="Ex.: Consultoria de processos"
                                     value={item.customLabel}
                                   />
-                                  {showItemErrors ? (
-                                    <span className="flex flex-col gap-1 text-[11.5px] font-semibold text-destructive">
-                                      {!areaValid ? <span>Selecione a área deste item.</span> : null}
-                                      {!descriptionValid ? (
-                                        <span>Informe a descrição deste item avulso.</span>
-                                      ) : null}
-                                      {!unitValid ? (
-                                        <span>Informe um valor negociado maior que zero.</span>
-                                      ) : null}
-                                    </span>
-                                  ) : (
-                                    <span className="flex items-center gap-1.5 pl-0.5 text-[11.5px] font-semibold text-[#9c7210]">
-                                      <AlertTriangle className="h-[13px] w-[13px]" />
-                                      Item avulso - informe a área, a descrição e o valor
-                                    </span>
-                                  )}
                                 </label>
+                              </div>
+                              {/* One always-present home for every message this row emits. */}
+                              <div className="flex flex-col gap-1 pl-3">
+                                {showItemErrors ? (
+                                  <span className="flex flex-col gap-1 text-[11.5px] font-semibold text-destructive">
+                                    {!areaValid ? <span>Selecione a área deste item.</span> : null}
+                                    {!descriptionValid ? (
+                                      <span>Informe a descrição deste item avulso.</span>
+                                    ) : null}
+                                    {!unitValid ? (
+                                      <span>Informe um valor negociado maior que zero.</span>
+                                    ) : null}
+                                  </span>
+                                ) : (
+                                  <span className="flex items-center gap-1.5 text-[11.5px] font-semibold text-[#9c7210]">
+                                    <AlertTriangle className="h-[13px] w-[13px]" />
+                                    Item avulso - informe a área, a descrição e o valor
+                                  </span>
+                                )}
                               </div>
                             </div>
                           );
@@ -6168,6 +6243,23 @@ function SaleWizardDialogBody({
                         const showCustomUnitError =
                           hasVariableValue && showItemErrors && !customUnitValid;
                         const showAreaError = showItemErrors && !product?.areaId;
+                        /*
+                          The ONE regime the affordance may collapse. A free row's
+                          description is its name and an open-price non-Serviço row
+                          REQUIRES one, so neither is ever hidden; a Serviço falls back
+                          to the catalog name, which is what makes its description
+                          genuinely optional.
+
+                          Note the deliberate asymmetry: once revealed, clearing the
+                          text does NOT re-collapse the field, because `descriptionOpen`
+                          stays true. A field must never vanish from under the caret.
+                        */
+                        const descriptionOptional = hasVariableValue && !needsDescription;
+                        const descriptionVisible =
+                          hasVariableValue &&
+                          (needsDescription ||
+                            item.descriptionOpen ||
+                            Boolean(item.customLabel.trim()));
                         // Three cases, three hints: a serviço says the description
                         // is optional and names the label it will fall back to, an
                         // open-price produto keeps asking for both.
@@ -6178,42 +6270,40 @@ function SaleWizardDialogBody({
                             ? 'Serviço com valor variável - descrição opcional'
                             : `Serviço com valor variável - sem descrição, o item aparece como "${saleItemDisplayName(item)}"`;
                         }
+                        const showRowMessages = showItemErrors
+                          ? showCustomLabelError || showCustomUnitError || showAreaError
+                          : hasVariableValue;
                         const subtotal =
                           Math.max(1, Number(item.quantity) || 1) * parseCurrencyToCents(item.unitBrl);
                         return (
-                          <div className="flex flex-col gap-[5px]" key={`${item.productId}-${index}`}>
-                            <div className="grid grid-cols-[minmax(0,1fr)_70px_130px_120px_36px] items-center gap-[9px]">
-                              <div className="flex flex-col gap-1">
-                                <Combobox
-                                  aria-label={`Produto / serviço do item ${index + 1}`}
-                                  className={formSelectClass}
-                                  emptyMessage="Nenhum produto encontrado"
-                                  entityGender="m"
-                                  entityLabel="produto"
-                                  onChange={(value) => setItem(index, { productId: value })}
-                                  // Deliberately not an inline create: a produto is invalid
-                                  // without an área and carries pricing plus three commission
-                                  // pairs, so the create row opens ProductDialog prefilled.
-                                  onCreate={
-                                    onCreateProduct ? (name) => onCreateProduct(name) : undefined
-                                  }
-                                  options={productOptions(bootstrap.products, areaNameById)}
-                                  searchPlaceholder="Buscar produto..."
-                                  value={item.productId}
-                                />
-                                {product?.areaId ? (
-                                  <span className="self-start rounded-full bg-[#ececf1] px-2 py-[2px] text-[11px] font-bold text-[#57575f]">
-                                    {areaNameById.get(product.areaId) ?? 'Área'}
-                                  </span>
-                                ) : (
-                                  <span className="self-start rounded-full bg-[#fdf0cf] px-2 py-[2px] text-[11px] font-bold text-[#9c7210]">
-                                    Sem área
-                                  </span>
-                                )}
-                              </div>
+                          <div className={saleItemBlockClass} key={`${item.productId}-${index}`}>
+                            {/*
+                              Column 1 is now the picker and nothing else, which is what
+                              lets `items-center` line the numbers up with it: the área
+                              badge used to stack under the picker and make this cell
+                              ~68px tall against 40px everywhere else.
+                            */}
+                            <div className={`${saleItemGridClass} items-center`}>
+                              <Combobox
+                                aria-label={`Produto / serviço do item ${index + 1}`}
+                                className={formSelectClass}
+                                emptyMessage="Nenhum produto encontrado"
+                                entityGender="m"
+                                entityLabel="produto"
+                                onChange={(value) => setItem(index, { productId: value })}
+                                // Deliberately not an inline create: a produto is invalid
+                                // without an área and carries pricing plus three commission
+                                // pairs, so the create row opens ProductDialog prefilled.
+                                onCreate={
+                                  onCreateProduct ? (name) => onCreateProduct(name) : undefined
+                                }
+                                options={productOptions(bootstrap.products, areaNameById)}
+                                searchPlaceholder="Buscar produto..."
+                                value={item.productId}
+                              />
                               <Input
                                 aria-label={`Quantidade do item ${index + 1}`}
-                                className={`sales-ops-num h-10 rounded-[9px] text-center ${formInputClass}`}
+                                className={`sales-ops-num text-center ${formInputClass}`}
                                 min={1}
                                 onChange={(event) => setItem(index, { quantity: event.target.value })}
                                 type="number"
@@ -6223,7 +6313,7 @@ function SaleWizardDialogBody({
                                 aria-invalid={showCustomUnitError}
                                 aria-label={`Valor unitário do item ${index + 1}`}
                                 className={cn(
-                                  'sales-ops-num h-10 rounded-[9px] text-right',
+                                  'sales-ops-num text-right',
                                   formInputClass,
                                   showCustomUnitError && 'border-destructive',
                                 )}
@@ -6244,10 +6334,35 @@ function SaleWizardDialogBody({
                                 <Trash2 className="h-3.5 w-3.5" />
                               </button>
                             </div>
-                            {hasVariableValue ? (
-                              <div className="grid grid-cols-[minmax(0,1fr)_70px_130px_120px_36px] gap-[9px]">
+                            {/* Metadata about the produto in column 1, plus the reveal affordance. */}
+                            <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 pl-3">
+                              {product?.areaId ? (
+                                <span className="rounded-full bg-[#ececf1] px-2 py-[2px] text-[11px] font-bold text-[#57575f]">
+                                  {areaNameById.get(product.areaId) ?? 'Área'}
+                                </span>
+                              ) : (
+                                <span className="rounded-full bg-[#fdf0cf] px-2 py-[2px] text-[11px] font-bold text-[#9c7210]">
+                                  Sem área
+                                </span>
+                              )}
+                              {descriptionOptional && !descriptionVisible ? (
+                                <button
+                                  className="rounded-[7px] border border-dashed border-[#dcdce2] px-2 py-[3px] text-[11.5px] font-semibold text-[#57575f] transition hover:border-[#eaa81a] hover:text-[#9c7210]"
+                                  onClick={() => revealDescription(index)}
+                                  type="button"
+                                >
+                                  + Adicionar descrição
+                                </button>
+                              ) : null}
+                            </div>
+                            {/*
+                              The description, on the same grid, so the input lands exactly
+                              under the produto picker and reads as a property of it.
+                            */}
+                            {descriptionVisible ? (
+                              <div className={saleItemGridClass}>
                                 <label className="flex min-w-0 flex-col gap-[6px]">
-                                  <span className="text-xs font-semibold text-[#8b8b92]">
+                                  <span className={saleItemFieldLabelClass}>
                                     {isService
                                       ? 'Nome / descrição do item (opcional)'
                                       : 'Nome / descrição do item'}
@@ -6270,34 +6385,49 @@ function SaleWizardDialogBody({
                                     placeholder={
                                       isService ? 'Ex.: detalhe do escopo' : 'Ex.: Módulo Vendas'
                                     }
+                                    ref={(node) => {
+                                      if (node && pendingDescriptionFocus.current === index) {
+                                        pendingDescriptionFocus.current = null;
+                                        node.focus();
+                                      }
+                                    }}
                                     value={item.customLabel}
                                   />
-                                  {showItemErrors ? (
-                                    <span className="flex flex-col gap-1 text-[11.5px] font-semibold text-destructive">
-                                      {showCustomLabelError ? (
-                                        <span>
-                                          Informe o nome ou a descrição deste item personalizado.
-                                        </span>
-                                      ) : null}
-                                      {showCustomUnitError ? (
-                                        <span>Informe um valor negociado maior que zero.</span>
-                                      ) : null}
-                                    </span>
-                                  ) : (
-                                    <span className="flex items-center gap-1.5 pl-0.5 text-[11.5px] font-semibold text-[#9c7210]">
-                                      <AlertTriangle className="h-[13px] w-[13px]" />
-                                      {descriptionHint}
-                                    </span>
-                                  )}
                                 </label>
                               </div>
                             ) : null}
-                            {showAreaError ? (
-                              <div className="grid grid-cols-[minmax(0,1fr)_70px_130px_120px_36px] gap-[9px]">
-                                <span className="text-[11.5px] font-semibold text-destructive">
-                                  Defina a área deste produto em Cadastros {'>'} Produtos &
-                                  Serviços.
-                                </span>
+                            {/*
+                              Every message this row can emit, in one always-present home
+                              OUTSIDE the collapsible block. `showCustomUnitError` is a
+                              VALUE error and a blank-description Serviço row is exactly
+                              the collapsing case, so keeping it inside the description
+                              would hide it from the row that most needs it.
+                            */}
+                            {showRowMessages ? (
+                              <div className="flex flex-col gap-1 pl-3">
+                                {showItemErrors ? (
+                                  <span className="flex flex-col gap-1 text-[11.5px] font-semibold text-destructive">
+                                    {showCustomLabelError ? (
+                                      <span>
+                                        Informe o nome ou a descrição deste item personalizado.
+                                      </span>
+                                    ) : null}
+                                    {showCustomUnitError ? (
+                                      <span>Informe um valor negociado maior que zero.</span>
+                                    ) : null}
+                                    {showAreaError ? (
+                                      <span>
+                                        Defina a área deste produto em Cadastros {'>'} Produtos &
+                                        Serviços.
+                                      </span>
+                                    ) : null}
+                                  </span>
+                                ) : (
+                                  <span className="flex items-center gap-1.5 text-[11.5px] font-semibold text-[#9c7210]">
+                                    <AlertTriangle className="h-[13px] w-[13px]" />
+                                    {descriptionHint}
+                                  </span>
+                                )}
                               </div>
                             ) : null}
                           </div>
