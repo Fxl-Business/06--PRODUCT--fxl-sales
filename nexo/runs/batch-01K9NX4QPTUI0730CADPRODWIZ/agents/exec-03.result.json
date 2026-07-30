@@ -1,0 +1,1 @@
+{"agent":"exec","slice":"03-wizard-itens-row","status":"PASS","report":"nexo/runs/batch-01K9NX4QPTUI0730CADPRODWIZ/exec-03.md","summary":"Step-1 Itens now shares one grid, each item is a bounded block, and the Servico-only optional description sits behind + Adicionar descricao; 365 web / 300 api tests, lint and type-check clean.","done":true,"ts":"2026-07-30T16:35:00Z"}

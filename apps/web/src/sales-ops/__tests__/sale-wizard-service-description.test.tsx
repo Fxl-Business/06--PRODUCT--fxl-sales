@@ -239,11 +239,16 @@ async function changeInput(input: HTMLInputElement, value: string) {
 
 const descriptionError = 'Informe o nome ou a descrição deste item personalizado.';
 const valueError = 'Informe um valor negociado maior que zero.';
+/** The opt-in affordance that now stands in for a collapsed optional description. */
+const revealDescription = '+ Adicionar descrição';
 
 describe('sale wizard serviço description', () => {
   it('advances step 1 with a serviço item whose description is blank', async () => {
     await changeInput(labeledInput('Valor unitário do item 1'), '4000');
-    expect(labeledInput('Nome / descrição do item 1').value).toBe('');
+    // The serviço description is the one optional regime, so it starts collapsed
+    // behind the reveal affordance rather than as an empty always-open input.
+    expect(container.querySelector('input[aria-label="Nome / descrição do item 1"]')).toBeNull();
+    expect(buttonByText(revealDescription)).toBeInstanceOf(HTMLButtonElement);
 
     await click(buttonByText('Avançar'));
 
@@ -285,6 +290,7 @@ describe('sale wizard serviço description', () => {
   });
 
   it('keeps the typed description when a serviço row has one', async () => {
+    await click(buttonByText(revealDescription));
     await changeInput(labeledInput('Nome / descrição do item 1'), 'Escopo mensal');
     await changeInput(labeledInput('Valor unitário do item 1'), '4000');
     await click(buttonByText('Avançar'));
@@ -328,7 +334,9 @@ describe('sale wizard serviço description', () => {
     expect(textOccurrences(valueError)).toBe(1);
     expect(textOccurrences(descriptionError)).toBe(0);
     expect(labeledInput('Valor unitário do item 1').getAttribute('aria-invalid')).toBe('true');
-    expect(labeledInput('Nome / descrição do item 1').getAttribute('aria-invalid')).not.toBe('true');
+    // The stronger form of the same claim: a collapsed optional field cannot be
+    // invalid, and the value error above still had to render OUTSIDE it to be seen.
+    expect(container.querySelector('input[aria-label="Nome / descrição do item 1"]')).toBeNull();
 
     // Positive control: supplying only the value, never a description, unblocks it.
     await changeInput(labeledInput('Valor unitário do item 1'), '4000');
@@ -368,6 +376,13 @@ describe('sale wizard serviço description', () => {
   });
 
   it('labels the serviço description as optional and names the catalog fallback', async () => {
+    // The hint describes what the item will be CALLED, so it keeps rendering while
+    // the field is collapsed; only the field itself is opt-in.
+    expect(container.textContent).toContain(
+      'Serviço com valor variável - sem descrição, o item aparece como "Consultoria FXL"',
+    );
+
+    await click(buttonByText(revealDescription));
     // The aria-label is frozen (eight existing queries depend on it); only the
     // visible label and the hint move.
     expect(labeledInput('Nome / descrição do item 1')).toBeInstanceOf(HTMLInputElement);
