@@ -50,6 +50,11 @@ Keep the repository folder name unchanged until the editor session can safely mo
 - Numeric fields use `<Input type="number">` from `@/components/ui/input`; the OS spin buttons are suppressed by a base-layer rule in `apps/web/src/index.css`.
   A raw `<input type="number">` is banned by the same ESLint rule.
 - `<input type="date">` is the one browser-native picker still allowed, by explicit decision.
+- Any component that opens an inline layer inside a dialog - `Combobox`'s panel, `InfoHint`'s disclosure - MUST call `useInlineLayer(open)` from `@/components/ui/inline-layer`.
+  Radix registers `useEscapeKeydown` on `document` with `{capture: true}`, so it runs before the event reaches React's root container and **no** handler inside the React tree can pre-empt it - `stopPropagation` and `stopImmediatePropagation` are both inert against it.
+  Without the registry, Escape aimed at an open picker closes the whole wizard and discards the operator's typed work.
+  `DialogContent` owns the registry and `preventDefault`s `onEscapeKeyDown` while any layer is open; the open count is a ref, so a picker opening does not re-render the dialog, and release is idempotent so a StrictMode double cleanup cannot strand the count negative and silently disarm the guard.
+  A regression test for this must render the component inside a REAL `Dialog` and assert `onOpenChange` was not called. A spy on a React sibling's `onKeyDown` passes even with the protection deleted - that exact false positive already shipped once.
 - Picker geometry has exactly two canonical sizes in sales-ops: `formSelectClass` (44px, matching `formInputClass` so a picker and the `Input` beside it line up) and `comboboxTriggerClass` (40px, the compact `Filtros` bar only).
   Call sites pass only non-geometry extras.
 - `onCreate` is wired only where an inline create yields a complete, valid record: cliente, área and função create through the API, and profissional accepts the typed name verbatim.
@@ -103,6 +108,10 @@ Keep the repository folder name unchanged until the editor session can safely mo
 - A row's OWN stored função always stays selectable on that row, resolved against the unfiltered `funcoes` and labelled `<nome> (arquivada)` when archived. Funções are never deleted, only archived, so a cost row pointing at an archived função is the expected end state of archiving one that carries money; hiding it would make the row read as money owed to nobody and would let a stray edit silently retarget the cost. A `funcaoId` that resolves to nothing at all reads `Função não encontrada`, never a raw id.
 - That is the same principle the Pessoa dialog follows, reached differently because the two dialogs are shaped differently. A pessoa splits the job across two controls, so `assignedFuncoes` resolves the chips from the unfiltered list while `selectableFuncoes` offers only active ones - which is why an archived função really does vanish from *that* picker. A cost row is one control doing both jobs, so the stored value has to be admitted into the row's own options; the direct precedent is `selectableAreas` in this same product dialog, which prepends an archived-but-current área into the picker it belongs to.
 - `sales_ops_products.providers` is deprecated and has no editor. Product writes OMIT the key rather than sending `[]`, so a PATCH leaves the column untouched, and the dialog surfaces the legacy names read-only inside the função cost section for manual re-entry. There is no backfill from `providers` to `productFuncaoCosts` and there cannot be one: a provider row keys on a free-text `personName` with no deterministic mapping to a `funcaoId`.
+- `code_suffix` is UNIQUE per org (`sales_ops_products_org_code_suffix_idx`, no `WHERE` clause), so an archived produto permanently occupies its slot.
+  A NEW produto seeds the field from the pure `nextProductCodeSuffix` in `apps/web/src/sales-ops/calculations.ts`: max+1 over every produto in the org, both `kind`s and both statuses, gaps deliberately left unfilled, non-numeric values ignored, numeric rather than lexicographic ordering, and a lowest-free fallback past 99.
+  The EDIT path is guarded by the `??` short-circuit on `modal?.product`, the same shape as the `name` seed, so an existing produto always renders its stored suffix and can never be silently renumbered.
+  The API still has no 23505 handling, so a genuine collision surfaces as a bare 500 - see `nexo/ROADMAP.md`.
 
 ## Propostas domain
 
