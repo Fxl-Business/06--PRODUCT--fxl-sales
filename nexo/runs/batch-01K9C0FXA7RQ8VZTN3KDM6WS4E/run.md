@@ -31,7 +31,7 @@ directly, one slice at a time, each gated by a separate local Verify agent (Gate
 | 06 | combobox-adoption | done | feat/06-combobox-adoption | PASS 2/3 | 762232b | wave 2 |
 | 07 | produtos-servicos-api | done | feat/07-produtos-servicos-api | PASS 1/3 | 5859b80 | wave 2 |
 | 08 | service-description-optional | done | feat/08-service-description-optional | PASS 1/3 | 045bd72 | wave 3 |
-| 09 | pessoas-funcoes-web | todo | | | | wave 3 |
+| 09 | pessoas-funcoes-web | done | feat/09-pessoas-funcoes-web | PASS 2/3 | 12aa1dc | wave 3 |
 | 10 | produtos-servicos-web | todo | | | | wave 3 |
 | 11 | payment-plan-builder | todo | | | | wave 3 |
 | 12 | proposta-overrides | todo | | | | wave 4 |
@@ -184,6 +184,55 @@ fallback, since the API stopped returning `type`. Harmless today because the API
 but it is a type-level lie, and fixing it touches 10 fixture files plus the product dialog.
 
 Report: `verify-08.md`.
+
+### 09-pessoas-funcoes-web - Gate 2 FAIL then PASS, merged at `12aa1dc`
+
+User item 11, web half. `cadastros/pessoas` and `cadastros/funcoes` replace the two special-cased
+Vendedores and Finders screens; `vendedor` and `finder` become immutable predefined funções rendered with
+a disabled `Lock` rather than an edit action that must fail. Web 31 files / 220 tests to 32 / 240.
+
+The routing trap was handled correctly: "Vendedores" and "Finders" were never two screens but one
+component with a `mode` prop that `meus-dados` also reuses, so the legacy `/cadastros/vendedores` alias is
+scoped to the cadastros workspace. Dropping that scope fails 8 tests.
+Dropping the three legacy booleans from the web type produced 26 type errors, all in fixtures and none in
+source - the mechanical proof no web code reads a deprecated mirror. 14 test files churned, not the 7 the
+plan predicted, because slices 01.1, 06 and 08 had added more since.
+
+**Attempt 1 FAIL - a silent visibility narrowing in a slice mandated visibility-neutral.** `master` had
+**two different** prestador pools: `ProductDialog` filtered only on `isCollaborator`, while the wizard memo
+also required `status === 'active'`. The new `collaboratorPool` helper unified them, so an inactive pessoa
+carrying a custom função silently stopped being offered in the produto picker. Coupled to that, a
+`CLAUDE.md` sentence claimed the helper matched "exactly how the API derives `is_collaborator`", which was
+false: `deriveBooleanMirrors` has no status component.
+
+The executor accepted the finding and went further than the report - it discovered the two-pool asymmetry
+the first verifier had not identified, replaced the pre-filtered pool with a per-person
+`isCollaboratorPerson` predicate, moved the status filter back to the one call site that had it, commented
+both sites, and added a `CLAUDE.md` bullet warning not to unify the pools without deciding and pinning the
+behaviour. It also closed a carried-forward debt (the `MeuPainelView` slug-swap mutation, which survived on
+`master` too) and explained why its own original mutation missed it: it had used a bogus slug rather than
+swapping, and the fixture person carried both funções.
+
+**Attempt 2 PASS.** The verifier proved population equivalence empirically rather than by reading, with a
+seven-person probe set - inactive plus custom função, prestador-only, archived função, system-only,
+vendedor plus prestador, inactive system-only, and no função - each carrying `deriveBooleanMirrors`-computed
+booleans so both sides read the same payload. Produto and wizard pickers matched `master` exactly, with the
+inactive pessoa offered by one and withheld from the other. The produto side was driven through the full
+`SalesOpsApp`, so the wiring was under test rather than just the dialog.
+It confirmed every edited `CLAUDE.md` sentence is now true, including that line 70's narrower claim is
+correct where the broader one would have been false, because `headerAction` still yields "Nova proposta" on
+`/meus-dados/vendas` and `/meus-dados/comissoes`.
+Reports: `verify-09.md`, `verify-09-attempt2.md`.
+
+**Three false `CLAUDE.md` sentences so far in this batch** - one blocked slice 06, one was a pre-existing
+ambiguity slice 09 rewrote, and this one. Treating a false rule there as a real defect is deliberate:
+`CLAUDE.md` is the standing instruction set every future agent in this repo reads.
+
+**Follow-up recommended, deliberately not smuggled in:** filtering inactive pessoas out of the produto
+Prestador picker does look like the better behaviour. Scope is one call site, the asymmetry bullet, and
+inverting the new test's assertion rather than deleting it. Blast radius is low because the field stores a
+name snapshot with a free-text `onCreate`, so an already-saved inactive prestador keeps rendering either
+way and only the suggestion list changes.
 
 ### SAFETY: `db:migrate` reads the staging `DATABASE_URL`
 
