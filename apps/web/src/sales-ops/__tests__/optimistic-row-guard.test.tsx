@@ -409,6 +409,24 @@ describe('an optimistic row is visible but never actionable', () => {
     expect(container.querySelector('button[aria-label="Editar Pessoa Optimista"]')).toBeNull();
   });
 
+  it('disables the função edit affordance while the create POST is in flight', async () => {
+    const saveFuncaoDeferred = createDeferred<{ funcao: SalesOpsFuncao }>();
+    vi.mocked(salesOpsApi.saveFuncao).mockReturnValueOnce(saveFuncaoDeferred.promise);
+
+    await renderApp('/cadastros/funcoes');
+    await resolveBootstrap(0, snapshot());
+
+    await click(buttonByText('Nova função'));
+    await changeInput(requireInput('form input'), 'Função Optimista');
+    await submitDialogForm();
+
+    expect(vi.mocked(salesOpsApi.saveFuncao)).toHaveBeenCalledTimes(1);
+    const pendingButton = requireButtonByAriaLabel('Salvando Função Optimista');
+    expect(pendingButton.disabled).toBe(true);
+    expect(pendingButton.getAttribute('title')).toBe('Salvando...');
+    expect(container.querySelector('button[aria-label="Editar Função Optimista"]')).toBeNull();
+  });
+
   it('re-enables the área edit affordance for a persisted row', async () => {
     await renderApp('/cadastros/areas');
     await resolveBootstrap(0, snapshot({ areas: [persistedArea] }));
@@ -471,14 +489,14 @@ describe('withoutOptimisticRows', () => {
   it('returns the same snapshot reference when no row is optimistic', () => {
     const snap = snapshot({
       areas: [persistedArea],
-      funcoes: [],
+      funcoes: [funcaoVendedor, funcaoPrestador],
       clients: [persistedClient],
       people: [persistedPerson],
     });
     expect(withoutOptimisticRows(snap)).toBe(snap);
   });
 
-  it('strips optimistic áreas, clientes and pessoas and keeps every other collection by reference', () => {
+  it('strips optimistic áreas, clientes, funções and pessoas and keeps every other collection by reference', () => {
     const snap = snapshot({
       areas: [
         persistedArea,
@@ -487,6 +505,10 @@ describe('withoutOptimisticRows', () => {
       clients: [
         persistedClient,
         { ...persistedClient, id: optimisticId('clients', 'Novo'), name: 'Novo' },
+      ],
+      funcoes: [
+        funcaoPrestador,
+        { ...funcaoPrestador, id: optimisticId('funcoes', 'Nova'), name: 'Nova' },
       ],
       people: [
         persistedPerson,
@@ -504,12 +526,14 @@ describe('withoutOptimisticRows', () => {
     expect(result).not.toBe(snap);
     expect(result.areas).toHaveLength(1);
     expect(result.clients).toHaveLength(1);
+    expect(result.funcoes).toHaveLength(1);
     expect(result.people).toHaveLength(1);
     expect(result.areas[0]?.id).toBe(persistedArea.id);
     expect(result.clients[0]?.id).toBe(persistedClient.id);
+    expect(result.funcoes[0]?.id).toBe(funcaoPrestador.id);
     expect(result.people[0]?.id).toBe(persistedPerson.id);
     expect(
-      [...result.areas, ...result.clients, ...result.people].some((row) =>
+      [...result.areas, ...result.clients, ...result.funcoes, ...result.people].some((row) =>
         isOptimisticId(row.id),
       ),
     ).toBe(false);
@@ -570,6 +594,48 @@ describe('an unsaved row is never offered to a picker', () => {
     const productPayload = vi.mocked(salesOpsApi.saveProduct).mock.calls[0]?.[0];
     expect(productPayload?.areaId).toBe(existingArea.id);
     expect(String(productPayload?.areaId)).not.toMatch(/^optimistic:/);
+  });
+
+  it('keeps an unsaved função out of the pessoa função picker', async () => {
+    const saveFuncaoDeferred = createDeferred<{ funcao: SalesOpsFuncao }>();
+    vi.mocked(salesOpsApi.saveFuncao).mockReturnValueOnce(saveFuncaoDeferred.promise);
+
+    await renderApp('/cadastros/funcoes');
+    await resolveBootstrap(0, snapshot({ funcoes: [funcaoPrestador] }));
+
+    await click(buttonByText('Nova função'));
+    await changeInput(requireInput('form input'), 'AAA Função Nova');
+    await submitDialogForm();
+    expect(text()).toContain('AAA Função Nova');
+
+    await click(buttonByText('Cancelar'));
+
+    const pessoasNav = container.querySelector('nav button[aria-label="Pessoas"]');
+    if (!(pessoasNav instanceof HTMLButtonElement)) throw new Error('nav Pessoas not found');
+    await click(pessoasNav);
+
+    // The create POST is still in flight, so the optimistic função is still cached.
+    expect(vi.mocked(salesOpsApi.saveFuncao)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(salesOpsApi.bootstrap)).toHaveBeenCalledTimes(1);
+
+    await click(buttonByText('Nova pessoa'));
+    await changeInput(requireInput('form input'), 'Pessoa Nova');
+    await click(comboboxTrigger('Função da pessoa'));
+    const rows = [...container.querySelectorAll<HTMLElement>('[role="option"]')];
+    const offered = rows.map((row) => row.textContent?.trim());
+
+    // Positive control: the persisted função is offered, and it is the only one.
+    expect(offered).toEqual([funcaoPrestador.name]);
+    expect(offered).not.toContain('AAA Função Nova');
+
+    await click(rows[0]!);
+    await click(buttonByText('Adicionar função'));
+    await submitDialogForm();
+
+    expect(vi.mocked(salesOpsApi.savePerson)).toHaveBeenCalledTimes(1);
+    const personPayload = vi.mocked(salesOpsApi.savePerson).mock.calls[0]?.[0];
+    expect(personPayload?.funcaoIds).toEqual([funcaoPrestador.id]);
+    expect(String(personPayload?.funcaoIds[0])).not.toMatch(/^optimistic:/);
   });
 });
 

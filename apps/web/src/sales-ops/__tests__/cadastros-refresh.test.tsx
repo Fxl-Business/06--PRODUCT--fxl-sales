@@ -418,6 +418,27 @@ describe('cadastros list refresh after a create', () => {
     expect(text()).not.toContain('Nenhuma pessoa cadastrada');
   });
 
+  it('shows a new função in the list before the create POST resolves', async () => {
+    const saveFuncaoDeferred = createDeferred<{ funcao: SalesOpsFuncao }>();
+    vi.mocked(salesOpsApi.saveFuncao).mockReturnValueOnce(saveFuncaoDeferred.promise);
+
+    await renderApp('/cadastros/funcoes');
+    await resolveBootstrap(0, snapshot());
+    expect(text()).toContain('Nenhuma função cadastrada');
+
+    await click(buttonByText('Nova função'));
+    await changeInput(requireInput('form input'), 'Designer');
+    await submitDialogForm();
+
+    // The POST is still in flight and the refetch has not been resolved, so the only
+    // thing that can have put the row on screen is the optimistic write.
+    expect(vi.mocked(salesOpsApi.saveFuncao)).toHaveBeenCalledTimes(1);
+    const row = container.querySelector('tbody tr');
+    expect(row?.textContent).toContain('Designer');
+    expect(row?.textContent).toContain('Personalizada');
+    expect(text()).not.toContain('Nenhuma função cadastrada');
+  });
+
   it('shows a new função in the list once the create POST resolves, with no further user action', async () => {
     const saveFuncaoDeferred = createDeferred<{ funcao: SalesOpsFuncao }>();
     vi.mocked(salesOpsApi.saveFuncao).mockReturnValueOnce(saveFuncaoDeferred.promise);

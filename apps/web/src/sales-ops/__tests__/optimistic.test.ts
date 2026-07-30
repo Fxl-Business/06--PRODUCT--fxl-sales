@@ -3,6 +3,7 @@ import {
   isOptimisticId,
   optimisticArea,
   optimisticClient,
+  optimisticFuncao,
   optimisticPerson,
   reconcileOptimisticRow,
 } from '../optimistic';
@@ -140,13 +141,7 @@ describe('sales-ops optimistic snapshot patches', () => {
     const patch = optimisticArea(previous, { name: 'Meta' });
     const persisted = area({ id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', name: 'Meta' });
 
-    const reconciled = reconcileOptimisticRow(
-      patch.next,
-      'areas',
-      patch.rowId,
-      persisted,
-      (row) => row.name,
-    );
+    const reconciled = reconcileOptimisticRow(patch.next, 'areas', patch.rowId, persisted);
 
     expect(reconciled.areas.map((row) => row.id)).toEqual([alfa.id, persisted.id]);
     expect(reconciled.areas.some((row) => isOptimisticId(row.id))).toBe(false);
@@ -232,6 +227,65 @@ describe('sales-ops optimistic snapshot patches', () => {
     const inserted = patch.next.people[0];
     expect(inserted?.funcaoIds).toEqual([vendedor.id, unknownId]);
     expect(inserted?.funcoes.map((row) => row.id)).toEqual([vendedor.id]);
+  });
+
+  it('inserts a new função after the system funções and ordered by name', () => {
+    const previous = snapshot({ funcoes: [vendedor, designer], people: [person()] });
+
+    const patch = optimisticFuncao(previous, { name: 'Arquiteto', status: 'active' });
+
+    // `is_system DESC, name ASC` - the API ordering, not plain name ordering, so the
+    // optimistic row does not visibly hop down when the refetch lands.
+    expect(patch.next.funcoes.map((row) => row.name)).toEqual([
+      'Vendedor',
+      'Arquiteto',
+      'Designer',
+    ]);
+    const inserted = patch.next.funcoes.find((row) => row.name === 'Arquiteto');
+    expect(inserted?.isSystem).toBe(false);
+    expect(inserted?.slug).toBe('arquiteto');
+    expect(inserted?.status).toBe('active');
+    expect(inserted?.id).toMatch(/^optimistic:/);
+    expect(patch.rowId).toBe(inserted?.id);
+    expect(patch.next.people).toBe(previous.people);
+  });
+
+  it('derives a provisional slug that strips diacritics and punctuation', () => {
+    const patch = optimisticFuncao(snapshot(), { name: 'Gestão de Contas / P.O.' });
+
+    expect(patch.next.funcoes[0]?.slug).toBe('gestao-de-contas-p-o');
+  });
+
+  it('reconciles the optimistic função with the persisted row', () => {
+    const previous = snapshot({ funcoes: [vendedor] });
+    const patch = optimisticFuncao(previous, { name: 'Arquiteto' });
+    const persisted = funcao({
+      id: 'fc000011-0000-4000-8000-000000000011',
+      name: 'Arquiteto',
+      slug: 'arquiteto',
+      isSystem: false,
+    });
+
+    const reconciled = reconcileOptimisticRow(patch.next, 'funcoes', patch.rowId, persisted);
+
+    expect(reconciled.funcoes.map((row) => row.id)).toEqual([vendedor.id, persisted.id]);
+    expect(reconciled.funcoes.some((row) => isOptimisticId(row.id))).toBe(false);
+  });
+
+  it('never flips isSystem when editing a função optimistically', () => {
+    const previous = snapshot({ funcoes: [vendedor, designer] });
+
+    const patch = optimisticFuncao(previous, {
+      id: designer.id,
+      name: 'Design',
+      status: 'archived',
+    });
+
+    expect(patch.next.funcoes).toHaveLength(2);
+    const edited = patch.next.funcoes.find((row) => row.id === designer.id);
+    expect(edited?.isSystem).toBe(false);
+    expect(edited?.slug).toBe('design');
+    expect(edited?.status).toBe('archived');
   });
 
   it('replaces the função set of the pessoa being edited rather than merging it', () => {
