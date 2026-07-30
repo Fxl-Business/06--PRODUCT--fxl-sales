@@ -5856,8 +5856,8 @@ function SaleWizardDialogBody({
 
   return (
     <Dialog onOpenChange={(nextOpen) => (!nextOpen ? onClose() : undefined)} open>
-      <DialogContent className="max-h-[92vh] w-[calc(100vw-48px)] max-w-[940px] gap-0 overflow-hidden rounded-[22px] border-none bg-[#f4f4f6] p-0 shadow-[0_30px_80px_rgba(0,0,0,.3)] sm:rounded-[22px] [&>button]:right-[26px] [&>button]:top-[31px] [&>button]:flex [&>button]:h-9 [&>button]:w-9 [&>button]:items-center [&>button]:justify-center [&>button]:rounded-[10px] [&>button]:border [&>button]:border-[#dcdce2] [&>button]:bg-white [&>button]:opacity-100 [&>button]:shadow-none">
-        <DialogHeader className="border-b border-[#e8e8ec] bg-white px-[26px] py-5 pr-[78px] text-left">
+      <DialogContent className="flex h-[92vh] max-h-[92vh] w-[calc(100vw-48px)] max-w-[940px] flex-col gap-0 overflow-hidden rounded-[22px] border-none bg-[#f4f4f6] p-0 shadow-[0_30px_80px_rgba(0,0,0,.3)] sm:rounded-[22px] [&>button]:right-[26px] [&>button]:top-[31px] [&>button]:flex [&>button]:h-9 [&>button]:w-9 [&>button]:items-center [&>button]:justify-center [&>button]:rounded-[10px] [&>button]:border [&>button]:border-[#dcdce2] [&>button]:bg-white [&>button]:opacity-100 [&>button]:shadow-none">
+        <DialogHeader className="shrink-0 border-b border-[#e8e8ec] bg-white px-[26px] py-5 pr-[78px] text-left">
           <DialogTitle className="sales-ops-num text-[19px] font-bold text-[#201f24]">
             {editSale ? 'Editar proposta' : 'Nova proposta'}
           </DialogTitle>
@@ -5866,7 +5866,7 @@ function SaleWizardDialogBody({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex items-center gap-1 overflow-x-auto border-b border-[#e8e8ec] bg-white px-[26px] py-4">
+        <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-[#e8e8ec] bg-white px-[26px] py-4">
           {wizardSteps.map((item, index) => {
             const done = item.step < wizardStep;
             const active = item.step === wizardStep;
@@ -5909,7 +5909,7 @@ function SaleWizardDialogBody({
           })}
         </div>
 
-        <div className="max-h-[calc(92vh-210px)] overflow-y-auto px-[26px] py-6">
+        <div className="min-h-0 flex-1 overflow-y-auto px-[26px] py-6">
           {bootstrap.products.length === 0 || sellers.length === 0 ? (
             <EmptyPanel
               text="Cadastre pelo menos um produto e um vendedor para registrar uma proposta."
@@ -7155,7 +7155,7 @@ function SaleWizardDialogBody({
           )}
         </div>
 
-        <div className="flex items-center justify-between border-t border-[#e8e8ec] bg-white px-[26px] py-4">
+        <div className="flex shrink-0 items-center justify-between border-t border-[#e8e8ec] bg-white px-[26px] py-4">
           <button
             className={`rounded-[11px] border border-[#dcdce2] bg-white px-5 py-[11px] text-sm font-semibold text-[#57575f] transition hover:bg-[#f2f2f4] ${wizardStep === 1 ? 'invisible' : ''}`}
             onClick={goBack}
