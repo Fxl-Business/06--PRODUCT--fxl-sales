@@ -567,6 +567,9 @@ export const salesOpsProducts = pgTable(
     areaId: uuid('area_id').references(() => salesOpsAreas.id),
     // Derived projection of `kind`, never authored independently. The
     // sales_ops_products_kind_open_price_check CHECK keeps it == (kind = 'service').
+    // It means "this row is a Serviço" and nothing more: a Serviço MAY carry an own
+    // value (setup_brl / monthly_brl) as a per-proposta default, and 0 is how "no
+    // base value" is expressed.
     openPrice: boolean('open_price').notNull().default(false),
     setupBrl: integer('setup_brl').notNull().default(0),
     hasMonthly: boolean('has_monthly').notNull().default(false),
@@ -613,10 +616,6 @@ export const salesOpsProducts = pgTable(
     check(
       'sales_ops_products_kind_open_price_check',
       sql`(${t.kind} = 'service') = ${t.openPrice}`,
-    ),
-    check(
-      'sales_ops_products_service_no_fixed_value_check',
-      sql`${t.kind} <> 'service' or (${t.setupBrl} = 0 and ${t.monthlyBrl} = 0)`,
     ),
     check(
       'sales_ops_products_default_entrada_mode_check',

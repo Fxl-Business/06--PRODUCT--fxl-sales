@@ -91,7 +91,13 @@ export type SalesOpsProduct = {
    * Optional because a locally constructed row (and any response that predates
    * the `kind` column) simply does not carry it. Absent is read as a Produto,
    * which is the conservative direction: it keeps every per-item requirement in
-   * place rather than relaxing one on a row we cannot classify.
+   * place rather than relaxing one on a row we cannot classify. `productRowRequirements`
+   * is what makes that true, by falling back to `openPrice` for the classification
+   * question when `kind` is missing.
+   *
+   * That fallback is about REQUIREMENTS only. The money question - what a row's own
+   * value is - goes through `productBaseValueBrl`, which reads setupBrl/monthlyBrl
+   * directly and never consults either flag, because both kinds may carry a value.
    */
   kind?: SalesOpsProductKind;
   codeSuffix: string;

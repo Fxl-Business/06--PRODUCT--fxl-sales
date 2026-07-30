@@ -48,6 +48,27 @@ export function isServiceProduct(product: Pick<SalesOpsProduct, 'kind'> | undefi
   return product?.kind === 'service';
 }
 
+/**
+ * The catalog value one unit of this row suggests, in integer CENTS. `0` means the
+ * row carries no own value and the operator types one inside the proposta.
+ *
+ * The one place a catalog own value is read, exactly as `isServiceProduct` is the
+ * one place the discriminator is read. It is deliberately kind-blind: a Produto's
+ * value is a catalog price and a Serviço's is a base value, but both are DEFAULTS
+ * a proposta may overwrite, so the arithmetic that prefills an item is identical.
+ * The `||` (not `+`) is the pre-existing wizard rule: a row that has no setup but
+ * does recur suggests its mensalidade.
+ *
+ * Before slice 07 a Serviço was pinned at 0 by a DB CHECK, so this returns exactly
+ * what the old `openPrice ? 0 : setupBrl || monthlyBrl` returned on every row that
+ * predates it.
+ */
+export function productBaseValueBrl(
+  product: Pick<SalesOpsProduct, 'setupBrl' | 'monthlyBrl'> | undefined,
+): number {
+  return product ? product.setupBrl || product.monthlyBrl : 0;
+}
+
 function percentageOrFallback(
   type: CommissionType | undefined,
   value: string | number | undefined,

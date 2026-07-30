@@ -12,11 +12,19 @@ const ADMIN_DB_URL = process.env.ADMIN_DATABASE_URL ?? APP_DB_URL;
 const ADMIN_CONNECTION_OPTIONS = { connection: { 'app.fxl_admin': 'true' } } as const;
 const DRIZZLE_DIR = path.resolve(process.cwd(), 'drizzle');
 
-/** The three CHECKs the migration adds AFTER the backfill, and only those. */
-const POST_BACKFILL_CHECKS = [
+/**
+ * The product CHECKs the LIVE schema carries. 0013 added three; 0015 dropped
+ * `sales_ops_products_service_no_fixed_value_check` so a Serviço may hold a base
+ * value, leaving the two classification CHECKs, which are untouched because a
+ * Serviço with a base value is still a Serviço.
+ *
+ * The 0013-era trio is not a constant: the one test that replays 0013 spells all
+ * three out in its own `ADD CONSTRAINT`, which is the point - it pins the migration
+ * as shipped rather than as the live schema happens to look now.
+ */
+const LIVE_PRODUCT_CHECKS = [
   'sales_ops_products_kind_check',
   'sales_ops_products_kind_open_price_check',
-  'sales_ops_products_service_no_fixed_value_check',
 ] as const;
 
 type ProductRow = {
@@ -84,11 +92,15 @@ describe('produtos & serviços schema migration 0013', () => {
   });
 
   /**
-   * Runs `fn` against a genuinely PRE-migration sales_ops_products: the three
-   * post-backfill CHECKs are dropped first, so contradictory legacy rows (an
+   * Runs `fn` against a genuinely PRE-migration sales_ops_products: every CHECK the
+   * LIVE schema still carries is dropped first, so contradictory legacy rows (an
    * open-price row still carrying a fixed value, a `kind` still holding the old
    * 'SaaS' constant) can be inserted at all. Everything, DDL included, is rolled
    * back afterwards, so the live schema is untouched.
+   *
+   * The drop list is what the live schema actually has, which since 0015 is two
+   * names and not 0013's three: `DROP CONSTRAINT` on a name that no longer exists is
+   * an error. Re-adding all three is the job of the one test that replays 0013.
    */
   async function inPreMigrationSandbox<T>(
     fn: (tx: postgres.TransactionSql) => Promise<T>,
@@ -99,7 +111,7 @@ describe('produtos & serviços schema migration 0013', () => {
     try {
       await adminClient.begin(async (tx) => {
         await tx.unsafe(
-          `ALTER TABLE sales_ops_products ${POST_BACKFILL_CHECKS.map(
+          `ALTER TABLE sales_ops_products ${LIVE_PRODUCT_CHECKS.map(
             (name) => `DROP CONSTRAINT ${name}`,
           ).join(', ')}`,
         );
@@ -366,9 +378,11 @@ describe('produtos & serviços schema migration 0013', () => {
       ORDER BY conname
     `;
     const names = constraints.map((row) => row.conname);
-    for (const name of POST_BACKFILL_CHECKS) {
+    for (const name of LIVE_PRODUCT_CHECKS) {
       expect(names, `${name} was not restored`).toContain(name);
     }
+    // Stated, not merely un-asserted: 0015 dropped it on purpose.
+    expect(names).not.toContain('sales_ops_products_service_no_fixed_value_check');
     expect(names).toContain('sales_ops_products_default_entrada_mode_check');
     expect(names).toContain('sales_ops_products_default_installments_check');
     expect(names).toContain('sales_ops_products_default_recurring_cycles_check');

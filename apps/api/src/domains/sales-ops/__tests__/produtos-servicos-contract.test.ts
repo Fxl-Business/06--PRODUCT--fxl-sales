@@ -46,10 +46,13 @@ describe('produtos & serviços write contract', () => {
     expect(resolveProductKind(parsed)).toBe('service');
   });
 
-  it('rejects a servico carrying a fixed own value, and accepts the same value on a produto', () => {
+  it('accepts a base value on a servico exactly as on a produto', () => {
+    // A Serviço's own value is a BASE value: a per-proposta default, exactly like a
+    // Produto's catalog price. The `service_cannot_have_fixed_value` refine that
+    // used to reject these two payloads is gone (slice 07).
     expect(
       ProductSchema.safeParse({ ...completeProduct, kind: 'service', setupBrl: 5000 }).success,
-    ).toBe(false);
+    ).toBe(true);
     expect(
       ProductSchema.safeParse({
         ...completeProduct,
@@ -57,9 +60,9 @@ describe('produtos & serviços write contract', () => {
         hasMonthly: true,
         monthlyBrl: 5000,
       }).success,
-    ).toBe(false);
+    ).toBe(true);
 
-    // Positive control: a Produto is exactly where a fixed own value belongs.
+    // Positive control: a Produto still takes a fixed own value.
     expect(
       ProductSchema.safeParse({ ...completeProduct, kind: 'product', setupBrl: 5000 }).success,
     ).toBe(true);
@@ -277,7 +280,9 @@ describe('produtos & serviços write contract', () => {
     // areaId is required on create but optional on patch.
     expect(ProductSchema.safeParse({ name: 'x' }).success).toBe(false);
 
-    expect(UpdateProductSchema.safeParse({ kind: 'service', setupBrl: 100 }).success).toBe(false);
+    // A base value on a partial serviço patch is as legal as one on a produto:
+    // the value is a per-proposta default either way (slice 07).
+    expect(UpdateProductSchema.safeParse({ kind: 'service', setupBrl: 100 }).success).toBe(true);
     expect(UpdateProductSchema.safeParse({ kind: 'product', setupBrl: 100 }).success).toBe(true);
     expect(UpdateProductSchema.safeParse({ kind: 'service', openPrice: false }).success).toBe(
       false,

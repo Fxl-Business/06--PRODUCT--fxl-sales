@@ -9,7 +9,6 @@ import {
   CreateSaleSchema,
   FuncaoSchema,
   INVALID_PRODUCT_ENTRADA_VALUE,
-  INVALID_PRODUCT_KIND_VALUE,
   PersonSchema,
   ProductSchema,
   SaleInputError,
@@ -144,9 +143,6 @@ salesOpsRouter.patch('/products/:id', async (c) => {
     );
   }
   const updated = await updateProduct(getDb(), c.get('orgId'), c.req.param('id'), parsed.data);
-  if (updated === INVALID_PRODUCT_KIND_VALUE) {
-    return c.json({ error: 'validation_error', reason: 'service_cannot_have_fixed_value' }, 400);
-  }
   if (updated === INVALID_PRODUCT_ENTRADA_VALUE) {
     return c.json({ error: 'validation_error', reason: 'entrada_mode_value_mismatch' }, 400);
   }

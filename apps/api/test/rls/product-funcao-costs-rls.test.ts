@@ -20,7 +20,6 @@ import {
   CreateSaleSchema,
   FuncaoSchema,
   INVALID_PRODUCT_ENTRADA_VALUE,
-  INVALID_PRODUCT_KIND_VALUE,
   ProductSchema,
   createArea,
   createFuncao,
@@ -295,13 +294,18 @@ describe('produtos & serviços defaults, função costs and tenancy', () => {
     expect(await listProductFuncaoCosts(db, orgA, created.product.id)).toHaveLength(1);
   });
 
-  it('a servico cannot be given a fixed own value through PATCH', async () => {
-    const orgA = newOrg('novalue');
+  it('a servico persists a base value, and one left alone stays at zero', async () => {
+    const orgA = newOrg('basevalue');
     const area = await seedArea(orgA);
-    const service = await createProduct(
+    const serviceA = await createProduct(
       db,
       orgA,
-      ProductSchema.parse({ name: 'Serviço', codeSuffix: '74', areaId: area.id, kind: 'service' }),
+      ProductSchema.parse({ name: 'Serviço A', codeSuffix: '74', areaId: area.id, kind: 'service' }),
+    );
+    const serviceB = await createProduct(
+      db,
+      orgA,
+      ProductSchema.parse({ name: 'Serviço B', codeSuffix: '77', areaId: area.id, kind: 'service' }),
     );
     const product = await createProduct(
       db,
@@ -309,39 +313,56 @@ describe('produtos & serviços defaults, função costs and tenancy', () => {
       ProductSchema.parse({ name: 'Produto', codeSuffix: '75', areaId: area.id, kind: 'product' }),
     );
 
-    expect(await updateProduct(db, orgA, service.product.id, { setupBrl: 5000 })).toBe(
-      INVALID_PRODUCT_KIND_VALUE,
-    );
-    expect(
-      await updateProduct(db, orgA, service.product.id, { hasMonthly: true, monthlyBrl: 5000 }),
-    ).toBe(INVALID_PRODUCT_KIND_VALUE);
-    // Reclassifying a priced Produto as a Serviço is the merged-row case a partial
-    // payload cannot see on its own.
-    const priced = await updateProduct(db, orgA, product.product.id, { setupBrl: 5000 });
+    const priced = await updateProduct(db, orgA, serviceA.product.id, { setupBrl: 500000 });
     if (typeof priced === 'string' || !priced) throw new Error('unexpected patch outcome');
-    expect(priced.product.setupBrl).toBe(5000);
-    expect(await updateProduct(db, orgA, product.product.id, { kind: 'service' })).toBe(
-      INVALID_PRODUCT_KIND_VALUE,
-    );
+    expect(priced.product.setupBrl).toBe(500000);
+    expect(priced.product.kind).toBe('service');
+    // The projection is untouched by the base value: a Serviço with one is still a Serviço.
+    expect(priced.product.openPrice).toBe(true);
 
-    // Positive controls: a Produto takes the value, and a Serviço takes zero.
-    expect(
-      await updateProduct(db, orgA, product.product.id, { kind: 'service', setupBrl: 0 }),
-    ).not.toBe(INVALID_PRODUCT_KIND_VALUE);
-    const zeroed = await updateProduct(db, orgA, service.product.id, { setupBrl: 0 });
-    if (typeof zeroed === 'string' || !zeroed) throw new Error('unexpected patch outcome');
-    expect(zeroed.product.setupBrl).toBe(0);
+    const recurring = await updateProduct(db, orgA, serviceA.product.id, {
+      hasMonthly: true,
+      monthlyBrl: 20000,
+    });
+    if (typeof recurring === 'string' || !recurring) throw new Error('unexpected patch outcome');
+    expect(recurring.product.monthlyBrl).toBe(20000);
 
-    // The write is rejected, never silently corrected: the stored row is untouched.
+    // Re-read: the values really landed on the row, not just on the RETURNING clause.
     const stored = await listProducts(db, orgA);
-    expect(stored.find((row) => row.id === service.product.id)?.setupBrl).toBe(0);
+    const storedA = stored.find((row) => row.id === serviceA.product.id);
+    expect(storedA?.setupBrl).toBe(500000);
+    expect(storedA?.monthlyBrl).toBe(20000);
 
-    // A raw UPDATE bypassing the service is refused by the DB itself.
+    // No-regression: a Serviço nobody touched is still exactly what it always was.
+    const storedB = stored.find((row) => row.id === serviceB.product.id);
+    expect(storedB?.setupBrl).toBe(0);
+    expect(storedB?.monthlyBrl).toBe(0);
+    expect(storedB?.openPrice).toBe(true);
+    expect(storedB?.kind).toBe('service');
+
+    // Behavior flip: reclassifying a priced Produto used to be INVALID_PRODUCT_KIND_VALUE.
+    const pricedProduct = await updateProduct(db, orgA, product.product.id, { setupBrl: 5000 });
+    if (typeof pricedProduct === 'string' || !pricedProduct) {
+      throw new Error('unexpected patch outcome');
+    }
+    expect(pricedProduct.product.setupBrl).toBe(5000);
+    const reclassified = await updateProduct(db, orgA, product.product.id, { kind: 'service' });
+    if (typeof reclassified === 'string' || !reclassified) {
+      throw new Error('unexpected patch outcome');
+    }
+    expect(reclassified.product.kind).toBe('service');
+    expect(reclassified.product.setupBrl).toBe(5000);
+
+    // The load-bearing assertion: only the dropped DB CHECK can make this resolve.
     await expect(
       adminClient`
-        UPDATE sales_ops_products SET setup_brl = 5000 WHERE id = ${service.product.id}
+        UPDATE sales_ops_products SET setup_brl = 5000 WHERE id = ${serviceB.product.id}
       `,
-    ).rejects.toThrow(/sales_ops_products_service_no_fixed_value_check/);
+    ).resolves.toBeDefined();
+    const [rawB] = await adminClient<{ setup_brl: number }[]>`
+      SELECT setup_brl FROM sales_ops_products WHERE id = ${serviceB.product.id}
+    `;
+    expect(rawB?.setup_brl).toBe(5000);
   });
 
   it('a merged entrada block that contradicts itself is a 400-shaped sentinel, not a 500', async () => {
