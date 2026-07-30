@@ -23,7 +23,7 @@ directly, one slice at a time, each gated by a separate local Verify agent (Gate
 | # | Slice | Status | Branch | Verify | Merge SHA | Note |
 |---|---|---|---|---|---|---|
 | 01 | query-cache-refresh | done | feat/01-query-cache-refresh | PASS | 482d499 | wave 1 |
-| 01.1 | optimistic-row-edit-guard | todo | | | | wave 1, inserted from verify-01 |
+| 01.1 | optimistic-row-edit-guard | done | feat/01.1-optimistic-row-edit-guard | PASS 1/3 | 320668c | wave 1, inserted from verify-01 |
 | 02 | dialog-no-outside-close | done | feat/02-dialog-no-outside-close | PASS 2/3 | e2d8b9b | wave 1 |
 | 03 | combobox-primitive | done | feat/03-combobox-primitive | PASS 2/3 | 1fb35e9 | wave 1 |
 | 04 | itens-section-align | cancelled | - | - | - | wave 1, executor stopped by the user - awaiting a human decision |
@@ -350,6 +350,48 @@ Report: `verify-05-attempt2.md`.
   assertion in a later slice.
 - `attachPersonFuncoes`'s `orgId` filter is a provably equivalent mutant given the composite FK plus
   caller-side scoping. Kept anyway, because `CLAUDE.md` mandates the explicit filter.
+
+### 01.1-optimistic-row-edit-guard - Gate 2 PASS first attempt, merged at `320668c`
+
+The first slice in the batch to clear Verify on its first submission.
+Three files, web 28 files / 181 tests to 29 / 190.
+
+The invariant shipped as designed - an optimistic row is visible in the cadastro that created it and
+nowhere else - via a memoised pure `withoutOptimisticRows(snapshot)` plus a disabled edit affordance
+while the create POST is in flight.
+
+The verifier built its own inventory rather than trusting the implementer's and confirmed it exactly:
+filtered at the dashboard model, área filter options, DashboardView, SalesView, CommissionsView,
+ProductsView, ProductDialog and SaleWizardDialog; raw surviving only at the four by-design cadastro
+reads plus the `sales` / `saleItems` / payables / settings reads.
+`useSalesOpsBootstrap` is called in exactly one place, so there is no bypass.
+Transitivity checked directly: `SaleWizardDialog` hands down nothing but `props.bootstrap`, and its
+`sellers` / `finders` / `collaborators` memos, `activeAreas`, `areaNameById`, cliente datalist and both
+prestador surfaces all derive from that single prop. One seam, no hole.
+
+Three things it verified by experiment rather than by reading:
+
+- **Memo reference stability**, the highest-risk defect shape here, since a new object per render would
+  re-render every consumer and could reintroduce the wizard-remount bug slice 01 had just fixed. It
+  instrumented the component and drove extra renders: `persistedBootstrap` *is* `bootstrap` when
+  nothing is optimistic, and allocates once per data change rather than per render otherwise.
+- **The reconcile inversion.** No-oping `onSuccess` reddened exactly the intended test while the other
+  8 new and 8 pre-existing tests stayed green - the precise gap verify-01 had named, where the pure
+  function was covered but the wiring was not. The refetch cannot mask it because bootstrap deferred #1
+  is asserted issued and deliberately never resolved, and the assertion is on the real PATCH payload.
+- **The disabled state is never stuck.** On the reject path the row rolls out entirely with no pending
+  button, because `useAppMutation` invalidates in `onSettled` on failure as well as success.
+
+Report: `verify-01.1.md`.
+
+Two pre-existing observations flagged rather than blocked on: the failed-create rollback is silent once
+the dialog is dismissed (slice-01 behaviour, no toast), and two concurrent creates where the second
+fails momentarily resurrect the first optimistic id before `onSettled`'s refetch heals it - during
+which the row is now disabled rather than dangerous, so strictly better than before this slice.
+
+Accepted forward coupling: the picker test asserts the literal nav label `Produtos`, which slice 10
+renames. It breaks loudly at one line with an explicit `nav Produtos not found` throw, and slice 10
+owns the update.
 
 ### Deferred: the same defect in the frozen `/admin/*` tree
 
