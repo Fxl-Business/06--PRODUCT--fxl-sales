@@ -34,6 +34,19 @@ export type SaleCommissionDefaults = {
   finderCommissionPct: number;
 };
 
+/**
+ * The one place the Produto/Serviço discriminator is read. Everything that needs
+ * to branch on "is this a serviço" goes through here, so if the field ever moves
+ * again this function body is the whole change.
+ *
+ * A row without `kind` is not a serviço. That is deliberate: the relaxations a
+ * serviço earns (an optional per-item description) must never be granted to a
+ * row whose classification the client cannot see.
+ */
+export function isServiceProduct(product: Pick<SalesOpsProduct, 'kind'> | undefined): boolean {
+  return product?.kind === 'service';
+}
+
 function percentageOrFallback(
   type: CommissionType | undefined,
   value: string | number | undefined,
