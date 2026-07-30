@@ -30,7 +30,7 @@ directly, one slice at a time, each gated by a separate local Verify agent (Gate
 | 05 | pessoas-funcoes-api | done | feat/05-pessoas-funcoes-api | PASS 2/3 | 69feb51 | wave 1 |
 | 06 | combobox-adoption | done | feat/06-combobox-adoption | PASS 2/3 | 762232b | wave 2 |
 | 07 | produtos-servicos-api | done | feat/07-produtos-servicos-api | PASS 1/3 | 5859b80 | wave 2 |
-| 08 | service-description-optional | todo | | | | wave 3 |
+| 08 | service-description-optional | done | feat/08-service-description-optional | PASS 1/3 | 045bd72 | wave 3 |
 | 09 | pessoas-funcoes-web | todo | | | | wave 3 |
 | 10 | produtos-servicos-web | todo | | | | wave 3 |
 | 11 | payment-plan-builder | todo | | | | wave 3 |
@@ -133,6 +133,57 @@ The plan's Risk 16 correction was upheld: `apps/web/src/sales-ops/types.ts` is a
 the API rename does not touch web typing.
 
 Report: `verify-07.md`.
+
+### Wave 2 integration gate - green
+
+Integrated `master` at `603a324` after slices 06 and 07: `lint=0 type-check=0 build=0`, unit web 30 / 210
+and api 27 / 283 and shared-utils 1 / 17, integration 18 / 88.
+
+### 08-service-description-optional - Gate 2 PASS first attempt, merged at `045bd72`
+
+User item 7. Web 30 files / 210 tests to 31 / 220, one new test file, zero existing test files edited.
+
+**The trap and the near-miss.** The requirement lived in one boolean fusing the description check and
+the negotiated-value check, so a careless relaxation drops both. The executor split them - but its first
+zero-value test **stayed green** under the fused-form mutation, because `canAdvanceStepOne` is
+`canSaveBasics && itemsValid` and `canSaveBasics` already demands `totalCents > 0`, so a lone zero-value
+row is blocked by the total even when `itemsValid` wrongly passes. It restructured the test to park a
+priced produto in row 2, isolating `itemsValid` as the only possible blocker, and the mutation then went
+Red properly.
+
+The verifier settled that confound in **both** directions rather than accepting the account: with row 2
+present the test is Red under the mutation, and with row 2 removed the identical test stays green. The
+second row is genuinely load-bearing.
+
+**An unreachable branch handled well.** Slice 07's `CHECK ((kind = 'service') = open_price)` makes
+`kind='product'` with `openPrice=true` DB-impossible, so that truth-table row cannot occur in production.
+The executor declined to fabricate a DB-impossible fixture, and the verifier agreed - but also found the
+branch is pinned anyway, because the web mirror makes `kind` optional so the reachable analogue is
+kind-absent plus `openPrice` true, which the test does cover.
+
+**A gap in slice 07's delivery, closed here.** Slice 07's `files_modified` listed
+`apps/web/src/sales-ops/types.ts`, but commit `5859b80` touched zero web files, so the web mirror still
+declared a `type` column the API had renamed away and had no `kind` at all. This slice added
+`kind?: SalesOpsProductKind` as a fourth file beyond its own plan. Optional, so the 10 existing product
+fixtures need no churn.
+
+**A deliberate deviation judged better than the plan.** The plan said not to lift the requirement pair
+into a helper at its two call sites; the executor lifted it into `productRowRequirements` anyway, because
+those two sites are a validity gate and its own error rendering - if they disagree the wizard blocks with
+no visible reason. The verifier upheld this and swept the whole gate: every conjunct implies a rendered
+error, so there is no silent-block path.
+
+**One inaccuracy to correct when the file is next touched.** The code comment and commit message justify
+the `|| 'Produto'` terminator with "`ProductSchema.name` is `.min(1)` without `.trim()`". That is false -
+it is `z.string().trim().min(1).max(140)` at `service.ts:174`, including on `master`, so the API already
+rejects a whitespace-only name. The terminator is still load-bearing against an empty snapshot (proven by
+mutation), but the stated rationale is wrong.
+
+**Pre-existing issue handed to slice 10:** `productType: product?.type ?? 'SaaS'` now always takes the
+fallback, since the API stopped returning `type`. Harmless today because the API strips `productType`,
+but it is a type-level lie, and fixing it touches 10 fixture files plus the product dialog.
+
+Report: `verify-08.md`.
 
 ### SAFETY: `db:migrate` reads the staging `DATABASE_URL`
 
