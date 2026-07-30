@@ -26,8 +26,8 @@ directly, one slice at a time, each gated by a separate local Verify agent (Gate
 | 01.1 | optimistic-row-edit-guard | todo | | | | wave 1, inserted from verify-01 |
 | 02 | dialog-no-outside-close | done | feat/02-dialog-no-outside-close | PASS 2/3 | e2d8b9b | wave 1 |
 | 03 | combobox-primitive | done | feat/03-combobox-primitive | PASS 2/3 | 1fb35e9 | wave 1 |
-| 04 | itens-section-align | todo | | | | wave 1 |
-| 05 | pessoas-funcoes-api | todo | | | | wave 1 |
+| 04 | itens-section-align | cancelled | - | - | - | wave 1, executor stopped by the user - awaiting a human decision |
+| 05 | pessoas-funcoes-api | done | feat/05-pessoas-funcoes-api | PASS 2/3 | 69feb51 | wave 1 |
 | 06 | combobox-adoption | todo | | | | wave 2 |
 | 07 | produtos-servicos-api | todo | | | | wave 2 |
 | 08 | service-description-optional | todo | | | | wave 3 |
@@ -263,6 +263,93 @@ Gates `lint=0 type-check=0 test=0`. Report: `verify-03-attempt2.md`.
 - If a parent flips `disabled` to `true` while the panel is already open, the panel stays mounted with
   an enabled search input and keyboard commit still works. No call site exists yet, so slice 06 is the
   first place this could matter.
+
+### 04-itens-section-align - cancelled mid-build, awaiting a human decision
+
+The executor was stopped by the user partway through the Green phase.
+It had modified `SalesOpsApp.tsx` (+255/-207 versus `master`) and written an untracked test file, with
+no commit and no result file, so the tree held a half-applied change to a 5200-line file.
+
+The partial work was preserved as a 522-line patch plus the 349-line test in the session scratchpad
+(`slice-04-cancelled-partial.patch`, `slice-04-cancelled-test.tsx`), the working tree was restored and
+the branch deleted, so `master` was never touched.
+Nothing depends on this slice - it is a pure leaf - so the rest of the batch proceeds regardless.
+The human chooses: redo with a fresh agent on the same plan, resume from the preserved patch, or drop
+the slice.
+
+### 05-pessoas-funcoes-api - Gate 2 FAIL then PASS, merged at `69feb51`
+
+The largest and most consequential slice in the batch: `sales_ops_funcoes` and
+`sales_ops_person_funcoes`, migration 0012 with an RLS-bypassing data backfill, funções CRUD, and
+`funcaoIds` as a set-replace on the existing `/people` endpoints.
+api unit 23 files / 215 tests to 24 / 248; integration 13 / 47 to 16 / 73.
+
+**A methodological finding worth keeping.** Mutation testing exposed that this repo's tenancy tests
+can be silently satisfied by database RLS rather than by the service filter `CLAUDE.md` mandates:
+deleting `eq(salesOpsFuncoes.orgId, orgId)` from `listFuncoes` originally survived, because the
+non-superuser role's RLS policy covered for it.
+The fix is to drive the same service functions over an `app.fxl_admin` connection, where the
+admin-context policy exposes every org and only the explicit filter can scope the result.
+**The same blind spot exists in `apps/api/test/rls/areas-rls.test.ts` today** - its tenant assertions
+would also pass with the explicit filter removed. Recorded below as a follow-up.
+
+Also caught before it could ship: `drizzle-kit` emitted the two composite foreign keys **before** the
+unique indexes they target, which would have failed on apply. Hand-reordered, then proved by dropping
+the tables and replaying 0012 from scratch.
+
+**Attempt 1 FAIL - three real product defects**, not test-quality gaps:
+
+1. `createFuncao` TOCTOU. A SELECT pre-check followed by a plain INSERT with no conflict handling, so
+   60 of 90 concurrent same-name calls raised an unhandled `23505` as HTTP 500 instead of the designed
+   409. An admin double-clicking Save hits it. `updateFuncao` had the same shape.
+2. The on-demand legacy seed's `ON CONFLICT (org_id, slug)` arbiter missed the second unique index on
+   `(org_id, name)`, so concurrent first person writes in a freshly provisioned org failed roughly 10
+   to 15 percent of the time with a 500 and a rolled-back create. The code's own race fallback was
+   unreachable because the error threw first.
+3. `PATCH /people/:id` silently stopped clearing `contactEmail`. The web client omits the key when the
+   input is blank; `master` cleared it via an unconditional `contactEmail: data.contactEmail || null`
+   while the new conditional spread retained the old value. That broke the only way the shipped Pessoa
+   dialog can clear an e-mail, so the criterion's "every pre-existing endpoint still resolves
+   unchanged" genuinely failed.
+
+**Remediation.** `onConflictDoNothing()` plus a re-probe under a fresh statement snapshot for the
+insert path, a `SAVEPOINT` with constraint-name mapping for the update path, a bare arbiter covering
+every unique index for the seed, and the unconditional `contactEmail` clear restored after checking
+what the client actually serializes.
+
+**The executor refused to ship a test that could not fail.** Its first defect-2 concurrency test
+survived the mutation, so rather than shipping it, it measured the real hit rate and established that
+the race window is **per fresh org** rather than per call - concentrating attempts on few orgs does
+nothing. It then shipped two oracles: a deterministic guard that directly constructs the state
+invisible to the arbiter (a row holding the seed's name but not its slug, which is genuinely
+API-unreachable since slug always tracks name), plus a 30-org race test.
+
+**Attempt 2 PASS.** The second verifier reproduced every fix independently: a 90-way same-name probe
+gave 0 unhandled with 1 winner and 89 sentinels, and both 409 reasons stayed independently reachable
+under concurrency (66 `duplicate` plus 21 `duplicate_slug` on the rename probe).
+It read the postgres.js driver source rather than assuming, confirming `sql.savepoint` rolls back on
+any throw with zero backends left idle-in-transaction, and confirmed the brittle constraint-name
+coupling is *guarded* - renaming the keys reddens the gate, so it cannot silently degrade to a 500.
+It judged the two-test approach legitimate, finding that both tests catch the mutation on 5 of 5 runs.
+Five consecutive integration runs were stable, so the concurrency tests are not flaky.
+Contract confirmed byte-identical to attempt 1 across all seven contract-carrying files, so slices 07,
+09 and 12 are safe.
+
+It also corrected the executor's own measurement: the claimed "0 of 96" for the 4-orgs-by-24 shape was
+optimistic, and actually hit 3 of 6 runs against the mutant. The per-fresh-org characterisation is
+directionally right, not absolute.
+
+Report: `verify-05-attempt2.md`.
+
+**Follow-ups recorded, not fixed here:**
+
+- `apps/api/test/rls/areas-rls.test.ts` carries the same RLS-masking blind spot. The `adminDb`
+  technique added in this slice is the fix.
+- `createPerson` via `funcaoIds` has no assertion on the derived boolean mirrors, so one drift mutation
+  survives there. The shipped code is correct and the path is not reachable from the UI; worth one
+  assertion in a later slice.
+- `attachPersonFuncoes`'s `orgId` filter is a provably equivalent mutant given the composite FK plus
+  caller-side scoping. Kept anyway, because `CLAUDE.md` mandates the explicit filter.
 
 ### Deferred: the same defect in the frozen `/admin/*` tree
 
