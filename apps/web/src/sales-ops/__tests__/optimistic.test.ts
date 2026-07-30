@@ -10,10 +10,33 @@ import type {
   SalesOpsArea,
   SalesOpsBootstrap,
   SalesOpsClient,
+  SalesOpsFuncao,
   SalesOpsPerson,
 } from '../types';
 
 const orgId = '99999999-9999-4999-8999-999999999999';
+
+function funcao(patch: Partial<SalesOpsFuncao> = {}): SalesOpsFuncao {
+  return {
+    id: 'fc000001-0000-4000-8000-000000000001',
+    orgId,
+    name: 'Vendedor',
+    slug: 'vendedor',
+    isSystem: true,
+    status: 'active',
+    createdAt: '2026-07-29T12:00:00.000Z',
+    updatedAt: null,
+    ...patch,
+  };
+}
+
+const vendedor = funcao();
+const designer = funcao({
+  id: 'fc000009-0000-4000-8000-000000000009',
+  name: 'Designer',
+  slug: 'designer',
+  isSystem: false,
+});
 
 function area(patch: Partial<SalesOpsArea> = {}): SalesOpsArea {
   return {
@@ -46,9 +69,8 @@ function person(patch: Partial<SalesOpsPerson> = {}): SalesOpsPerson {
     displayName: 'Alfa Pessoa',
     contactEmail: null,
     status: 'active',
-    isSeller: false,
-    isFinder: false,
-    isCollaborator: false,
+    funcaoIds: [],
+    funcoes: [],
     createdAt: '2026-07-29T12:00:00.000Z',
     updatedAt: null,
     ...patch,
@@ -61,6 +83,7 @@ function snapshot(patch: Partial<SalesOpsBootstrap> = {}): SalesOpsBootstrap {
     products: [],
     clients: [],
     areas: [],
+    funcoes: [],
     people: [],
     payables: [],
     saleItems: [],
@@ -164,23 +187,64 @@ describe('sales-ops optimistic snapshot patches', () => {
     expect(patch.next.areas).toBe(previous.areas);
   });
 
-  it('inserts a new pessoa ordered by displayName', () => {
+  it('inserts a new pessoa ordered by displayName, resolving its funções from the catalogue', () => {
     const alfaPerson = person();
     const zetaPerson = person({
       id: '77777777-7777-4777-8777-777777777777',
       displayName: 'Zeta Pessoa',
     });
-    const previous = snapshot({ people: [alfaPerson, zetaPerson] });
+    const previous = snapshot({
+      funcoes: [vendedor, designer],
+      people: [alfaPerson, zetaPerson],
+    });
 
-    const patch = optimisticPerson(previous, { displayName: 'Meta Pessoa', isSeller: true });
+    const patch = optimisticPerson(previous, {
+      displayName: 'Meta Pessoa',
+      funcaoIds: [vendedor.id, designer.id],
+    });
 
     expect(patch.next.people.map((row) => row.displayName)).toEqual([
       'Alfa Pessoa',
       'Meta Pessoa',
       'Zeta Pessoa',
     ]);
-    expect(patch.next.people.find((row) => row.displayName === 'Meta Pessoa')?.isSeller).toBe(true);
+    const inserted = patch.next.people.find((row) => row.displayName === 'Meta Pessoa');
+    expect(inserted?.funcaoIds).toEqual([vendedor.id, designer.id]);
+    expect(inserted?.funcoes).toEqual([
+      { id: vendedor.id, name: 'Vendedor', slug: 'vendedor', isSystem: true },
+      { id: designer.id, name: 'Designer', slug: 'designer', isSystem: false },
+    ]);
     expect(isOptimisticId(patch.rowId)).toBe(true);
     expect(patch.next.clients).toBe(previous.clients);
+    expect(patch.next.funcoes).toBe(previous.funcoes);
+  });
+
+  it('drops a função id the cached catalogue does not know but keeps it in funcaoIds', () => {
+    const unknownId = '88888888-8888-4888-8888-888888888888';
+    const previous = snapshot({ funcoes: [vendedor], people: [] });
+
+    const patch = optimisticPerson(previous, {
+      displayName: 'Meta Pessoa',
+      funcaoIds: [vendedor.id, unknownId],
+    });
+
+    const inserted = patch.next.people[0];
+    expect(inserted?.funcaoIds).toEqual([vendedor.id, unknownId]);
+    expect(inserted?.funcoes.map((row) => row.id)).toEqual([vendedor.id]);
+  });
+
+  it('replaces the função set of the pessoa being edited rather than merging it', () => {
+    const existing = person({ funcaoIds: [vendedor.id], funcoes: [vendedor] });
+    const previous = snapshot({ funcoes: [vendedor, designer], people: [existing] });
+
+    const patch = optimisticPerson(previous, {
+      id: existing.id,
+      displayName: existing.displayName,
+      funcaoIds: [designer.id],
+    });
+
+    const edited = patch.next.people.find((row) => row.id === existing.id);
+    expect(edited?.funcaoIds).toEqual([designer.id]);
+    expect(edited?.funcoes.map((row) => row.slug)).toEqual(['designer']);
   });
 });

@@ -12,6 +12,7 @@ import type {
   SalesOpsArea,
   SalesOpsBootstrap,
   SalesOpsClient,
+  SalesOpsFuncao,
   SalesOpsPerson,
   SalesOpsProduct,
 } from '../types';
@@ -55,6 +56,7 @@ vi.mock('../api', () => ({
     saveProduct: vi.fn(),
     saveClient: vi.fn(),
     saveArea: vi.fn(),
+    saveFuncao: vi.fn(),
     createSale: vi.fn(),
     updateSale: vi.fn(),
     transitionSale: vi.fn(),
@@ -71,6 +73,29 @@ const act = (
 ).act;
 
 const orgId = '99999999-9999-4999-8999-999999999999';
+
+/**
+ * Funções replace the three removed `is_seller` / `is_finder` / `is_collaborator`
+ * mirrors on a pessoa. `vendedor` is one of the two predefined system funções;
+ * `prestador` is an ordinary custom one, which is what makes a pessoa a prestador.
+ */
+const funcaoVendedor: SalesOpsFuncao = {
+  id: 'fc000001-0000-4000-8000-000000000001',
+  orgId,
+  name: 'Vendedor',
+  slug: 'vendedor',
+  isSystem: true,
+  status: 'active',
+  createdAt: '2026-07-29T12:00:00.000Z',
+  updatedAt: null,
+};
+const funcaoPrestador: SalesOpsFuncao = {
+  ...funcaoVendedor,
+  id: 'fc000003-0000-4000-8000-000000000003',
+  name: 'Prestador',
+  slug: 'prestador',
+  isSystem: false,
+};
 const areaId = '66666666-6666-4666-8666-666666666666';
 
 function createDeferred<T>() {
@@ -91,6 +116,7 @@ function snapshot(patch: Partial<SalesOpsBootstrap> = {}): SalesOpsBootstrap {
     products: [],
     clients: [],
     areas: [],
+    funcoes: [],
     people: [],
     payables: [],
     saleItems: [],
@@ -139,9 +165,8 @@ const persistedPerson: SalesOpsPerson = {
   displayName: 'Pessoa Persistida',
   contactEmail: null,
   status: 'active',
-  isSeller: true,
-  isFinder: false,
-  isCollaborator: true,
+  funcaoIds: [funcaoVendedor.id, funcaoPrestador.id],
+  funcoes: [funcaoVendedor, funcaoPrestador],
   createdAt: '2026-07-29T12:05:00.000Z',
   updatedAt: null,
 };
@@ -281,6 +306,16 @@ function comboboxTrigger(ariaLabel: string): HTMLButtonElement {
   return match;
 }
 
+/** Open the picker and commit the row whose visible label starts with `optionLabel`. */
+async function pickOption(ariaLabel: string, optionLabel: string) {
+  await click(comboboxTrigger(ariaLabel));
+  const row = [...container.querySelectorAll('[role="option"]')].find((candidate) =>
+    candidate.textContent?.trim().startsWith(optionLabel),
+  );
+  if (!(row instanceof HTMLElement)) throw new Error(`option not found: ${optionLabel}`);
+  await click(row);
+}
+
 async function submitDialogForm() {
   const form = container.querySelector('form');
   if (!(form instanceof HTMLFormElement)) throw new Error('dialog form not found');
@@ -358,11 +393,13 @@ describe('an optimistic row is visible but never actionable', () => {
     const savePersonDeferred = createDeferred<{ person: SalesOpsPerson }>();
     vi.mocked(salesOpsApi.savePerson).mockReturnValueOnce(savePersonDeferred.promise);
 
-    await renderApp('/cadastros/vendedores');
-    await resolveBootstrap(0, snapshot());
+    await renderApp('/cadastros/pessoas');
+    await resolveBootstrap(0, snapshot({ funcoes: [funcaoVendedor] }));
 
-    await click(buttonByText('Novo vendedor'));
+    await click(buttonByText('Nova pessoa'));
     await changeInput(requireInput('form input'), 'Pessoa Optimista');
+    await pickOption('Função da pessoa', funcaoVendedor.name);
+    await click(buttonByText('Adicionar função'));
     await submitDialogForm();
 
     expect(vi.mocked(salesOpsApi.savePerson)).toHaveBeenCalledTimes(1);
@@ -434,6 +471,7 @@ describe('withoutOptimisticRows', () => {
   it('returns the same snapshot reference when no row is optimistic', () => {
     const snap = snapshot({
       areas: [persistedArea],
+      funcoes: [],
       clients: [persistedClient],
       people: [persistedPerson],
     });
@@ -528,5 +566,76 @@ describe('an unsaved row is never offered to a picker', () => {
     const productPayload = vi.mocked(salesOpsApi.saveProduct).mock.calls[0]?.[0];
     expect(productPayload?.areaId).toBe(existingArea.id);
     expect(String(productPayload?.areaId)).not.toMatch(/^optimistic:/);
+  });
+});
+
+/**
+ * The produto Prestador field stores a NAME SNAPSHOT rather than a person id, so an
+ * inactive pessoa who already provides a produto has to stay selectable. This pins
+ * the pool the app hands `ProductDialog`, which is a wiring contract no
+ * ProductDialog-level test can see. It exists because the funções rework briefly
+ * narrowed this pool to active pessoas only.
+ */
+describe('the produto prestador pool', () => {
+  const inactivePrestador: SalesOpsPerson = {
+    id: '18181818-1818-4181-8181-181818181818',
+    orgId,
+    displayName: 'Prestadora Inativa',
+    contactEmail: null,
+    status: 'inactive',
+    funcaoIds: [funcaoPrestador.id],
+    funcoes: [funcaoPrestador],
+    createdAt: '2026-07-29T12:00:00.000Z',
+    updatedAt: null,
+  };
+  const activeSeller: SalesOpsPerson = {
+    id: '19191919-1919-4191-8191-191919191919',
+    orgId,
+    displayName: 'Vendedor Ativo',
+    contactEmail: null,
+    status: 'active',
+    funcaoIds: [funcaoVendedor.id],
+    funcoes: [funcaoVendedor],
+    createdAt: '2026-07-29T12:00:00.000Z',
+    updatedAt: null,
+  };
+
+  it('offers an inactive pessoa carrying a custom função, and never a vendedor', async () => {
+    await renderApp('/cadastros/produtos');
+    await resolveBootstrap(
+      0,
+      snapshot({
+        areas: [existingArea],
+        funcoes: [funcaoVendedor, funcaoPrestador],
+        people: [inactivePrestador, activeSeller, persistedPerson],
+      }),
+    );
+
+    await click(buttonByText('Novo produto'));
+
+    const addProvider = [...container.querySelectorAll('button')].find(
+      (candidate) =>
+        candidate.textContent?.trim() === 'Adicionar' &&
+        candidate
+          .closest('div.border-t')
+          ?.textContent?.includes('Prestadores de serviço'),
+    );
+    if (!(addProvider instanceof HTMLButtonElement)) {
+      throw new Error('Adicionar prestador button not found');
+    }
+    await click(addProvider);
+
+    await click(comboboxTrigger('Prestador 1'));
+    const offered = [...container.querySelectorAll<HTMLElement>('[role="option"]')].map((row) =>
+      row.textContent?.trim(),
+    );
+
+    // The inactive prestadora is offered: status is not part of who is a prestador.
+    expect(offered).toContain('Prestadora Inativa');
+    // Positive control: an active pessoa carrying a custom função is offered too, so a
+    // pool that had collapsed to empty could not pass this test.
+    expect(offered).toContain(persistedPerson.displayName);
+    // Negative with the control above: carrying only a system função is not enough.
+    expect(offered).not.toContain('Vendedor Ativo');
   });
 });

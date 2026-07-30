@@ -13,8 +13,33 @@ import type {
   SalesOpsArea,
   SalesOpsBootstrap,
   SalesOpsClient,
+  SalesOpsPersonFuncao,
   SalesOpsProduct,
 } from '../types';
+
+/**
+ * Funções replace the three removed `is_seller` / `is_finder` / `is_collaborator`
+ * mirrors on a pessoa. `vendedor` and `finder` are the two predefined system funções;
+ * `prestador` is an ordinary custom one, which is what makes a pessoa a prestador.
+ */
+const funcaoVendedor: SalesOpsPersonFuncao = {
+  id: 'fc000001-0000-4000-8000-000000000001',
+  name: 'Vendedor',
+  slug: 'vendedor',
+  isSystem: true,
+};
+const funcaoFinder: SalesOpsPersonFuncao = {
+  id: 'fc000002-0000-4000-8000-000000000002',
+  name: 'Finder',
+  slug: 'finder',
+  isSystem: true,
+};
+const funcaoPrestador: SalesOpsPersonFuncao = {
+  id: 'fc000003-0000-4000-8000-000000000003',
+  name: 'Prestador',
+  slug: 'prestador',
+  isSystem: false,
+};
 
 vi.mock('@/components/ui/dialog', () => ({
   Dialog: ({ children }: HTMLAttributes<HTMLDivElement>) => <div>{children}</div>,
@@ -112,9 +137,8 @@ function baseBootstrap(patch: Partial<SalesOpsBootstrap> = {}): SalesOpsBootstra
         displayName: 'Ana Martins',
         contactEmail: null,
         status: 'active',
-        isSeller: true,
-        isFinder: true,
-        isCollaborator: false,
+        funcaoIds: [funcaoVendedor.id, funcaoFinder.id],
+        funcoes: [funcaoVendedor, funcaoFinder],
         createdAt: '2026-07-29T12:00:00.000Z',
         updatedAt: null,
       },
@@ -124,14 +148,14 @@ function baseBootstrap(patch: Partial<SalesOpsBootstrap> = {}): SalesOpsBootstra
         displayName: 'Carla Prestadora',
         contactEmail: null,
         status: 'active',
-        isSeller: false,
-        isFinder: true,
-        isCollaborator: true,
+        funcaoIds: [funcaoFinder.id, funcaoPrestador.id],
+        funcoes: [funcaoFinder, funcaoPrestador],
         createdAt: '2026-07-29T12:00:00.000Z',
         updatedAt: null,
       },
     ],
     areas: [area(), area({ id: areaConsultoriaId, name: 'FXL Consultoria' })],
+    funcoes: [],
     payables: [],
     saleItems: [],
     receivables: [],
@@ -590,9 +614,8 @@ describe('combobox adoption in the produto dialog', () => {
     displayName: 'Carla Prestadora',
     contactEmail: null,
     status: 'active' as const,
-    isSeller: false,
-    isFinder: false,
-    isCollaborator: true,
+    funcaoIds: [funcaoPrestador.id],
+    funcoes: [funcaoPrestador],
     createdAt: '2026-07-29T12:00:00.000Z',
     updatedAt: null,
   };

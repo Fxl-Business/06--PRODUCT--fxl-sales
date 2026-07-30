@@ -12,6 +12,7 @@ import {
   LayoutGrid,
   ListChecks,
   Loader2,
+  Lock,
   LogOut,
   MoreHorizontal,
   Plus,
@@ -20,6 +21,7 @@ import {
   Settings,
   Trash2,
   UserRound,
+  X,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
@@ -68,6 +70,7 @@ import {
   useSalesOpsBootstrap,
   useSaveSalesOpsArea,
   useSaveSalesOpsClient,
+  useSaveSalesOpsFuncao,
   useSaveSalesOpsPerson,
   useSaveSalesOpsProduct,
   useSaveSalesOpsSettings,
@@ -94,7 +97,9 @@ import type {
   SalesOpsArea,
   SalesOpsBootstrap,
   SalesOpsClient,
+  SalesOpsFuncao,
   SalesOpsPerson,
+  SalesOpsPersonFuncao,
   SalesOpsProduct,
   SalesOpsSale,
   SalesOpsSettings,
@@ -115,6 +120,7 @@ import {
 import type {
   SaveAreaPayload,
   SaveClientPayload,
+  SaveFuncaoPayload,
   SavePersonPayload,
   SaveProductPayload,
   SaveSettingsPayload,
@@ -126,6 +132,7 @@ const emptyBootstrap: SalesOpsBootstrap = {
   products: [],
   clients: [],
   areas: [],
+  funcoes: [],
   people: [],
   payables: [],
   saleItems: [],
@@ -182,7 +189,8 @@ type ModalState =
   | { kind: 'product'; product?: SalesOpsProduct; prefillName?: string }
   | { kind: 'client'; client?: SalesOpsClient }
   | { kind: 'area'; area?: SalesOpsArea }
-  | { kind: 'person'; person?: SalesOpsPerson; roleHint: 'seller' | 'finder' | 'collaborator' }
+  | { kind: 'funcao'; funcao?: SalesOpsFuncao }
+  | { kind: 'person'; person?: SalesOpsPerson }
   | null;
 
 type SaleWizardRequest = { mode: 'create' } | { mode: 'edit'; sale: SalesOpsSale };
@@ -219,12 +227,16 @@ function titleForView(view: SalesOpsView, workspace: SalesOpsWorkspace) {
         ? 'Registro operacional com código, cliente, produto, responsável e status'
         : 'Propostas com código, cliente, áreas, responsáveis, status e ciclo de vida',
     },
+    /**
+     * `vendedores` and `finders` only ever render under `meus-dados` now that
+     * Cadastros manages people through `pessoas`, so both titles are unconditional.
+     */
     vendedores: {
-      title: personal ? 'Meu painel' : 'Vendedores',
+      title: 'Meu painel',
       subtitle: 'Performance, comissão, ticket médio e vendas por responsável',
     },
     finders: {
-      title: personal ? 'Meu painel' : 'Finders',
+      title: 'Meu painel',
       subtitle: 'Indicações, receita gerada e comissão por parceiro',
     },
     comissoes: {
@@ -242,6 +254,14 @@ function titleForView(view: SalesOpsView, workspace: SalesOpsWorkspace) {
     clientes: {
       title: 'Clientes',
       subtitle: 'Base comercial e receita acumulada por cliente',
+    },
+    pessoas: {
+      title: 'Pessoas',
+      subtitle: 'Cadastro único de pessoas e das funções atribuídas a cada uma',
+    },
+    funcoes: {
+      title: 'Funções',
+      subtitle: 'Funções predefinidas do app e funções personalizadas da organização',
     },
     geral: {
       title: 'Geral',
@@ -319,6 +339,36 @@ function salePrimaryProductName(bootstrap: SalesOpsBootstrap, saleId: string): s
     bootstrap.saleItems.find((item) => item.saleId === saleId)?.productNameSnapshot ??
     'Sem produto'
   );
+}
+
+/**
+ * The two predefined app funções. Every função read in this file goes through
+ * `hasFuncao` or `isCollaboratorPerson`, never through an inline slug comparison, so
+ * there is exactly one adaptation point if the slugs ever move.
+ *
+ * Deliberately not exported: `react-refresh/only-export-components` allows only
+ * component exports from this module, and nothing outside it needs these.
+ */
+const FUNCAO_SLUG_VENDEDOR = 'vendedor';
+const FUNCAO_SLUG_FINDER = 'finder';
+
+function hasFuncao(person: SalesOpsPerson, slug: string): boolean {
+  return person.funcoes.some((funcao) => funcao.slug === slug);
+}
+
+/**
+ * Prestadores: the professionals-cost population. Character for character how the
+ * API derives the deprecated `is_collaborator` column (`deriveBooleanMirrors` in
+ * `apps/api/src/domains/sales-ops/service.ts`), so the web and the server never
+ * disagree on who counts as a prestador. In particular `status` is NOT part of it
+ * on either side: a call site that wants only active pessoas filters for that
+ * itself, and the two existing call sites deliberately differ (see their comments).
+ *
+ * Deliberately NOT keyed on the `prestador` slug: that função is non-system and an
+ * org may rename or archive it.
+ */
+function isCollaboratorPerson(person: SalesOpsPerson): boolean {
+  return person.funcoes.some((funcao) => !funcao.isSystem);
 }
 
 function salesForPerson(bootstrap: SalesOpsBootstrap, person: SalesOpsPerson, mode: 'seller' | 'finder') {
@@ -571,6 +621,7 @@ export function SalesOpsApp() {
   const saveProduct = useSaveSalesOpsProduct();
   const saveClient = useSaveSalesOpsClient();
   const saveArea = useSaveSalesOpsArea();
+  const saveFuncao = useSaveSalesOpsFuncao();
   const createSale = useCreateSalesOpsSale();
   const updateSale = useUpdateSalesOpsSale();
   const transitionSale = useTransitionSalesOpsSale();
@@ -613,15 +664,14 @@ export function SalesOpsApp() {
   }, [bootstrap.sales, bootstrap.saleItems, salesFilters]);
   const navItems = getSalesOpsNavigation(workspace, profile.roles);
   const title = titleForView(view, workspace);
-  const canManagePeople =
-    workspace === 'cadastros' &&
-    (view === 'vendedores' || view === 'finders') &&
-    profile.roles.includes('admin');
-  const personModalMatchesRoute =
-    canManagePeople &&
-    modal?.kind === 'person' &&
-    ((view === 'vendedores' && modal.roleHint === 'seller') ||
-      (view === 'finders' && modal.roleHint === 'finder'));
+  /**
+   * The redundant `admin` check is belt and braces: `getVisibleWorkspaces` already
+   * refuses the `cadastros` workspace to anyone without the role.
+   */
+  const canManageCadastros = workspace === 'cadastros' && profile.roles.includes('admin');
+  const canManagePeople = canManageCadastros && view === 'pessoas';
+  const canManageFuncoes = canManageCadastros && view === 'funcoes';
+  const personModalMatchesRoute = canManagePeople && modal?.kind === 'person';
 
   /**
    * Inline creates from a picker's `+ Criar novo ...` row. `mutateAsync` is read inside
@@ -642,6 +692,15 @@ export function SalesOpsApp() {
     try {
       const { area } = await saveArea.mutateAsync({ name: name.trim(), status: 'active' });
       return area;
+    } catch {
+      return null;
+    }
+  }
+
+  async function createFuncaoByName(name: string): Promise<SalesOpsFuncao | null> {
+    try {
+      const { funcao } = await saveFuncao.mutateAsync({ name: name.trim(), status: 'active' });
+      return funcao;
     } catch {
       return null;
     }
@@ -699,12 +758,12 @@ export function SalesOpsApp() {
       setModal({ kind: 'client' });
       return;
     }
-    if (canManagePeople && view === 'vendedores') {
-      setModal({ kind: 'person', roleHint: 'seller' });
+    if (canManagePeople) {
+      setModal({ kind: 'person' });
       return;
     }
-    if (canManagePeople && view === 'finders') {
-      setModal({ kind: 'person', roleHint: 'finder' });
+    if (canManageFuncoes) {
+      setModal({ kind: 'funcao' });
       return;
     }
     setSaleWizard({ mode: 'create' });
@@ -719,10 +778,14 @@ export function SalesOpsApp() {
           ? 'Nova área'
           : view === 'clientes'
             ? 'Novo cliente'
-            : view === 'vendedores' && canManagePeople
-              ? 'Novo vendedor'
-              : view === 'finders' && canManagePeople
-                ? 'Novo finder'
+            : view === 'pessoas'
+              ? canManagePeople
+                ? 'Nova pessoa'
+                : null
+              : view === 'funcoes'
+                ? canManageFuncoes
+                  ? 'Nova função'
+                  : null
                 : view === 'vendedores' || view === 'finders'
                   ? null
                   : 'Nova proposta';
@@ -1140,26 +1203,10 @@ export function SalesOpsApp() {
                   />
                 ) : null}
                 {view === 'vendedores' ? (
-                  <PeopleView
-                    bootstrap={bootstrap}
-                    mode="seller"
-                    onEdit={
-                      canManagePeople
-                        ? (person) => setModal({ kind: 'person', person, roleHint: 'seller' })
-                        : undefined
-                    }
-                  />
+                  <MeuPainelView bootstrap={persistedBootstrap} mode="seller" />
                 ) : null}
                 {view === 'finders' ? (
-                  <PeopleView
-                    bootstrap={bootstrap}
-                    mode="finder"
-                    onEdit={
-                      canManagePeople
-                        ? (person) => setModal({ kind: 'person', person, roleHint: 'finder' })
-                        : undefined
-                    }
-                  />
+                  <MeuPainelView bootstrap={persistedBootstrap} mode="finder" />
                 ) : null}
                 {view === 'comissoes' ? <CommissionsView bootstrap={persistedBootstrap} /> : null}
                 {view === 'produtos' ? (
@@ -1181,6 +1228,24 @@ export function SalesOpsApp() {
                     onEdit={(area) => setModal({ kind: 'area', area })}
                   />
                 ) : null}
+                {view === 'pessoas' ? (
+                  <PessoasView
+                    bootstrap={bootstrap}
+                    onEdit={(person) => setModal({ kind: 'person', person })}
+                  />
+                ) : null}
+                {view === 'funcoes' ? (
+                  /*
+                    persistedBootstrap: no função is ever written optimistically, so
+                    `funcoes` is identical either way, and this keeps an in-flight
+                    optimistic pessoa out of the "Nº pessoas" column - an optimistic row
+                    belongs only to the cadastro that created it.
+                  */
+                  <FuncoesView
+                    bootstrap={persistedBootstrap}
+                    onEdit={(funcao) => setModal({ kind: 'funcao', funcao })}
+                  />
+                ) : null}
                 {view === 'geral' ? (
                   <SettingsView
                     key={bootstrap.settings?.updatedAt ?? bootstrap.settings?.createdAt ?? 'new'}
@@ -1197,7 +1262,13 @@ export function SalesOpsApp() {
 
       <ProductDialog
         areas={persistedBootstrap.areas}
-        collaborators={persistedBootstrap.people.filter((person) => person.isCollaborator)}
+        /*
+          No status filter, deliberately: the produto Prestador field stores a name
+          snapshot rather than an id, so an inactive pessoa who already provides a
+          produto must stay selectable. Narrowing this to active pessoas would remove
+          an option operators have today.
+        */
+        collaborators={persistedBootstrap.people.filter(isCollaboratorPerson)}
         modal={modal?.kind === 'product' ? modal : null}
         onClose={() => setModal(null)}
         onCreateArea={createAreaByName}
@@ -1222,9 +1293,19 @@ export function SalesOpsApp() {
         }}
         saving={saveArea.isPending}
       />
+      <FuncaoDialog
+        modal={modal?.kind === 'funcao' ? modal : null}
+        onClose={() => setModal(null)}
+        onSave={(payload) => {
+          saveFuncao.mutate(payload, { onSuccess: () => setModal(null) });
+        }}
+        saving={saveFuncao.isPending}
+      />
       <PersonDialog
+        funcoes={persistedBootstrap.funcoes}
         modal={personModalMatchesRoute && modal?.kind === 'person' ? modal : null}
         onClose={() => setModal(null)}
+        onCreateFuncao={createFuncaoByName}
         onSave={(payload) => {
           savePerson.mutate(payload, { onSuccess: () => setModal(null) });
         }}
@@ -1917,16 +1998,22 @@ function SaleDetailDialog({
   );
 }
 
-function PeopleView({
+/**
+ * The `meus-dados` performance panel behind the `vendedores` and `finders` views.
+ * It takes no `onEdit` at all, so "Meus dados reuses the people panels in read-only
+ * mode" holds in the type signature and not only in the wiring; people cadastro
+ * editing lives exclusively in `PessoasView` under `cadastros/pessoas`.
+ */
+function MeuPainelView({
   bootstrap,
   mode,
-  onEdit,
 }: {
   bootstrap: SalesOpsBootstrap;
   mode: 'seller' | 'finder';
-  onEdit?: (person: SalesOpsPerson) => void;
 }) {
-  const people = bootstrap.people.filter((person) => (mode === 'seller' ? person.isSeller : person.isFinder));
+  const people = bootstrap.people.filter((person) =>
+    hasFuncao(person, mode === 'seller' ? FUNCAO_SLUG_VENDEDOR : FUNCAO_SLUG_FINDER),
+  );
   if (people.length === 0) {
     return (
       <EmptyPanel
@@ -1940,9 +2027,8 @@ function PeopleView({
     <div className="grid gap-[14px] xl:grid-cols-3 md:grid-cols-2">
       {people.map((person) => {
         const metrics = personMetrics(bootstrap, person, mode);
-        const pending = isOptimisticId(person.id);
-        const cardBody = (
-          <>
+        return (
+          <article className={`${panelClass} p-5 text-left`} key={person.id}>
             <div className="mb-4 flex items-center gap-3">
               <div className="sales-ops-num flex h-[46px] w-[46px] flex-none items-center justify-center rounded-[13px] bg-gradient-to-br from-[#eaa81a] to-[#9c7210] text-[17px] font-bold text-white">
                 {initials(person.displayName)}
@@ -1968,33 +2054,7 @@ function PeopleView({
                 </div>
               </div>
             </div>
-          </>
-        );
-
-        if (!onEdit) {
-          return (
-            <article className={`${panelClass} p-5 text-left`} key={person.id}>
-              {cardBody}
-            </article>
-          );
-        }
-
-        return (
-          <button
-            aria-label={
-              pending ? `Salvando ${person.displayName}` : `Editar ${person.displayName}`
-            }
-            className={`${panelClass} p-5 text-left transition ${
-              pending ? 'cursor-not-allowed opacity-60' : 'hover:border-[#d8c79a]'
-            }`}
-            disabled={pending}
-            key={person.id}
-            onClick={() => onEdit(person)}
-            title={pending ? 'Salvando...' : undefined}
-            type="button"
-          >
-            {cardBody}
-          </button>
+          </article>
         );
       })}
     </div>
@@ -2317,6 +2377,199 @@ export function AreasView({
                   >
                     <Edit3 className="h-[15px] w-[15px]" />
                   </button>
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
+const systemBadgeClass = 'bg-[#fdf0cf] text-[#7a5a12]';
+const neutralBadgeClass = 'bg-[#eeeef1] text-[#6a6a72]';
+
+/**
+ * The people cadastro: one row per pessoa with the funções she carries. Deliberately
+ * a separate component from `MeuPainelView`, because a cadastro table and a personal
+ * performance card grid answer different questions; sharing one component would need
+ * a mode matrix over both layout and permissions.
+ */
+export function PessoasView({
+  bootstrap,
+  onEdit,
+}: {
+  bootstrap: SalesOpsBootstrap;
+  onEdit: (person: SalesOpsPerson) => void;
+}) {
+  if (bootstrap.people.length === 0) {
+    return (
+      <EmptyPanel
+        text="Cadastre pessoas e atribua funções para usá-las como vendedor, finder ou prestador nas propostas."
+        title="Nenhuma pessoa cadastrada"
+      />
+    );
+  }
+
+  return (
+    <div className={`${panelClass} overflow-hidden`}>
+      <Table>
+        <TableHeader>
+          <TableRow className="bg-[#fafafb] hover:bg-[#fafafb]">
+            <TableHead className={tableHeadClass}>Nome</TableHead>
+            <TableHead className={tableHeadClass}>E-mail</TableHead>
+            <TableHead className={`${tableHeadClass} text-center`}>Funções</TableHead>
+            <TableHead className={`${tableHeadClass} text-center`}>Status</TableHead>
+            <TableHead className={`${tableHeadClass} text-center`}>Ações</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {bootstrap.people.map((person) => {
+            const pending = isOptimisticId(person.id);
+            return (
+              <TableRow key={person.id}>
+                <TableCell className="px-4 py-3 text-sm font-semibold">
+                  {person.displayName}
+                </TableCell>
+                <TableCell className={tableCellClass}>
+                  {person.contactEmail ?? <span className="text-[#b6b6bd]">-</span>}
+                </TableCell>
+                <TableCell className="px-4 py-3">
+                  {person.funcoes.length === 0 ? (
+                    <div className="text-center text-[13.5px] text-[#b6b6bd]">-</div>
+                  ) : (
+                    <div className="flex flex-wrap justify-center gap-1.5">
+                      {person.funcoes.map((funcao) => (
+                        <Badge
+                          className={funcao.isSystem ? systemBadgeClass : neutralBadgeClass}
+                          key={funcao.id}
+                        >
+                          {funcao.name}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                </TableCell>
+                <TableCell className="px-4 py-3 text-center">
+                  <Badge
+                    className={
+                      person.status === 'active'
+                        ? 'bg-[#c9e7cf] text-[#1f7d43]'
+                        : neutralBadgeClass
+                    }
+                  >
+                    {person.status === 'active' ? 'Ativo' : 'Inativo'}
+                  </Badge>
+                </TableCell>
+                <TableCell className="px-4 py-3 text-center">
+                  <button
+                    aria-label={
+                      pending ? `Salvando ${person.displayName}` : `Editar ${person.displayName}`
+                    }
+                    className={pending ? iconButtonPendingClass : iconButtonClass}
+                    disabled={pending}
+                    onClick={() => onEdit(person)}
+                    title={pending ? 'Salvando...' : 'Editar'}
+                    type="button"
+                  >
+                    <Edit3 className="h-[15px] w-[15px]" />
+                  </button>
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
+/**
+ * The funções cadastro. `vendedor` and `finder` are predefined app roles: the API
+ * answers `409 funcao_is_system` to any rename or archive, so this table offers no
+ * edit affordance for them at all rather than offering one that must fail.
+ * There is no delete affordance anywhere: removal is `status: 'archived'`, matching
+ * áreas and the fact that the sales-ops router has no DELETE verb.
+ */
+export function FuncoesView({
+  bootstrap,
+  onEdit,
+}: {
+  bootstrap: SalesOpsBootstrap;
+  onEdit: (funcao: SalesOpsFuncao) => void;
+}) {
+  if (bootstrap.funcoes.length === 0) {
+    return (
+      <EmptyPanel
+        text="Vendedor e finder são funções predefinidas do app; crie funções personalizadas para prestadores como designer, desenvolvedor ou P.O."
+        title="Nenhuma função cadastrada"
+      />
+    );
+  }
+
+  return (
+    <div className={`${panelClass} overflow-hidden`}>
+      <Table>
+        <TableHeader>
+          <TableRow className="bg-[#fafafb] hover:bg-[#fafafb]">
+            <TableHead className={tableHeadClass}>Nome</TableHead>
+            <TableHead className={`${tableHeadClass} text-center`}>Tipo</TableHead>
+            <TableHead className={`${tableHeadClass} text-center`}>Status</TableHead>
+            <TableHead className={`${tableHeadClass} text-center`}>Nº pessoas</TableHead>
+            <TableHead className={`${tableHeadClass} text-center`}>Ações</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {bootstrap.funcoes.map((funcao) => {
+            // The join key on a person's nested entry is `id`, not `funcaoId`.
+            const personCount = bootstrap.people.filter((person) =>
+              person.funcoes.some((assigned) => assigned.id === funcao.id),
+            ).length;
+            return (
+              <TableRow key={funcao.id}>
+                <TableCell className="px-4 py-3 text-sm font-semibold">{funcao.name}</TableCell>
+                <TableCell className="px-4 py-3 text-center">
+                  <Badge className={funcao.isSystem ? systemBadgeClass : neutralBadgeClass}>
+                    {funcao.isSystem ? 'Predefinida' : 'Personalizada'}
+                  </Badge>
+                </TableCell>
+                <TableCell className="px-4 py-3 text-center">
+                  <Badge
+                    className={
+                      funcao.status === 'active'
+                        ? 'bg-[#c9e7cf] text-[#1f7d43]'
+                        : neutralBadgeClass
+                    }
+                  >
+                    {funcao.status === 'active' ? 'Ativa' : 'Arquivada'}
+                  </Badge>
+                </TableCell>
+                <TableCell className="sales-ops-num px-4 py-3 text-center text-[13.5px]">
+                  {personCount}
+                </TableCell>
+                <TableCell className="px-4 py-3 text-center">
+                  {funcao.isSystem ? (
+                    <button
+                      aria-label="Função predefinida do app"
+                      className={`${iconButtonClass} disabled:cursor-not-allowed disabled:opacity-50`}
+                      disabled
+                      title="Função predefinida do app"
+                      type="button"
+                    >
+                      <Lock className="h-[15px] w-[15px]" />
+                    </button>
+                  ) : (
+                    <button
+                      aria-label={`Editar ${funcao.name}`}
+                      className={iconButtonClass}
+                      onClick={() => onEdit(funcao)}
+                      title="Editar"
+                      type="button"
+                    >
+                      <Edit3 className="h-[15px] w-[15px]" />
+                    </button>
+                  )}
                 </TableCell>
               </TableRow>
             );
@@ -3547,16 +3800,16 @@ function AreaDialogBody({
   );
 }
 
-function PersonDialog(props: {
-  modal: Extract<ModalState, { kind: 'person' }> | null;
+export function FuncaoDialog(props: {
+  modal: Extract<ModalState, { kind: 'funcao' }> | null;
   onClose: () => void;
-  onSave: (payload: SavePersonPayload) => void;
+  onSave: (payload: SaveFuncaoPayload) => void;
   saving: boolean;
 }) {
   if (!props.modal) return null;
   return (
-    <PersonDialogBody
-      key={props.modal.person?.id ?? `new-${props.modal.roleHint}`}
+    <FuncaoDialogBody
+      key={props.modal.funcao?.id ?? 'new-funcao'}
       modal={props.modal}
       onClose={props.onClose}
       onSave={props.onSave}
@@ -3565,37 +3818,182 @@ function PersonDialog(props: {
   );
 }
 
-function PersonDialogBody({
+function FuncaoDialogBody({
   modal,
   onClose,
   onSave,
   saving,
 }: {
+  modal: Extract<ModalState, { kind: 'funcao' }>;
+  onClose: () => void;
+  onSave: (payload: SaveFuncaoPayload) => void;
+  saving: boolean;
+}) {
+  const [name, setName] = useState(modal.funcao?.name ?? '');
+  const [status, setStatus] = useState<'active' | 'archived'>(modal.funcao?.status ?? 'active');
+  /**
+   * Defence in depth. `FuncoesView` never wires `onEdit` for a predefined função, so
+   * this branch is unreachable in normal use; it exists so a future mis-wire cannot
+   * produce the rename or archive the API answers `409 funcao_is_system` to.
+   */
+  const isSystem = modal.funcao?.isSystem === true;
+
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    if (isSystem || !name.trim()) return;
+    onSave({ id: modal.funcao?.id, name: name.trim(), status });
+  }
+
+  return (
+    <Dialog onOpenChange={(open) => (!open ? onClose() : undefined)} open>
+      <DialogContent className="max-w-[520px] rounded-[20px] border-none bg-white p-0">
+        <DialogHeader className="border-b border-[#e8e8ec] px-6 py-5 text-left">
+          <DialogTitle className="sales-ops-num text-[19px]">Função</DialogTitle>
+          <DialogDescription>
+            Função atribuível a uma pessoa e usada nos custos de uma proposta.
+          </DialogDescription>
+        </DialogHeader>
+        <form className="flex flex-col gap-4 px-6 py-5" onSubmit={submit}>
+          <Field label="Nome" required>
+            <Input
+              className="bg-[#fafafb]"
+              disabled={isSystem}
+              onChange={(event) => setName(event.target.value)}
+              value={name}
+            />
+          </Field>
+          <FieldBlock label="Status">
+            <Combobox
+              aria-label="Status da função"
+              className={formSelectClass}
+              disabled={isSystem}
+              onChange={(value) => setStatus(value as 'active' | 'archived')}
+              options={[
+                { value: 'active', label: 'Ativa' },
+                { value: 'archived', label: 'Arquivada' },
+              ]}
+              searchPlaceholder="Buscar status..."
+              value={status}
+            />
+          </FieldBlock>
+          {isSystem ? (
+            <p className="text-[12.5px] text-[#8b8b92]">
+              Função predefinida do app: o nome e o status não podem ser alterados.
+            </p>
+          ) : null}
+          <div className="flex justify-end gap-3 border-t border-[#e8e8ec] pt-4">
+            <SecondaryButton onClick={onClose}>Cancelar</SecondaryButton>
+            <PrimaryButton disabled={saving || isSystem || !name.trim()} type="submit">
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              Salvar
+            </PrimaryButton>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+export function PersonDialog(props: {
+  funcoes: SalesOpsFuncao[];
+  modal: Extract<ModalState, { kind: 'person' }> | null;
+  onClose: () => void;
+  onCreateFuncao?: (name: string) => Promise<SalesOpsFuncao | null>;
+  onSave: (payload: SavePersonPayload) => void;
+  saving: boolean;
+}) {
+  if (!props.modal) return null;
+  return (
+    <PersonDialogBody
+      funcoes={props.funcoes}
+      key={props.modal.person?.id ?? 'new-person'}
+      modal={props.modal}
+      onClose={props.onClose}
+      onCreateFuncao={props.onCreateFuncao}
+      onSave={props.onSave}
+      saving={props.saving}
+    />
+  );
+}
+
+function PersonDialogBody({
+  funcoes,
+  modal,
+  onClose,
+  onCreateFuncao,
+  onSave,
+  saving,
+}: {
+  funcoes: SalesOpsFuncao[];
   modal: Extract<ModalState, { kind: 'person' }>;
   onClose: () => void;
+  onCreateFuncao?: (name: string) => Promise<SalesOpsFuncao | null>;
   onSave: (payload: SavePersonPayload) => void;
   saving: boolean;
 }) {
   const [displayName, setDisplayName] = useState(modal.person?.displayName ?? '');
   const [contactEmail, setContactEmail] = useState(modal.person?.contactEmail ?? '');
-  const [isSeller, setIsSeller] = useState(modal.person?.isSeller ?? modal.roleHint === 'seller');
-  const [isFinder, setIsFinder] = useState(modal.person?.isFinder ?? modal.roleHint === 'finder');
-  const [isCollaborator, setIsCollaborator] = useState(
-    modal.person?.isCollaborator ?? modal.roleHint === 'collaborator',
-  );
   const [status, setStatus] = useState<'active' | 'inactive'>(modal.person?.status ?? 'active');
+  const [assignedIds, setAssignedIds] = useState<string[]>(
+    () => modal.person?.funcoes.map((funcao) => funcao.id) ?? [],
+  );
+  const [pendingFuncaoId, setPendingFuncaoId] = useState('');
+  /**
+   * Funções created from the picker's own create row. The `funcoes` prop only
+   * refreshes once the invalidated bootstrap refetch lands, so without this the row
+   * the operator just created would have no name to render for a beat.
+   */
+  const [createdFuncoes, setCreatedFuncoes] = useState<SalesOpsFuncao[]>([]);
   const activeModal = modal;
+
+  /**
+   * Resolved against the org catalogue, the funções just created here and the
+   * pessoa's own entries, so an archived função she already carries keeps its row
+   * (and stays removable) even though it is gone from the picker below. Same
+   * handling as `selectableAreas` in ProductDialogBody.
+   */
+  const assignedFuncoes = assignedIds.flatMap<SalesOpsPersonFuncao>((id) => {
+    const known =
+      funcoes.find((funcao) => funcao.id === id) ??
+      createdFuncoes.find((funcao) => funcao.id === id) ??
+      modal.person?.funcoes.find((funcao) => funcao.id === id);
+    return known ? [known] : [];
+  });
+  const selectableFuncoes: ComboboxOption[] = [...funcoes, ...createdFuncoes]
+    .filter((funcao) => funcao.status === 'active' && !assignedIds.includes(funcao.id))
+    .map((funcao) => ({ value: funcao.id, label: funcao.name }));
+
+  function assignFuncao(id: string) {
+    if (!id) return;
+    setAssignedIds((current) => (current.includes(id) ? current : [...current, id]));
+    setPendingFuncaoId('');
+  }
+
+  /**
+   * The Combobox `onCreate` is `(query: string) => void`, so the async create is
+   * wrapped rather than returned. A rejected create resolves to null and simply
+   * leaves the assignment list unchanged, matching every other inline create in
+   * this file: no dialog in this app surfaces API errors today.
+   */
+  async function handleCreateFuncao(query: string) {
+    if (!onCreateFuncao) return;
+    const created = await onCreateFuncao(query.trim());
+    if (!created) return;
+    setCreatedFuncoes((current) =>
+      current.some((funcao) => funcao.id === created.id) ? current : [...current, created],
+    );
+    assignFuncao(created.id);
+  }
 
   function submit(event: FormEvent) {
     event.preventDefault();
+    if (!displayName.trim() || assignedIds.length === 0) return;
     onSave({
       id: activeModal.person?.id,
       displayName: displayName.trim(),
       contactEmail: contactEmail.trim() || undefined,
       status,
-      isSeller,
-      isFinder,
-      isCollaborator,
+      funcaoIds: assignedIds,
     });
   }
 
@@ -3604,7 +4002,9 @@ function PersonDialogBody({
       <DialogContent className="max-w-[520px] rounded-[20px] border-none bg-white p-0">
         <DialogHeader className="border-b border-[#e8e8ec] px-6 py-5 text-left">
           <DialogTitle className="sales-ops-num text-[19px]">Pessoa</DialogTitle>
-          <DialogDescription>Vendedores, finders e prestadores usam o mesmo cadastro.</DialogDescription>
+          <DialogDescription>
+            Cadastro único de pessoas: atribua as funções que ela exerce.
+          </DialogDescription>
         </DialogHeader>
         <form className="flex flex-col gap-4 px-6 py-5" onSubmit={submit}>
           <Field label="Nome" required>
@@ -3635,15 +4035,61 @@ function PersonDialogBody({
               value={status}
             />
           </FieldBlock>
-          <div className="grid gap-2 md:grid-cols-3">
-            <RoleToggle checked={isSeller} label="Vendedor" onChange={setIsSeller} />
-            <RoleToggle checked={isFinder} label="Finder" onChange={setIsFinder} />
-            <RoleToggle checked={isCollaborator} label="Prestador" onChange={setIsCollaborator} />
-          </div>
+          <FieldBlock label="Funções" required>
+            {assignedIds.length > 0 ? (
+              <div className="flex flex-col gap-2">
+                {assignedFuncoes.map((funcao) => (
+                  <div
+                    className="flex items-center gap-2 rounded-[10px] border border-[#dcdce2] bg-[#fafafb] px-3 py-2"
+                    key={funcao.id}
+                  >
+                    <span className="flex-1 text-[13.5px] font-semibold text-[#201f24]">
+                      {funcao.name}
+                    </span>
+                    {funcao.isSystem ? (
+                      <Badge className={systemBadgeClass}>Predefinida</Badge>
+                    ) : null}
+                    <button
+                      aria-label={`Remover função ${funcao.name}`}
+                      className={iconButtonClass}
+                      onClick={() =>
+                        setAssignedIds((current) => current.filter((id) => id !== funcao.id))
+                      }
+                      title="Remover"
+                      type="button"
+                    >
+                      <X className="h-[15px] w-[15px]" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-[12.5px] text-[#8b8b92]">Atribua ao menos uma função.</p>
+            )}
+            <div className="flex items-center gap-2">
+              <div className="flex-1">
+                <Combobox
+                  aria-label="Função da pessoa"
+                  className={formSelectClass}
+                  entityGender="f"
+                  entityLabel="função"
+                  onChange={setPendingFuncaoId}
+                  onCreate={onCreateFuncao ? (query) => void handleCreateFuncao(query) : undefined}
+                  options={selectableFuncoes}
+                  placeholder="Selecione uma função"
+                  searchPlaceholder="Buscar função..."
+                  value={pendingFuncaoId}
+                />
+              </div>
+              <SecondaryButton onClick={() => assignFuncao(pendingFuncaoId)}>
+                Adicionar função
+              </SecondaryButton>
+            </div>
+          </FieldBlock>
           <div className="flex justify-end gap-3 border-t border-[#e8e8ec] pt-4">
             <SecondaryButton onClick={onClose}>Cancelar</SecondaryButton>
             <PrimaryButton
-              disabled={saving || !displayName.trim() || (!isSeller && !isFinder && !isCollaborator)}
+              disabled={saving || !displayName.trim() || assignedIds.length === 0}
               type="submit"
             >
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
@@ -3653,29 +4099,6 @@ function PersonDialogBody({
         </form>
       </DialogContent>
     </Dialog>
-  );
-}
-
-function RoleToggle({
-  checked,
-  label,
-  onChange,
-}: {
-  checked: boolean;
-  label: string;
-  onChange: (checked: boolean) => void;
-}) {
-  return (
-    <button
-      className={`flex items-center justify-center gap-2 rounded-[10px] border px-3 py-3 text-[13.5px] font-bold ${
-        checked ? 'border-[#eaa81a] bg-[#fdf0cf] text-[#7a5a12]' : 'border-[#dcdce2] bg-[#fafafb] text-[#57575f]'
-      }`}
-      onClick={() => onChange(!checked)}
-      type="button"
-    >
-      {checked ? <Check className="h-4 w-4" /> : <UserRound className="h-4 w-4" />}
-      {label}
-    </button>
   );
 }
 
@@ -3869,15 +4292,23 @@ function SaleWizardDialogBody({
 }) {
   const settings = activeSettings(bootstrap.settings);
   const sellers = useMemo(
-    () => bootstrap.people.filter((person) => person.isSeller && person.status === 'active'),
+    () =>
+      bootstrap.people.filter(
+        (person) => hasFuncao(person, FUNCAO_SLUG_VENDEDOR) && person.status === 'active',
+      ),
     [bootstrap.people],
   );
   const finders = useMemo(
-    () => bootstrap.people.filter((person) => person.isFinder && person.status === 'active'),
+    () =>
+      bootstrap.people.filter(
+        (person) => hasFuncao(person, FUNCAO_SLUG_FINDER) && person.status === 'active',
+      ),
     [bootstrap.people],
   );
+  // Active only, unlike the produto Prestador picker above: a new proposta should not
+  // suggest an inactive pessoa as a profissional. Pre-existing asymmetry, preserved.
   const collaborators = useMemo(
-    () => bootstrap.people.filter((person) => person.isCollaborator && person.status === 'active'),
+    () => bootstrap.people.filter((person) => isCollaboratorPerson(person) && person.status === 'active'),
     [bootstrap.people],
   );
   const firstProduct = bootstrap.products[0];

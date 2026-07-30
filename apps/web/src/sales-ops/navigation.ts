@@ -7,12 +7,17 @@ import {
   Database,
   Layers,
   Search,
+  Tags,
   UsersRound,
   type LucideIcon,
 } from 'lucide-react';
 import type { AppRole } from '@/auth/claims';
 
 export type SalesOpsWorkspace = 'tatico' | 'operacional' | 'cadastros' | 'meus-dados';
+/**
+ * `vendedores` and `finders` are no longer Cadastros screens; they survive here
+ * because they are the two `meus-dados` "Meu painel" view ids.
+ */
 export type SalesOpsView =
   | 'dashboard'
   | 'vendas'
@@ -22,6 +27,8 @@ export type SalesOpsView =
   | 'produtos'
   | 'areas'
   | 'clientes'
+  | 'pessoas'
+  | 'funcoes'
   | 'geral';
 
 export type SalesOpsNavigationItem = {
@@ -59,8 +66,8 @@ const cadastros: SalesOpsNavigationItem[] = [
   { id: 'produtos', label: 'Produtos', icon: Database },
   { id: 'areas', label: 'Áreas', icon: Layers },
   { id: 'clientes', label: 'Clientes', icon: ContactRound },
-  { id: 'vendedores', label: 'Vendedores', icon: UsersRound },
-  { id: 'finders', label: 'Finders', icon: Search },
+  { id: 'pessoas', label: 'Pessoas', icon: UsersRound },
+  { id: 'funcoes', label: 'Funções', icon: Tags },
   { id: 'geral', label: 'Geral', icon: Cog },
 ];
 
@@ -142,18 +149,44 @@ export function getDefaultSalesOpsRoute(
   return { workspace: 'tatico', view: 'dashboard' };
 }
 
+/**
+ * Bookmarked Cadastros URLs that lost their screen when Pessoas replaced the two
+ * special-cased vendedor and finder cadastros. Both have a real successor, so the
+ * URL is rewritten rather than dropped on the role default.
+ */
+const legacyCadastroViews: Readonly<Record<string, SalesOpsView>> = {
+  vendedores: 'pessoas',
+  finders: 'pessoas',
+};
+
+/**
+ * Scoped to `cadastros` on purpose: `vendedores` and `finders` are still the two
+ * live `meus-dados` view ids, so aliasing them workspace-wide would hijack the
+ * seller and finder "Meu painel" routes.
+ */
+function aliasLegacyView(
+  workspace: SalesOpsWorkspace,
+  view: string | undefined,
+): string | undefined {
+  if (workspace !== 'cadastros' || view === undefined) return view;
+  return legacyCadastroViews[view] ?? view;
+}
+
 export function resolveSalesOpsRoute(
   params: SalesOpsRouteParams,
   roles: readonly AppRole[],
 ): SalesOpsRouteResolution {
   const workspace = getVisibleWorkspaces(roles).find((id) => id === params.workspace);
+  const requestedView = workspace ? aliasLegacyView(workspace, params.view) : params.view;
   const view = workspace
-    ? getSalesOpsNavigation(workspace, roles).find((item) => item.id === params.view)?.id
+    ? getSalesOpsNavigation(workspace, roles).find((item) => item.id === requestedView)?.id
     : undefined;
 
   if (workspace && view) {
     const route = { workspace, view };
-    return { route, path: buildSalesOpsPath(route), redirect: false };
+    // An aliased view differs from what the URL asked for, which is exactly when
+    // the caller must rewrite the address bar. A canonical route stays `false`.
+    return { route, path: buildSalesOpsPath(route), redirect: view !== params.view };
   }
 
   const route = getDefaultSalesOpsRoute(roles);

@@ -6,7 +6,13 @@ import type { HTMLAttributes } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { SalesOpsArea, SalesOpsBootstrap, SalesOpsProduct } from '../types';
+import type {
+  SalesOpsArea,
+  SalesOpsBootstrap,
+  SalesOpsFuncao,
+  SalesOpsPerson,
+  SalesOpsProduct,
+} from '../types';
 
 const authMocks = vi.hoisted(() => ({
   logout: vi.fn(async () => undefined),
@@ -47,6 +53,7 @@ vi.mock('../api', () => ({
     saveProduct: vi.fn(),
     saveClient: vi.fn(),
     saveArea: vi.fn(),
+    saveFuncao: vi.fn(),
     createSale: vi.fn(),
     updateSale: vi.fn(),
     transitionSale: vi.fn(),
@@ -83,6 +90,7 @@ function snapshot(patch: Partial<SalesOpsBootstrap> = {}): SalesOpsBootstrap {
     products: [],
     clients: [],
     areas: [],
+    funcoes: [],
     people: [],
     payables: [],
     saleItems: [],
@@ -106,6 +114,28 @@ const persistedArea: SalesOpsArea = {
   id: '12121212-1212-4121-8121-121212121212',
   orgId,
   name: 'FXL BPO Sales',
+  status: 'active',
+  createdAt: '2026-07-29T12:05:00.000Z',
+  updatedAt: null,
+};
+
+const existingFuncao: SalesOpsFuncao = {
+  id: '16161616-1616-4161-8161-161616161616',
+  orgId,
+  name: 'Vendedor',
+  slug: 'vendedor',
+  isSystem: true,
+  status: 'active',
+  createdAt: '2026-07-29T12:00:00.000Z',
+  updatedAt: null,
+};
+
+const persistedFuncao: SalesOpsFuncao = {
+  id: '17171717-1717-4171-8171-171717171717',
+  orgId,
+  name: 'Designer',
+  slug: 'designer',
+  isSystem: false,
   status: 'active',
   createdAt: '2026-07-29T12:05:00.000Z',
   updatedAt: null,
@@ -354,6 +384,68 @@ describe('cadastros list refresh after a create', () => {
     await resolveBootstrap(1, snapshot({ areas: [existingArea], products: [persistedProduct] }));
 
     expect(text()).toContain('FXL Produto Novo');
+    expect(vi.mocked(salesOpsApi.bootstrap)).toHaveBeenCalledTimes(2);
+  });
+
+  it('sends funcaoIds when creating a pessoa and shows her before the POST resolves', async () => {
+    const savePersonDeferred = createDeferred<{ person: SalesOpsPerson }>();
+    vi.mocked(salesOpsApi.savePerson).mockReturnValueOnce(savePersonDeferred.promise);
+
+    await renderApp('/cadastros/pessoas');
+    await resolveBootstrap(0, snapshot({ funcoes: [existingFuncao] }));
+    expect(text()).toContain('Nenhuma pessoa cadastrada');
+
+    await click(buttonByText('Nova pessoa'));
+    await changeInput(requireInput('form input'), 'Sig');
+    await pickOption('Função da pessoa', existingFuncao.name);
+    await click(buttonByText('Adicionar função'));
+    await submitDialogForm();
+
+    expect(vi.mocked(salesOpsApi.savePerson)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(salesOpsApi.savePerson).mock.calls[0]?.[0]).toEqual({
+      displayName: 'Sig',
+      contactEmail: undefined,
+      status: 'active',
+      funcaoIds: [existingFuncao.id],
+      id: undefined,
+    });
+
+    // The optimistic row resolves its badge from the cached função catalogue.
+    // Scoped to the table, because the still-open dialog also says "Vendedor".
+    const row = container.querySelector('tbody tr');
+    expect(row?.textContent).toContain('Sig');
+    expect(row?.textContent).toContain('Vendedor');
+    expect(text()).not.toContain('Nenhuma pessoa cadastrada');
+  });
+
+  it('shows a new função in the list once the create POST resolves, with no further user action', async () => {
+    const saveFuncaoDeferred = createDeferred<{ funcao: SalesOpsFuncao }>();
+    vi.mocked(salesOpsApi.saveFuncao).mockReturnValueOnce(saveFuncaoDeferred.promise);
+
+    await renderApp('/cadastros/funcoes');
+    await resolveBootstrap(0, snapshot());
+    expect(text()).toContain('Nenhuma função cadastrada');
+
+    await click(buttonByText('Nova função'));
+    await changeInput(requireInput('form input'), 'Designer');
+    await submitDialogForm();
+
+    expect(vi.mocked(salesOpsApi.saveFuncao)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(salesOpsApi.saveFuncao).mock.calls[0]?.[0]).toEqual({
+      name: 'Designer',
+      status: 'active',
+    });
+
+    await act(async () => {
+      saveFuncaoDeferred.resolve({ funcao: persistedFuncao });
+    });
+    await flushReact();
+
+    await resolveBootstrap(1, snapshot({ funcoes: [persistedFuncao] }));
+
+    expect(text()).toContain('Designer');
+    expect(text()).toContain('Personalizada');
+    expect(text()).not.toContain('Nenhuma função cadastrada');
     expect(vi.mocked(salesOpsApi.bootstrap)).toHaveBeenCalledTimes(2);
   });
 

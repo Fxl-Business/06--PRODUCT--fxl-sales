@@ -148,6 +148,7 @@ function bootstrap(overrides: Partial<SalesOpsBootstrap> = {}): SalesOpsBootstra
       { id: areaTechId, orgId: 'org-test', name: 'FXL Tech', status: 'active', createdAt: '2026-07-10T12:00:00.000Z', updatedAt: null },
       { id: areaAdvisorId, orgId: 'org-test', name: 'FXL Advisor', status: 'active', createdAt: '2026-07-10T12:00:00.000Z', updatedAt: null },
     ],
+    funcoes: [],
     people: [],
     payables: [
       {
