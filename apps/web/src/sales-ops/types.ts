@@ -28,10 +28,24 @@ export type SalesOpsProductProvider = {
   commissionValue: number;
 };
 
+/**
+ * Produto | Serviço, the single classification axis on a catalog row. Storage
+ * values are English to match every other enum on the wire; the pt-BR labels
+ * live in the view layer.
+ */
+export type SalesOpsProductKind = 'product' | 'service';
+
 export type SalesOpsProduct = {
   id: string;
   orgId: string;
   name: string;
+  /**
+   * Optional because a locally constructed row (and any response that predates
+   * the `kind` column) simply does not carry it. Absent is read as a Produto,
+   * which is the conservative direction: it keeps every per-item requirement in
+   * place rather than relaxing one on a row we cannot classify.
+   */
+  kind?: SalesOpsProductKind;
   type: string;
   codeSuffix: string;
   areaId: string | null;

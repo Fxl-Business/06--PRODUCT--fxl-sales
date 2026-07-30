@@ -107,6 +107,7 @@ import {
   formatMoneyBrl,
   initials,
   installmentSumCents,
+  isServiceProduct,
   parseCurrencyInputToCents,
   resolveSaleCommissionDefaults,
   splitInstallmentsEqually,
@@ -4043,9 +4044,13 @@ function SaleWizardDialogBody({
       return Boolean(item.areaId) && Boolean(item.customLabel.trim()) && parseCurrencyToCents(item.unitBrl) > 0;
     }
     const product = selectedProduct(item);
-    const openPriceOk =
-      !product?.openPrice || (Boolean(item.customLabel.trim()) && parseCurrencyToCents(item.unitBrl) > 0);
-    return openPriceOk && Boolean(product?.areaId);
+    // Two independent rules, deliberately not fused into one boolean. A serviço
+    // has a catalog name to fall back on, so its description is optional - but it
+    // still has no catalog price, so the negotiated value stays required.
+    const { needsDescription, needsNegotiatedValue } = productRowRequirements(product);
+    const valueOk = !needsNegotiatedValue || parseCurrencyToCents(item.unitBrl) > 0;
+    const descriptionOk = !needsDescription || Boolean(item.customLabel.trim());
+    return valueOk && descriptionOk && Boolean(product?.areaId);
   });
   const canSaveBasics = canSave && totalCents > 0;
   const canAdvanceStepOne = canSaveBasics && itemsValid;
@@ -4146,12 +4151,37 @@ function SaleWizardDialogBody({
     return bootstrap.products.find((product) => product.id === item.productId) ?? firstProduct;
   }
 
+  /**
+   * What a catalog-product row must carry before step 1 accepts it. Shared by the
+   * `itemsValid` gate and the row's error rendering so the two cannot drift: if
+   * they disagree, the wizard either blocks with no visible reason or shows an
+   * error it does not enforce.
+   *
+   * A Serviço needs a value but not a description, because `saleItemDisplayName`
+   * falls back to the catalog name. An open-price row that is not a Serviço needs
+   * both. A fixed-price Produto needs neither - it has a catalog price and a
+   * catalog name, and the description field is not even rendered.
+   */
+  function productRowRequirements(product: SalesOpsProduct | undefined) {
+    const isService = isServiceProduct(product);
+    const hasVariableValue = Boolean(product?.openPrice) || isService;
+    return {
+      isService,
+      hasVariableValue,
+      needsNegotiatedValue: hasVariableValue,
+      needsDescription: hasVariableValue && !isService,
+    };
+  }
+
   function saleItemDisplayName(item: SaleItemForm): string {
     if (item.kind === 'free') return item.customLabel.trim() || 'Item avulso';
     const product = selectedProduct(item);
     if (!product) return 'Produto';
-    if (!product.openPrice) return product.name;
-    return item.customLabel.trim() || product.name;
+    // `.trim() || 'Produto'` closes the one path from a blank description to an
+    // API 400: ProductSchema.name is `.min(1)` without `.trim()`, so a
+    // whitespace-only catalog name would otherwise reach the wire as ''.
+    if (!productRowRequirements(product).hasVariableValue) return product.name.trim() || 'Produto';
+    return item.customLabel.trim() || product.name.trim() || 'Produto';
   }
 
   function setItem(index: number, patch: Partial<SaleItemForm>) {
@@ -4670,13 +4700,25 @@ function SaleWizardDialogBody({
                         }
 
                         const product = selectedProduct(item);
+                        const { isService, hasVariableValue, needsDescription } =
+                          productRowRequirements(product);
                         const customLabelValid = Boolean(item.customLabel.trim());
                         const customUnitValid = parseCurrencyToCents(item.unitBrl) > 0;
                         const showCustomLabelError =
-                          Boolean(product?.openPrice) && showItemErrors && !customLabelValid;
+                          needsDescription && showItemErrors && !customLabelValid;
                         const showCustomUnitError =
-                          Boolean(product?.openPrice) && showItemErrors && !customUnitValid;
+                          hasVariableValue && showItemErrors && !customUnitValid;
                         const showAreaError = showItemErrors && !product?.areaId;
+                        // Three cases, three hints: a serviço says the description
+                        // is optional and names the label it will fall back to, an
+                        // open-price produto keeps asking for both.
+                        let descriptionHint =
+                          'Sistema personalizado - informe um nome/descrição e o valor negociado';
+                        if (isService) {
+                          descriptionHint = customLabelValid
+                            ? 'Serviço com valor variável - descrição opcional'
+                            : `Serviço com valor variável - sem descrição, o item aparece como "${saleItemDisplayName(item)}"`;
+                        }
                         const subtotal =
                           Math.max(1, Number(item.quantity) || 1) * parseCurrencyToCents(item.unitBrl);
                         return (
@@ -4743,14 +4785,19 @@ function SaleWizardDialogBody({
                                 <Trash2 className="h-3.5 w-3.5" />
                               </button>
                             </div>
-                            {product?.openPrice ? (
+                            {hasVariableValue ? (
                               <div className="grid grid-cols-[minmax(0,1fr)_70px_130px_120px_36px] gap-[9px]">
                                 <label className="flex min-w-0 flex-col gap-[6px]">
                                   <span className="text-xs font-semibold text-[#8b8b92]">
-                                    Nome / descrição do item
+                                    {isService
+                                      ? 'Nome / descrição do item (opcional)'
+                                      : 'Nome / descrição do item'}
                                   </span>
                                   <Input
                                     aria-invalid={showCustomLabelError}
+                                    // Frozen: existing wizard tests query this exact
+                                    // string, and the (opcional) hint belongs to the
+                                    // visible label, not to the accessible name.
                                     aria-label={`Nome / descrição do item ${index + 1}`}
                                     className={cn(
                                       'h-10 rounded-[9px]',
@@ -4761,7 +4808,9 @@ function SaleWizardDialogBody({
                                     onChange={(event) =>
                                       setItem(index, { customLabel: event.target.value })
                                     }
-                                    placeholder="Ex.: Módulo Vendas"
+                                    placeholder={
+                                      isService ? 'Ex.: detalhe do escopo' : 'Ex.: Módulo Vendas'
+                                    }
                                     value={item.customLabel}
                                   />
                                   {showItemErrors ? (
@@ -4778,7 +4827,7 @@ function SaleWizardDialogBody({
                                   ) : (
                                     <span className="flex items-center gap-1.5 pl-0.5 text-[11.5px] font-semibold text-[#9c7210]">
                                       <AlertTriangle className="h-[13px] w-[13px]" />
-                                      Sistema personalizado - informe um nome/descrição e o valor negociado
+                                      {descriptionHint}
                                     </span>
                                   )}
                                 </label>
