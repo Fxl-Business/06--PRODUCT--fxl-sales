@@ -5945,6 +5945,16 @@ function SaleWizardDialogBody({
     if (!onCreateFuncao) return;
     const created = await onCreateFuncao(name);
     if (!created) return;
+    /*
+      `allocatableFuncoes` filters optimistic ids so a placeholder can never be
+      SELECTED, but the create path writes `created.id` straight through. In-repo
+      `createFuncaoByName` resolves the API response, so this cannot fire; the guard
+      exists because `SaleWizardDialog` is exported and an outside caller could hand
+      back a cached row. Without it the row would drop out of the options while
+      `valueLabel` still printed the name, so the leak would be invisible until the
+      uuid cast failed and took the whole wizard with it.
+    */
+    if (isOptimisticId(created.id)) return;
     setCreatedFuncoes((current) =>
       current.some((funcao) => funcao.id === created.id) ? current : [...current, created],
     );

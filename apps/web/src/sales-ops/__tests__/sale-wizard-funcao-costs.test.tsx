@@ -747,6 +747,35 @@ describe('sale wizard profissionais alocados', () => {
     expect(options).toContain('Desenvolvedor');
   });
 
+  it('refuses an optimistic funcao handed back by the create handler', async () => {
+    // The picker's own filter only stops a placeholder being SELECTED. The create
+    // path writes the returned id straight through, so an outside caller of the
+    // exported SaleWizardDialog whose handler resolves a cached row would otherwise
+    // set a placeholder funcaoId while valueLabel still printed the name - invisible
+    // until the uuid cast failed and took the whole wizard with it.
+    const onCreateFuncao = vi.fn(async (name: string) =>
+      funcao(`optimistic:funcoes:${name}`, name),
+    );
+    await renderWizard(null, onCreateFuncao);
+    await goToCosts();
+    await addProfessional();
+    await click(comboboxTrigger('Função do profissional 1'));
+    await typeInto(panelSearch('Buscar função...'), 'Arquiteto');
+    await click(createRow()!);
+    await flushReact();
+
+    expect(onCreateFuncao).toHaveBeenCalledWith('Arquiteto');
+    // The row keeps its unset state rather than adopting the placeholder.
+    expect(comboboxText('Função do profissional 1')).not.toBe('Arquiteto');
+
+    await pickOption('Profissional 1', 'Bruno Entrega');
+    await flushReact();
+    await click(buttonByText('Salvar rascunho'));
+
+    const payload = onSave.mock.calls.at(-1)![0];
+    expect(String(payload.professionals[0]?.funcaoId ?? '')).not.toMatch(/^optimistic:/);
+  });
+
   it('toggles CUSTO ALOCADO to % and resolves against the funcao-scoped item subtotal', async () => {
     await renderWizard();
     await goToCosts();
