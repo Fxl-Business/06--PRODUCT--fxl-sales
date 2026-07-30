@@ -5,7 +5,30 @@ import type { HTMLAttributes } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SaleWizardDialog } from '../SalesOpsApp';
-import type { CreateSalePayload, SalesOpsBootstrap, SalesOpsSale } from '../types';
+import type {
+  CreateSalePayload,
+  SalesOpsBootstrap,
+  SalesOpsPersonFuncao,
+  SalesOpsSale,
+} from '../types';
+
+/**
+ * Funções replace the three removed `is_seller` / `is_finder` / `is_collaborator`
+ * mirrors on a pessoa. `vendedor` and `finder` are the two predefined system funções;
+ * `prestador` is an ordinary custom one, which is what makes a pessoa a prestador.
+ */
+const funcaoVendedor: SalesOpsPersonFuncao = {
+  id: 'fc000001-0000-4000-8000-000000000001',
+  name: 'Vendedor',
+  slug: 'vendedor',
+  isSystem: true,
+};
+const funcaoFinder: SalesOpsPersonFuncao = {
+  id: 'fc000002-0000-4000-8000-000000000002',
+  name: 'Finder',
+  slug: 'finder',
+  isSystem: true,
+};
 
 vi.mock('@/components/ui/dialog', () => ({
   Dialog: ({ children }: HTMLAttributes<HTMLDivElement>) => <div>{children}</div>,
@@ -110,6 +133,7 @@ function bootstrap(patch: Partial<SalesOpsBootstrap> = {}): SalesOpsBootstrap {
         updatedAt: null,
       },
     ],
+    funcoes: [],
     people: [
       {
         id: sellerId,
@@ -117,9 +141,8 @@ function bootstrap(patch: Partial<SalesOpsBootstrap> = {}): SalesOpsBootstrap {
         displayName: 'Ana Martins',
         contactEmail: null,
         status: 'active',
-        isSeller: true,
-        isFinder: false,
-        isCollaborator: false,
+        funcaoIds: [funcaoVendedor.id],
+        funcoes: [funcaoVendedor],
         createdAt: '2026-07-10T12:00:00.000Z',
         updatedAt: null,
       },
@@ -129,9 +152,8 @@ function bootstrap(patch: Partial<SalesOpsBootstrap> = {}): SalesOpsBootstrap {
         displayName: 'Bruno Finder',
         contactEmail: null,
         status: 'active',
-        isSeller: false,
-        isFinder: true,
-        isCollaborator: false,
+        funcaoIds: [funcaoFinder.id],
+        funcoes: [funcaoFinder],
         createdAt: '2026-07-10T12:00:00.000Z',
         updatedAt: null,
       },

@@ -71,6 +71,7 @@ function bootstrap(patch: Partial<SalesOpsBootstrap> = {}): SalesOpsBootstrap {
     products: [],
     clients: [],
     areas: [],
+    funcoes: [],
     people: [],
     payables: [],
     saleItems: [],
@@ -152,6 +153,7 @@ describe('areas view', () => {
         <AreasView
           bootstrap={bootstrap({
             areas: [areaOne, areaTwo],
+            funcoes: [],
             products: [product({ areaId: areaOne.id })],
           })}
           onEdit={vi.fn()}

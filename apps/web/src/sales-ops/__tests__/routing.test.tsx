@@ -14,6 +14,28 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppRole } from '@/auth/claims';
 import { SalesOpsApp } from '../SalesOpsApp';
+import type { SalesOpsFuncao } from '../types';
+
+/**
+ * Funções replace the three removed `is_seller` / `is_finder` / `is_collaborator`
+ * mirrors on a pessoa. `vendedor` and `finder` are the two predefined system funções.
+ */
+const funcaoVendedor: SalesOpsFuncao = {
+  id: 'fc000001-0000-4000-8000-000000000001',
+  orgId: '22222222-2222-4222-8222-222222222222',
+  name: 'Vendedor',
+  slug: 'vendedor',
+  isSystem: true,
+  status: 'active',
+  createdAt: '2026-07-01T00:00:00.000Z',
+  updatedAt: null,
+};
+const funcaoFinder: SalesOpsFuncao = {
+  ...funcaoVendedor,
+  id: 'fc000002-0000-4000-8000-000000000002',
+  name: 'Finder',
+  slug: 'finder',
+};
 
 const act = (
   React as typeof React & { act: typeof import('react-dom/test-utils').act }
@@ -50,11 +72,24 @@ const personFixture = {
   displayName: 'Alex Silva',
   contactEmail: 'alex.silva@fxl.example',
   status: 'active' as const,
-  isSeller: true,
-  isFinder: true,
-  isCollaborator: false,
+  funcaoIds: [funcaoVendedor.id, funcaoFinder.id],
+  funcoes: [funcaoVendedor, funcaoFinder],
   createdAt: '2026-07-01T00:00:00.000Z',
   updatedAt: null,
+};
+
+/**
+ * Carries ONLY `finder`, unlike Alex Silva who carries both. Without a
+ * single-função pessoa in the fixture, swapping the two slugs inside
+ * `MeuPainelView` is invisible to every assertion here.
+ */
+const finderOnlyFixture = {
+  ...personFixture,
+  id: '33333333-3333-4333-8333-333333333333',
+  displayName: 'Bia Indicadora',
+  contactEmail: null,
+  funcaoIds: [funcaoFinder.id],
+  funcoes: [funcaoFinder],
 };
 
 vi.mock('../hooks', () => ({
@@ -64,7 +99,8 @@ vi.mock('../hooks', () => ({
       products: [],
       clients: [],
       areas: [],
-      people: [personFixture],
+      funcoes: [funcaoVendedor, funcaoFinder],
+      people: [personFixture, finderOnlyFixture],
       payables: [],
       saleItems: [],
       receivables: [],
@@ -80,6 +116,7 @@ vi.mock('../hooks', () => ({
   useCancelSalesOpsContract: () => mutation,
   useSaveSalesOpsArea: () => mutation,
   useSaveSalesOpsClient: () => mutation,
+  useSaveSalesOpsFuncao: () => mutation,
   useSaveSalesOpsPerson: () => mutation,
   useSaveSalesOpsProduct: () => mutation,
   useSaveSalesOpsSettings: () => mutation,
@@ -374,7 +411,7 @@ describe('Sales Ops canonical routing', () => {
     expectHeading('Propostas');
   });
 
-  it('keeps people management in Cadastros and personal people panels read-only', async () => {
+  it('keeps pessoas management in Cadastros and personal panels read-only', async () => {
     await renderRoute('/tatico/dashboard', ['admin']);
     const tacticalNavigation = container.querySelector('aside nav');
     expect(
@@ -382,29 +419,31 @@ describe('Sales Ops canonical routing', () => {
         item.getAttribute('aria-label'),
       ),
     ).toEqual(['Visão geral']);
-    expect(mainRegion().querySelector('button[aria-label="Vendedores"]')).toBeNull();
-    expect(mainRegion().querySelector('button[aria-label="Finders"]')).toBeNull();
-    expect(buttonByTextOrNull('Novo vendedor')).toBeNull();
-    expect(buttonByTextOrNull('Novo finder')).toBeNull();
+    expect(mainRegion().querySelector('button[aria-label="Pessoas"]')).toBeNull();
+    expect(mainRegion().querySelector('button[aria-label="Funções"]')).toBeNull();
+    expect(buttonByTextOrNull('Nova pessoa')).toBeNull();
+    expect(buttonByTextOrNull('Nova função')).toBeNull();
 
     await renderRoute('/tatico/vendedores', ['admin']);
     expect(pathname()).toBe('/tatico/dashboard');
     expectHeading('Visão geral');
 
-    await renderRoute('/cadastros/vendedores', ['admin']);
+    await renderRoute('/cadastros/pessoas', ['admin']);
     expectWorkspace('Cadastros');
-    expectHeading('Vendedores');
-    buttonByText('Novo vendedor');
-    const editSeller = buttonByAccessibleName('Editar Alex Silva');
-    expect(editSeller).not.toBeNull();
-    await click(editSeller!);
+    expectHeading('Pessoas');
+    buttonByText('Nova pessoa');
+    const editPerson = buttonByAccessibleName('Editar Alex Silva');
+    expect(editPerson).not.toBeNull();
+    await click(editPerson!);
     expect(container.querySelector('h2')?.textContent).toBe('Pessoa');
 
-    await renderRoute('/cadastros/finders', ['admin']);
+    await renderRoute('/cadastros/funcoes', ['admin']);
     expectWorkspace('Cadastros');
-    expectHeading('Finders');
-    buttonByText('Novo finder');
-    expect(buttonByAccessibleName('Editar Alex Silva')).not.toBeNull();
+    expectHeading('Funções');
+    buttonByText('Nova função');
+    // Predefined funções expose a locked control instead of an edit affordance.
+    expect(buttonByAccessibleName('Editar Vendedor')).toBeNull();
+    expect(buttonByAccessibleName('Função predefinida do app')).not.toBeNull();
 
     for (const personal of [
       { path: '/meus-dados/vendedores', roles: ['seller'] as AppRole[] },
@@ -412,22 +451,55 @@ describe('Sales Ops canonical routing', () => {
       { path: '/meus-dados/vendedores', roles: ['admin', 'seller'] as AppRole[] },
     ]) {
       await renderRoute(personal.path, personal.roles);
+      expect(pathname()).toBe(personal.path);
       expectWorkspace('Meus dados');
       expectHeading('Meu painel');
       expect(mainRegion().textContent).toContain('0 propostas ganhas no período');
       const personalCard = mainRegion().querySelector('article');
       expect(personalCard?.textContent).toContain('Alex Silva');
       await click(personalCard!);
-      expect(buttonByTextOrNull('Novo vendedor')).toBeNull();
-      expect(buttonByTextOrNull('Novo finder')).toBeNull();
+      expect(buttonByTextOrNull('Nova pessoa')).toBeNull();
+      expect(buttonByTextOrNull('Nova função')).toBeNull();
       expect(buttonByAccessibleName('Editar Alex Silva')).toBeNull();
       expect(container.querySelector('h2')?.textContent).not.toBe('Pessoa');
     }
   });
 
+  it('scopes each Meu painel to the função its route stands for', async () => {
+    // Alex Silva carries both funções, so she is the positive control on both panels;
+    // Bia Indicadora carries only `finder` and is what separates them.
+    await renderRoute('/meus-dados/vendedores', ['seller', 'finder']);
+    expectHeading('Meu painel');
+    expect(mainRegion().textContent).toContain('Alex Silva');
+    expect(mainRegion().textContent).not.toContain('Bia Indicadora');
+
+    await renderRoute('/meus-dados/finders', ['seller', 'finder']);
+    expectHeading('Meu painel');
+    expect(mainRegion().textContent).toContain('Alex Silva');
+    expect(mainRegion().textContent).toContain('Bia Indicadora');
+  });
+
+  it('rewrites the legacy cadastros seller and finder URLs to Pessoas', async () => {
+    await renderRoute('/cadastros/vendedores', ['admin']);
+    expect(pathname()).toBe('/cadastros/pessoas');
+    expectWorkspace('Cadastros');
+    expectHeading('Pessoas');
+
+    await renderRoute('/cadastros/finders', ['admin']);
+    expect(pathname()).toBe('/cadastros/pessoas');
+    expectWorkspace('Cadastros');
+    expectHeading('Pessoas');
+
+    // The alias never overrides role visibility: a seller still lands on their panel.
+    await renderRoute('/cadastros/vendedores', ['seller']);
+    expect(pathname()).toBe('/meus-dados/vendedores');
+    expectWorkspace('Meus dados');
+    expectHeading('Meu painel');
+  });
+
   it('closes people management when the mounted app leaves Cadastros', async () => {
-    await renderRoute('/cadastros/vendedores', ['admin', 'seller']);
-    await click(buttonByText('Novo vendedor'));
+    await renderRoute('/cadastros/pessoas', ['admin', 'seller']);
+    await click(buttonByText('Nova pessoa'));
     expect(container.querySelector('h2')?.textContent).toBe('Pessoa');
     expect(buttonByTextOrNull('Salvar')).not.toBeNull();
 
@@ -441,8 +513,8 @@ describe('Sales Ops canonical routing', () => {
     await click(workspaceButton());
     await click(buttonByText('Cadastros'));
     expect(pathname()).toBe('/cadastros/produtos');
-    await click(buttonByAccessibleName('Vendedores')!);
-    expect(pathname()).toBe('/cadastros/vendedores');
+    await click(buttonByAccessibleName('Pessoas')!);
+    expect(pathname()).toBe('/cadastros/pessoas');
     expect(container.querySelector('h2')).toBeNull();
 
     await click(buttonByAccessibleName('Editar Alex Silva')!);
@@ -463,14 +535,14 @@ describe('Sales Ops canonical routing', () => {
 
     await click(workspaceButton());
     await click(buttonByText('Cadastros'));
-    await click(buttonByAccessibleName('Vendedores')!);
-    expect(pathname()).toBe('/cadastros/vendedores');
+    await click(buttonByAccessibleName('Pessoas')!);
+    expect(pathname()).toBe('/cadastros/pessoas');
     expect(container.querySelector('h2')).toBeNull();
   });
 
   it('does not restore a stale people dialog through browser history', async () => {
-    await renderHistory(['/tatico/dashboard', '/cadastros/vendedores'], ['admin']);
-    await click(buttonByText('Novo vendedor'));
+    await renderHistory(['/tatico/dashboard', '/cadastros/pessoas'], ['admin']);
+    await click(buttonByText('Nova pessoa'));
     expect(container.querySelector('h2')?.textContent).toBe('Pessoa');
 
     await click(buttonByText('Back'));
@@ -478,44 +550,37 @@ describe('Sales Ops canonical routing', () => {
     expect(container.querySelector('h2')).toBeNull();
 
     await click(buttonByText('Forward'));
-    expect(pathname()).toBe('/cadastros/vendedores');
+    expect(pathname()).toBe('/cadastros/pessoas');
     expect(container.querySelector('h2')).toBeNull();
     expect(buttonByTextOrNull('Salvar')).toBeNull();
   });
 
-  it('closes route-specific people dialogs when history switches people pages', async () => {
-    await renderHistory(['/cadastros/finders', '/cadastros/vendedores'], ['admin']);
-    await click(buttonByText('Novo vendedor'));
+  it('closes the pessoa dialog when history switches cadastros pages', async () => {
+    await renderHistory(['/cadastros/funcoes', '/cadastros/pessoas'], ['admin']);
+    await click(buttonByText('Nova pessoa'));
     expect(container.querySelector('h2')?.textContent).toBe('Pessoa');
 
     await click(buttonByText('Back'));
-    expect(pathname()).toBe('/cadastros/finders');
-    expectHeading('Finders');
+    expect(pathname()).toBe('/cadastros/funcoes');
+    expectHeading('Funções');
     expect(container.querySelector('h2')).toBeNull();
     expect(buttonByTextOrNull('Salvar')).toBeNull();
 
     await click(buttonByText('Forward'));
-    expect(pathname()).toBe('/cadastros/vendedores');
-    expect(container.querySelector('h2')).toBeNull();
-
-    await click(buttonByText('Back'));
-    await click(buttonByText('Novo finder'));
-    expect(container.querySelector('h2')?.textContent).toBe('Pessoa');
-
-    await click(buttonByText('Forward'));
-    expect(pathname()).toBe('/cadastros/vendedores');
-    expectHeading('Vendedores');
+    expect(pathname()).toBe('/cadastros/pessoas');
+    expectHeading('Pessoas');
     expect(container.querySelector('h2')).toBeNull();
     expect(buttonByTextOrNull('Salvar')).toBeNull();
 
-    await click(buttonByText('Back'));
-    expect(pathname()).toBe('/cadastros/finders');
-    expect(container.querySelector('h2')).toBeNull();
+    // Positive control for the two negatives above: the dialog does open here.
+    await click(buttonByText('Nova pessoa'));
+    expect(container.querySelector('h2')?.textContent).toBe('Pessoa');
+    expect(buttonByTextOrNull('Salvar')).not.toBeNull();
   });
 
   it('irrevocably clears people dialogs during rapid browser history transitions', async () => {
-    await renderHistory(['/tatico/dashboard', '/cadastros/vendedores'], ['admin'], false);
-    await click(buttonByText('Novo vendedor'));
+    await renderHistory(['/tatico/dashboard', '/cadastros/pessoas'], ['admin'], false);
+    await click(buttonByText('Nova pessoa'));
     expect(container.querySelector('h2')?.textContent).toBe('Pessoa');
 
     const queuedMicrotasks: Array<() => void> = [];
@@ -535,7 +600,7 @@ describe('Sales Ops canonical routing', () => {
           buttonByText('Forward').dispatchEvent(new MouseEvent('click', { bubbles: true })),
         );
       });
-      expect(pathname()).toBe('/cadastros/vendedores');
+      expect(pathname()).toBe('/cadastros/pessoas');
       expect(queuedMicrotasks).toHaveLength(1);
 
       await act(async () => {

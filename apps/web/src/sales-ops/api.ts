@@ -4,6 +4,7 @@ import type {
   SalesOpsArea,
   SalesOpsBootstrap,
   SalesOpsClient,
+  SalesOpsFuncao,
   SalesOpsPerson,
   SalesOpsProduct,
   SalesOpsSettings,
@@ -14,10 +15,19 @@ type Token = string;
 export type TransitionSaleStatus = 'open' | 'won' | 'lost' | 'cancelled';
 export type TransitionSalePayload = { saleId: string; status: TransitionSaleStatus };
 
-export type SavePersonPayload = Omit<
-  Partial<SalesOpsPerson>,
-  'id' | 'orgId' | 'createdAt' | 'updatedAt'
-> & { id?: string; displayName: string };
+/**
+ * Written out rather than derived from `Partial<SalesOpsPerson>`, because a
+ * pessoa write sends an id list where the row carries resolved `funcoes`.
+ * `funcaoIds` is authoritative server-side and is a full set replacement, so the
+ * three deprecated booleans are never sent.
+ */
+export type SavePersonPayload = {
+  id?: string;
+  displayName: string;
+  contactEmail?: string;
+  status?: 'active' | 'inactive';
+  funcaoIds: string[];
+};
 
 export type SaveProductPayload = Omit<
   Partial<SalesOpsProduct>,
@@ -45,6 +55,12 @@ export type SaveAreaPayload = Omit<
   Partial<SalesOpsArea>,
   'id' | 'orgId' | 'createdAt' | 'updatedAt'
 > & { id?: string; name: string };
+
+/**
+ * `slug` and `isSystem` are never sent: the API derives the slug from the name and
+ * only a migration may flag a função as one of the two predefined app roles.
+ */
+export type SaveFuncaoPayload = { id?: string; name: string; status?: 'active' | 'archived' };
 
 export type SaveSettingsPayload = Partial<
   Omit<
@@ -90,6 +106,13 @@ export const salesOpsApi = {
     const { id, ...body } = payload;
     return apiFetch<{ area: SalesOpsArea }>(
       id ? `/api/v1/sales-ops/areas/${id}` : '/api/v1/sales-ops/areas',
+      { method: id ? 'PATCH' : 'POST', token, body: JSON.stringify(body) },
+    );
+  },
+  saveFuncao: (payload: SaveFuncaoPayload, token: Token) => {
+    const { id, ...body } = payload;
+    return apiFetch<{ funcao: SalesOpsFuncao }>(
+      id ? `/api/v1/sales-ops/funcoes/${id}` : '/api/v1/sales-ops/funcoes',
       { method: id ? 'PATCH' : 'POST', token, body: JSON.stringify(body) },
     );
   },

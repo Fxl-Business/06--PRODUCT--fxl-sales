@@ -9,8 +9,21 @@ import type {
   SalesOpsBootstrap,
   SalesOpsClient,
   SalesOpsPerson,
+  SalesOpsPersonFuncao,
   SalesOpsProduct,
 } from '../types';
+
+/**
+ * Funções replace the three removed `is_seller` / `is_finder` / `is_collaborator`
+ * mirrors on a pessoa. `vendedor` and `finder` are the two predefined system funções;
+ * `prestador` is an ordinary custom one, which is what makes a pessoa a prestador.
+ */
+const funcaoVendedor: SalesOpsPersonFuncao = {
+  id: 'fc000001-0000-4000-8000-000000000001',
+  name: 'Vendedor',
+  slug: 'vendedor',
+  isSystem: true,
+};
 
 vi.mock('@/components/ui/dialog', () => ({
   Dialog: ({ children }: HTMLAttributes<HTMLDivElement>) => <div>{children}</div>,
@@ -81,9 +94,8 @@ const seller: SalesOpsPerson = {
   displayName: 'Ana Martins',
   contactEmail: null,
   status: 'active',
-  isSeller: true,
-  isFinder: false,
-  isCollaborator: false,
+  funcaoIds: [funcaoVendedor.id],
+  funcoes: [funcaoVendedor],
   createdAt: '2026-07-29T12:00:00.000Z',
   updatedAt: null,
 };
@@ -99,6 +111,7 @@ function bootstrap(patch: Partial<SalesOpsBootstrap> = {}): SalesOpsBootstrap {
     sales: [],
     products: [fixedProduct],
     clients: [zetaClient],
+    funcoes: [],
     people: [seller],
     areas: [
       {

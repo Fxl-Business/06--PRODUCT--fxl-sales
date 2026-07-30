@@ -4,6 +4,7 @@ import type {
   SalesOpsBootstrap,
   SalesOpsClient,
   SalesOpsPerson,
+  SalesOpsPersonFuncao,
 } from './types';
 
 /**
@@ -144,12 +145,28 @@ export function optimisticPerson(
     ? previous.people.find((row) => row.id === payload.id)
     : undefined;
   const rowId = existing?.id ?? payload.id ?? optimisticId('people', payload.displayName);
+  /**
+   * `funcaoIds` is a full set replacement, and the payload carries only ids, so the
+   * nested `funcoes` the badges render from is resolved against the cached
+   * catalogue. An id the cache does not know is dropped from `funcoes` but kept in
+   * `funcaoIds`, so a stale snapshot degrades to a missing badge rather than a
+   * render crash, and the invalidated refetch repairs it.
+   */
+  const funcaoIds = payload.funcaoIds;
+  const funcoes: SalesOpsPersonFuncao[] = funcaoIds.flatMap((id) => {
+    const funcao = previous.funcoes.find((candidate) => candidate.id === id);
+    return funcao
+      ? [{ id: funcao.id, name: funcao.name, slug: funcao.slug, isSystem: funcao.isSystem }]
+      : [];
+  });
   const nextRow: SalesOpsPerson = existing
     ? {
         ...existing,
         ...payload,
         id: existing.id,
         orgId: existing.orgId,
+        funcaoIds,
+        funcoes,
         createdAt: existing.createdAt,
         updatedAt: existing.updatedAt,
       }
@@ -159,9 +176,8 @@ export function optimisticPerson(
         displayName: payload.displayName,
         contactEmail: payload.contactEmail ?? null,
         status: payload.status ?? 'active',
-        isSeller: payload.isSeller ?? false,
-        isFinder: payload.isFinder ?? false,
-        isCollaborator: payload.isCollaborator ?? false,
+        funcaoIds,
+        funcoes,
         createdAt: new Date().toISOString(),
         updatedAt: null,
       };

@@ -54,9 +54,17 @@ describe('sales operations navigation', () => {
       'produtos',
       'areas',
       'clientes',
-      'vendedores',
-      'finders',
+      'pessoas',
+      'funcoes',
       'geral',
+    ]);
+    expect(getSalesOpsNavigation('cadastros', team).map((item) => item.label)).toEqual([
+      'Produtos',
+      'Áreas',
+      'Clientes',
+      'Pessoas',
+      'Funções',
+      'Geral',
     ]);
   });
 
@@ -131,20 +139,66 @@ describe('sales operations navigation', () => {
       path: '/meus-dados/vendas',
       redirect: false,
     });
-    expect(resolveSalesOpsRoute({ workspace: 'cadastros', view: 'vendedores' }, team)).toEqual({
-      route: { workspace: 'cadastros', view: 'vendedores' },
-      path: '/cadastros/vendedores',
+    expect(resolveSalesOpsRoute({ workspace: 'cadastros', view: 'pessoas' }, team)).toEqual({
+      route: { workspace: 'cadastros', view: 'pessoas' },
+      path: '/cadastros/pessoas',
       redirect: false,
     });
-    expect(resolveSalesOpsRoute({ workspace: 'cadastros', view: 'finders' }, team)).toEqual({
-      route: { workspace: 'cadastros', view: 'finders' },
-      path: '/cadastros/finders',
+    expect(resolveSalesOpsRoute({ workspace: 'cadastros', view: 'funcoes' }, team)).toEqual({
+      route: { workspace: 'cadastros', view: 'funcoes' },
+      path: '/cadastros/funcoes',
       redirect: false,
     });
     expect(resolveSalesOpsRoute({ workspace: 'cadastros', view: 'areas' }, team)).toEqual({
       route: { workspace: 'cadastros', view: 'areas' },
       path: '/cadastros/areas',
       redirect: false,
+    });
+  });
+
+  it('aliases only the cadastros-scoped legacy vendedores and finders views to pessoas', () => {
+    expect(resolveSalesOpsRoute({ workspace: 'cadastros', view: 'vendedores' }, team)).toEqual({
+      route: { workspace: 'cadastros', view: 'pessoas' },
+      path: '/cadastros/pessoas',
+      redirect: true,
+    });
+    expect(resolveSalesOpsRoute({ workspace: 'cadastros', view: 'finders' }, team)).toEqual({
+      route: { workspace: 'cadastros', view: 'pessoas' },
+      path: '/cadastros/pessoas',
+      redirect: true,
+    });
+
+    // The scope guard: `meus-dados` keeps both view ids verbatim. If the alias were
+    // not restricted to `cadastros`, each of these would degrade to a redirect.
+    expect(resolveSalesOpsRoute({ workspace: 'meus-dados', view: 'vendedores' }, seller)).toEqual({
+      route: { workspace: 'meus-dados', view: 'vendedores' },
+      path: '/meus-dados/vendedores',
+      redirect: false,
+    });
+    expect(resolveSalesOpsRoute({ workspace: 'meus-dados', view: 'finders' }, finder)).toEqual({
+      route: { workspace: 'meus-dados', view: 'finders' },
+      path: '/meus-dados/finders',
+      redirect: false,
+    });
+    expect(
+      resolveSalesOpsRoute({ workspace: 'meus-dados', view: 'vendedores' }, everything),
+    ).toEqual({
+      route: { workspace: 'meus-dados', view: 'vendedores' },
+      path: '/meus-dados/vendedores',
+      redirect: false,
+    });
+
+    // Role visibility is resolved before the alias, so a seller is still bounced to
+    // their own workspace rather than into Cadastros.
+    expect(resolveSalesOpsRoute({ workspace: 'cadastros', view: 'vendedores' }, seller)).toEqual({
+      route: { workspace: 'meus-dados', view: 'vendedores' },
+      path: '/meus-dados/vendedores',
+      redirect: true,
+    });
+    expect(resolveSalesOpsRoute({ workspace: 'cadastros', view: 'pessoas' }, seller)).toEqual({
+      route: { workspace: 'meus-dados', view: 'vendedores' },
+      path: '/meus-dados/vendedores',
+      redirect: true,
     });
   });
 
@@ -209,9 +263,11 @@ describe('sales operations navigation', () => {
     expect(workspaceForView('comissoes', seller)).toBe('meus-dados');
     expect(workspaceForView('finders', finder)).toBe('meus-dados');
     expect(workspaceForView('vendas', finder)).toBe('meus-dados');
-    expect(workspaceForView('vendedores', team)).toBe('cadastros');
-    expect(workspaceForView('finders', team)).toBe('cadastros');
-    expect(workspaceForView('vendedores', ['admin', 'seller'])).toBe('cadastros');
+    expect(workspaceForView('pessoas', team)).toBe('cadastros');
+    expect(workspaceForView('funcoes', team)).toBe('cadastros');
+    // `vendedores` now lives only in meus-dados, so a team+seller user resolves it there.
+    expect(workspaceForView('vendedores', ['admin', 'seller'])).toBe('meus-dados');
+    expect(workspaceForView('finders', ['admin', 'finder'])).toBe('meus-dados');
     expect(workspaceForView('vendas', ['admin', 'finder'])).toBe('operacional');
     expect(workspaceForView('areas', team)).toBe('cadastros');
   });

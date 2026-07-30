@@ -3,15 +3,41 @@ export type PaymentMethod = 'pix' | 'card' | 'boleto' | 'transfer';
 export type PaymentCondition = 'cash' | 'installments' | 'recurring';
 export type CommissionType = 'pct' | 'fix';
 
+/**
+ * An org-scoped função. `vendedor` and `finder` are the only two that can carry
+ * `isSystem: true`; every other one is created by the org and fully editable.
+ */
+export type SalesOpsFuncao = {
+  id: string;
+  orgId: string;
+  name: string;
+  slug: string;
+  isSystem: boolean;
+  status: 'active' | 'archived';
+  createdAt: string;
+  updatedAt: string | null;
+};
+
+/** A função as it is nested on a pessoa. Note the key is `id`, not `funcaoId`. */
+export type SalesOpsPersonFuncao = Pick<
+  SalesOpsFuncao,
+  'id' | 'name' | 'slug' | 'isSystem'
+>;
+
+/**
+ * The API still returns the deprecated `is_seller` / `is_finder` /
+ * `is_collaborator` mirrors on the wire, and this type deliberately does not
+ * declare them: `pnpm run type-check` is then the mechanical proof that no web
+ * code reads a mirror instead of the `funcoes` assignments.
+ */
 export type SalesOpsPerson = {
   id: string;
   orgId: string;
   displayName: string;
   contactEmail: string | null;
   status: 'active' | 'inactive';
-  isSeller: boolean;
-  isFinder: boolean;
-  isCollaborator: boolean;
+  funcaoIds: string[];
+  funcoes: SalesOpsPersonFuncao[];
   createdAt: string;
   updatedAt: string | null;
 };
@@ -200,6 +226,7 @@ export type SalesOpsBootstrap = {
   products: SalesOpsProduct[];
   clients: SalesOpsClient[];
   areas: SalesOpsArea[];
+  funcoes: SalesOpsFuncao[];
   people: SalesOpsPerson[];
   payables: SalesOpsPayable[];
   saleItems: SalesOpsSaleItem[];

@@ -156,6 +156,7 @@ function bootstrap(): SalesOpsBootstrap {
     products: [],
     clients: [],
     areas: [],
+    funcoes: [],
     people: [],
     payables: [],
     saleItems: [],

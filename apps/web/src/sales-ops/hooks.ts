@@ -6,6 +6,7 @@ import {
   salesOpsApi,
   type SaveAreaPayload,
   type SaveClientPayload,
+  type SaveFuncaoPayload,
   type SavePersonPayload,
   type SaveProductPayload,
   type SaveSettingsPayload,
@@ -43,6 +44,7 @@ function selectSalesOpsBootstrap(data: SalesOpsBootstrap): SalesOpsBootstrap {
     products: Array.isArray(data.products) ? data.products : [],
     clients: Array.isArray(data.clients) ? data.clients : [],
     areas: Array.isArray(data.areas) ? data.areas : [],
+    funcoes: Array.isArray(data.funcoes) ? data.funcoes : [],
     people: Array.isArray(data.people) ? data.people : [],
     payables: Array.isArray(data.payables) ? data.payables : [],
     saleItems: Array.isArray(data.saleItems) ? data.saleItems : [],
@@ -178,6 +180,17 @@ export function useSaveSalesOpsArea() {
       ...optimistic,
     },
   );
+}
+
+export function useSaveSalesOpsFuncao() {
+  const { getToken } = useAccessToken();
+  // No optimistic write: the server derives `slug` from `name`, so the client cannot
+  // build the persisted row.
+  return useAppMutation({
+    mutationFn: async (payload: SaveFuncaoPayload) =>
+      salesOpsApi.saveFuncao(payload, await requireToken(getToken)),
+    invalidates: [queryKeys.salesOps.all],
+  });
 }
 
 export function useCreateSalesOpsSale() {
