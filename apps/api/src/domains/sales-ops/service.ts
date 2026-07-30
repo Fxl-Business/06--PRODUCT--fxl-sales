@@ -1,11 +1,13 @@
-import { and, desc, eq, gt, inArray, ne, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, ne, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { getDb } from '../../db/client.js';
 import {
   salesOpsAreas,
   salesOpsClients,
+  salesOpsFuncoes,
   salesOpsPayables,
   salesOpsPeople,
+  salesOpsPersonFuncoes,
   salesOpsProducts,
   salesOpsReceivables,
   salesOpsSaleItems,
@@ -27,27 +29,20 @@ const PersonFieldsSchema = z.object({
   displayName: z.string().min(1).max(120),
   contactEmail: z.string().email().optional().or(z.literal('')),
   status: z.enum(['active', 'inactive']).default('active'),
-  isSeller: z.boolean().default(false),
-  isFinder: z.boolean().default(false),
-  isCollaborator: z.boolean().default(false),
+  // Forward contract: the assignment set is authoritative when present.
+  funcaoIds: z.array(uuid).optional(),
+  /** @deprecated compat shim - accepted only while the web build predates slice 09. */
+  isSeller: z.boolean().optional(),
+  /** @deprecated compat shim - accepted only while the web build predates slice 09. */
+  isFinder: z.boolean().optional(),
+  /** @deprecated compat shim - accepted only while the web build predates slice 09. */
+  isCollaborator: z.boolean().optional(),
 });
 
-export const PersonSchema = PersonFieldsSchema.refine(
-  (data) => data.isSeller || data.isFinder || data.isCollaborator,
-  {
-    message: 'at least one role is required',
-  },
-);
-export const UpdatePersonSchema = PersonFieldsSchema.partial().refine(
-  (data) =>
-    data.isSeller === undefined ||
-    data.isFinder === undefined ||
-    data.isCollaborator === undefined ||
-    data.isSeller ||
-    data.isFinder ||
-    data.isCollaborator,
-  { message: 'at least one role is required' },
-);
+// The at-least-one-função rule lives in the service (see planPersonFuncoes), not
+// in a .refine(), because it now has to consult the caller org's função rows.
+export const PersonSchema = PersonFieldsSchema;
+export const UpdatePersonSchema = PersonFieldsSchema.partial();
 
 export const ProductModuleSchema = z.object({
   name: z.string().min(1),
@@ -99,6 +94,83 @@ export const AreaSchema = z.object({
 });
 export const UpdateAreaSchema = AreaSchema.partial();
 export type AreaInput = z.infer<typeof AreaSchema>;
+
+// `slug` and `isSystem` are deliberately absent: the slug is always derived
+// server-side from the name, and only migration 0012 (or the on-demand seed
+// below) may ever flag a função as a predefined app role.
+export const FuncaoSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  status: z.enum(['active', 'archived']).default('active'),
+});
+export const UpdateFuncaoSchema = FuncaoSchema.partial();
+export type FuncaoInput = z.infer<typeof FuncaoSchema>;
+
+/** The two predefined app roles. Reserved slugs, immutable through the API. */
+export const SYSTEM_FUNCAO_SLUGS = ['vendedor', 'finder'] as const;
+
+/**
+ * The three slugs the deprecated boolean payload maps onto, with the seed used
+ * when an org does not have the função yet.
+ *
+ * `prestador` is a compatibility bucket for the existing collaborator picker,
+ * not a predefined app role, so it is seeded non-system and an org may rename or
+ * archive it. `sales_ops_funcoes_system_slug_check` makes it impossible to flag
+ * anything but the two reserved slugs as system.
+ */
+const LEGACY_FUNCAO_SEEDS = {
+  vendedor: { name: 'Vendedor', isSystem: true },
+  finder: { name: 'Finder', isSystem: true },
+  prestador: { name: 'Prestador', isSystem: false },
+} as const;
+
+type LegacyFuncaoSlug = keyof typeof LEGACY_FUNCAO_SEEDS;
+
+/**
+ * Derives the stable machine key for a função display name: lowercase, without
+ * diacritics, non-alphanumerics collapsed to single dashes, trimmed, capped at
+ * the column's 120-char budget.
+ */
+export function slugifyFuncao(name: string): string {
+  return name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 120)
+    .replace(/-+$/g, '');
+}
+
+export type PersonFuncaoPlan =
+  | { kind: 'ids'; funcaoIds: string[] }
+  | { kind: 'slugs'; slugs: LegacyFuncaoSlug[] }
+  | { kind: 'unchanged' }
+  | 'funcao_required';
+
+/**
+ * Decides, without touching the database, which funções a person write intends.
+ *
+ * Resolution order:
+ *  1. `funcaoIds` is authoritative when present; an explicitly empty set is a
+ *     rejection, never a silent no-op.
+ *  2. Otherwise the deprecated booleans map onto the three legacy slugs.
+ *  3. Otherwise a create is rejected and a patch leaves the set untouched.
+ */
+export function planPersonFuncoes(
+  input: Partial<PersonInput>,
+  mode: 'create' | 'update',
+): PersonFuncaoPlan {
+  if (input.funcaoIds !== undefined) {
+    if (input.funcaoIds.length === 0) return 'funcao_required';
+    return { kind: 'ids', funcaoIds: [...new Set(input.funcaoIds)] };
+  }
+  const slugs: LegacyFuncaoSlug[] = [];
+  if (input.isSeller) slugs.push('vendedor');
+  if (input.isFinder) slugs.push('finder');
+  if (input.isCollaborator) slugs.push('prestador');
+  if (slugs.length > 0) return { kind: 'slugs', slugs };
+  return mode === 'create' ? 'funcao_required' : { kind: 'unchanged' };
+}
 
 export const SettingsSchema = z.object({
   legalName: z.string().default(''),
@@ -625,35 +697,420 @@ async function withTenant<T>(db: Db, orgId: string, fn: (tx: Db) => Promise<T>):
   });
 }
 
-export async function listPeople(db: Db, orgId: string) {
-  return withTenant(db, orgId, (tx) =>
-    tx
+type PersonRow = typeof salesOpsPeople.$inferSelect;
+type FuncaoRow = typeof salesOpsFuncoes.$inferSelect;
+type AttachedFuncao = Pick<FuncaoRow, 'id' | 'name' | 'slug' | 'isSystem'>;
+export type PersonWithFuncoes = PersonRow & {
+  funcaoIds: string[];
+  funcoes: AttachedFuncao[];
+};
+
+/**
+ * Reads the assignment sets for the given people in one grouped query and
+ * attaches them, ordered so the predefined app roles lead deterministically.
+ */
+async function attachPersonFuncoes(
+  tx: Db,
+  orgId: string,
+  people: PersonRow[],
+): Promise<PersonWithFuncoes[]> {
+  if (people.length === 0) return [];
+  const rows = await tx
+    .select({
+      personId: salesOpsPersonFuncoes.personId,
+      id: salesOpsFuncoes.id,
+      name: salesOpsFuncoes.name,
+      slug: salesOpsFuncoes.slug,
+      isSystem: salesOpsFuncoes.isSystem,
+    })
+    .from(salesOpsPersonFuncoes)
+    .innerJoin(
+      salesOpsFuncoes,
+      and(
+        eq(salesOpsFuncoes.orgId, orgId),
+        eq(salesOpsFuncoes.id, salesOpsPersonFuncoes.funcaoId),
+      ),
+    )
+    .where(
+      and(
+        eq(salesOpsPersonFuncoes.orgId, orgId),
+        inArray(
+          salesOpsPersonFuncoes.personId,
+          people.map((person) => person.id),
+        ),
+      ),
+    )
+    .orderBy(desc(salesOpsFuncoes.isSystem), asc(salesOpsFuncoes.name));
+
+  const byPerson = new Map<string, AttachedFuncao[]>();
+  for (const { personId, ...funcao } of rows) {
+    const bucket = byPerson.get(personId);
+    if (bucket) bucket.push(funcao);
+    else byPerson.set(personId, [funcao]);
+  }
+  return people.map((person) => {
+    const funcoes = byPerson.get(person.id) ?? [];
+    return { ...person, funcoes, funcaoIds: funcoes.map((funcao) => funcao.id) };
+  });
+}
+
+/**
+ * Resolves the intended função set to concrete org-scoped rows, creating the
+ * three legacy slugs on demand so an org provisioned after migration 0012 still
+ * has its predefined app roles.
+ */
+async function resolvePersonFuncoes(
+  tx: Db,
+  orgId: string,
+  plan: Exclude<PersonFuncaoPlan, 'funcao_required' | { kind: 'unchanged' }>,
+): Promise<FuncaoRow[] | 'unknown_funcao'> {
+  if (plan.kind === 'ids') {
+    const found = await tx
+      .select()
+      .from(salesOpsFuncoes)
+      .where(and(eq(salesOpsFuncoes.orgId, orgId), inArray(salesOpsFuncoes.id, plan.funcaoIds)));
+    // Any id that is unknown, or that belongs to another org and is therefore
+    // invisible under this org filter, is a hard rejection.
+    if (found.length !== plan.funcaoIds.length) return 'unknown_funcao';
+    return found;
+  }
+
+  const existing = await tx
+    .select()
+    .from(salesOpsFuncoes)
+    .where(and(eq(salesOpsFuncoes.orgId, orgId), inArray(salesOpsFuncoes.slug, [...plan.slugs])));
+  const bySlug = new Map(existing.map((funcao) => [funcao.slug, funcao]));
+
+  for (const slug of plan.slugs) {
+    if (bySlug.has(slug)) continue;
+    const seed = LEGACY_FUNCAO_SEEDS[slug];
+    const [created] = await tx
+      .insert(salesOpsFuncoes)
+      .values({ orgId, name: seed.name, slug, isSystem: seed.isSystem })
+      // Bare, i.e. every unique index, NOT a named (org_id, slug) arbiter. The
+      // table also carries a unique index on (org_id, name), and this seed writes
+      // both columns, so a concurrent seed of the same row violates both. Naming
+      // only the slug arbiter means Postgres raises 23505 whenever it reports the
+      // name index, which throws past the race fallback below and turns an
+      // ordinary concurrent first person write into an HTTP 500.
+      .onConflictDoNothing()
+      .returning();
+    if (created) {
+      bySlug.set(slug, created);
+      continue;
+    }
+    // A concurrent writer won the race; re-read the winner. Reachable now that
+    // the conflict is absorbed instead of raised. Safe to key on the slug because
+    // name and slug move together for these seeds (the slug is derived from the
+    // name), so a name conflict implies the same-slug row is the winner.
+    const [raced] = await tx
+      .select()
+      .from(salesOpsFuncoes)
+      .where(and(eq(salesOpsFuncoes.orgId, orgId), eq(salesOpsFuncoes.slug, slug)))
+      .limit(1);
+    if (!raced) return 'unknown_funcao';
+    bySlug.set(slug, raced);
+  }
+
+  return plan.slugs.map((slug) => bySlug.get(slug)!);
+}
+
+/**
+ * Full set replacement, scoped to the caller org and the one person. Set replace
+ * rather than merge is what keeps the derived boolean mirrors from drifting:
+ * there is exactly one write path and the mirrors are recomputed alongside it.
+ */
+async function replacePersonFuncoes(
+  tx: Db,
+  orgId: string,
+  personId: string,
+  funcaoIds: string[],
+): Promise<void> {
+  await tx
+    .delete(salesOpsPersonFuncoes)
+    .where(
+      and(
+        eq(salesOpsPersonFuncoes.orgId, orgId),
+        eq(salesOpsPersonFuncoes.personId, personId),
+      ),
+    );
+  if (funcaoIds.length === 0) return;
+  await tx
+    .insert(salesOpsPersonFuncoes)
+    .values(funcaoIds.map((funcaoId) => ({ orgId, personId, funcaoId })));
+}
+
+/**
+ * The three deprecated boolean columns on sales_ops_people, recomputed from the
+ * assignment set. `isCollaborator` means "holds at least one non-system função",
+ * which is exactly how the prestador/professionals picker consumes it.
+ */
+function deriveBooleanMirrors(funcoes: Pick<FuncaoRow, 'slug' | 'isSystem'>[]) {
+  return {
+    isSeller: funcoes.some((funcao) => funcao.slug === 'vendedor'),
+    isFinder: funcoes.some((funcao) => funcao.slug === 'finder'),
+    isCollaborator: funcoes.some((funcao) => !funcao.isSystem),
+  };
+}
+
+function toAttached(funcoes: FuncaoRow[]): AttachedFuncao[] {
+  return [...funcoes]
+    .sort(
+      (a, b) => Number(b.isSystem) - Number(a.isSystem) || a.name.localeCompare(b.name, 'pt-BR'),
+    )
+    .map(({ id, name, slug, isSystem }) => ({ id, name, slug, isSystem }));
+}
+
+export async function listPeople(db: Db, orgId: string): Promise<PersonWithFuncoes[]> {
+  return withTenant(db, orgId, async (tx) => {
+    const people = await tx
       .select()
       .from(salesOpsPeople)
       .where(eq(salesOpsPeople.orgId, orgId))
-      .orderBy(salesOpsPeople.displayName),
+      .orderBy(salesOpsPeople.displayName);
+    return attachPersonFuncoes(tx, orgId, people);
+  });
+}
+
+export async function createPerson(
+  db: Db,
+  orgId: string,
+  data: PersonInput,
+): Promise<PersonWithFuncoes | 'unknown_funcao' | 'funcao_required'> {
+  return withTenant(db, orgId, async (tx) => {
+    const plan = planPersonFuncoes(data, 'create');
+    if (plan === 'funcao_required' || plan.kind === 'unchanged') return 'funcao_required';
+    const resolved = await resolvePersonFuncoes(tx, orgId, plan);
+    if (resolved === 'unknown_funcao') return 'unknown_funcao';
+
+    const [person] = await tx
+      .insert(salesOpsPeople)
+      .values({
+        displayName: data.displayName,
+        status: data.status,
+        orgId,
+        contactEmail: data.contactEmail || null,
+        ...deriveBooleanMirrors(resolved),
+      })
+      .returning();
+    await replacePersonFuncoes(tx, orgId, person!.id, resolved.map((funcao) => funcao.id));
+    const funcoes = toAttached(resolved);
+    return { ...person!, funcoes, funcaoIds: funcoes.map((funcao) => funcao.id) };
+  });
+}
+
+export async function updatePerson(
+  db: Db,
+  orgId: string,
+  id: string,
+  data: Partial<PersonInput>,
+): Promise<PersonWithFuncoes | null | 'unknown_funcao' | 'funcao_required'> {
+  return withTenant(db, orgId, async (tx) => {
+    const plan = planPersonFuncoes(data, 'update');
+    if (plan === 'funcao_required') return 'funcao_required';
+
+    const [current] = await tx
+      .select()
+      .from(salesOpsPeople)
+      .where(and(eq(salesOpsPeople.orgId, orgId), eq(salesOpsPeople.id, id)))
+      .limit(1);
+    if (!current) return null;
+
+    let resolved: FuncaoRow[] | null = null;
+    if (plan.kind !== 'unchanged') {
+      const outcome = await resolvePersonFuncoes(tx, orgId, plan);
+      if (outcome === 'unknown_funcao') return 'unknown_funcao';
+      resolved = outcome;
+    }
+
+    const [person] = await tx
+      .update(salesOpsPeople)
+      .set({
+        ...(data.displayName !== undefined ? { displayName: data.displayName } : {}),
+        ...(data.status !== undefined ? { status: data.status } : {}),
+        // Unconditional, matching the pre-slice behaviour exactly. contactEmail is
+        // a full-replace field on this endpoint: the shipped Pessoa dialog builds
+        // `contactEmail: contactEmail.trim() || undefined` and JSON.stringify then
+        // DROPS the key, so an absent key is how the UI says "clear it". Making
+        // this a conditional spread retains the old address instead and removes
+        // the only way the UI can blank an e-mail.
+        // Consequence for later slices: any PATCH that omits contactEmail clears
+        // it, so a caller sending funcaoIds must send contactEmail alongside.
+        contactEmail: data.contactEmail || null,
+        ...(resolved ? deriveBooleanMirrors(resolved) : {}),
+        updatedAt: new Date(),
+      })
+      .where(and(eq(salesOpsPeople.orgId, orgId), eq(salesOpsPeople.id, id)))
+      .returning();
+    if (!person) return null;
+
+    if (resolved) {
+      await replacePersonFuncoes(tx, orgId, id, resolved.map((funcao) => funcao.id));
+      const funcoes = toAttached(resolved);
+      return { ...person, funcoes, funcaoIds: funcoes.map((funcao) => funcao.id) };
+    }
+    const [attached] = await attachPersonFuncoes(tx, orgId, [person]);
+    return attached!;
+  });
+}
+
+export async function listFuncoes(db: Db, orgId: string) {
+  return withTenant(db, orgId, (tx) =>
+    tx
+      .select()
+      .from(salesOpsFuncoes)
+      .where(eq(salesOpsFuncoes.orgId, orgId))
+      .orderBy(desc(salesOpsFuncoes.isSystem), asc(salesOpsFuncoes.name)),
   );
 }
 
-export async function createPerson(db: Db, orgId: string, data: PersonInput) {
+export async function getFuncao(db: Db, orgId: string, id: string) {
   return withTenant(db, orgId, async (tx) => {
-    const [person] = await tx
-      .insert(salesOpsPeople)
-      .values({ ...data, orgId, contactEmail: data.contactEmail || null })
-      .returning();
-    return person!;
+    const [funcao] = await tx
+      .select()
+      .from(salesOpsFuncoes)
+      .where(and(eq(salesOpsFuncoes.orgId, orgId), eq(salesOpsFuncoes.id, id)))
+      .limit(1);
+    return funcao ?? null;
   });
 }
 
-export async function updatePerson(db: Db, orgId: string, id: string, data: Partial<PersonInput>) {
+export async function createFuncao(db: Db, orgId: string, data: FuncaoInput) {
   return withTenant(db, orgId, async (tx) => {
-    const [person] = await tx
-      .update(salesOpsPeople)
-      .set({ ...data, contactEmail: data.contactEmail || null, updatedAt: new Date() })
-      .where(and(eq(salesOpsPeople.orgId, orgId), eq(salesOpsPeople.id, id)))
+    const slug = slugifyFuncao(data.name);
+    if ((SYSTEM_FUNCAO_SLUGS as readonly string[]).includes(slug)) return 'reserved_slug' as const;
+    // Fast path, purely for the error message: it names which rule was hit
+    // without waiting on a lock. It is NOT the guard - see the conflict clause.
+    const clash = await findFuncaoClash(tx, orgId, data.name, slug);
+    if (clash) return clash;
+    const [funcao] = await tx
+      .insert(salesOpsFuncoes)
+      // isSystem is never taken from the caller: only the two reserved slugs may
+      // ever be flagged system, and only by the migration or the legacy seed.
+      .values({ ...data, orgId, slug, isSystem: false })
+      // The probe above is a time-of-check/time-of-use race: a concurrent writer
+      // (an admin double-clicking Save is enough) can land the same name in
+      // between, and a plain INSERT would raise 23505 and escape as an HTTP 500
+      // instead of the designed 409. Absorbing the conflict here makes the unique
+      // indexes the actual guard, and keeps the transaction usable so the probe
+      // below can still say WHICH rule was hit.
+      .onConflictDoNothing()
       .returning();
-    return person ?? null;
+    if (funcao) return funcao;
+    // Lost the race. Re-probe under a fresh statement snapshot, which now sees
+    // the committed winner, and fall back to the name reason.
+    return (await findFuncaoClash(tx, orgId, data.name, slug)) ?? ('duplicate' as const);
   });
+}
+
+export async function updateFuncao(
+  db: Db,
+  orgId: string,
+  id: string,
+  data: Partial<FuncaoInput>,
+) {
+  return withTenant(db, orgId, async (tx) => {
+    const [current] = await tx
+      .select()
+      .from(salesOpsFuncoes)
+      .where(and(eq(salesOpsFuncoes.orgId, orgId), eq(salesOpsFuncoes.id, id)))
+      .limit(1);
+    if (!current) return null;
+    // The two predefined app roles are fully immutable through the API: no
+    // rename, no archive, no delete.
+    if (current.isSystem && (data.name !== undefined || data.status !== undefined)) {
+      return 'is_system' as const;
+    }
+
+    let slug: string | undefined;
+    if (data.name !== undefined) {
+      slug = slugifyFuncao(data.name);
+      if ((SYSTEM_FUNCAO_SLUGS as readonly string[]).includes(slug)) {
+        return 'reserved_slug' as const;
+      }
+      // Fast path for the error message only; the constraint is the real guard.
+      const clash = await findFuncaoClash(tx, orgId, data.name, slug, id);
+      if (clash) return clash;
+    }
+
+    // UPDATE has no ON CONFLICT clause, so the same TOCTOU race as createFuncao is
+    // handled by catching the unique violation and mapping it onto the same two
+    // 409 reasons. The write runs inside a SAVEPOINT (a nested drizzle
+    // transaction) so a rejected rename leaves the surrounding transaction usable
+    // rather than poisoned.
+    try {
+      const funcao = await tx.transaction(async (nested) => {
+        const [row] = await nested
+          .update(salesOpsFuncoes)
+          .set({ ...data, ...(slug !== undefined ? { slug } : {}), updatedAt: new Date() })
+          .where(and(eq(salesOpsFuncoes.orgId, orgId), eq(salesOpsFuncoes.id, id)))
+          .returning();
+        return row ?? null;
+      });
+      return funcao;
+    } catch (error) {
+      const violated = mapFuncaoUniqueViolation(error);
+      if (violated) return violated;
+      throw error;
+    }
+  });
+}
+
+/**
+ * Maps a Postgres unique violation on sales_ops_funcoes onto the service
+ * sentinels, so a lost race reports the same reason the pre-check would have.
+ *
+ * The two indexes are reported separately on purpose: the API surfaces
+ * `funcao_name_taken` and `funcao_slug_taken` as distinct 409 reasons, so a
+ * distinct display name that collides on the derived machine key stays
+ * distinguishable from a plain duplicate name.
+ */
+const FUNCAO_UNIQUE_VIOLATIONS: Record<string, 'duplicate' | 'duplicate_slug'> = {
+  sales_ops_funcoes_org_name_idx: 'duplicate',
+  sales_ops_funcoes_org_slug_idx: 'duplicate_slug',
+};
+
+function mapFuncaoUniqueViolation(error: unknown): 'duplicate' | 'duplicate_slug' | null {
+  // postgres.js puts code/constraint_name on the error; drizzle re-throws it
+  // wrapped, exposing the original under `cause`.
+  const candidates = [error, (error as { cause?: unknown } | null)?.cause];
+  for (const candidate of candidates) {
+    const pgError = candidate as
+      | { code?: string; constraint_name?: string; constraint?: string }
+      | null
+      | undefined;
+    if (!pgError || pgError.code !== '23505') continue;
+    const constraint = pgError.constraint_name ?? pgError.constraint;
+    const mapped = constraint ? FUNCAO_UNIQUE_VIOLATIONS[constraint] : undefined;
+    if (mapped) return mapped;
+  }
+  return null;
+}
+
+/**
+ * Per-org uniqueness for both the display name and the derived machine key,
+ * reported separately so the API can say which rule was hit.
+ */
+async function findFuncaoClash(
+  tx: Db,
+  orgId: string,
+  name: string,
+  slug: string,
+  excludeId?: string,
+): Promise<'duplicate' | 'duplicate_slug' | null> {
+  const notSelf = excludeId ? [ne(salesOpsFuncoes.id, excludeId)] : [];
+  const [byName] = await tx
+    .select({ id: salesOpsFuncoes.id })
+    .from(salesOpsFuncoes)
+    .where(and(eq(salesOpsFuncoes.orgId, orgId), eq(salesOpsFuncoes.name, name), ...notSelf))
+    .limit(1);
+  if (byName) return 'duplicate';
+  const [bySlug] = await tx
+    .select({ id: salesOpsFuncoes.id })
+    .from(salesOpsFuncoes)
+    .where(and(eq(salesOpsFuncoes.orgId, orgId), eq(salesOpsFuncoes.slug, slug), ...notSelf))
+    .limit(1);
+  return bySlug ? 'duplicate_slug' : null;
 }
 
 export async function listProducts(db: Db, orgId: string) {
@@ -1314,11 +1771,21 @@ export async function getSalesOpsSnapshot(db: Db, orgId: string) {
       .from(salesOpsClients)
       .where(eq(salesOpsClients.orgId, orgId))
       .orderBy(salesOpsClients.name);
-    const people = await tx
+    const personRows = await tx
       .select()
       .from(salesOpsPeople)
       .where(eq(salesOpsPeople.orgId, orgId))
       .orderBy(salesOpsPeople.displayName);
+    const people = await attachPersonFuncoes(tx, orgId, personRows);
+    const funcoes = await tx
+      .select()
+      .from(salesOpsFuncoes)
+      .where(eq(salesOpsFuncoes.orgId, orgId))
+      .orderBy(desc(salesOpsFuncoes.isSystem), asc(salesOpsFuncoes.name));
+    const personFuncoes = await tx
+      .select()
+      .from(salesOpsPersonFuncoes)
+      .where(eq(salesOpsPersonFuncoes.orgId, orgId));
     const payables = await tx.select().from(salesOpsPayables).where(eq(salesOpsPayables.orgId, orgId));
     const saleItems = await tx
       .select()
@@ -1347,6 +1814,8 @@ export async function getSalesOpsSnapshot(db: Db, orgId: string) {
       products,
       clients,
       people,
+      funcoes,
+      personFuncoes,
       payables,
       saleItems,
       areas,

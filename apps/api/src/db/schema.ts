@@ -25,6 +25,7 @@ import {
   bigserial,
   boolean,
   check,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -437,13 +438,29 @@ export const salesOpsPeople = pgTable(
     displayName: text('display_name').notNull(),
     contactEmail: text('contact_email'),
     status: text('status').notNull().default('active'), // 'active' | 'inactive'
+    /**
+     * @deprecated derived mirror of sales_ops_person_funcoes (slug 'vendedor');
+     * drop after slice 09 flips the web readers to funções.
+     */
     isSeller: boolean('is_seller').notNull().default(false),
+    /**
+     * @deprecated derived mirror of sales_ops_person_funcoes (slug 'finder');
+     * drop after slice 09 flips the web readers to funções.
+     */
     isFinder: boolean('is_finder').notNull().default(false),
+    /**
+     * @deprecated derived mirror of sales_ops_person_funcoes ("holds at least one
+     * non-system função"); drop after slice 09 flips the web readers to funções.
+     */
     isCollaborator: boolean('is_collaborator').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }),
   },
-  (t) => [index('sales_ops_people_org_id_idx').on(t.orgId, t.displayName)],
+  (t) => [
+    index('sales_ops_people_org_id_idx').on(t.orgId, t.displayName),
+    // Composite-FK target for sales_ops_person_funcoes.(org_id, person_id).
+    uniqueIndex('sales_ops_people_org_id_id_idx').on(t.orgId, t.id),
+  ],
 );
 
 export const salesOpsAreas = pgTable(
@@ -457,6 +474,84 @@ export const salesOpsAreas = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }),
   },
   (t) => [uniqueIndex('sales_ops_areas_org_name_idx').on(t.orgId, t.name)],
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// sales_ops_funcoes - org-configurable roles a pessoa can hold. 'vendedor' and
+// 'finder' are the two predefined app roles, seeded per org by migration 0012
+// and immutable through the API; everything else (Desenvolvedor, Designer,
+// Tester, P.O., ...) is org data.
+// ─────────────────────────────────────────────────────────────────────────────
+export const salesOpsFuncoes = pgTable(
+  'sales_ops_funcoes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: text('org_id').notNull(),
+    // pt-BR display label shown in Cadastros and in every picker.
+    name: text('name').notNull(),
+    // Stable machine key. 'vendedor' and 'finder' are reserved for the two
+    // predefined app roles; everything else is slugified from `name` on create.
+    slug: text('slug').notNull(),
+    // true ONLY for the two predefined app roles. Guards rename and archive.
+    isSystem: boolean('is_system').notNull().default(false),
+    status: text('status').notNull().default('active'), // 'active' | 'archived'
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex('sales_ops_funcoes_org_slug_idx').on(t.orgId, t.slug),
+    uniqueIndex('sales_ops_funcoes_org_name_idx').on(t.orgId, t.name),
+    // Composite-FK target for sales_ops_person_funcoes.(org_id, funcao_id).
+    uniqueIndex('sales_ops_funcoes_org_id_id_idx').on(t.orgId, t.id),
+    // Only the two predefined slugs may ever be flagged as system, even through
+    // a raw SQL write.
+    check(
+      'sales_ops_funcoes_system_slug_check',
+      sql`NOT is_system OR slug IN ('vendedor', 'finder')`,
+    ),
+  ],
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// sales_ops_person_funcoes - the pessoa <-> função assignment join, and the
+// single source of truth for the three deprecated boolean mirrors on
+// sales_ops_people.
+//
+// The foreign keys are composite on (org_id, fk) rather than single-column:
+// a foreign key does not consult the RLS predicate, so a plain
+// `person_id references sales_ops_people(id)` would happily let org A assign
+// org B's função if a service filter were ever forgotten.
+// ─────────────────────────────────────────────────────────────────────────────
+export const salesOpsPersonFuncoes = pgTable(
+  'sales_ops_person_funcoes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: text('org_id').notNull(),
+    personId: uuid('person_id').notNull(),
+    funcaoId: uuid('funcao_id').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex('sales_ops_person_funcoes_org_person_funcao_idx').on(
+      t.orgId,
+      t.personId,
+      t.funcaoId,
+    ),
+    index('sales_ops_person_funcoes_org_funcao_idx').on(t.orgId, t.funcaoId),
+    // cascade: an assignment has no meaning without its pessoa.
+    foreignKey({
+      columns: [t.orgId, t.personId],
+      foreignColumns: [salesOpsPeople.orgId, salesOpsPeople.id],
+      name: 'sales_ops_person_funcoes_org_person_fk',
+    }).onDelete('cascade'),
+    // restrict: a função that is still assigned can never be deleted out from
+    // under the assignment.
+    foreignKey({
+      columns: [t.orgId, t.funcaoId],
+      foreignColumns: [salesOpsFuncoes.orgId, salesOpsFuncoes.id],
+      name: 'sales_ops_person_funcoes_org_funcao_fk',
+    }).onDelete('restrict'),
+  ],
 );
 
 export const salesOpsProducts = pgTable(

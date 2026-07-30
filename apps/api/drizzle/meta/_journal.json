@@ -85,6 +85,13 @@
       "when": 1785349621521,
       "tag": "0011_proposal_lifecycle_schema",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1785369675084,
+      "tag": "0012_sales_ops_funcoes",
+      "breakpoints": true
     }
   ]
 }
