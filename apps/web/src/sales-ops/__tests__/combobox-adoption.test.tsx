@@ -697,6 +697,23 @@ describe('combobox adoption in the produto dialog', () => {
     );
   });
 
+  /** Nome and Área are both on step 1 and both gate every later step of the wizard. */
+  async function fillProductIdentity() {
+    const nameInput = container.querySelector('input[placeholder="Nome"]');
+    if (!(nameInput instanceof HTMLInputElement)) throw new Error('name input not found');
+    await changeInput(nameInput, 'FXL New Product');
+    await pickOption('Área do produto', 'FXL Tech');
+  }
+
+  /** The função cost editor lives on step 4, `Comissões e custos`. */
+  async function goToCostStep() {
+    const match = [...container.querySelectorAll('button')].find((candidate) =>
+      candidate.textContent?.trim().endsWith('Comissões e custos'),
+    );
+    if (!(match instanceof HTMLButtonElement)) throw new Error('step button not found');
+    await click(match);
+  }
+
   /** Both ListEditors label their add button "Adicionar", so scope by section title. */
   async function addListRow(sectionTitle: string) {
     const section = [...container.querySelectorAll('div.border-t')].find((candidate) =>
@@ -730,6 +747,8 @@ describe('combobox adoption in the produto dialog', () => {
     expect(createRow()?.textContent?.trim()).toBe('+ Criar nova área "FXL Serviços"');
     await key(panelSearch(), 'Escape');
 
+    await fillProductIdentity();
+    await goToCostStep();
     await addListRow('Custos padrão por função');
 
     await click(comboboxTrigger('Função do custo padrão 1'));
