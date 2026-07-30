@@ -466,6 +466,51 @@ Before the later contract slice drops the column, dump the data while it is stil
 SELECT id, name, providers FROM sales_ops_products WHERE jsonb_array_length(providers) > 0;
 ```
 
+## Final state - batch complete
+
+Integration gate on integrated `master` at `af459d4`:
+
+```
+lint=0   type-check=0   build=0
+unit:         web 38 files / 354 tests
+              api 29 / 300
+              shared-utils 2 / 23
+integration:  19 files / 101 tests
+```
+
+Batch baseline for comparison: web 21 / 122, api 23 / 215, integration 13 / 47, shared-utils 1 / 17.
+So the suite grew by 233 web tests, 85 api unit tests, 54 integration tests and 6 shared-utils tests.
+
+Acceptance spot-check: zero native `<select>` and zero `<datalist>` remain in `apps/web/src` production
+source, enforced by `no-restricted-syntax`.
+
+**12 of 13 slices merged.** Slice 04 was cancelled by the user mid-build and is parked in `AUDIT.md`.
+Nothing has been released - Gate 3 is a separate human step (`/nexo-ship`).
+
+### Gate 2 record
+
+Gate 2 blocked **12 of 14** first submissions. The blocks were worth their cost:
+
+| Class | Instances |
+|---|---|
+| False `CLAUDE.md` sentences | 6 found, 2 blocking. In a repo where `CLAUDE.md` overrides default behaviour, a false rule instructs the next agent to undo working code - which is exactly what would have happened to slice 10's archived-função escape hatch. |
+| Tests that could not fail | Slice 02's prop-name oracle, slice 03's four surviving mutations, slice 01's untested reconcile wiring, slice 12's two self-caught gaps. |
+| Real product defects | A 500 on admin double-click, a silent regression breaking e-mail clearing, a picker population narrowed without notice, a cost row reading "R$ 300,00 for no função", and a money-losing truncation in a pure generator. |
+
+Two slices were merged only after an **orchestrator-requested amendment on top of a Gate 2 PASS**, because
+a passing gate means "may merge", not "must merge unimproved": slice 11's docstring promised exactness while
+`.slice` dropped the remainder row (R$ 7.500,00 vanished in the Red test), and slice 12's Revisão screen
+rendered a margin larger than the total.
+
+### The methodological finding that outlives this batch
+
+**Database RLS silently satisfies tenancy tests even when the service's explicit `orgId` filter is deleted**,
+because the app connects as a non-superuser with RLS enforced. This appeared in slices 05, 07 and 12 - three
+separate slices - so it is a property of this test suite, not a coincidence. The technique that exposes it is
+driving the service over an `app.fxl_admin` connection where the admin policy exposes every org. Any existing
+tenancy test written without it is likely unfalsifiable; `apps/api/test/rls/areas-rls.test.ts` is confirmed
+to be one.
+
 ## Slice log
 
 ### 01-query-cache-refresh - done
