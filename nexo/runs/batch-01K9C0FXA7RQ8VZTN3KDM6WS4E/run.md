@@ -28,7 +28,7 @@ directly, one slice at a time, each gated by a separate local Verify agent (Gate
 | 03 | combobox-primitive | done | feat/03-combobox-primitive | PASS 2/3 | 1fb35e9 | wave 1 |
 | 04 | itens-section-align | cancelled | - | - | - | wave 1, executor stopped by the user - awaiting a human decision |
 | 05 | pessoas-funcoes-api | done | feat/05-pessoas-funcoes-api | PASS 2/3 | 69feb51 | wave 1 |
-| 06 | combobox-adoption | todo | | | | wave 2 |
+| 06 | combobox-adoption | done | feat/06-combobox-adoption | PASS 2/3 | 762232b | wave 2 |
 | 07 | produtos-servicos-api | todo | | | | wave 2 |
 | 08 | service-description-optional | todo | | | | wave 3 |
 | 09 | pessoas-funcoes-web | todo | | | | wave 3 |
@@ -392,6 +392,78 @@ which the row is now disabled rather than dangerous, so strictly better than bef
 Accepted forward coupling: the picker test asserts the literal nav label `Produtos`, which slice 10
 renames. It breaks loudly at one line with an explicit `nav Produtos not found` throw, and slice 10
 owns the update.
+
+### Wave 1 integration gate - green
+
+Run on integrated `master` at `e2c43a0` after slices 01, 01.1, 02, 03 and 05 merged (04 cancelled):
+`lint=0 type-check=0 build=0`, unit web 29 / 190 and api 24 / 248 and shared-utils 1 / 17,
+integration 16 / 73.
+Batch baseline for comparison was web 21 / 122, api 23 / 215, integration 13 / 47.
+
+### 06-combobox-adoption - Gate 2 FAIL then PASS, merged at `762232b`
+
+The slice that actually delivers items 3 and 4 to the screen. `NativeSelect` deleted, all 17 call sites
+plus both bespoke `datalist` typeaheads routed through the merged `Combobox`, picker geometry unified,
+the rule written into `CLAUDE.md` and enforced by `no-restricted-syntax`.
+Web 29 files / 190 tests to 30 / 210.
+
+The executor's first run died mid-stream on an API error with only the rule, the ESLint config, the
+token fix and the spinner suppression written; `SalesOpsApp.tsx` had 16 lines changed. It was resumed
+from transcript, told to re-read its own diff rather than trust memory in case the stall truncated a
+file, and completed the migration. Eleven mutations were applied to production source, each watched
+Red and each reverted byte-identical.
+
+**Attempt 1 FAIL, on one false sentence rather than any code defect.** The new `## UI Controls` section
+asserted "Every single-select picker in `apps/web/src` uses `Combobox`", which is untrue: two Radix
+`Select` sites remain at `admin/products/ProductDialog.tsx:132` (status) and
+`admin/products/CommissionRuleForm.tsx:94` (basis).
+The exclusion was judged correct - a Radix `Select` is not a browser-native picker, so the user's core
+rule is satisfied and machine-enforced at all 19 sites - but `CLAUDE.md` governs every future agent in
+this repo, so a documented rule the codebase violates is a real defect.
+
+The remediation was documentation only, and the executor caught two problems in its own draft while
+making it: an opening line reading "No browser-native picker anywhere in `apps/web/src`" that
+contradicted the pre-existing `<input type="date">` carve-out three lines below, and an initial
+justification of "frozen legacy tree" that was wrong because this very slice edits siblings of both
+excepted files. The reason now given is the true one - both option sets are closed enums, so search
+buys nothing.
+
+**Attempt 2 PASS.** The verifier confirmed `git diff 8dd3273..762232b` touches only `CLAUDE.md`, so
+attempt 1's clean findings transfer. It then checked every claim against the tree rather than the commit
+message, and found the mandate's scoping is load-bearing rather than hedging: `auth/react.tsx:240`
+passes its own `h-9`, which would falsify the "exactly two canonical sizes" bullet if that bullet were
+not itself scoped to sales-ops.
+It verified the exception is honest - both option sets are two literal JSX children enumerating a full
+TypeScript union (`ProductStatus`, `CommissionBasis`) with no `.map()` and no query, while the same
+`ProductDialog` file renders its one genuinely data-driven picker as a `Combobox`.
+And it planted a lint probe **inside `admin/products/` itself** to prove the documented exception is not
+a lint escape hatch.
+Reports: `verify-06.md`, `verify-06-attempt2.md`.
+
+**A correction to the orchestrator's own brief, recorded so it does not propagate:** the claim that raw
+`<input type="number">` existed in `admin/*` and `finder/*` on `master` was false - those files already
+used the shadcn `Input`. It came from the repo-mapping agent and was passed on unverified.
+
+**Deliberate visible changes for the human to sanity-check:** the two inert comissões filter pickers are
+gone; the admin and finder `Select` panels now have a background where they previously had none; and
+parcelas and profissionais rows grow from 40px to 44px.
+
+**Still visually unverified - no agent had a browser.** Carried to the visual pass:
+
+1. The create rows working end to end against the real API.
+2. The two CSS-only claims: no OS spin buttons, and the admin/finder popover backgrounds.
+3. Rendered pixel geometry. The tests assert class tokens only, so 44px-matches-44px is unproven in a
+   real browser.
+4. The inline panel on the **last** parcela or profissional row - does it float above, or extend the
+   dialog's scroll area?
+5. Two stacked Radix modal dialogs when `Cadastrar produto` opens `ProductDialog` over the wizard, a
+   state unreachable on `master`.
+
+**Three non-blocking follow-ups noted, all outside the diff:** the `eslint.config.js` rationale comment
+still says "exactly one single-select control" and is now mildly out of step with the documented
+exception; an `index.css` comment calls spin buttons "the last browser-native picker"; and the sales-ops
+sidebar workspace switcher (`SalesOpsApp.tsx:789-870`) is a hand-rolled routing menu that a future agent
+could misread the Combobox mandate as covering.
 
 ### Deferred: the same defect in the frozen `/admin/*` tree
 
