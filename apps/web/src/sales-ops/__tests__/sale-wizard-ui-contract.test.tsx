@@ -381,6 +381,22 @@ describe('sale wizard UI contract', () => {
     expect(source).not.toContain('marque prazo indeterminado');
   });
 
+  it('keeps the step-2 payment plan header on one grid with no right-flown derived lines', () => {
+    /*
+      Both negatives below were real strings in this file before the alignment fix, so
+      each is about markup that was removed rather than markup that never existed. The
+      structural claim itself is asserted in the DOM by `sale-wizard-payment-plan.test.tsx`,
+      where it can actually fail.
+    */
+    // The two-column header grid that put `Recorrência` on its own row underneath.
+    expect(source).not.toContain('md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]');
+    // The derived lines pinned to their grid column's right edge.
+    expect(source).not.toContain('sales-ops-num text-right text-[12.5px] font-bold');
+    // Positive control: the derived lines still exist, just left-aligned.
+    expect(source).toContain('sales-ops-num text-[12.5px] font-bold');
+    expect(source).toContain('entrada cobre o total');
+  });
+
   it('keeps the wizard shell free of a hand-computed body height', () => {
     // Positive control: the flex-column shell really is there, so the negative below
     // is about a constant that was removed rather than one that never existed.
