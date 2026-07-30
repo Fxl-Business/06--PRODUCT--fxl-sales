@@ -56,7 +56,6 @@ const areaId = '66666666-6666-4666-8666-666666666666';
 function product(overrides: Partial<SalesOpsProduct> & { id: string; name: string }): SalesOpsProduct {
   return {
     orgId: 'org-test',
-    type: 'SaaS',
     codeSuffix: '0',
     areaId,
     openPrice: false,
@@ -125,6 +124,7 @@ const bootstrap: SalesOpsBootstrap = {
   payables: [],
   saleItems: [],
   receivables: [],
+  productFuncaoCosts: [],
   saleProfessionals: [],
   settings: {
     orgId: 'org-test',

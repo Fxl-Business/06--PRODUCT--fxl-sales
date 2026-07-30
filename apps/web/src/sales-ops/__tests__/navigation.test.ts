@@ -59,7 +59,7 @@ describe('sales operations navigation', () => {
       'geral',
     ]);
     expect(getSalesOpsNavigation('cadastros', team).map((item) => item.label)).toEqual([
-      'Produtos',
+      'Produtos & Serviços',
       'Áreas',
       'Clientes',
       'Pessoas',

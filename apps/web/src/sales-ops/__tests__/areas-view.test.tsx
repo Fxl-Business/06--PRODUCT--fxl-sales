@@ -42,7 +42,6 @@ const product = (patch: Partial<SalesOpsProduct> = {}): SalesOpsProduct => ({
   id: '11111111-1111-4111-8111-111111111111',
   orgId: 'org-test',
   name: 'FXL Finance',
-  type: 'SaaS',
   codeSuffix: '7',
   areaId: area().id,
   openPrice: false,
@@ -76,6 +75,7 @@ function bootstrap(patch: Partial<SalesOpsBootstrap> = {}): SalesOpsBootstrap {
     payables: [],
     saleItems: [],
     receivables: [],
+    productFuncaoCosts: [],
     saleProfessionals: [],
     settings: null,
     ...patch,
@@ -250,7 +250,8 @@ describe('areas view', () => {
       root.render(
         <ProductDialog
           areas={[areaFixture]}
-          collaborators={[]}
+          funcaoCosts={[]}
+          funcoes={[]}
           modal={{ kind: 'product' }}
           onClose={vi.fn()}
           onSave={onSave}
@@ -274,6 +275,10 @@ describe('areas view', () => {
 
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ areaId: areaFixture.id }));
     expect(onSave.mock.calls[0]?.[0]).not.toHaveProperty('type');
+    // `openPrice` is a server-written projection of `kind` now, and `providers` is
+    // deprecated and deliberately omitted so a PATCH leaves the column untouched.
+    expect(onSave.mock.calls[0]?.[0]).not.toHaveProperty('openPrice');
+    expect(onSave.mock.calls[0]?.[0]).not.toHaveProperty('providers');
   });
 
   it('shows the área name instead of the legacy type in the products table', async () => {
@@ -283,7 +288,11 @@ describe('areas view', () => {
       root.render(
         <ProductsView
           areas={[areaFixture]}
+          funcaoCosts={[]}
+          funcoes={[]}
+          kind="product"
           onEdit={vi.fn()}
+          onKindChange={vi.fn()}
           products={[
             product({ areaId: areaFixture.id }),
             product({ id: '22222222-2222-4222-8222-222222222222', areaId: null }),

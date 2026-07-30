@@ -191,6 +191,7 @@ function bootstrap(overrides: Partial<SalesOpsBootstrap> = {}): SalesOpsBootstra
       { id: 'rec-1', saleId: wonSale.id, label: '1/2', dueDate: '2026-07-10', amountBrl: 150000, method: 'pix', status: 'paid' },
       { id: 'rec-2', saleId: wonSale.id, label: '2/2', dueDate: '2026-08-10', amountBrl: 150000, method: 'boleto', status: 'open' },
     ],
+    productFuncaoCosts: [],
     saleProfessionals: [],
     settings: null,
     ...overrides,

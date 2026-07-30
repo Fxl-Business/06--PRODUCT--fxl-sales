@@ -29,6 +29,14 @@ export type SavePersonPayload = {
   funcaoIds: string[];
 };
 
+/**
+ * Every `numeric(...)` column is a string on read and a number on write, so the
+ * four rate fields are `Omit`ted from the read type and re-declared. `valuePct`
+ * on a cost row crosses the same boundary, hence the explicit write union rather
+ * than a `Partial<SalesOpsProductFuncaoCost>`; it mirrors the API's
+ * `ProductFuncaoCostSchema` discriminated union so the units can never be
+ * ambiguous (`valuePct` is a percent, `valueBrl` is integer cents).
+ */
 export type SaveProductPayload = Omit<
   Partial<SalesOpsProduct>,
   | 'id'
@@ -38,12 +46,18 @@ export type SaveProductPayload = Omit<
   | 'sellerCommissionValue'
   | 'sellerWithFinderCommissionValue'
   | 'finderCommissionValue'
+  | 'defaultEntradaPct'
 > & {
   id?: string;
   name: string;
   sellerCommissionValue?: number;
   sellerWithFinderCommissionValue?: number;
   finderCommissionValue?: number;
+  defaultEntradaPct?: number | null;
+  productFuncaoCosts?: Array<
+    | { funcaoId: string; mode: 'pct'; valuePct: number }
+    | { funcaoId: string; mode: 'fix'; valueBrl: number }
+  >;
 };
 
 export type SaveClientPayload = Omit<

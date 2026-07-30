@@ -61,6 +61,28 @@ export type SalesOpsProductProvider = {
  */
 export type SalesOpsProductKind = 'product' | 'service';
 
+/**
+ * One default cost for one função on one produto/serviço. Cost rows come back
+ * FLAT under `bootstrap.productFuncaoCosts`, never nested on a product, so every
+ * consumer looks them up by `productId`.
+ *
+ * `valuePct` is a percent (drizzle serializes `numeric` as a string) and
+ * `valueBrl` is integer CENTS. Exactly one of them is set, discriminated by
+ * `mode`, which is what keeps "5.00 percent" and "30000 cents" from ever sharing
+ * a field.
+ */
+export type SalesOpsProductFuncaoCost = {
+  id: string;
+  orgId: string;
+  productId: string;
+  funcaoId: string;
+  mode: CommissionType;
+  valuePct: string | null;
+  valueBrl: number | null;
+  createdAt: string;
+  updatedAt: string | null;
+};
+
 export type SalesOpsProduct = {
   id: string;
   orgId: string;
@@ -72,7 +94,6 @@ export type SalesOpsProduct = {
    * place rather than relaxing one on a row we cannot classify.
    */
   kind?: SalesOpsProductKind;
-  type: string;
   codeSuffix: string;
   areaId: string | null;
   openPrice: boolean;
@@ -87,7 +108,28 @@ export type SalesOpsProduct = {
   sellerWithFinderCommissionValue: string;
   finderCommissionType: CommissionType;
   finderCommissionValue: string;
+  /**
+   * The default payment plan TEMPLATE: six flat columns, no nested object and no
+   * absolute dates. `defaultEntradaMode: 'none'` plus
+   * `defaultRemainingInstallments: 1` IS the app default and reproduces a single
+   * cash parcela, so there is no "this product has no plan" state.
+   *
+   * Optional for the same reason `kind` is: a locally constructed row does not
+   * carry them, so every reader falls back to the app default rather than
+   * printing `undefined`. `defaultEntradaPct` is a percent serialized by drizzle
+   * as a string; `defaultEntradaBrl` is integer cents;
+   * `defaultRecurringCycles: null` means indefinite recurrence. The recurring
+   * AMOUNT is deliberately absent: it already lives in `monthlyBrl`, and
+   * `hasMonthly` already expresses "this thing recurs".
+   */
+  defaultPaymentMethod?: PaymentMethod;
+  defaultEntradaMode?: 'none' | 'pct' | 'fix';
+  defaultEntradaPct?: string | null;
+  defaultEntradaBrl?: number | null;
+  defaultRemainingInstallments?: number;
+  defaultRecurringCycles?: number | null;
   modules: SalesOpsProductModule[];
+  /** @deprecated superseded by `SalesOpsProductFuncaoCost`; read-only from here on. */
   providers: SalesOpsProductProvider[];
   status: 'active' | 'archived';
   createdAt: string;
@@ -224,6 +266,7 @@ export type SalesOpsSettings = {
 export type SalesOpsBootstrap = {
   sales: SalesOpsSale[];
   products: SalesOpsProduct[];
+  productFuncaoCosts: SalesOpsProductFuncaoCost[];
   clients: SalesOpsClient[];
   areas: SalesOpsArea[];
   funcoes: SalesOpsFuncao[];

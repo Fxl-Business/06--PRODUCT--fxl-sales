@@ -58,7 +58,6 @@ function product(
     id,
     orgId: 'org-test',
     name,
-    type: openPrice ? 'Custom' : 'SaaS',
     codeSuffix: openPrice ? 'CST' : 'FIN',
     areaId,
     openPrice,
@@ -124,6 +123,7 @@ const bootstrap: SalesOpsBootstrap = {
   payables: [],
   saleItems: [],
   receivables: [],
+  productFuncaoCosts: [],
   saleProfessionals: [],
   settings: {
     orgId: 'org-test',

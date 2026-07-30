@@ -104,6 +104,7 @@ vi.mock('../hooks', () => ({
       payables: [],
       saleItems: [],
       receivables: [],
+      productFuncaoCosts: [],
       saleProfessionals: [],
       settings: null,
     },
@@ -294,7 +295,7 @@ describe('Sales Ops canonical routing', () => {
     await click(buttonByText('Cadastros'));
     expect(pathname()).toBe('/cadastros/produtos');
     expectWorkspace('Cadastros');
-    expectHeading('Produtos');
+    expectHeading('Produtos & Serviços');
   });
 
   it('restores the visible workspace and page through browser history', async () => {

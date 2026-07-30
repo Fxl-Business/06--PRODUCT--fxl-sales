@@ -101,6 +101,8 @@ import type {
   SalesOpsPerson,
   SalesOpsPersonFuncao,
   SalesOpsProduct,
+  SalesOpsProductFuncaoCost,
+  SalesOpsProductKind,
   SalesOpsSale,
   SalesOpsSettings,
   SalesOpsStatus,
@@ -130,6 +132,7 @@ import type {
 const emptyBootstrap: SalesOpsBootstrap = {
   sales: [],
   products: [],
+  productFuncaoCosts: [],
   clients: [],
   areas: [],
   funcoes: [],
@@ -185,8 +188,18 @@ const workspaceVisuals: Record<
   'meus-dados': { icon: UserRound, tileBg: '#8a5cc4', tileColor: '#fff' },
 };
 
+/**
+ * `kind` here is the MODAL discriminator. `productKind` is the Produto/Serviço
+ * classification the dialog should open on for a brand new record; the two live
+ * on different fields and never meet.
+ */
 type ModalState =
-  | { kind: 'product'; product?: SalesOpsProduct; prefillName?: string }
+  | {
+      kind: 'product';
+      product?: SalesOpsProduct;
+      prefillName?: string;
+      productKind?: SalesOpsProductKind;
+    }
   | { kind: 'client'; client?: SalesOpsClient }
   | { kind: 'area'; area?: SalesOpsArea }
   | { kind: 'funcao'; funcao?: SalesOpsFuncao }
@@ -213,6 +226,44 @@ const paymentMethodOptions: ComboboxOption[] = [
   { value: 'boleto', label: 'Boleto' },
   { value: 'transfer', label: 'Transferência' },
 ];
+
+/**
+ * The four pt-BR method names, hoisted so the sale detail's ledger tables and the
+ * produto default-plan editor read from one map instead of two copies.
+ */
+const paymentMethodLabels: Record<PaymentMethod, string> = {
+  pix: 'PIX',
+  card: 'Cartão',
+  boleto: 'Boleto',
+  transfer: 'Transferência',
+};
+
+const defaultPaymentMethodOptions: ComboboxOption[] = (
+  Object.keys(paymentMethodLabels) as PaymentMethod[]
+).map((method) => ({ value: method, label: paymentMethodLabels[method] }));
+
+/**
+ * `nenhuma | % | R$ fixo`, the same option set, labels and stored values the
+ * proposta payment-plan builder uses, so the cadastro default and the per-proposta
+ * control read as one design.
+ */
+const entradaModeOptions: ComboboxOption[] = [
+  { value: 'none', label: 'nenhuma' },
+  { value: 'pct', label: '%' },
+  { value: 'fix', label: 'R$ fixo' },
+];
+
+/**
+ * `installments: max(120)` on the sale write endpoints counts the entrada row too,
+ * and `materializeDefaultPaymentPlan` puts the entrada ON TOP of
+ * `defaultRemainingInstallments`. So a template with an entrada may configure at
+ * most 119 remaining parcelas; without one, the full 120.
+ */
+const MAX_PLAN_INSTALLMENTS = 120;
+
+function maxRemainingInstallments(entradaMode: 'none' | 'pct' | 'fix'): number {
+  return entradaMode === 'none' ? MAX_PLAN_INSTALLMENTS : MAX_PLAN_INSTALLMENTS - 1;
+}
 
 function titleForView(view: SalesOpsView, workspace: SalesOpsWorkspace) {
   const personal = workspace === 'meus-dados';
@@ -244,8 +295,8 @@ function titleForView(view: SalesOpsView, workspace: SalesOpsWorkspace) {
       subtitle: 'Contas a pagar geradas pelas vendas persistidas',
     },
     produtos: {
-      title: 'Produtos',
-      subtitle: 'Catálogo, valores, códigos e regras de comissão',
+      title: 'Produtos & Serviços',
+      subtitle: 'Catálogo, valores, custos por função e padrões de proposta',
     },
     areas: {
       title: 'Áreas',
@@ -323,14 +374,15 @@ function centsToInput(cents: number | undefined): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(2);
 }
 
-function parseDecimal(value: string | number | undefined, fallback = 0): number {
+/** `null` is accepted because that is what drizzle hands back for a nullable numeric. */
+function parseDecimal(value: string | number | null | undefined, fallback = 0): number {
   if (typeof value === 'number') return Number.isFinite(value) ? value : fallback;
   if (!value) return fallback;
   const parsed = Number(value.replace(',', '.'));
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function pctToInput(value: string | number | undefined, fallback = 0): string {
+function pctToInput(value: string | number | null | undefined, fallback = 0): string {
   return String(parseDecimal(value, fallback));
 }
 
@@ -634,6 +686,14 @@ export function SalesOpsApp() {
   const [modal, setModal] = useState<ModalState>(null);
   const [saleWizard, setSaleWizard] = useState<SaleWizardRequest | null>(null);
   const [salesFilters, setSalesFilters] = useState<SalesFilters>({ status: 'all', areaId: 'all' });
+  /**
+   * Which bucket of `cadastros/produtos` is on screen. Component state, not URL
+   * state: the URL is the source of truth for the workspace and the page, and this
+   * is neither. It lives here rather than in `ProductsView` because the header
+   * action label and the modal it opens both read it. Same precedent as
+   * `salesFilters` above.
+   */
+  const [productKind, setProductKind] = useState<SalesOpsProductKind>('product');
   const mountedRef = useRef(true);
 
   const visibleWorkspaceIds = useMemo(
@@ -747,7 +807,7 @@ export function SalesOpsApp() {
 
   function runHeaderAction() {
     if (view === 'produtos') {
-      setModal({ kind: 'product' });
+      setModal({ kind: 'product', productKind });
       return;
     }
     if (view === 'areas') {
@@ -773,7 +833,9 @@ export function SalesOpsApp() {
     view === 'geral'
       ? null
       : view === 'produtos'
-        ? 'Novo produto'
+        ? productKind === 'service'
+          ? 'Novo serviço'
+          : 'Novo produto'
         : view === 'areas'
           ? 'Nova área'
           : view === 'clientes'
@@ -1212,8 +1274,12 @@ export function SalesOpsApp() {
                 {view === 'produtos' ? (
                   <ProductsView
                     areas={persistedBootstrap.areas}
+                    funcaoCosts={persistedBootstrap.productFuncaoCosts}
+                    funcoes={persistedBootstrap.funcoes}
+                    kind={productKind}
                     products={persistedBootstrap.products}
                     onEdit={(product) => setModal({ kind: 'product', product })}
+                    onKindChange={setProductKind}
                   />
                 ) : null}
                 {view === 'clientes' ? (
@@ -1263,12 +1329,14 @@ export function SalesOpsApp() {
       <ProductDialog
         areas={persistedBootstrap.areas}
         /*
-          No status filter, deliberately: the produto Prestador field stores a name
-          snapshot rather than an id, so an inactive pessoa who already provides a
-          produto must stay selectable. Narrowing this to active pessoas would remove
-          an option operators have today.
+          Cost rows come back FLAT, one array for the whole org, so the parent scopes
+          them to the record being edited. A naive `product.funcaoCosts` read would
+          silently render zero costs.
         */
-        collaborators={persistedBootstrap.people.filter(isCollaboratorPerson)}
+        funcaoCosts={persistedBootstrap.productFuncaoCosts.filter(
+          (row) => row.productId === (modal?.kind === 'product' ? modal.product?.id : undefined),
+        )}
+        funcoes={persistedBootstrap.funcoes}
         modal={modal?.kind === 'product' ? modal : null}
         onClose={() => setModal(null)}
         onCreateArea={createAreaByName}
@@ -1780,12 +1848,7 @@ function SaleDetailDialog({
     .filter((row) => row.saleId === sale.id)
     .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
   const payables = bootstrap.payables.filter((payable) => payable.saleId === sale.id);
-  const methodLabels: Record<PaymentMethod, string> = {
-    pix: 'PIX',
-    card: 'Cartão',
-    boleto: 'Boleto',
-    transfer: 'Transferência',
-  };
+  const methodLabels = paymentMethodLabels;
   const receivableStatusMeta: Record<'open' | 'paid' | 'void', { label: string; className: string }> = {
     open: { label: 'Aberta', className: 'bg-[#fdf0cf] text-[#7a5a12]' },
     paid: { label: 'Paga', className: 'bg-[#c9e7cf] text-[#1f7d43]' },
@@ -2160,92 +2223,236 @@ function formatProductCommission(type: 'pct' | 'fix', value: string): string {
     .replace(/\u00a0/g, ' ');
 }
 
+/**
+ * Deliberately NOT `formatProductCommission`: a commission value is stored in
+ * REAIS (`numeric(10,2)`) while a função cost is stored in integer CENTS, so
+ * reusing that helper would render a R$ 300,00 cost as R$ 30.000,00.
+ */
+function formatFuncaoCost(row: SalesOpsProductFuncaoCost): string {
+  return row.mode === 'pct' ? `${pctToInput(row.valuePct, 0)}%` : formatMoneyBrl(row.valueBrl ?? 0);
+}
+
+/**
+ * A função as the `Custos padrão por função` picker names it. An archived one is
+ * marked, because it stays visible on the cost row that already carries it and the
+ * operator has to be able to tell that it is no longer assignable.
+ */
+function funcaoCostOptionLabel(funcao: SalesOpsFuncao): string {
+  return funcao.status === 'archived' ? `${funcao.name} (arquivada)` : funcao.name;
+}
+
+function productKindOf(product: SalesOpsProduct): SalesOpsProductKind {
+  return isServiceProduct(product) ? 'service' : 'product';
+}
+
+function funcoesLabel(count: number): string {
+  return count === 1 ? '1 função' : `${count} funções`;
+}
+
+/**
+ * `50% + 3x`, `R$ 5.000,00 + 2x`, `1x`, each optionally ` + mensal`. There is no
+ * dash state: `'none'` plus `1` is the stored app default and means "à vista em 1x".
+ */
+function defaultPlanSummary(product: SalesOpsProduct): string {
+  const parts: string[] = [];
+  if (product.defaultEntradaMode === 'pct') {
+    parts.push(`${pctToInput(product.defaultEntradaPct, 0)}%`);
+  } else if (product.defaultEntradaMode === 'fix') {
+    parts.push(formatMoneyBrl(product.defaultEntradaBrl ?? 0));
+  }
+  parts.push(`${Math.max(1, Math.floor(product.defaultRemainingInstallments ?? 1))}x`);
+  return `${parts.join(' + ')}${product.hasMonthly ? ' + mensal' : ''}`;
+}
+
 export function ProductsView({
   areas,
   products,
+  funcoes,
+  funcaoCosts,
+  kind,
+  onKindChange,
   onEdit,
 }: {
   areas: SalesOpsArea[];
   products: SalesOpsProduct[];
+  funcoes: SalesOpsFuncao[];
+  /** Every org cost row, flat. Scoped per row by `productId`, never read off a product. */
+  funcaoCosts: SalesOpsProductFuncaoCost[];
+  kind: SalesOpsProductKind;
+  onKindChange: (kind: SalesOpsProductKind) => void;
   onEdit: (product: SalesOpsProduct) => void;
 }) {
-  if (products.length === 0) {
-    return (
-      <EmptyPanel
-        text="Cadastre produtos reais para habilitar a criação de vendas e códigos automáticos."
-        title="Nenhum produto cadastrado"
-      />
-    );
-  }
+  const isService = kind === 'service';
+  const produtoCount = products.filter((product) => productKindOf(product) === 'product').length;
+  const servicoCount = products.length - produtoCount;
+  const visible = products.filter((product) => productKindOf(product) === kind);
+  const funcaoNameById = new Map(funcoes.map((funcao) => [funcao.id, funcao.name]));
 
   return (
     <div className={`${panelClass} overflow-hidden`}>
-      <Table>
-        <TableHeader>
-          <TableRow className="bg-[#fafafb] hover:bg-[#fafafb]">
-            <TableHead className={tableHeadClass}>Nome</TableHead>
-            <TableHead className={tableHeadClass}>Área</TableHead>
-            <TableHead className={`${tableHeadClass} text-center`}>Cód.</TableHead>
-            <TableHead className={`${tableHeadClass} text-right`}>Setup</TableHead>
-            <TableHead className={`${tableHeadClass} text-right`}>Mensalidade</TableHead>
-            <TableHead className={`${tableHeadClass} text-center`}>Somente vendedor</TableHead>
-            <TableHead className={`${tableHeadClass} text-center`}>Vendedor + Finder</TableHead>
-            <TableHead className={`${tableHeadClass} text-center`}>Recorrente</TableHead>
-            <TableHead className={`${tableHeadClass} text-center`}>Ações</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {products.map((product) => (
-            <TableRow key={product.id}>
-              <TableCell className="px-4 py-3 text-sm font-semibold">{product.name}</TableCell>
-              <TableCell className={tableCellClass}>
-                {areas.find((area) => area.id === product.areaId)?.name ?? '-'}
-              </TableCell>
-              <TableCell className="px-4 py-3 text-center">
-                <span className="sales-ops-num rounded-md bg-[#fdf0cf] px-2 py-1 text-xs font-bold tracking-[0.04em] text-[#9c7210]">
-                  ...{product.codeSuffix}
-                </span>
-              </TableCell>
-              <TableCell className="sales-ops-num px-4 py-3 text-right text-[13.5px]">
-                {product.openPrice ? 'Aberto' : formatMoneyBrl(product.setupBrl, { maximumFractionDigits: 0 })}
-              </TableCell>
-              <TableCell className="sales-ops-num px-4 py-3 text-right text-[13.5px]">
-                {product.hasMonthly
-                  ? product.openPrice
-                    ? 'Aberto'
-                    : formatMoneyBrl(product.monthlyBrl, { maximumFractionDigits: 0 })
-                  : '-'}
-              </TableCell>
-              <TableCell className="sales-ops-num px-4 py-3 text-center text-[13.5px] font-semibold">
-                {formatProductCommission(product.sellerCommissionType, product.sellerCommissionValue)}
-              </TableCell>
-              <TableCell className="sales-ops-num px-4 py-3 text-center text-[13.5px] font-semibold">
-                {formatProductCommission(
-                  product.sellerWithFinderCommissionType,
-                  product.sellerWithFinderCommissionValue,
-                )}{' '}
-                + {formatProductCommission(product.finderCommissionType, product.finderCommissionValue)}
-              </TableCell>
-              <TableCell className="px-4 py-3 text-center">
-                <Badge
-                  className={
-                    product.recurringCommission
-                      ? 'bg-[#c9e7cf] text-[#1f7d43]'
-                      : 'bg-[#eeeef1] text-[#6a6a72]'
-                  }
-                >
-                  {product.recurringCommission ? 'Sim' : 'Não'}
-                </Badge>
-              </TableCell>
-              <TableCell className="px-4 py-3 text-center">
-                <button className={iconButtonClass} onClick={() => onEdit(product)} type="button">
-                  <Edit3 className="h-[15px] w-[15px]" />
-                </button>
-              </TableCell>
+      {/*
+        The filter lives INSIDE the card so filter and rows read as one object, and
+        it renders ABOVE the empty state so an operator is never trapped in an empty
+        bucket with no way back.
+      */}
+      <div className="border-b border-[#e8e8ec] px-4 py-3">
+        <div className="inline-flex gap-[5px] rounded-[11px] bg-[#f2f2f4] p-1">
+          <SegmentedButton
+            active={!isService}
+            ariaLabel="Filtrar por produtos"
+            count={produtoCount}
+            onClick={() => onKindChange('product')}
+          >
+            Produtos
+          </SegmentedButton>
+          <SegmentedButton
+            active={isService}
+            ariaLabel="Filtrar por serviços"
+            count={servicoCount}
+            onClick={() => onKindChange('service')}
+          >
+            Serviços
+          </SegmentedButton>
+        </div>
+      </div>
+      {visible.length === 0 ? (
+        <div className="p-4">
+          <EmptyPanel
+            text={
+              isService
+                ? 'Cadastre serviços de valor variável para reaproveitar custos por função e padrões de proposta.'
+                : 'Cadastre produtos com valor próprio para habilitar a criação de propostas e códigos automáticos.'
+            }
+            title={isService ? 'Nenhum serviço cadastrado' : 'Nenhum produto cadastrado'}
+          />
+        </div>
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow className="bg-[#fafafb] hover:bg-[#fafafb]">
+              <TableHead className={tableHeadClass}>Nome</TableHead>
+              <TableHead className={tableHeadClass}>Área</TableHead>
+              <TableHead className={`${tableHeadClass} text-center`}>Cód.</TableHead>
+              {isService ? (
+                <>
+                  <TableHead className={`${tableHeadClass} text-right`}>Valor</TableHead>
+                  <TableHead className={tableHeadClass}>Plano padrão</TableHead>
+                  <TableHead className={`${tableHeadClass} text-center`}>Custos padrão</TableHead>
+                </>
+              ) : (
+                <>
+                  <TableHead className={`${tableHeadClass} text-right`}>Setup</TableHead>
+                  <TableHead className={`${tableHeadClass} text-right`}>Mensalidade</TableHead>
+                </>
+              )}
+              <TableHead className={`${tableHeadClass} text-center`}>Somente vendedor</TableHead>
+              <TableHead className={`${tableHeadClass} text-center`}>Vendedor + Finder</TableHead>
+              {isService ? null : (
+                <TableHead className={`${tableHeadClass} text-center`}>Recorrente</TableHead>
+              )}
+              <TableHead className={`${tableHeadClass} text-center`}>Ações</TableHead>
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+          </TableHeader>
+          <TableBody>
+            {visible.map((product) => {
+              const costs = funcaoCosts.filter((row) => row.productId === product.id);
+              return (
+                <TableRow key={product.id}>
+                  <TableCell className="px-4 py-3 text-sm font-semibold">{product.name}</TableCell>
+                  <TableCell className={tableCellClass}>
+                    {areas.find((area) => area.id === product.areaId)?.name ?? '-'}
+                  </TableCell>
+                  <TableCell className="px-4 py-3 text-center">
+                    <span className="sales-ops-num rounded-md bg-[#fdf0cf] px-2 py-1 text-xs font-bold tracking-[0.04em] text-[#9c7210]">
+                      ...{product.codeSuffix}
+                    </span>
+                  </TableCell>
+                  {isService ? (
+                    <>
+                      {/*
+                          Never a money figure: a serviço has no own value by definition
+                          and the DB CHECK keeps setup/mensalidade at zero, so R$ 0,00
+                          would be a lie and `Aberto` would leak a deprecated flag name.
+                        */}
+                      <TableCell className="px-4 py-3 text-right text-[13.5px] text-[#9b9ba3]">
+                        Variável
+                      </TableCell>
+                      <TableCell className="sales-ops-num px-4 py-3 text-[13.5px]">
+                        {defaultPlanSummary(product)}
+                      </TableCell>
+                      <TableCell
+                        className="px-4 py-3 text-center text-[13.5px]"
+                        title={
+                          costs.length
+                            ? costs
+                                .map(
+                                  (row) =>
+                                    `${funcaoNameById.get(row.funcaoId) ?? 'Função'} · ${formatFuncaoCost(row)}`,
+                                )
+                                .join(', ')
+                            : undefined
+                        }
+                      >
+                        {costs.length ? funcoesLabel(costs.length) : '-'}
+                      </TableCell>
+                    </>
+                  ) : (
+                    <>
+                      <TableCell className="sales-ops-num px-4 py-3 text-right text-[13.5px]">
+                        {formatMoneyBrl(product.setupBrl, { maximumFractionDigits: 0 })}
+                      </TableCell>
+                      <TableCell className="sales-ops-num px-4 py-3 text-right text-[13.5px]">
+                        {product.hasMonthly
+                          ? formatMoneyBrl(product.monthlyBrl, { maximumFractionDigits: 0 })
+                          : '-'}
+                      </TableCell>
+                    </>
+                  )}
+                  <TableCell className="sales-ops-num px-4 py-3 text-center text-[13.5px] font-semibold">
+                    {formatProductCommission(
+                      product.sellerCommissionType,
+                      product.sellerCommissionValue,
+                    )}
+                  </TableCell>
+                  <TableCell className="sales-ops-num px-4 py-3 text-center text-[13.5px] font-semibold">
+                    {formatProductCommission(
+                      product.sellerWithFinderCommissionType,
+                      product.sellerWithFinderCommissionValue,
+                    )}{' '}
+                    +{' '}
+                    {formatProductCommission(
+                      product.finderCommissionType,
+                      product.finderCommissionValue,
+                    )}
+                  </TableCell>
+                  {isService ? null : (
+                    <TableCell className="px-4 py-3 text-center">
+                      <Badge
+                        className={
+                          product.recurringCommission
+                            ? 'bg-[#c9e7cf] text-[#1f7d43]'
+                            : 'bg-[#eeeef1] text-[#6a6a72]'
+                        }
+                      >
+                        {product.recurringCommission ? 'Sim' : 'Não'}
+                      </Badge>
+                    </TableCell>
+                  )}
+                  <TableCell className="px-4 py-3 text-center">
+                    <button
+                      className={iconButtonClass}
+                      onClick={() => onEdit(product)}
+                      type="button"
+                    >
+                      <Edit3 className="h-[15px] w-[15px]" />
+                    </button>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      )}
     </div>
   );
 }
@@ -2789,11 +2996,14 @@ function SettingsView({
   );
 }
 
+/** One editable row of the `Custos padrão por função` editor. */
+type FuncaoCostForm = { funcaoId: string; mode: 'pct' | 'fix'; value: string };
+
 type ProductForm = {
   name: string;
   areaId: string;
   codeSuffix: string;
-  openPrice: boolean;
+  kind: SalesOpsProductKind;
   setupBrl: string;
   hasMonthly: boolean;
   monthlyBrl: string;
@@ -2804,16 +3014,33 @@ type ProductForm = {
   sellerWithFinderCommissionValue: string;
   finderCommissionType: 'pct' | 'fix';
   finderCommissionValue: string;
+  defaultPaymentMethod: PaymentMethod;
+  defaultEntradaMode: 'none' | 'pct' | 'fix';
+  /**
+   * One field for both entrada units - a percent when the mode is `'pct'`, reais
+   * when it is `'fix'` - because the UI has one input whose unit follows the mode
+   * and the DB CHECK forbids both columns being set at once. `submit()` fans it
+   * out into exactly one column.
+   */
+  defaultEntradaValue: string;
+  defaultRemainingInstallments: string;
+  /** Blank is the ONLY expression of "prazo indeterminado". */
+  defaultRecurringCycles: string;
   modules: Array<{ name: string; type: string; valueBrl: string }>;
-  providers: Array<{ personName: string; commissionType: 'pct' | 'fix'; commissionValue: string }>;
+  funcaoCosts: FuncaoCostForm[];
 };
 
-function productForm(product?: SalesOpsProduct, prefillName?: string): ProductForm {
+function productForm(
+  product?: SalesOpsProduct,
+  prefillName?: string,
+  kindHint?: SalesOpsProductKind,
+  funcaoCosts?: SalesOpsProductFuncaoCost[],
+): ProductForm {
   return {
     name: product?.name ?? prefillName ?? '',
     areaId: product?.areaId ?? '',
     codeSuffix: product?.codeSuffix ?? '0',
-    openPrice: product?.openPrice ?? false,
+    kind: product?.kind ?? kindHint ?? 'product',
     setupBrl: centsToInput(product?.setupBrl),
     hasMonthly: product?.hasMonthly ?? false,
     monthlyBrl: centsToInput(product?.monthlyBrl),
@@ -2828,73 +3055,52 @@ function productForm(product?: SalesOpsProduct, prefillName?: string): ProductFo
     ),
     finderCommissionType: product?.finderCommissionType ?? 'pct',
     finderCommissionValue: pctToInput(product?.finderCommissionValue, 3),
+    defaultPaymentMethod: product?.defaultPaymentMethod ?? 'pix',
+    defaultEntradaMode: product?.defaultEntradaMode ?? 'none',
+    defaultEntradaValue:
+      product?.defaultEntradaMode === 'pct'
+        ? pctToInput(product.defaultEntradaPct, 0)
+        : product?.defaultEntradaMode === 'fix'
+          ? centsToInput(product.defaultEntradaBrl ?? 0)
+          : '',
+    defaultRemainingInstallments: String(product?.defaultRemainingInstallments ?? 1),
+    defaultRecurringCycles:
+      product?.defaultRecurringCycles == null ? '' : String(product.defaultRecurringCycles),
     modules: product?.modules.map((module) => ({
       name: module.name,
       type: module.type,
       valueBrl: centsToInput(module.valueBrl),
     })) ?? [],
-    providers: product?.providers.map((provider) => ({
-      personName: provider.personName,
-      commissionType: provider.commissionType,
-      commissionValue: String(provider.commissionValue),
-    })) ?? [],
+    funcaoCosts: (funcaoCosts ?? []).map((row) => ({
+      funcaoId: row.funcaoId,
+      mode: row.mode,
+      value: row.mode === 'pct' ? pctToInput(row.valuePct, 0) : centsToInput(row.valueBrl ?? 0),
+    })),
   };
 }
 
-function ReferenceToggle({
-  checked,
-  onChange,
-  label,
-  description,
-  className = 'bg-[#fafafb] border-[#ececf1]',
-  badge,
-}: {
-  checked: boolean;
-  onChange: (checked: boolean) => void;
-  label: string;
-  description?: string;
-  className?: string;
-  badge?: string;
-}) {
-  return (
-    <button
-      className={`flex items-center justify-between gap-4 rounded-xl border px-[14px] py-3 text-left ${className}`}
-      onClick={() => onChange(!checked)}
-      type="button"
-    >
-      <span className="min-w-0">
-        <span className="flex flex-wrap items-center gap-[7px] text-[13.5px] font-semibold text-[#201f24]">
-          {label}
-          {badge ? (
-            <span className="rounded-md bg-[#eaa81a] px-1.5 py-0.5 text-[10px] font-extrabold uppercase tracking-[0.03em] text-[#18181b]">
-              {badge}
-            </span>
-          ) : null}
-        </span>
-        {description ? <span className="mt-0.5 block text-xs text-[#8b8b92]">{description}</span> : null}
-      </span>
-      <span
-        className={`relative h-[25px] w-11 flex-none rounded-full transition ${checked ? 'bg-[#eaa81a]' : 'bg-[#d2d2d8]'}`}
-      >
-        <span
-          className={`absolute top-[2.5px] h-5 w-5 rounded-full bg-white transition ${checked ? 'right-[2.5px]' : 'left-[2.5px]'}`}
-        />
-      </span>
-    </button>
-  );
-}
-
-function CommissionModeButton({
+/**
+ * The one segmented-pill recipe in this file: the produto/serviço list filter, the
+ * dialog's kind selector and the commission scenario pills all render through it,
+ * so the three cannot drift into looking like three design systems.
+ */
+function SegmentedButton({
   active,
   children,
+  count,
+  ariaLabel,
   onClick,
 }: {
   active: boolean;
   children: ReactNode;
+  count?: number;
+  ariaLabel?: string;
   onClick: () => void;
 }) {
   return (
     <button
+      aria-label={ariaLabel}
+      aria-pressed={active}
       className={`flex-1 rounded-lg px-3 py-[9px] text-[13px] font-bold transition ${
         active ? 'bg-[#201f24] text-white' : 'bg-transparent text-[#84848c] hover:text-[#201f24]'
       }`}
@@ -2902,6 +3108,15 @@ function CommissionModeButton({
       type="button"
     >
       {children}
+      {count === undefined ? null : (
+        <span
+          className={`sales-ops-num ml-1.5 rounded-md px-1.5 text-[11px] font-bold ${
+            active ? 'bg-[#3a393f] text-white' : 'bg-[#e9e9ed] text-[#6a6a72]'
+          }`}
+        >
+          {count}
+        </span>
+      )}
     </button>
   );
 }
@@ -2972,7 +3187,9 @@ function DefinedOnSaleNotice() {
 export function ProductDialog(props: {
   modal: Extract<ModalState, { kind: 'product' }> | null;
   areas: SalesOpsArea[];
-  collaborators: SalesOpsPerson[];
+  funcoes: SalesOpsFuncao[];
+  /** Only the cost rows of the product being edited; the parent filters by `productId`. */
+  funcaoCosts: SalesOpsProductFuncaoCost[];
   onClose: () => void;
   onCreateArea?: (name: string) => Promise<SalesOpsArea | null>;
   onSave: (payload: SaveProductPayload) => void;
@@ -2981,11 +3198,16 @@ export function ProductDialog(props: {
   if (!props.modal) return null;
   return (
     <ProductDialogBody
-      // The typed name is part of the form's identity: opening the dialog twice from two
-      // different produto create rows has to re-seed the Nome field.
-      key={props.modal.product?.id ?? `new-product-${props.modal.prefillName ?? ''}`}
+      // The typed name and the requested kind are both part of the form's identity:
+      // opening `Novo serviço` straight after `Novo produto` has to reseed the form,
+      // and so does opening the dialog from two different produto create rows.
+      key={
+        props.modal.product?.id ??
+        `new-${props.modal.productKind ?? 'product'}-${props.modal.prefillName ?? ''}`
+      }
       areas={props.areas}
-      collaborators={props.collaborators}
+      funcaoCosts={props.funcaoCosts}
+      funcoes={props.funcoes}
       modal={props.modal}
       onClose={props.onClose}
       onCreateArea={props.onCreateArea}
@@ -2998,7 +3220,8 @@ export function ProductDialog(props: {
 function ProductDialogBody({
   modal,
   areas,
-  collaborators,
+  funcoes,
+  funcaoCosts,
   onClose,
   onCreateArea,
   onSave,
@@ -3006,14 +3229,15 @@ function ProductDialogBody({
 }: {
   modal: Extract<ModalState, { kind: 'product' }>;
   areas: SalesOpsArea[];
-  collaborators: SalesOpsPerson[];
+  funcoes: SalesOpsFuncao[];
+  funcaoCosts: SalesOpsProductFuncaoCost[];
   onClose: () => void;
   onCreateArea?: (name: string) => Promise<SalesOpsArea | null>;
   onSave: (payload: SaveProductPayload) => void;
   saving: boolean;
 }) {
   const [form, setForm] = useState<ProductForm>(() =>
-    productForm(modal?.product, modal?.prefillName),
+    productForm(modal?.product, modal?.prefillName, modal?.productKind, funcaoCosts),
   );
   const [commissionMode, setCommissionMode] = useState<'seller_only' | 'with_finder'>('seller_only');
   /**
@@ -3049,18 +3273,131 @@ function ProductDialogBody({
     set('areaId', created.id);
   }
 
+  const isService = form.kind === 'service';
+  const parcelasCeiling = maxRemainingInstallments(form.defaultEntradaMode);
+  /**
+   * The pool a NEW cost row may draw from: active, non-system funções only. Paying a
+   * vendedor is the `Comissionamento padrão` block's job, and `isSystem` exists to
+   * make exactly that distinction.
+   */
+  const eligibleFuncoes = funcoes.filter(
+    (funcao) => funcao.status === 'active' && !funcao.isSystem,
+  );
+  const funcaoById = new Map(funcoes.map((funcao) => [funcao.id, funcao]));
+  const usedFuncaoIds = new Set(form.funcaoCosts.map((row) => row.funcaoId).filter(Boolean));
+  const noFuncoesAvailable = eligibleFuncoes.length === 0;
+  /*
+      Counted against the ELIGIBLE pool only. A row carrying an archived (or otherwise
+      non-assignable) função consumes none of that pool, so counting it would disable
+      `Adicionar` while an assignable função is still free.
+    */
+    const usedEligibleCount = eligibleFuncoes.filter((funcao) => usedFuncaoIds.has(funcao.id))
+      .length;
+  const allFuncoesUsed = !noFuncoesAvailable && usedEligibleCount >= eligibleFuncoes.length;
+  const legacyProviderNames = (activeModal.product?.providers ?? [])
+    .map((provider) => provider.personName.trim())
+    .filter(Boolean);
+
+  /**
+   * What one cost row's picker may show. Built from the UNFILTERED `funcoes` for the
+   * row's own stored value, because a função is never deleted, only archived: a cost
+   * row pointing at an archived função is the expected end state of archiving one
+   * that carries money, not a corrupt row. Resolving it only against
+   * `eligibleFuncoes` left the trigger on its placeholder, so the row read as "R$
+   * 300,00 for no função" and picking anything silently retargeted the cost.
+   *
+   * This is CLAUDE.md's "a row's OWN stored função always stays selectable on that
+   * row" under Produtos & Serviços, which is the bullet that governs this picker - not
+   * the bullet above it, which is about the pool a NEW row draws from. The direct
+   * precedent is `selectableAreas` above, which prepends an archived-but-current área
+   * into the picker it belongs to. The Pessoa dialog reaches the same principle by
+   * splitting the job in two instead (unfiltered chips, active-only add picker), which
+   * is why an archived função does vanish from that picker but must not vanish here.
+   */
+  function costRowFuncaoOptions(row: FuncaoCostForm): ComboboxOption[] {
+    const offered = eligibleFuncoes.filter(
+      (funcao) => funcao.id === row.funcaoId || !usedFuncaoIds.has(funcao.id),
+    );
+    const current = row.funcaoId ? funcaoById.get(row.funcaoId) : undefined;
+    const withCurrent =
+      current && !offered.some((funcao) => funcao.id === current.id)
+        ? [current, ...offered]
+        : offered;
+    return withCurrent.map((funcao) => ({
+      value: funcao.id,
+      label: funcaoCostOptionLabel(funcao),
+    }));
+  }
+
+  /**
+   * The trigger's text when the stored `funcaoId` resolves to nothing at all, e.g.
+   * against a partial bootstrap. Naming it `Função não encontrada` rather than letting
+   * the placeholder win keeps the row from reading as money owed to nobody, and says
+   * "não encontrada" rather than "removida" because a função is never deleted.
+   * Never the raw id.
+   */
+  function costRowFuncaoValueLabel(row: FuncaoCostForm): string | undefined {
+    if (!row.funcaoId) return undefined;
+    const current = funcaoById.get(row.funcaoId);
+    return current ? funcaoCostOptionLabel(current) : 'Função não encontrada';
+  }
+
+  function setKind(kind: SalesOpsProductKind) {
+    setForm((current) => ({ ...current, kind }));
+  }
+
+  function setEntradaMode(mode: 'none' | 'pct' | 'fix') {
+    setForm((current) => {
+      const ceiling = maxRemainingInstallments(mode);
+      const parcelas = Math.floor(parseDecimal(current.defaultRemainingInstallments, 1));
+      return {
+        ...current,
+        defaultEntradaMode: mode,
+        // Adding an entrada row consumes one of the 120 slots, so a 120x template has
+        // to come down to 119 the moment the entrada appears. Clamped here rather than
+        // only at submit so the visible number never lies about what will be saved.
+        defaultRemainingInstallments:
+          parcelas > ceiling ? String(ceiling) : current.defaultRemainingInstallments,
+        defaultEntradaValue: mode === 'none' ? '' : current.defaultEntradaValue,
+      };
+    });
+  }
+
+  function setCostRow(index: number, patch: Partial<FuncaoCostForm>) {
+    setForm((current) => ({
+      ...current,
+      funcaoCosts: current.funcaoCosts.map((row, rowIndex) =>
+        rowIndex === index ? { ...row, ...patch } : row,
+      ),
+    }));
+  }
+
   function submit(event: FormEvent) {
     event.preventDefault();
     if (!form.areaId) return;
+    const parcelas = Math.min(
+      parcelasCeiling,
+      Math.max(1, Math.floor(parseDecimal(form.defaultRemainingInstallments, 1)) || 1),
+    );
+    const cyclesInput = form.defaultRecurringCycles.trim();
+    const cycles =
+      !form.hasMonthly || cyclesInput === ''
+        ? null
+        : Math.min(
+            MAX_PLAN_INSTALLMENTS,
+            Math.max(1, Math.floor(parseDecimal(cyclesInput, 1)) || 1),
+          );
     const payload: SaveProductPayload = {
       id: activeModal.product?.id,
       name: form.name.trim(),
       areaId: form.areaId,
       codeSuffix: form.codeSuffix.replace(/\D/g, '').slice(0, 2) || '0',
-      openPrice: form.openPrice,
-      setupBrl: form.openPrice ? 0 : parseCurrencyToCents(form.setupBrl),
+      // `kind` only. `openPrice` is a server-written projection of it now, and sending
+      // both would be a `kind_open_price_conflict`.
+      kind: form.kind,
+      setupBrl: isService ? 0 : parseCurrencyToCents(form.setupBrl),
       hasMonthly: form.hasMonthly,
-      monthlyBrl: form.openPrice || !form.hasMonthly ? 0 : parseCurrencyToCents(form.monthlyBrl),
+      monthlyBrl: isService || !form.hasMonthly ? 0 : parseCurrencyToCents(form.monthlyBrl),
       recurringCommission: form.hasMonthly && form.recurringCommission,
       sellerCommissionType: form.sellerCommissionType,
       sellerCommissionValue: parseDecimal(form.sellerCommissionValue, 10),
@@ -3068,6 +3405,25 @@ function ProductDialogBody({
       sellerWithFinderCommissionValue: parseDecimal(form.sellerWithFinderCommissionValue, 7),
       finderCommissionType: form.finderCommissionType,
       finderCommissionValue: parseDecimal(form.finderCommissionValue, 3),
+      defaultPaymentMethod: form.defaultPaymentMethod,
+      defaultEntradaMode: form.defaultEntradaMode,
+      defaultEntradaPct:
+        form.defaultEntradaMode === 'pct' ? parseDecimal(form.defaultEntradaValue, 0) : null,
+      defaultEntradaBrl:
+        form.defaultEntradaMode === 'fix' ? parseCurrencyToCents(form.defaultEntradaValue) : null,
+      defaultRemainingInstallments: parcelas,
+      defaultRecurringCycles: cycles,
+      productFuncaoCosts: form.funcaoCosts
+        .filter((row) => row.funcaoId)
+        .map((row) =>
+          row.mode === 'pct'
+            ? { funcaoId: row.funcaoId, mode: 'pct' as const, valuePct: parseDecimal(row.value, 0) }
+            : {
+                funcaoId: row.funcaoId,
+                mode: 'fix' as const,
+                valueBrl: parseCurrencyToCents(row.value),
+              },
+        ),
       modules: form.modules
         .filter((module) => module.name.trim())
         .map((module) => ({
@@ -3075,31 +3431,63 @@ function ProductDialogBody({
           type: module.type.trim() || 'Upsell',
           valueBrl: parseCurrencyToCents(module.valueBrl),
         })),
-      providers: form.providers
-        .filter((provider) => provider.personName.trim())
-        .map((provider) => ({
-          personName: provider.personName.trim(),
-          commissionType: provider.commissionType,
-          commissionValue: parseDecimal(provider.commissionValue, 0),
-        })),
+      // `providers` is deliberately OMITTED rather than sent as []: PATCH leaves an
+      // omitted key unchanged, so the deprecated column survives the first edit after
+      // this screen shipped and stays readable for the manual re-entry notice below.
       status: 'active',
     };
     onSave(payload);
   }
 
+  /** `Entrada de 50% + 3x do restante · PIX · mensal por 12 ciclos`. */
+  function planSummary(): string {
+    const parcelas = Math.min(
+      parcelasCeiling,
+      Math.max(1, Math.floor(parseDecimal(form.defaultRemainingInstallments, 1)) || 1),
+    );
+    const entrada =
+      form.defaultEntradaMode === 'pct'
+        ? `Entrada de ${parseDecimal(form.defaultEntradaValue, 0)}%`
+        : form.defaultEntradaMode === 'fix'
+          ? `Entrada de ${formatMoneyBrl(parseCurrencyToCents(form.defaultEntradaValue))}`
+          : null;
+    const restante = entrada ? `${parcelas}x do restante` : `${parcelas}x`;
+    let summary = `${[entrada, restante].filter(Boolean).join(' + ')} · ${
+      paymentMethodLabels[form.defaultPaymentMethod]
+    }`;
+    if (form.hasMonthly) {
+      const cyclesInput = form.defaultRecurringCycles.trim();
+      if (cyclesInput === '') {
+        summary += ' · mensal por prazo indeterminado';
+      } else {
+        const cycles = Math.max(1, Math.floor(parseDecimal(cyclesInput, 1)) || 1);
+        summary += ` · mensal por ${cycles} ${cycles === 1 ? 'ciclo' : 'ciclos'}`;
+      }
+    }
+    return summary;
+  }
+
   return (
     <Dialog onOpenChange={(open) => (!open ? onClose() : undefined)} open>
       <DialogContent
-        className="flex h-[92vh] max-h-[92vh] w-[calc(100vw-48px)] max-w-[560px] flex-col gap-0 overflow-hidden rounded-[20px] border-none bg-white p-0 shadow-[0_30px_80px_rgba(0,0,0,.3)] sm:rounded-[20px] [&>button:last-child]:hidden"
+        className="flex h-[92vh] max-h-[92vh] w-[calc(100vw-48px)] max-w-[640px] flex-col gap-0 overflow-hidden rounded-[20px] border-none bg-white p-0 shadow-[0_30px_80px_rgba(0,0,0,.3)] sm:rounded-[20px] [&>button:last-child]:hidden"
         onOpenAutoFocus={(event) => event.preventDefault()}
       >
         <DialogHeader className="flex-row items-start justify-between space-y-0 border-b border-[#e8e8ec] px-6 py-5 text-left">
           <div>
             <DialogTitle className="sales-ops-num text-[19px] font-bold text-[#201f24]">
-              {activeModal.product ? 'Editar produto' : 'Novo produto'}
+              {activeModal.product
+                ? isService
+                  ? 'Editar serviço'
+                  : 'Editar produto'
+                : isService
+                  ? 'Novo serviço'
+                  : 'Novo produto'}
             </DialogTitle>
             <DialogDescription className="mt-1 text-[13px] text-[#8b8b92]">
-              Catálogo, valores e comissões padrão
+              {isService
+                ? 'Valor variável, custos por função e padrões de proposta'
+                : 'Catálogo, valores e comissões padrão'}
             </DialogDescription>
           </div>
           <button
@@ -3116,6 +3504,29 @@ function ProductDialogBody({
         </DialogHeader>
         <form className="flex min-h-0 flex-1 flex-col" onSubmit={submit}>
           <div className="flex min-h-0 flex-1 flex-col gap-[15px] overflow-y-auto px-6 py-[22px]">
+            <div className="flex flex-col gap-[11px]">
+              <div className="flex gap-[5px] rounded-[11px] bg-[#f2f2f4] p-1">
+                <SegmentedButton
+                  active={!isService}
+                  ariaLabel="Classificar como produto"
+                  onClick={() => setKind('product')}
+                >
+                  Produto
+                </SegmentedButton>
+                <SegmentedButton
+                  active={isService}
+                  ariaLabel="Classificar como serviço"
+                  onClick={() => setKind('service')}
+                >
+                  Serviço
+                </SegmentedButton>
+              </div>
+              <div className="rounded-[11px] border border-[#f0dfae] bg-[#fdf0cf] px-[14px] py-[11px] text-[13px] text-[#57575f]">
+                Tudo aqui é padrão: dentro da proposta você pode alterar qualquer valor sem mexer no
+                cadastro.
+              </div>
+            </div>
+
             <Field label="Nome" required>
               <Input
                 className={formInputClass}
@@ -3151,14 +3562,11 @@ function ProductDialogBody({
               </div>
             </div>
 
-            <ReferenceToggle
-              badge="Sob demanda"
-              checked={form.openPrice}
-              className="border-[#f0e2bd] bg-[#fbf3e0]"
-              description="Valor definido na venda - para sistemas personalizados"
-              label="Preço em aberto"
-              onChange={(value) => set('openPrice', value)}
-            />
+            {isService ? (
+              <div className="rounded-[11px] border border-[#f0e2bd] bg-[#fbf3e0] px-[14px] py-[11px] text-[13px] font-semibold text-[#9c7210]">
+                Serviços têm valor variável, definido em cada proposta.
+              </div>
+            ) : null}
 
             <div className="grid gap-3 md:grid-cols-2">
               <FieldBlock label="Área" required>
@@ -3177,7 +3585,7 @@ function ProductDialogBody({
                 />
               </FieldBlock>
               <Field label="Setup (R$)">
-                {form.openPrice ? (
+                {isService ? (
                   <DefinedOnSaleNotice />
                 ) : (
                   <Input
@@ -3197,6 +3605,8 @@ function ProductDialogBody({
                   <div className="text-xs text-[#8b8b92]">Cobrança recorrente além do setup</div>
                 </div>
                 <button
+                  aria-label="Possui mensalidade"
+                  aria-pressed={form.hasMonthly}
                   className={`relative h-[25px] w-11 flex-none rounded-full transition ${form.hasMonthly ? 'bg-[#2f7d4b]' : 'bg-[#d2d2d8]'}`}
                   onClick={() => set('hasMonthly', !form.hasMonthly)}
                   type="button"
@@ -3209,7 +3619,7 @@ function ProductDialogBody({
               {form.hasMonthly ? (
                 <div className="flex flex-col gap-[11px] px-[14px] pb-[14px]">
                   <Field label="Valor da mensalidade (R$)">
-                    {form.openPrice ? (
+                    {isService ? (
                       <DefinedOnSaleNotice />
                     ) : (
                       <Input
@@ -3230,6 +3640,8 @@ function ProductDialogBody({
                       </div>
                     </div>
                     <button
+                      aria-label="Incide sobre recorrente"
+                      aria-pressed={form.recurringCommission}
                       className={`relative h-[25px] w-11 flex-none rounded-full transition ${form.recurringCommission ? 'bg-[#2f7d4b]' : 'bg-[#d2d2d8]'}`}
                       onClick={() => set('recurringCommission', !form.recurringCommission)}
                       type="button"
@@ -3243,23 +3655,23 @@ function ProductDialogBody({
               ) : null}
             </div>
 
-            <div>
-              <div className="mb-[9px] text-[11px] font-bold uppercase tracking-[0.06em] text-[#9b9ba3]">
-                Comissionamento
-              </div>
+            <DialogSection
+              subtitle="Sugestão aplicada ao criar a proposta"
+              title="Comissionamento padrão"
+            >
               <div className="mb-[14px] flex gap-[5px] rounded-[11px] bg-[#f2f2f4] p-1">
-                <CommissionModeButton
+                <SegmentedButton
                   active={commissionMode === 'seller_only'}
                   onClick={() => setCommissionMode('seller_only')}
                 >
                   Somente vendedor
-                </CommissionModeButton>
-                <CommissionModeButton
+                </SegmentedButton>
+                <SegmentedButton
                   active={commissionMode === 'with_finder'}
                   onClick={() => setCommissionMode('with_finder')}
                 >
                   Vendedor + Finder
-                </CommissionModeButton>
+                </SegmentedButton>
               </div>
 
               <div className="mb-3">
@@ -3345,135 +3757,160 @@ function ProductDialogBody({
                   </div>
                 </div>
               ) : null}
-            </div>
+            </DialogSection>
 
-            <ListEditor
-              addLabel="Adicionar"
-              empty="Nenhum módulo adicionado"
-              onAdd={() =>
-                set('modules', [...form.modules, { name: '', type: 'Upsell', valueBrl: '0.00' }])
-              }
-              subtitle="Upsell, downsell e complementos"
-              title="Módulos"
+            <DialogSection
+              subtitle="Aplicado ao gerar as parcelas da proposta - sem datas fixas"
+              title="Plano de pagamento padrão"
             >
-              {form.modules.map((module, index) => (
-                <div className="rounded-xl border border-[#ececf1] bg-[#fafafb] p-[11px]" key={index}>
-                  <div className="mb-2 flex items-center gap-2">
-                    <Input
-                      className={`bg-white ${formInputClass}`}
-                      onChange={(event) => {
-                        const next = [...form.modules];
-                        next[index] = { ...module, name: event.target.value };
-                        set('modules', next);
-                      }}
-                      placeholder="Nome do módulo"
-                      value={module.name}
-                    />
-                    <button
-                      aria-label="Remover módulo"
-                      className="flex h-[34px] w-[34px] flex-none items-center justify-center rounded-[9px] border border-[#e6d3d0] bg-white text-[#b23a22] transition hover:bg-[#fbf0ee]"
-                      onClick={() => set('modules', form.modules.filter((_, itemIndex) => itemIndex !== index))}
-                      type="button"
-                    >
-                      <Trash2 className="h-[15px] w-[15px]" />
-                    </button>
-                  </div>
-                  <div className="flex gap-2">
-                    <div className="flex-[0_0_132px]">
+              <div className="flex flex-col gap-[11px] rounded-xl border border-[#ececf1] bg-[#fafafb] p-[11px]">
+                <div className="flex flex-wrap items-end gap-[9px]">
+                  <FieldBlock label="Tipo de entrada">
+                    <div className="w-[132px]">
                       <Combobox
-                        aria-label={`Tipo do módulo ${index + 1}`}
+                        aria-label="Tipo de entrada"
                         className={cn(formSelectClass, 'bg-white')}
-                        onChange={(value) => {
-                          const next = [...form.modules];
-                          next[index] = { ...module, type: value };
-                          set('modules', next);
-                        }}
-                        options={enumOptions([
-                          'Módulo',
-                          'Upsell',
-                          'Downsell',
-                          'Cross-sell',
-                          'Add-on',
-                        ])}
-                        searchPlaceholder="Buscar tipo..."
-                        value={module.type}
+                        onChange={(value) => setEntradaMode(value as 'none' | 'pct' | 'fix')}
+                        options={entradaModeOptions}
+                        searchPlaceholder="Buscar tipo de entrada..."
+                        value={form.defaultEntradaMode}
                       />
                     </div>
-                    <div className="relative flex-1">
-                      <span className="pointer-events-none absolute left-[11px] top-1/2 -translate-y-1/2 text-[12.5px] font-bold text-[#9b9ba3]">
-                        R$
-                      </span>
+                  </FieldBlock>
+                  {form.defaultEntradaMode === 'none' ? null : (
+                    <Field label="Valor da entrada">
+                      <div className="flex w-[148px]">
+                        <UnitInput
+                          ariaLabel="Valor da entrada"
+                          onChange={(value) => set('defaultEntradaValue', value)}
+                          unit={form.defaultEntradaMode === 'fix' ? 'R$' : '%'}
+                          value={form.defaultEntradaValue}
+                        />
+                      </div>
+                    </Field>
+                  )}
+                  <Field label="Restante">
+                    <div className="flex items-center gap-2">
                       <Input
-                        className={`sales-ops-num bg-white pl-8 ${formInputClass}`}
-                        onChange={(event) => {
-                          const next = [...form.modules];
-                          next[index] = { ...module, valueBrl: event.target.value };
-                          set('modules', next);
-                        }}
-                        placeholder="0"
+                        aria-label="Parcelas restantes"
+                        className={`sales-ops-num w-[72px] text-center ${formInputClass}`}
+                        max={parcelasCeiling}
+                        min={1}
+                        onChange={(event) =>
+                          set('defaultRemainingInstallments', event.target.value)
+                        }
                         type="number"
-                        value={module.valueBrl}
+                        value={form.defaultRemainingInstallments}
                       />
+                      <span className="text-[13px] font-bold text-[#9b9ba3]">x</span>
                     </div>
-                  </div>
+                  </Field>
                 </div>
-              ))}
-            </ListEditor>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <FieldBlock label="Forma de pagamento padrão">
+                    <Combobox
+                      aria-label="Forma de pagamento padrão"
+                      className={cn(formSelectClass, 'bg-white')}
+                      onChange={(value) => set('defaultPaymentMethod', value as PaymentMethod)}
+                      options={defaultPaymentMethodOptions}
+                      searchPlaceholder="Buscar forma de pagamento..."
+                      value={form.defaultPaymentMethod}
+                    />
+                  </FieldBlock>
+                  {form.hasMonthly ? (
+                    <Field label="Número de ciclos">
+                      <Input
+                        aria-label="Número de ciclos"
+                        className={`sales-ops-num bg-white ${formInputClass}`}
+                        max={MAX_PLAN_INSTALLMENTS}
+                        min={1}
+                        onChange={(event) => set('defaultRecurringCycles', event.target.value)}
+                        placeholder="Indeterminado"
+                        type="number"
+                        value={form.defaultRecurringCycles}
+                      />
+                    </Field>
+                  ) : null}
+                </div>
+                {form.hasMonthly ? (
+                  <div className="text-[11.5px] text-[#8b8b92]">
+                    Deixe em branco para prazo indeterminado
+                  </div>
+                ) : null}
+                <div className="flex items-center gap-2.5 rounded-[11px] border border-[#cfe4cf] bg-[#e2efe2] px-[14px] py-[11px] text-[13px] font-semibold text-[#2f7d4b]">
+                  <RotateCcw className="h-4 w-4 flex-none" />
+                  {planSummary()}
+                </div>
+              </div>
+            </DialogSection>
 
             <ListEditor
+              addDisabled={noFuncoesAvailable || allFuncoesUsed}
               addLabel="Adicionar"
-              empty="Nenhum prestador vinculado"
-              onAdd={() =>
-                set('providers', [
-                  ...form.providers,
-                  {
-                    personName: collaborators[0]?.displayName ?? '',
-                    commissionType: 'pct',
-                    commissionValue: '0',
-                  },
-                ])
+              addTitle={
+                noFuncoesAvailable
+                  ? 'Nenhuma função cadastrada ainda. Cadastre as funções em Cadastros > Funções para definir custos padrão.'
+                  : allFuncoesUsed
+                    ? 'Todas as funções já têm custo padrão'
+                    : undefined
               }
-              subtitle="Vinculados a este produto"
-              title="Prestadores de serviço"
+              empty={
+                noFuncoesAvailable
+                  ? 'Nenhuma função cadastrada ainda. Cadastre as funções em Cadastros > Funções para definir custos padrão.'
+                  : 'Nenhum custo padrão definido'
+              }
+              footer={
+                legacyProviderNames.length ? (
+                  <div className="mt-2.5 text-[12px] text-[#8b8b92]">
+                    Prestadores antigos deste cadastro não foram convertidos automaticamente:{' '}
+                    {legacyProviderNames.join(', ')}. Recadastre o custo por função acima.
+                  </div>
+                ) : null
+              }
+              onAdd={() =>
+                set('funcaoCosts', [...form.funcaoCosts, { funcaoId: '', mode: 'pct', value: '0' }])
+              }
+              subtitle="Quanto cada função custa neste item por padrão"
+              title="Custos padrão por função"
             >
-              {form.providers.map((provider, index) => (
+              {form.funcaoCosts.map((row, index) => (
                 <div className="rounded-xl border border-[#ececf1] bg-[#fafafb] p-[11px]" key={index}>
                   <div className="mb-2 flex items-center gap-2">
                     <div className="min-w-0 flex-1">
                       <Combobox
-                        aria-label={`Prestador ${index + 1}`}
+                        aria-label={`Função do custo padrão ${index + 1}`}
                         className={cn(formSelectClass, 'bg-white')}
-                        emptyMessage="Nenhum prestador cadastrado"
-                        entityGender="m"
-                        entityLabel="prestador"
-                        onChange={(value) => {
-                          const next = [...form.providers];
-                          next[index] = { ...provider, personName: value };
-                          set('providers', next);
-                        }}
-                        // The stored field is a name snapshot, not an id, so a typed name is
-                        // as valid as a listed one. This replaces the free-text datalist.
-                        onCreate={(name) => {
-                          const next = [...form.providers];
-                          next[index] = { ...provider, personName: name };
-                          set('providers', next);
-                        }}
-                        options={collaborators.map((person) => ({
-                          value: person.displayName,
-                          label: person.displayName,
-                          description: person.contactEmail ?? undefined,
-                        }))}
-                        placeholder="Nome"
-                        searchPlaceholder="Buscar ou digitar um nome..."
-                        value={provider.personName}
-                        valueLabel={provider.personName}
+                        emptyMessage="Nenhuma função disponível"
+                        entityGender="f"
+                        entityLabel="função"
+                        onChange={(value) => setCostRow(index, { funcaoId: value })}
+                        /*
+                          A função already used by another row is filtered out, so the
+                          client can never send two rows for one função and trip the
+                          API's duplicate_funcao_cost. The row's own stored função is
+                          always admitted, archived or not.
+                        */
+                        options={costRowFuncaoOptions(row)}
+                        placeholder="Selecione a função"
+                        searchPlaceholder="Buscar função..."
+                        value={row.funcaoId}
+                        /*
+                          Belt and braces for a stored funcaoId that is in `funcoes`
+                          under no status at all, e.g. against a stale bootstrap: the
+                          trigger still names it rather than falling back to the
+                          placeholder and reading as a cost for no função.
+                        */
+                        valueLabel={costRowFuncaoValueLabel(row)}
                       />
                     </div>
                     <button
-                      aria-label="Remover prestador"
+                      aria-label={`Remover custo padrão ${index + 1}`}
                       className="flex h-[34px] w-[34px] flex-none items-center justify-center rounded-[9px] border border-[#e6d3d0] bg-white text-[#b23a22] transition hover:bg-[#fbf0ee]"
                       onClick={() =>
-                        set('providers', form.providers.filter((_, itemIndex) => itemIndex !== index))
+                        set(
+                          'funcaoCosts',
+                          form.funcaoCosts.filter((_, rowIndex) => rowIndex !== index),
+                        )
                       }
                       type="button"
                     >
@@ -3483,40 +3920,108 @@ function ProductDialogBody({
                   <div className="flex gap-2">
                     <div className="flex flex-none gap-[3px] rounded-[9px] bg-[#f2f2f4] p-[3px]">
                       <UnitToggle
-                        active={provider.commissionType === 'pct'}
-                        ariaLabel={`Comissão de ${provider.personName || 'prestador'} em porcentagem`}
-                        onClick={() => {
-                          const next = [...form.providers];
-                          next[index] = { ...provider, commissionType: 'pct' };
-                          set('providers', next);
-                        }}
+                        active={row.mode === 'pct'}
+                        /*
+                          Indexed rather than name-interpolated: the label has to be
+                          stable from the moment the row is added, before a função is
+                          even chosen.
+                        */
+                        ariaLabel={`Custo da função ${index + 1} em porcentagem`}
+                        onClick={() => setCostRow(index, { mode: 'pct' })}
                         value="%"
                       />
                       <UnitToggle
-                        active={provider.commissionType === 'fix'}
-                        ariaLabel={`Comissão de ${provider.personName || 'prestador'} em reais`}
-                        onClick={() => {
-                          const next = [...form.providers];
-                          next[index] = { ...provider, commissionType: 'fix' };
-                          set('providers', next);
-                        }}
+                        active={row.mode === 'fix'}
+                        ariaLabel={`Custo da função ${index + 1} em reais`}
+                        onClick={() => setCostRow(index, { mode: 'fix' })}
                         value="R$"
                       />
                     </div>
                     <UnitInput
-                      ariaLabel={`Comissão de ${provider.personName || 'prestador'}`}
-                      onChange={(value) => {
-                        const next = [...form.providers];
-                        next[index] = { ...provider, commissionValue: value };
-                        set('providers', next);
-                      }}
-                      unit={provider.commissionType === 'fix' ? 'R$' : '%'}
-                      value={provider.commissionValue}
+                      ariaLabel={`Custo da função ${index + 1}`}
+                      onChange={(value) => setCostRow(index, { value })}
+                      unit={row.mode === 'fix' ? 'R$' : '%'}
+                      value={row.value}
                     />
                   </div>
                 </div>
               ))}
             </ListEditor>
+
+            {isService ? null : (
+              <ListEditor
+                addLabel="Adicionar"
+                empty="Nenhum módulo adicionado"
+                onAdd={() =>
+                  set('modules', [...form.modules, { name: '', type: 'Upsell', valueBrl: '0.00' }])
+                }
+                subtitle="Upsell, downsell e complementos"
+                title="Módulos"
+              >
+                {form.modules.map((module, index) => (
+                  <div className="rounded-xl border border-[#ececf1] bg-[#fafafb] p-[11px]" key={index}>
+                    <div className="mb-2 flex items-center gap-2">
+                      <Input
+                        className={`bg-white ${formInputClass}`}
+                        onChange={(event) => {
+                          const next = [...form.modules];
+                          next[index] = { ...module, name: event.target.value };
+                          set('modules', next);
+                        }}
+                        placeholder="Nome do módulo"
+                        value={module.name}
+                      />
+                      <button
+                        aria-label="Remover módulo"
+                        className="flex h-[34px] w-[34px] flex-none items-center justify-center rounded-[9px] border border-[#e6d3d0] bg-white text-[#b23a22] transition hover:bg-[#fbf0ee]"
+                        onClick={() => set('modules', form.modules.filter((_, itemIndex) => itemIndex !== index))}
+                        type="button"
+                      >
+                        <Trash2 className="h-[15px] w-[15px]" />
+                      </button>
+                    </div>
+                    <div className="flex gap-2">
+                      <div className="flex-[0_0_132px]">
+                        <Combobox
+                          aria-label={`Tipo do módulo ${index + 1}`}
+                          className={cn(formSelectClass, 'bg-white')}
+                          onChange={(value) => {
+                            const next = [...form.modules];
+                            next[index] = { ...module, type: value };
+                            set('modules', next);
+                          }}
+                          options={enumOptions([
+                            'Módulo',
+                            'Upsell',
+                            'Downsell',
+                            'Cross-sell',
+                            'Add-on',
+                          ])}
+                          searchPlaceholder="Buscar tipo..."
+                          value={module.type}
+                        />
+                      </div>
+                      <div className="relative flex-1">
+                        <span className="pointer-events-none absolute left-[11px] top-1/2 -translate-y-1/2 text-[12.5px] font-bold text-[#9b9ba3]">
+                          R$
+                        </span>
+                        <Input
+                          className={`sales-ops-num bg-white pl-8 ${formInputClass}`}
+                          onChange={(event) => {
+                            const next = [...form.modules];
+                            next[index] = { ...module, valueBrl: event.target.value };
+                            set('modules', next);
+                          }}
+                          placeholder="0"
+                          type="number"
+                          value={module.valueBrl}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </ListEditor>
+            )}
           </div>
 
           <div className="flex flex-none justify-end gap-2.5 border-t border-[#e8e8ec] bg-[#fafafb] px-6 py-4">
@@ -3541,40 +4046,76 @@ function ProductDialogBody({
   );
 }
 
-function ListEditor({
+/**
+ * The one section-header recipe inside a dialog. `ListEditor` renders through it,
+ * so a repeating-row section and a plain section are typographically identical.
+ */
+function DialogSection({
   title,
   subtitle,
-  empty,
-  addLabel,
-  onAdd,
+  action,
   children,
 }: {
   title: string;
   subtitle?: string;
-  empty: string;
-  addLabel: string;
-  onAdd: () => void;
+  action?: ReactNode;
   children: ReactNode;
 }) {
-  const hasChildren = Array.isArray(children) ? children.length > 0 : Boolean(children);
   return (
     <div className="border-t border-[#ececf1] pt-4">
-      <div className="mb-2.5 flex items-center justify-between">
-        <div>
+      <div className="mb-2.5 flex items-center justify-between gap-3">
+        <div className="min-w-0">
           <div className="text-[11px] font-bold uppercase tracking-[0.06em] text-[#9b9ba3]">
             {title}
           </div>
           {subtitle ? <div className="mt-0.5 text-[11.5px] text-[#b0b0b8]">{subtitle}</div> : null}
         </div>
+        {action}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function ListEditor({
+  title,
+  subtitle,
+  empty,
+  addLabel,
+  addDisabled,
+  addTitle,
+  onAdd,
+  children,
+  footer,
+}: {
+  title: string;
+  subtitle?: string;
+  empty: string;
+  addLabel: string;
+  addDisabled?: boolean;
+  addTitle?: string;
+  onAdd: () => void;
+  children: ReactNode;
+  footer?: ReactNode;
+}) {
+  const hasChildren = Array.isArray(children) ? children.length > 0 : Boolean(children);
+  return (
+    <DialogSection
+      action={
         <button
-          className="flex items-center gap-1 rounded-[9px] border border-[#dcdce2] bg-white px-[11px] py-[7px] text-[12.5px] font-bold text-[#57575f] transition hover:border-[#eaa81a] hover:bg-[#f2f2f4] hover:text-[#9c7210]"
+          className="flex flex-none items-center gap-1 rounded-[9px] border border-[#dcdce2] bg-white px-[11px] py-[7px] text-[12.5px] font-bold text-[#57575f] transition hover:border-[#eaa81a] hover:bg-[#f2f2f4] hover:text-[#9c7210] disabled:cursor-not-allowed disabled:border-[#ececf1] disabled:bg-[#f6f6f8] disabled:text-[#b6b6bd]"
+          disabled={addDisabled}
           onClick={onAdd}
+          title={addTitle}
           type="button"
         >
           <Plus className="h-[13px] w-[13px]" />
           {addLabel}
         </button>
-      </div>
+      }
+      subtitle={subtitle}
+      title={title}
+    >
       <div className="flex flex-col gap-2">
         {hasChildren ? (
           children
@@ -3584,7 +4125,8 @@ function ListEditor({
           </div>
         )}
       </div>
-    </div>
+      {footer}
+    </DialogSection>
   );
 }
 
@@ -4801,7 +5343,14 @@ function SaleWizardDialogBody({
           productId: product?.id,
           areaId: product?.areaId ?? undefined,
           productName: saleItemDisplayName(item),
-          productType: product?.type ?? 'SaaS',
+          /*
+            A literal, not a read off the product: `type` was renamed to `kind` and
+            the API no longer returns it, so `product?.type` was always `undefined`
+            and this expression always took the fallback. The value on the wire is
+            unchanged, because the server derives `product_type_snapshot` from the
+            product's own `kind` and ignores whatever the client sends here.
+          */
+          productType: 'SaaS',
           quantity: item.quantity,
           unitBrl: parseCurrencyToCents(item.unitBrl),
         };
@@ -5267,7 +5816,8 @@ function SaleWizardDialogBody({
                             {showAreaError ? (
                               <div className="grid grid-cols-[minmax(0,1fr)_70px_130px_120px_36px] gap-[9px]">
                                 <span className="text-[11.5px] font-semibold text-destructive">
-                                  Defina a área deste produto em Cadastros {'>'} Produtos.
+                                  Defina a área deste produto em Cadastros {'>'} Produtos &
+                                  Serviços.
                                 </span>
                               </div>
                             ) : null}

@@ -161,6 +161,7 @@ function bootstrap(): SalesOpsBootstrap {
     payables: [],
     saleItems: [],
     receivables: [],
+    productFuncaoCosts: [],
     saleProfessionals: [],
     settings: null,
   };

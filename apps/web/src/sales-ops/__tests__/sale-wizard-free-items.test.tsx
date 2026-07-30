@@ -53,7 +53,6 @@ function product(patch: Partial<SalesOpsProduct> = {}): SalesOpsProduct {
     id: fixedProductId,
     orgId: 'org-test',
     name: 'FXL Finance',
-    type: 'SaaS',
     codeSuffix: 'FIN',
     areaId: areaOneId,
     openPrice: false,
@@ -126,6 +125,7 @@ function baseBootstrap(patch: Partial<SalesOpsBootstrap> = {}): SalesOpsBootstra
     payables: [],
     saleItems: [],
     receivables: [],
+    productFuncaoCosts: [],
     saleProfessionals: [],
     settings: {
       orgId: 'org-test',
@@ -284,7 +284,9 @@ describe('sale wizard free-form items', () => {
 
     await click(buttonByText('Avançar'));
 
-    expect(container.textContent).toContain('Defina a área deste produto em Cadastros > Produtos.');
+    expect(container.textContent).toContain(
+      'Defina a área deste produto em Cadastros > Produtos & Serviços.',
+    );
     expect(container.textContent).toContain('Cliente e responsáveis');
   });
 });
