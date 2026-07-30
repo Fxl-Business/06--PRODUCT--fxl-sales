@@ -1,0 +1,658 @@
+// @vitest-environment happy-dom
+
+import * as React from 'react';
+import type { HTMLAttributes } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { SaleWizardDialog } from '../SalesOpsApp';
+import type {
+  CreateSalePayload,
+  SalesOpsBootstrap,
+  SalesOpsFuncao,
+  SalesOpsPersonFuncao,
+  SalesOpsProduct,
+  SalesOpsProductFuncaoCost,
+  SalesOpsSale,
+} from '../types';
+
+vi.mock('@/components/ui/dialog', () => ({
+  Dialog: ({ children }: HTMLAttributes<HTMLDivElement>) => <div>{children}</div>,
+  DialogContent: ({ children, className }: HTMLAttributes<HTMLDivElement>) => (
+    <div className={className}>{children}</div>
+  ),
+  DialogDescription: ({ children, ...props }: HTMLAttributes<HTMLParagraphElement>) => (
+    <p {...props}>{children}</p>
+  ),
+  DialogHeader: ({ children, ...props }: HTMLAttributes<HTMLDivElement>) => (
+    <div {...props}>{children}</div>
+  ),
+  DialogTitle: ({ children, ...props }: HTMLAttributes<HTMLHeadingElement>) => (
+    <h2 {...props}>{children}</h2>
+  ),
+}));
+
+const act = (React as typeof React & { act: typeof import('react-dom/test-utils').act }).act;
+
+const areaId = '66666666-6666-4666-8666-666666666666';
+const customProductId = '11111111-1111-4111-8111-111111111111';
+const landingProductId = '22222222-2222-4222-8222-222222222222';
+const clientId = '33333333-3333-4333-8333-333333333333';
+const sellerId = '44444444-4444-4444-8444-444444444444';
+const deliveryPersonId = '88888888-8888-4888-8888-888888888888';
+const inactivePersonId = '99999999-9999-4999-8999-999999999999';
+const devFuncaoId = 'fc000010-0000-4000-8000-000000000010';
+const testerFuncaoId = 'fc000011-0000-4000-8000-000000000011';
+const vendedorFuncaoId = 'fc000001-0000-4000-8000-000000000001';
+const archivedFuncaoId = 'fc000012-0000-4000-8000-000000000012';
+const saleId = '77777777-7777-4777-8777-777777777777';
+
+const funcaoVendedor: SalesOpsPersonFuncao = {
+  id: vendedorFuncaoId,
+  name: 'Vendedor',
+  slug: 'vendedor',
+  isSystem: true,
+};
+
+function funcao(id: string, name: string, patch: Partial<SalesOpsFuncao> = {}): SalesOpsFuncao {
+  return {
+    id,
+    orgId: 'org-test',
+    name,
+    slug: name.toLowerCase(),
+    isSystem: false,
+    status: 'active',
+    createdAt: '2026-07-13T12:00:00.000Z',
+    updatedAt: null,
+    ...patch,
+  };
+}
+
+function product(id: string, name: string, setupBrl: number): SalesOpsProduct {
+  return {
+    id,
+    orgId: 'org-test',
+    name,
+    codeSuffix: id.startsWith('1') ? '1' : '2',
+    areaId,
+    openPrice: false,
+    setupBrl,
+    hasMonthly: false,
+    monthlyBrl: 0,
+    recurringCommission: false,
+    hasFinderCommission: false,
+    sellerCommissionType: 'pct',
+    sellerCommissionValue: '10',
+    sellerWithFinderCommissionType: 'pct',
+    sellerWithFinderCommissionValue: '7',
+    finderCommissionType: 'pct',
+    finderCommissionValue: '3',
+    modules: [],
+    providers: [],
+    status: 'active',
+    createdAt: '2026-07-13T12:00:00.000Z',
+    updatedAt: null,
+  };
+}
+
+/** FXL Custom is the primary item at 1 x R$ 20.000,00. */
+const productCustom = product(customProductId, 'FXL Custom', 2000000);
+const productLanding = product(landingProductId, 'Landing Page', 1000000);
+
+function costRow(patch: Partial<SalesOpsProductFuncaoCost>): SalesOpsProductFuncaoCost {
+  return {
+    id: `cost-${patch.productId}-${patch.funcaoId}`,
+    orgId: 'org-test',
+    productId: customProductId,
+    funcaoId: devFuncaoId,
+    mode: 'pct',
+    valuePct: '5.00',
+    valueBrl: null,
+    createdAt: '2026-07-13T12:00:00.000Z',
+    updatedAt: null,
+    ...patch,
+  };
+}
+
+const bootstrap: SalesOpsBootstrap = {
+  sales: [],
+  products: [productCustom, productLanding],
+  clients: [
+    {
+      id: clientId,
+      orgId: 'org-test',
+      name: 'Client A',
+      contact: null,
+      createdAt: '2026-07-13T12:00:00.000Z',
+      updatedAt: null,
+    },
+  ],
+  funcoes: [
+    funcao(devFuncaoId, 'Desenvolvedor'),
+    funcao(testerFuncaoId, 'Testador'),
+    funcao(vendedorFuncaoId, 'Vendedor', { slug: 'vendedor', isSystem: true }),
+    funcao(archivedFuncaoId, 'Arquivada', { status: 'archived' }),
+  ],
+  people: [
+    {
+      id: sellerId,
+      orgId: 'org-test',
+      displayName: 'Ana Martins',
+      contactEmail: null,
+      status: 'active',
+      // Vendedor only: a pessoa the OLD isCollaborator picker would have hidden.
+      funcaoIds: [vendedorFuncaoId],
+      funcoes: [funcaoVendedor],
+      createdAt: '2026-07-13T12:00:00.000Z',
+      updatedAt: null,
+    },
+    {
+      id: deliveryPersonId,
+      orgId: 'org-test',
+      displayName: 'Bruno Entrega',
+      contactEmail: null,
+      status: 'active',
+      funcaoIds: [devFuncaoId],
+      funcoes: [{ id: devFuncaoId, name: 'Desenvolvedor', slug: 'desenvolvedor', isSystem: false }],
+      createdAt: '2026-07-13T12:00:00.000Z',
+      updatedAt: null,
+    },
+    {
+      id: inactivePersonId,
+      orgId: 'org-test',
+      displayName: 'Zulmira Inativa',
+      contactEmail: null,
+      status: 'inactive',
+      funcaoIds: [devFuncaoId],
+      funcoes: [{ id: devFuncaoId, name: 'Desenvolvedor', slug: 'desenvolvedor', isSystem: false }],
+      createdAt: '2026-07-13T12:00:00.000Z',
+      updatedAt: null,
+    },
+  ],
+  areas: [
+    {
+      id: areaId,
+      orgId: 'org-test',
+      name: 'FXL Tech',
+      status: 'active',
+      createdAt: '2026-07-13T12:00:00.000Z',
+      updatedAt: null,
+    },
+  ],
+  payables: [],
+  saleItems: [],
+  receivables: [],
+  productFuncaoCosts: [
+    costRow({ productId: customProductId, funcaoId: devFuncaoId, mode: 'pct', valuePct: '5.00' }),
+    costRow({
+      productId: customProductId,
+      funcaoId: testerFuncaoId,
+      mode: 'fix',
+      valuePct: null,
+      valueBrl: 30000,
+    }),
+    costRow({
+      productId: landingProductId,
+      funcaoId: testerFuncaoId,
+      mode: 'fix',
+      valuePct: null,
+      valueBrl: 30000,
+    }),
+  ],
+  saleProfessionals: [],
+  settings: {
+    orgId: 'org-test',
+    legalName: '',
+    document: '',
+    phone: '',
+    financeEmail: '',
+    defaultSellerCommissionPct: '9',
+    defaultFinderCommissionPct: '2',
+    defaultTaxPct: '6',
+    currency: 'BRL',
+    taxRegime: 'Simples Nacional',
+    periodClosingDay: 1,
+    tableDensity: 'comfortable',
+    dateFormat: 'dd/mm/aaaa',
+    language: 'pt-BR',
+    commissionOnRecurring: true,
+    sellerCanBeFinder: true,
+    createdAt: '2026-07-13T12:00:00.000Z',
+    updatedAt: null,
+  },
+};
+
+/** A stored proposta whose professional row is a LEGACY free-text one. */
+const editSale: SalesOpsSale = {
+  id: saleId,
+  orgId: 'org-test',
+  sequence: 1,
+  code: '0001-1',
+  clientId,
+  clientNameSnapshot: 'Client A',
+  sellerPersonId: sellerId,
+  sellerNameSnapshot: 'Ana Martins',
+  finderPersonId: null,
+  finderNameSnapshot: null,
+  status: 'open',
+  paymentMethod: 'pix',
+  condition: 'cash',
+  installments: 1,
+  baseDate: '2026-07-13T00:00:00.000Z',
+  notes: null,
+  wonAt: null,
+  lostAt: null,
+  totalBrl: 2000000,
+  recurringBrl: 0,
+  sellerCommissionPct: '10.00',
+  finderCommissionPct: '2.00',
+  taxPct: '6.00',
+  otherCostsBrl: 0,
+  professionalCostsBrl: 777777,
+  sellerCommissionBrl: 200000,
+  finderCommissionBrl: 0,
+  taxBrl: 120000,
+  netMarginBrl: 902223,
+  netMarginPct: '45.11',
+  createdAt: '2026-07-13T12:00:00.000Z',
+  updatedAt: null,
+};
+
+const editBootstrap: SalesOpsBootstrap = {
+  ...bootstrap,
+  sales: [editSale],
+  saleItems: [
+    {
+      saleId,
+      productId: customProductId,
+      productNameSnapshot: 'FXL Custom',
+      productTypeSnapshot: 'product',
+      quantity: 1,
+      unitBrl: 2000000,
+      subtotalBrl: 2000000,
+      areaId,
+      areaNameSnapshot: 'FXL Tech',
+    },
+  ],
+  receivables: [
+    {
+      id: 'rec-1',
+      saleId,
+      label: '1/1',
+      dueDate: '2026-07-13',
+      amountBrl: 2000000,
+      method: 'pix',
+      status: 'open',
+    },
+  ],
+  saleProfessionals: [
+    {
+      saleId,
+      personId: null,
+      personNameSnapshot: 'Dev Externo',
+      funcaoId: null,
+      funcaoNameSnapshot: '',
+      role: 'Operacional',
+      costBrl: 777777,
+    },
+  ],
+};
+
+let container: HTMLDivElement;
+let root: Root;
+let onSave: ReturnType<typeof vi.fn<(payload: CreateSalePayload) => void>>;
+
+async function renderWizard(sale: SalesOpsSale | null = null) {
+  (
+    globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
+  ).IS_REACT_ACT_ENVIRONMENT = true;
+  container = document.createElement('div');
+  document.body.append(container);
+  root = createRoot(container);
+  onSave = vi.fn<(payload: CreateSalePayload) => void>();
+  await act(async () => {
+    root.render(
+      <SaleWizardDialog
+        bootstrap={sale ? editBootstrap : bootstrap}
+        editSale={sale}
+        onClose={vi.fn()}
+        onSave={onSave}
+        open
+        saving={false}
+      />,
+    );
+  });
+}
+
+afterEach(async () => {
+  await act(async () => root.unmount());
+  container.remove();
+  vi.restoreAllMocks();
+});
+
+function buttonByText(label: string): HTMLButtonElement {
+  const match = [...container.querySelectorAll('button')].find(
+    (candidate) => candidate.textContent?.trim() === label,
+  );
+  if (!(match instanceof HTMLButtonElement)) throw new Error(`button not found: ${label}`);
+  return match;
+}
+
+function labeledInput(label: string): HTMLInputElement {
+  const match = container.querySelector(`input[aria-label="${label}"]`);
+  if (!(match instanceof HTMLInputElement)) throw new Error(`input not found: ${label}`);
+  return match;
+}
+
+function comboboxTrigger(ariaLabel: string): HTMLButtonElement {
+  const match = container.querySelector(`button[role="combobox"][aria-label="${ariaLabel}"]`);
+  if (!(match instanceof HTMLButtonElement)) throw new Error(`combobox not found: ${ariaLabel}`);
+  return match;
+}
+
+function comboboxText(ariaLabel: string): string {
+  return comboboxTrigger(ariaLabel).textContent?.trim() ?? '';
+}
+
+function optionLabels(): string[] {
+  return [...container.querySelectorAll('[role="option"]')].map(
+    (row) => row.textContent?.trim() ?? '',
+  );
+}
+
+async function openPicker(ariaLabel: string): Promise<string[]> {
+  await click(comboboxTrigger(ariaLabel));
+  return optionLabels();
+}
+
+/** For a picker whose rows carry a description, e.g. the produto's área. */
+async function pickOptionStartingWith(ariaLabel: string, optionLabel: string) {
+  await click(comboboxTrigger(ariaLabel));
+  const row = [...container.querySelectorAll('[role="option"]')].find((candidate) =>
+    candidate.textContent?.trim().startsWith(optionLabel),
+  );
+  if (!(row instanceof HTMLElement)) throw new Error(`option not found: ${optionLabel}`);
+  await click(row);
+}
+
+async function pickOption(ariaLabel: string, optionLabel: string) {
+  await click(comboboxTrigger(ariaLabel));
+  const row = [...container.querySelectorAll('[role="option"]')].find(
+    (candidate) => candidate.textContent?.trim() === optionLabel,
+  );
+  if (!(row instanceof HTMLElement)) throw new Error(`option not found: ${optionLabel}`);
+  await click(row);
+}
+
+async function click(element: HTMLElement) {
+  await act(async () => element.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+}
+
+async function typeInto(input: HTMLInputElement, value: string) {
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+    setter?.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
+async function flushReact() {
+  await act(async () => Promise.resolve());
+}
+
+async function goToCosts() {
+  await click(buttonByText('Avançar'));
+  await click(buttonByText('Avançar'));
+}
+
+async function backToProposta() {
+  await click(buttonByText('Voltar'));
+  await click(buttonByText('Voltar'));
+}
+
+async function addProfessional() {
+  await click(buttonByText('+ profissional'));
+  await flushReact();
+}
+
+/** The panel text under a row's `CUSTO ALOCADO`, chip or derivation alike. */
+function rowFooterText(index = 1): string {
+  const cost = labeledInput(`Custo alocado do profissional ${index}`);
+  return cost.parentElement?.textContent?.trim() ?? '';
+}
+
+describe('sale wizard profissionais alocados', () => {
+  it('offers every active pessoa in the profissional picker and no longer offers Digite manualmente', async () => {
+    await renderWizard();
+    await goToCosts();
+    await addProfessional();
+
+    const options = await openPicker('Profissional 1');
+    // A vendedor-only pessoa is offered: allocation is no longer gated on
+    // "carries a non-system função".
+    expect(options).toContain('Ana Martins');
+    expect(options).toContain('Bruno Entrega');
+    // Inactive stays out, and the old free-text escape hatch is gone.
+    expect(options).not.toContain('Zulmira Inativa');
+    expect(options).not.toContain('Digite manualmente');
+  });
+
+  it('picks a funcao from the registry and lists only active funcoes', async () => {
+    await renderWizard();
+    await goToCosts();
+    await addProfessional();
+
+    const options = await openPicker('Função do profissional 1');
+    expect(options).toEqual(['Desenvolvedor', 'Testador', 'Vendedor']);
+    expect(options).not.toContain('Arquivada');
+  });
+
+  it('starts a new row with no funcao instead of the old hardcoded Operacional', async () => {
+    await renderWizard();
+    await goToCosts();
+    await addProfessional();
+
+    expect(comboboxText('Função do profissional 1')).toBe('Selecionar função...');
+    expect(container.textContent).not.toContain('Operacional');
+  });
+
+  it('prefills a percent funcao cost from the declaring item subtotal and shows the derivation', async () => {
+    await renderWizard();
+    await goToCosts();
+    await addProfessional();
+    await pickOption('Função do profissional 1', 'Desenvolvedor');
+    await flushReact();
+
+    // 5% of the FXL Custom subtotal of R$ 20.000,00.
+    expect(labeledInput('Custo alocado do profissional 1').value).toBe('1000');
+    expect(rowFooterText()).toContain('5% de FXL Custom (R$ 20.000,00)');
+  });
+
+  it('prefills a fixed funcao cost and leaves it editable', async () => {
+    await renderWizard();
+    await goToCosts();
+    await addProfessional();
+    await pickOption('Função do profissional 1', 'Testador');
+    await flushReact();
+    expect(labeledInput('Custo alocado do profissional 1').value).toBe('300');
+
+    await typeInto(labeledInput('Custo alocado do profissional 1'), '450');
+    expect(rowFooterText()).toContain('Alterado manualmente');
+
+    // Moving the item price recomputes every non-manual row; this one is manual.
+    await backToProposta();
+    await typeInto(labeledInput('Valor unitário do item 1'), '30000');
+    await flushReact();
+    await goToCosts();
+    expect(labeledInput('Custo alocado do profissional 1').value).toBe('450');
+    expect(rowFooterText()).toContain('Alterado manualmente');
+  });
+
+  it('sums a fixed default across every item whose product declares the funcao', async () => {
+    await renderWizard();
+    await click(buttonByText('+ item'));
+    await flushReact();
+    await pickOptionStartingWith('Produto / serviço do item 2', 'Landing Page');
+    await flushReact();
+    await goToCosts();
+    await addProfessional();
+    await pickOption('Função do profissional 1', 'Testador');
+    await flushReact();
+
+    // R$ 300,00 from FXL Custom plus R$ 300,00 from Landing Page.
+    expect(labeledInput('Custo alocado do profissional 1').value).toBe('600');
+    expect(rowFooterText()).toContain('R$ 300,00 de FXL Custom + R$ 300,00 de Landing Page');
+  });
+
+  it('excludes the recurring mensalidade from the percent base', async () => {
+    await renderWizard();
+    await goToCosts();
+    await addProfessional();
+    await pickOption('Função do profissional 1', 'Desenvolvedor');
+    await flushReact();
+    expect(labeledInput('Custo alocado do profissional 1').value).toBe('1000');
+
+    await click(buttonByText('Voltar'));
+    await pickOption('Recorrência', 'mensal');
+    await flushReact();
+    await typeInto(labeledInput('Valor da mensalidade'), '5000');
+    await flushReact();
+    expect(labeledInput('Valor da mensalidade').value).toBe('5000');
+    await click(buttonByText('Avançar'));
+
+    // A professional_cost payable is one-shot at win, so a monthly stream must not
+    // enter its base.
+    expect(labeledInput('Custo alocado do profissional 1').value).toBe('1000');
+    expect(rowFooterText()).toContain('5% de FXL Custom (R$ 20.000,00)');
+  });
+
+  it('re-prefills the cost when the funcao changes on a row the operator never typed into', async () => {
+    await renderWizard();
+    await goToCosts();
+    await addProfessional();
+    await pickOption('Função do profissional 1', 'Desenvolvedor');
+    await flushReact();
+    expect(labeledInput('Custo alocado do profissional 1').value).toBe('1000');
+
+    await pickOption('Função do profissional 1', 'Testador');
+    await flushReact();
+    expect(labeledInput('Custo alocado do profissional 1').value).toBe('300');
+  });
+
+  it('keeps a hand-typed cost when the funcao on that row changes', async () => {
+    await renderWizard();
+    await goToCosts();
+    await addProfessional();
+    await pickOption('Função do profissional 1', 'Desenvolvedor');
+    await flushReact();
+    await typeInto(labeledInput('Custo alocado do profissional 1'), '450');
+
+    await pickOption('Função do profissional 1', 'Testador');
+    await flushReact();
+
+    // Pinned: Testador's R$ 300,00 default does not overwrite the typed 450.
+    expect(comboboxText('Função do profissional 1')).toBe('Testador');
+    expect(labeledInput('Custo alocado do profissional 1').value).toBe('450');
+    expect(rowFooterText()).toContain('Alterado manualmente');
+
+    // Positive control on the same row: Restaurar padrão clears the pin and the
+    // cost snaps to the new função's default, so the pin above is a real guard.
+    const restore = [...container.querySelectorAll('button')].find(
+      (candidate) => candidate.textContent?.trim() === 'Restaurar padrão',
+    );
+    if (!(restore instanceof HTMLButtonElement)) throw new Error('Restaurar padrão not found');
+    await click(restore);
+    await flushReact();
+    expect(labeledInput('Custo alocado do profissional 1').value).toBe('300');
+    expect(rowFooterText()).toContain('R$ 300,00 de FXL Custom');
+  });
+
+  it('does not touch the cost when only the pessoa changes', async () => {
+    await renderWizard();
+    await goToCosts();
+    await addProfessional();
+    await pickOption('Função do profissional 1', 'Desenvolvedor');
+    await flushReact();
+    expect(labeledInput('Custo alocado do profissional 1').value).toBe('1000');
+
+    await pickOption('Profissional 1', 'Bruno Entrega');
+    await flushReact();
+    expect(comboboxText('Profissional 1')).toBe('Bruno Entrega');
+    expect(labeledInput('Custo alocado do profissional 1').value).toBe('1000');
+  });
+
+  it('keeps a stored professional cost when editing an existing proposta', async () => {
+    await renderWizard(editSale);
+    await goToCosts();
+    expect(labeledInput('Custo alocado do profissional 1').value).toBe('7777.77');
+
+    await backToProposta();
+    await typeInto(labeledInput('Valor unitário do item 1'), '30000');
+    await flushReact();
+    await goToCosts();
+    expect(labeledInput('Custo alocado do profissional 1').value).toBe('7777.77');
+  });
+
+  it('renders a legacy free-text funcao snapshot when the row has no funcaoId', async () => {
+    await renderWizard(editSale);
+    await goToCosts();
+
+    expect(comboboxText('Função do profissional 1')).toBe('Operacional');
+    expect(comboboxText('Profissional 1')).toBe('Dev Externo');
+  });
+
+  it('blocks advancing past Custos e margem when a profissional row has no funcao', async () => {
+    await renderWizard();
+    await goToCosts();
+    await addProfessional();
+    expect(container.textContent).toContain('Passo 3 de 4');
+
+    await click(buttonByText('Avançar'));
+    await flushReact();
+    expect(container.textContent).toContain('Passo 3 de 4');
+    expect(container.textContent).toContain('Selecione a função de cada profissional alocado.');
+
+    // Positive control: picking a função unblocks the same button.
+    await pickOption('Função do profissional 1', 'Desenvolvedor');
+    await flushReact();
+    await click(buttonByText('Avançar'));
+    await flushReact();
+    expect(container.textContent).toContain('Passo 4 de 4');
+    expect(container.textContent).not.toContain('Selecione a função de cada profissional alocado.');
+  });
+
+  it('sends funcaoId and the funcao name as role in the save payload', async () => {
+    await renderWizard();
+    await goToCosts();
+    await addProfessional();
+    await pickOption('Profissional 1', 'Bruno Entrega');
+    await pickOption('Função do profissional 1', 'Desenvolvedor');
+    await flushReact();
+    await click(buttonByText('Salvar rascunho'));
+
+    expect(onSave).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        professionals: [
+          {
+            personId: deliveryPersonId,
+            personName: 'Bruno Entrega',
+            funcaoId: devFuncaoId,
+            role: 'Desenvolvedor',
+            costBrl: 100000,
+          },
+        ],
+      }),
+    );
+  });
+
+  it('shows the funcao on the Custo profissional row of the payables preview', async () => {
+    await renderWizard();
+    await goToCosts();
+    await addProfessional();
+    await pickOption('Profissional 1', 'Bruno Entrega');
+    await pickOption('Função do profissional 1', 'Desenvolvedor');
+    await flushReact();
+    await click(buttonByText('Avançar'));
+
+    expect(container.textContent).toContain('Alocação - Bruno Entrega · Desenvolvedor');
+  });
+});

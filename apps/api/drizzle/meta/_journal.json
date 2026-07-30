@@ -99,6 +99,13 @@
       "when": 1785379099310,
       "tag": "0013_produtos_servicos_defaults",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1785427740000,
+      "tag": "0014_sale_professional_funcoes",
+      "breakpoints": true
     }
   ]
 }

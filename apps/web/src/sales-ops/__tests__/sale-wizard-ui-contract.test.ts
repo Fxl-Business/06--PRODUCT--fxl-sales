@@ -36,6 +36,20 @@ describe('sale wizard UI contract', () => {
     expect(source).toContain('A soma das parcelas precisa ser igual ao total da proposta.');
     expect(source).toContain('por prazo indeterminado');
     expect(source).toContain('Previsão de contas a pagar');
+    /*
+      Overrides. `Alterado manualmente` and `Restaurar padrão` are the visible
+      contract that a cadastro number is a default the operator may take over;
+      `Custos profissionais` and `Outros custos` are the Revisão breakdown that
+      replaced the single opaque `Custos + imposto` line.
+    */
+    expect(source).toContain('Alterado manualmente');
+    expect(source).toContain('Restaurar padrão');
+    expect(source).toContain('Custos profissionais');
+    expect(source).toContain('Selecione a função de cada profissional alocado.');
+    expect(source).not.toContain('Custos + imposto');
+    // The two free-text escape hatches Profissionais alocados used to carry.
+    expect(source).not.toContain('Digite manualmente');
+    expect(source).not.toContain("role: 'Operacional'");
     expect(source).toContain('Passo {wizardStep} de 4');
     expect(source).toContain('Avançar');
     expect(source).toContain('Salvar proposta');

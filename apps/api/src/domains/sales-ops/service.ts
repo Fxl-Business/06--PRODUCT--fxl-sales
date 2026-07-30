@@ -1,3 +1,4 @@
+import { computeSaleFinancials, pctOfCents } from '@fxl-sales/shared-utils';
 import { and, asc, desc, eq, gt, inArray, ne, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { getDb } from '../../db/client.js';
@@ -348,12 +349,29 @@ export const SaleItemSchema = z
     }
   });
 
-export const SaleProfessionalSchema = z.object({
-  personId: uuid.optional(),
-  personName: z.string().min(1),
-  role: z.string().min(1),
-  costBrl: money,
-});
+/**
+ * `funcaoNameSnapshot` is deliberately absent: the snapshot is derived server-side
+ * from the resolved cadastro row, so a client can never author the label a
+ * proposta stores. `role` stays accepted but optional, which keeps a legacy
+ * free-text payload legal while a funcaoId-only payload becomes legal too.
+ */
+export const SaleProfessionalSchema = z
+  .object({
+    personId: uuid.optional(),
+    personName: z.string().min(1),
+    funcaoId: uuid.optional(),
+    role: z.string().min(1).optional(),
+    costBrl: money,
+  })
+  .superRefine((row, ctx) => {
+    if (!row.funcaoId && !row.role?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['funcaoId'],
+        message: 'funcao_or_role_required',
+      });
+    }
+  });
 
 function validatePaymentPlan(
   data: {
@@ -462,10 +480,6 @@ function addMonths(value: string, months: number): string {
   return target.toISOString().slice(0, 10);
 }
 
-function pctOf(amount: number, rate: number): number {
-  return Math.floor((amount * rate) / 100);
-}
-
 /**
  * The stored default-payment block, exactly as a product row returns it
  * (`defaultEntradaPct` is a numeric(5,2) and therefore a string).
@@ -549,7 +563,20 @@ export function materializeDefaultPaymentPlan(input: {
 
 export class SaleInputError extends Error {
   constructor(
-    readonly code: 'product_not_found' | 'product_area_missing' | 'area_not_found',
+    readonly code:
+      | 'product_not_found'
+      | 'product_area_missing'
+      | 'area_not_found'
+      | 'seller_not_found'
+      | 'finder_not_found'
+      | 'person_not_found'
+      | 'funcao_not_found',
+    /**
+     * The offending `items[]` index, or the offending `professionals[]` index for
+     * `person_not_found` / `funcao_not_found`. `-1` means the error is not about
+     * an array row at all, which is the case for `seller_not_found` and
+     * `finder_not_found`.
+     */
     readonly itemIndex: number,
   ) {
     super(code);
@@ -617,6 +644,81 @@ async function resolveSaleItemContexts(
   });
 }
 
+/**
+ * The four ids a sale write accepts that name an org-scoped cadastro row: the
+ * vendedor, the finder, and each profissional's pessoa and função.
+ *
+ * Until this resolver existed they were written straight through as bare uuids
+ * with no in-org check, and the single-column FKs to sales_ops_people do NOT
+ * consult the RLS predicate, so org A could pin org B's pessoa onto its own
+ * proposta. Resolving them here, inside the caller's `withTenant` transaction and
+ * always through `and(eq(table.orgId, orgId), inArray(table.id, ids))`, is what
+ * makes that impossible; the composite (org_id, funcao_id) FK is the second,
+ * database-level defence for the função.
+ *
+ * The resolved rows are also the ONLY source of the two snapshots the ledger
+ * writes, so a body that disagrees with the cadastro loses.
+ */
+export type ResolvedPartyContexts = {
+  people: Map<string, { id: string; displayName: string }>;
+  funcoes: Map<string, { id: string; name: string }>;
+};
+
+async function resolvePartyContexts(
+  tx: Db,
+  orgId: string,
+  input: Pick<CreateSaleInput, 'sellerPersonId' | 'finderPersonId' | 'professionals'>,
+): Promise<ResolvedPartyContexts> {
+  const personIds = [
+    ...new Set(
+      [
+        input.sellerPersonId,
+        input.finderPersonId,
+        ...input.professionals.map((professional) => professional.personId),
+      ].filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  const people = personIds.length
+    ? await tx
+        .select({ id: salesOpsPeople.id, displayName: salesOpsPeople.displayName })
+        .from(salesOpsPeople)
+        .where(and(eq(salesOpsPeople.orgId, orgId), inArray(salesOpsPeople.id, personIds)))
+    : [];
+  const peopleById = new Map(people.map((person) => [person.id, person]));
+
+  const funcaoIds = [
+    ...new Set(
+      input.professionals
+        .map((professional) => professional.funcaoId)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  const funcoes = funcaoIds.length
+    ? await tx
+        .select({ id: salesOpsFuncoes.id, name: salesOpsFuncoes.name })
+        .from(salesOpsFuncoes)
+        .where(and(eq(salesOpsFuncoes.orgId, orgId), inArray(salesOpsFuncoes.id, funcaoIds)))
+    : [];
+  const funcoesById = new Map(funcoes.map((funcao) => [funcao.id, funcao]));
+
+  if (input.sellerPersonId && !peopleById.has(input.sellerPersonId)) {
+    throw new SaleInputError('seller_not_found', -1);
+  }
+  if (input.finderPersonId && !peopleById.has(input.finderPersonId)) {
+    throw new SaleInputError('finder_not_found', -1);
+  }
+  input.professionals.forEach((professional, index) => {
+    if (professional.personId && !peopleById.has(professional.personId)) {
+      throw new SaleInputError('person_not_found', index);
+    }
+    if (professional.funcaoId && !funcoesById.has(professional.funcaoId)) {
+      throw new SaleInputError('funcao_not_found', index);
+    }
+  });
+
+  return { people: peopleById, funcoes: funcoesById };
+}
+
 export type ReceivableDraft = {
   label: string;
   dueDate: string;
@@ -625,7 +727,17 @@ export type ReceivableDraft = {
   status: 'open';
 };
 
-export function buildSaleLedger(input: CreateSaleInput, itemContexts: ResolvedItemContext[]) {
+/** No pessoa and no função resolved: every snapshot falls back to the request body. */
+export const EMPTY_PARTY_CONTEXTS: ResolvedPartyContexts = {
+  people: new Map(),
+  funcoes: new Map(),
+};
+
+export function buildSaleLedger(
+  input: CreateSaleInput,
+  itemContexts: ResolvedItemContext[],
+  parties: ResolvedPartyContexts = EMPTY_PARTY_CONTEXTS,
+) {
   if (itemContexts.length !== input.items.length) {
     throw new Error('item_context_mismatch');
   }
@@ -656,29 +768,28 @@ export function buildSaleLedger(input: CreateSaleInput, itemContexts: ResolvedIt
 
   const boundedRecurringBrl =
     recurring && recurring.cycles !== null ? recurring.monthlyBrl * recurring.cycles : 0;
-  const totalBrl = itemsTotalBrl + boundedRecurringBrl;
   const recurringBrl = recurring ? recurring.monthlyBrl : 0;
 
-  const sellerCommissionBrl = receivables.reduce(
-    (sum, row) => sum + pctOf(row.amountBrl, input.sellerCommissionPct),
-    0,
-  );
-  const finderCommissionBrl = input.finderPersonId
-    ? receivables.reduce((sum, row) => sum + pctOf(row.amountBrl, input.finderCommissionPct), 0)
-    : 0;
-  const taxBrl = receivables.reduce((sum, row) => sum + pctOf(row.amountBrl, input.taxPct), 0);
-  const professionalCostsBrl = input.professionals.reduce(
-    (sum, professional) => sum + professional.costBrl,
-    0,
-  );
-  const netMarginBrl =
-    totalBrl -
-    sellerCommissionBrl -
-    finderCommissionBrl -
-    professionalCostsBrl -
-    input.otherCostsBrl -
-    taxBrl;
-  const netMarginPct = totalBrl > 0 ? ((netMarginBrl / totalBrl) * 100).toFixed(2) : '0.00';
+  /*
+    The receivable rows and their "N/M" / "MN/M" labels are built here and stay
+    here; only the money is delegated, to the ONE `computeSaleFinancials` the
+    wizard also calls. That is what makes the margin the operator sees in steps 3
+    and 4 the same number this function persists.
+  */
+  const financials = computeSaleFinancials({
+    itemsTotalBrl,
+    boundedRecurringBrl,
+    receivableAmountsBrl: receivables.map((row) => row.amountBrl),
+    sellerCommissionPct: input.sellerCommissionPct,
+    finderCommissionPct: input.finderCommissionPct,
+    hasFinder: Boolean(input.finderPersonId),
+    taxPct: input.taxPct,
+    otherCostsBrl: input.otherCostsBrl,
+    professionalCostsBrl: input.professionals.reduce(
+      (sum, professional) => sum + professional.costBrl,
+      0,
+    ),
+  });
 
   const paymentMethod = input.installments[0]!.method;
   const condition = input.recurring
@@ -702,18 +813,11 @@ export function buildSaleLedger(input: CreateSaleInput, itemContexts: ResolvedIt
       installments: installmentsColumn,
       baseDate: input.baseDate,
       notes: input.notes ?? null,
-      totalBrl,
       recurringBrl,
       sellerCommissionPct: input.sellerCommissionPct.toFixed(2),
       finderCommissionPct: input.finderCommissionPct.toFixed(2),
       taxPct: input.taxPct.toFixed(2),
-      otherCostsBrl: input.otherCostsBrl,
-      professionalCostsBrl,
-      sellerCommissionBrl,
-      finderCommissionBrl,
-      taxBrl,
-      netMarginBrl,
-      netMarginPct,
+      ...financials,
     },
     items: input.items.map((item, index) => ({
       productId: item.productId,
@@ -725,12 +829,30 @@ export function buildSaleLedger(input: CreateSaleInput, itemContexts: ResolvedIt
       unitBrl: item.unitBrl,
       subtotalBrl: item.quantity * item.unitBrl,
     })),
-    professionals: input.professionals.map((professional) => ({
-      personId: professional.personId,
-      personNameSnapshot: professional.personName,
-      role: professional.role,
-      costBrl: professional.costBrl,
-    })),
+    professionals: input.professionals.map((professional) => {
+      /*
+        Server-authoritative snapshots. A resolved cadastro row always wins over
+        whatever label the body carried; the body is the fallback only on the
+        legacy unregistered path, where there is no id to resolve. `role` is the
+        deprecated mirror and is therefore written with exactly the same string as
+        `funcaoNameSnapshot`, never independently.
+      */
+      const person = professional.personId
+        ? parties.people.get(professional.personId)
+        : undefined;
+      const funcao = professional.funcaoId
+        ? parties.funcoes.get(professional.funcaoId)
+        : undefined;
+      const funcaoNameSnapshot = funcao?.name ?? professional.role ?? '';
+      return {
+        personId: professional.personId,
+        personNameSnapshot: person?.displayName ?? professional.personName,
+        funcaoId: professional.funcaoId ?? null,
+        funcaoNameSnapshot,
+        role: funcaoNameSnapshot,
+        costBrl: professional.costBrl,
+      };
+    }),
     receivables,
   };
 }
@@ -790,7 +912,7 @@ export function materializeWonPayables(input: MaterializeWonPayablesInput): Paya
   for (const row of input.receivables) {
     if (row.status === 'void') continue;
 
-    const sellerAmountBrl = pctOf(row.amountBrl, input.sale.sellerCommissionPct);
+    const sellerAmountBrl = pctOfCents(row.amountBrl, input.sale.sellerCommissionPct);
     if (sellerAmountBrl > 0 && !alreadyExists('seller_commission', row.id)) {
       drafts.push({
         beneficiaryName: input.sale.sellerName,
@@ -803,7 +925,7 @@ export function materializeWonPayables(input: MaterializeWonPayablesInput): Paya
     }
 
     if (input.sale.hasFinder) {
-      const finderAmountBrl = pctOf(row.amountBrl, input.sale.finderCommissionPct);
+      const finderAmountBrl = pctOfCents(row.amountBrl, input.sale.finderCommissionPct);
       if (finderAmountBrl > 0 && !alreadyExists('finder_commission', row.id)) {
         drafts.push({
           beneficiaryName: input.sale.finderName ?? 'Finder',
@@ -816,7 +938,7 @@ export function materializeWonPayables(input: MaterializeWonPayablesInput): Paya
       }
     }
 
-    const taxAmountBrl = pctOf(row.amountBrl, input.sale.taxPct);
+    const taxAmountBrl = pctOfCents(row.amountBrl, input.sale.taxPct);
     if (taxAmountBrl > 0 && !alreadyExists('tax', row.id)) {
       drafts.push({
         beneficiaryName: 'Impostos',
@@ -1801,7 +1923,8 @@ export async function createSale(
 ): Promise<{ sale: typeof salesOpsSales.$inferSelect; ledger: SaleLedger; payables: PayableDraft[] }> {
   return withTenant(db, orgId, async (tx) => {
     const itemContexts = await resolveSaleItemContexts(tx, orgId, input.items);
-    const ledger = buildSaleLedger(input, itemContexts);
+    const parties = await resolvePartyContexts(tx, orgId, input);
+    const ledger = buildSaleLedger(input, itemContexts, parties);
 
     const sequenceRows = await tx
       .select({ nextSequence: sql<number>`COALESCE(MAX(${salesOpsSales.sequence}), 0) + 1` })
@@ -1944,7 +2067,8 @@ export async function updateSale(
     }
 
     const itemContexts = await resolveSaleItemContexts(tx, orgId, input.items);
-    const ledger = buildSaleLedger(input, itemContexts);
+    const parties = await resolvePartyContexts(tx, orgId, input);
+    const ledger = buildSaleLedger(input, itemContexts, parties);
 
     await tx
       .delete(salesOpsPayables)

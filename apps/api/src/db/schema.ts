@@ -798,10 +798,31 @@ export const salesOpsSaleProfessionals = pgTable(
       .references(() => salesOpsSales.id),
     personId: uuid('person_id').references(() => salesOpsPeople.id),
     personNameSnapshot: text('person_name_snapshot').notNull(),
+    // FK declared as the composite (org_id, funcao_id) constraint below, not here.
+    // Nullable so every legacy row, whose free-text `role` matched no cadastro
+    // função, keeps its label without a função being invented from a typo.
+    funcaoId: uuid('funcao_id'),
+    funcaoNameSnapshot: text('funcao_name_snapshot').notNull().default(''),
+    /** @deprecated derived mirror of funcaoNameSnapshot; drop in a later contract slice. */
     role: text('role').notNull(),
     costBrl: integer('cost_brl').notNull(),
   },
-  (t) => [index('sales_ops_sale_professionals_sale_id_idx').on(t.saleId)],
+  (t) => [
+    index('sales_ops_sale_professionals_sale_id_idx').on(t.saleId),
+    index('sales_ops_sale_professionals_org_funcao_idx').on(t.orgId, t.funcaoId),
+    // Composite, mirroring sales_ops_person_funcoes_org_funcao_fk and
+    // sales_ops_product_funcao_costs_org_funcao_fk. A single-column FK on
+    // funcao_id does NOT consult the RLS predicate, so org A could pin org B's
+    // função onto a proposta whenever a service filter was missed. `restrict`
+    // keeps a função that a historical proposta still names undeletable.
+    // MATCH SIMPLE (the default) skips the lookup entirely when funcao_id is
+    // NULL, which is exactly what the legacy rows need.
+    foreignKey({
+      columns: [t.orgId, t.funcaoId],
+      foreignColumns: [salesOpsFuncoes.orgId, salesOpsFuncoes.id],
+      name: 'sales_ops_sale_professionals_org_funcao_fk',
+    }).onDelete('restrict'),
+  ],
 );
 
 export const salesOpsReceivables = pgTable(
