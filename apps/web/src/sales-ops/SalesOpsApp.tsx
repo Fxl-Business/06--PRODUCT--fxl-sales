@@ -125,6 +125,7 @@ import {
   isServiceProduct,
   MAX_PLAN_INSTALLMENTS,
   maxRemainingInstallments,
+  nextProductCodeSuffix,
   parseCurrencyInputToCents,
   productBaseValueBrl,
   professionalCostBaseCents,
@@ -1432,6 +1433,13 @@ export function SalesOpsApp() {
         onSave={(payload) => {
           saveProduct.mutate(payload, { onSuccess: () => setModal(null) });
         }}
+        /*
+          The persisted snapshot, matching every sibling prop here. Products are not
+          an optimistic collection today so this is the raw list by reference, but if
+          they ever become one an in-flight row the server may still reject must not
+          inflate the max and silently skip a number.
+        */
+        products={persistedBootstrap.products}
         saving={saveProduct.isPending}
       />
       <ClientDialog
@@ -3141,11 +3149,19 @@ function productForm(
   prefillName?: string,
   kindHint?: SalesOpsProductKind,
   funcaoCosts?: SalesOpsProductFuncaoCost[],
+  /** Suggested suffix for a NEW record only; an existing product's own value always wins. */
+  nextCodeSuffix?: string,
 ): ProductForm {
   return {
     name: product?.name ?? prefillName ?? '',
     areaId: product?.areaId ?? '',
-    codeSuffix: product?.codeSuffix ?? '0',
+    /*
+      The `??` short-circuit IS the edit-path guard, exactly as it is for `name` one
+      line above: when a product is being edited its stored suffix wins and the
+      suggestion is never consulted. `??` and not `||`, because the column is
+      NOT NULL DEFAULT '0' and '0' is a legitimate stored value.
+    */
+    codeSuffix: product?.codeSuffix ?? nextCodeSuffix ?? '0',
     kind: product?.kind ?? kindHint ?? 'product',
     setupBrl: centsToOptionalInput(product?.setupBrl),
     hasMonthly: product?.hasMonthly ?? false,
@@ -3366,6 +3382,13 @@ export function ProductDialog(props: {
   funcoes: SalesOpsFuncao[];
   /** Only the cost rows of the product being edited; the parent filters by `productId`. */
   funcaoCosts: SalesOpsProductFuncaoCost[];
+  /**
+   * The org's WHOLE catalogue, both kinds and both statuses - the set the unique
+   * index `(org_id, code_suffix)` covers, and therefore the set the código suffix
+   * suggestion has to read. Required, not optional, so `type-check` names every
+   * render site instead of letting a missed one silently read as an empty catalogue.
+   */
+  products: SalesOpsProduct[];
   onClose: () => void;
   onCreateArea?: (name: string) => Promise<SalesOpsArea | null>;
   onSave: (payload: SaveProductPayload) => void;
@@ -3388,6 +3411,7 @@ export function ProductDialog(props: {
       onClose={props.onClose}
       onCreateArea={props.onCreateArea}
       onSave={props.onSave}
+      products={props.products}
       saving={props.saving}
     />
   );
@@ -3398,6 +3422,7 @@ function ProductDialogBody({
   areas,
   funcoes,
   funcaoCosts,
+  products,
   onClose,
   onCreateArea,
   onSave,
@@ -3407,13 +3432,25 @@ function ProductDialogBody({
   areas: SalesOpsArea[];
   funcoes: SalesOpsFuncao[];
   funcaoCosts: SalesOpsProductFuncaoCost[];
+  products: SalesOpsProduct[];
   onClose: () => void;
   onCreateArea?: (name: string) => Promise<SalesOpsArea | null>;
   onSave: (payload: SaveProductPayload) => void;
   saving: boolean;
 }) {
+  /*
+    Lazy initializer, so the suggestion is computed exactly once per mount, and
+    `ProductDialog` keys this component on the record being opened - so it is
+    recomputed on every open and never re-derived under the operator mid-edit.
+  */
   const [form, setForm] = useState<ProductForm>(() =>
-    productForm(modal?.product, modal?.prefillName, modal?.productKind, funcaoCosts),
+    productForm(
+      modal?.product,
+      modal?.prefillName,
+      modal?.productKind,
+      funcaoCosts,
+      nextProductCodeSuffix(products),
+    ),
   );
   const [commissionMode, setCommissionMode] = useState<'seller_only' | 'with_finder'>('seller_only');
   /**
@@ -3824,6 +3861,9 @@ function ProductDialogBody({
                     <div className="sales-ops-num flex flex-none items-center rounded-[10px] border border-[#dcdce2] bg-white py-2 pl-[13px] pr-1.5 text-[15px] font-bold tracking-[0.06em] text-[#b0b0b8]">
                       0000-
                       <input
+                        // The visible `0000-` prefix is a sibling div, not a label, so
+                        // without this the field has no accessible name at all.
+                        aria-label="Final do código da venda"
                         className="sales-ops-num w-10 border-none bg-transparent px-0.5 text-center text-[15px] font-bold text-[#3f6ea3] outline-none"
                         inputMode="numeric"
                         maxLength={2}

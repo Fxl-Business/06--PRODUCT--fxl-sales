@@ -48,6 +48,47 @@ export function isServiceProduct(product: Pick<SalesOpsProduct, 'kind'> | undefi
   return product?.kind === 'service';
 }
 
+/** Upper bound of a produto code suffix: the API accepts `/^\d{1,2}$/`, so 0..99. */
+export const MAX_PRODUCT_CODE_SUFFIX = 99;
+
+/**
+ * The suffix a NEW produto/serviço should start on: the highest suffix already in the
+ * catalogue, plus one.
+ *
+ * `(org_id, code_suffix)` is UNIQUE and the index is not partial, so every existing row -
+ * archived included, Produto and Serviço alike - permanently owns its number, and a
+ * duplicate INSERT escapes as a 500 (`createProduct` does not map 23505). max + 1 is
+ * therefore the next guaranteed-free value in a dense catalogue.
+ *
+ * Only strictly-shaped values (`/^\d{1,2}$/`, the same regex the API enforces) count
+ * toward the max; anything else - a legacy free-text label, an over-wide value - is
+ * ignored rather than coerced, because a coerced number could name a slot someone else
+ * really holds.
+ *
+ * Never zero-padded: the stored value is text, `'07'` and `'7'` are two distinct rows
+ * under the unique index, and the suffix is concatenated verbatim into every sale code.
+ */
+export function nextProductCodeSuffix(
+  products: readonly Pick<SalesOpsProduct, 'codeSuffix'>[],
+): string {
+  const used = new Set<number>();
+  for (const product of products) {
+    const raw = product.codeSuffix;
+    if (typeof raw !== 'string' || !/^\d{1,2}$/.test(raw)) continue;
+    used.add(Number.parseInt(raw, 10));
+  }
+  if (used.size === 0) return '0';
+  const next = Math.max(...used) + 1;
+  if (next <= MAX_PRODUCT_CODE_SUFFIX) return String(next);
+  // 99 is taken. Fall back to the lowest free slot so the suggestion stays saveable;
+  // if the whole 0..99 space is exhausted no suffix can be saved at all, and '0'
+  // reproduces exactly today's behaviour rather than inventing a new failure mode.
+  for (let candidate = 0; candidate <= MAX_PRODUCT_CODE_SUFFIX; candidate += 1) {
+    if (!used.has(candidate)) return String(candidate);
+  }
+  return '0';
+}
+
 /**
  * The catalog value one unit of this row suggests, in integer CENTS. `0` means the
  * row carries no own value and the operator types one inside the proposta.

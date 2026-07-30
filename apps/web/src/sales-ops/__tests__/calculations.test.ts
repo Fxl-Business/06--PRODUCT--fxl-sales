@@ -7,6 +7,8 @@ import {
   describeProfessionalCostBase,
   formatMoneyBrl,
   installmentSumCents,
+  MAX_PRODUCT_CODE_SUFFIX,
+  nextProductCodeSuffix,
   parseCurrencyInputToCents,
   professionalCostBaseCents,
   resolveProfessionalCostCents,
@@ -14,7 +16,12 @@ import {
   splitInstallmentsEqually,
   type SaleCommissionDefaultsProduct,
 } from '../calculations';
-import type { SalesOpsBootstrap, SalesOpsProductFuncaoCost, SalesOpsSale } from '../types';
+import type {
+  SalesOpsBootstrap,
+  SalesOpsProduct,
+  SalesOpsProductFuncaoCost,
+  SalesOpsSale,
+} from '../types';
 
 function saleFixture(overrides: Partial<SalesOpsSale> = {}): SalesOpsSale {
   return {
@@ -561,5 +568,108 @@ describe('professional cost unit resolution', () => {
       '10% de R$ 30.000,00 (total dos itens de produto)',
     );
     expect(describeProfessionalCostBase('10', undefined, 0)).toBe('');
+  });
+});
+
+/*
+  `(org_id, code_suffix)` is UNIQUE and NOT partial, so every one of these cases is
+  about which numbers are already permanently owned. The suggestion is `max + 1`,
+  which is what the operator asked for, and NOT "lowest free slot" - case 3 is the
+  assertion that decides the slice.
+*/
+describe('nextProductCodeSuffix', () => {
+  function rows(...codeSuffixes: string[]): Array<Pick<SalesOpsProduct, 'codeSuffix'>> {
+    return codeSuffixes.map((codeSuffix) => ({ codeSuffix }));
+  }
+
+  function productFixture(patch: Partial<SalesOpsProduct>): SalesOpsProduct {
+    return {
+      id: `product-${patch.codeSuffix ?? '0'}`,
+      orgId: 'org-test',
+      name: 'FXL Produto',
+      kind: 'product',
+      codeSuffix: '0',
+      areaId: 'area-1',
+      openPrice: false,
+      setupBrl: 0,
+      hasMonthly: false,
+      monthlyBrl: 0,
+      recurringCommission: false,
+      hasFinderCommission: false,
+      sellerCommissionType: 'pct',
+      sellerCommissionValue: '10.00',
+      sellerWithFinderCommissionType: 'pct',
+      sellerWithFinderCommissionValue: '7.00',
+      finderCommissionType: 'pct',
+      finderCommissionValue: '3.00',
+      defaultPaymentMethod: 'pix',
+      defaultEntradaMode: 'none',
+      defaultEntradaPct: null,
+      defaultEntradaBrl: null,
+      defaultRemainingInstallments: 1,
+      defaultRecurringCycles: null,
+      modules: [],
+      providers: [],
+      status: 'active',
+      createdAt: '2026-07-30T12:00:00.000Z',
+      updatedAt: null,
+      ...patch,
+    };
+  }
+
+  it('starts an empty catalogue at the column default 0', () => {
+    expect(nextProductCodeSuffix([])).toBe('0');
+  });
+
+  it('increments the ordinary single-row case', () => {
+    expect(nextProductCodeSuffix(rows('0'))).toBe('1');
+  });
+
+  it('takes the max and never fills a gap', () => {
+    // 1, 2, 4, 5 and 6 are free and stay free: `max + 1`, not lowest-free.
+    expect(nextProductCodeSuffix(rows('0', '3', '7'))).toBe('8');
+  });
+
+  it('is order-independent', () => {
+    expect(nextProductCodeSuffix(rows('7', '0', '3'))).toBe('8');
+  });
+
+  it('ignores non-numeric suffixes, and a catalogue of only those is the empty case', () => {
+    expect(nextProductCodeSuffix(rows('FIN', 'CST'))).toBe('0');
+  });
+
+  it('counts only strictly-shaped values, exactly as the API regex does', () => {
+    // '007', '100', '' and ' 5' cannot round-trip through /^\d{1,2}$/, so none of
+    // them is evidence that a slot is occupied. Only '2' counts.
+    expect(nextProductCodeSuffix(rows('2', 'FIN', '007', '100', '', ' 5'))).toBe('3');
+  });
+
+  it('orders numerically, not lexicographically', () => {
+    // A `.sort()`-based implementation would answer '10' here.
+    expect(nextProductCodeSuffix(rows('9', '10'))).toBe('11');
+  });
+
+  it('falls back to the lowest free slot once 99 is taken', () => {
+    expect(nextProductCodeSuffix(rows('99'))).toBe('0');
+    expect(nextProductCodeSuffix(rows('0', '99'))).toBe('1');
+  });
+
+  it('returns 0 rather than 100 when the whole space is exhausted', () => {
+    const everySuffix = Array.from({ length: 100 }, (_, index) => String(index));
+    expect(nextProductCodeSuffix(rows(...everySuffix))).toBe('0');
+  });
+
+  it('counts archived rows and serviço rows too', () => {
+    // The unique index has no WHERE clause: an archived produto owns its suffix
+    // forever, and a Serviço owns one exactly like a Produto does.
+    const catalogue: SalesOpsProduct[] = [
+      productFixture({ codeSuffix: '4', status: 'archived' }),
+      productFixture({ codeSuffix: '6', kind: 'service' }),
+    ];
+    expect(nextProductCodeSuffix(catalogue)).toBe('7');
+  });
+
+  it('bounds the domain at 99, matching the API regex and the input maxLength', () => {
+    expect(MAX_PRODUCT_CODE_SUFFIX).toBe(99);
   });
 });
