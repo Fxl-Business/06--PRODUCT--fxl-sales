@@ -1,0 +1,1 @@
+{"agent":"exec","slice":"02-wizard-shell-footer","status":"PASS","report":"nexo/runs/batch-01K9NX4QPTUI0730CADPRODWIZ/exec-02.md","summary":"Wizard shell converted to a flex column (5 className strings only); footer can no longer be clipped. Web 39 files/363 tests, api 29/300, lint and type-check clean.","done":true,"ts":"2026-07-30T19:20:00Z"}

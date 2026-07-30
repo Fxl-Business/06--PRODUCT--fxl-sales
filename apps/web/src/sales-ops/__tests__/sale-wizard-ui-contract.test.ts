@@ -81,6 +81,18 @@ describe('sale wizard UI contract', () => {
     expect(source).not.toContain('marque prazo indeterminado');
   });
 
+  it('keeps the wizard shell free of a hand-computed body height', () => {
+    // Positive control: the flex-column shell really is there, so the negative below
+    // is about a constant that was removed rather than one that never existed.
+    expect(source).toContain(
+      'flex h-[92vh] max-h-[92vh] w-[calc(100vw-48px)] max-w-[940px] flex-col',
+    );
+    expect(source).toContain('min-h-0 flex-1 overflow-y-auto px-[26px] py-6');
+    // A `calc()` against the viewport HEIGHT is always a guess about chrome height.
+    expect(source).not.toContain('calc(92vh-');
+    expect(source).not.toContain('vh-210px');
+  });
+
   it('keeps every picker on the Combobox with no native picker markup left behind', () => {
     // Positive control: the pickers really are Comboboxes, so the negatives below are
     // about a migration that happened rather than about markup that never existed.
