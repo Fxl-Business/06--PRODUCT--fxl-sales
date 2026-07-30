@@ -85,6 +85,7 @@ import {
   type SalesOpsView,
   type SalesOpsWorkspace,
 } from './navigation';
+import { isOptimisticId, withoutOptimisticRows } from './optimistic';
 import type { AppRole } from '@/auth/claims';
 import type {
   CreateSalePayload,
@@ -137,8 +138,15 @@ const mutedPanelClass = 'rounded-[18px] border border-[#e8e8ec] bg-[#fbfbfc]';
 const tableHeadClass =
   'px-4 py-3 text-[11px] font-bold uppercase tracking-[0.06em] text-[#9b9ba3]';
 const tableCellClass = 'px-4 py-3 text-[13.5px] text-[#57575f]';
-const iconButtonClass =
-  'inline-flex h-8 w-8 items-center justify-center rounded-[9px] border border-[#dcdce2] bg-white text-[#57575f] transition hover:border-[#eaa81a] hover:bg-[#f5f2ea] hover:text-[#9c7210]';
+const iconButtonBaseClass =
+  'inline-flex h-8 w-8 items-center justify-center rounded-[9px] border transition';
+const iconButtonClass = `${iconButtonBaseClass} border-[#dcdce2] bg-white text-[#57575f] hover:border-[#eaa81a] hover:bg-[#f5f2ea] hover:text-[#9c7210]`;
+/**
+ * Disjoint from `iconButtonClass` on purpose: `hover:` and `disabled:` have equal
+ * specificity, so a `disabled:` variant on the enabled class would light the control
+ * up on hover depending on Tailwind's generated source order.
+ */
+const iconButtonPendingClass = `${iconButtonBaseClass} cursor-not-allowed border-[#ececf1] bg-[#f6f6f8] text-[#b6b6bd]`;
 const formInputClass =
   'h-11 rounded-[10px] border-[#dcdce2] bg-[#fafafb] px-3 text-sm text-[#201f24] shadow-none outline-none ring-0 transition focus-visible:border-[#eaa81a] focus-visible:ring-0 focus-visible:ring-offset-0 disabled:bg-[#f4f4f6] disabled:text-[#9b9ba3] disabled:opacity-100';
 const formSelectClass =
@@ -529,7 +537,13 @@ export function SalesOpsApp() {
   const resolution = resolveSalesOpsRoute(routeParams, profile.roles);
   const { workspace, view } = resolution.route;
   const bootstrap = bootstrapQuery.data ?? emptyBootstrap;
-  const dashboard = useMemo(() => buildDashboardModel(bootstrap), [bootstrap]);
+  /**
+   * Optimistic rows carry a client-side placeholder id, so only the cadastro list
+   * that created them may see them. Every other surface reads this snapshot, which
+   * is the same object by reference whenever nothing is optimistic.
+   */
+  const persistedBootstrap = useMemo(() => withoutOptimisticRows(bootstrap), [bootstrap]);
+  const dashboard = useMemo(() => buildDashboardModel(persistedBootstrap), [persistedBootstrap]);
   const filteredSales = useMemo(() => {
     return bootstrap.sales.filter((sale) => {
       if (salesFilters.status !== 'all' && sale.status !== salesFilters.status) return false;
@@ -990,7 +1004,7 @@ export function SalesOpsApp() {
                 value={salesFilters.areaId}
               >
                 <option value="all">Todas as áreas</option>
-                {bootstrap.areas.map((area) => (
+                {persistedBootstrap.areas.map((area) => (
                   <option key={area.id} value={area.id}>
                     {area.name}
                   </option>
@@ -1035,11 +1049,11 @@ export function SalesOpsApp() {
             {!bootstrapQuery.isLoading && !bootstrapQuery.isError ? (
               <>
                 {view === 'dashboard' ? (
-                  <DashboardView bootstrap={bootstrap} dashboard={dashboard} go={go} />
+                  <DashboardView bootstrap={persistedBootstrap} dashboard={dashboard} go={go} />
                 ) : null}
                 {view === 'vendas' ? (
                   <SalesView
-                    bootstrap={bootstrap}
+                    bootstrap={persistedBootstrap}
                     canManage={workspace === 'operacional'}
                     onCancelContract={(sale) => cancelContract.mutate(sale.id)}
                     onEdit={(sale) => setSaleWizard({ mode: 'edit', sale })}
@@ -1071,11 +1085,11 @@ export function SalesOpsApp() {
                     }
                   />
                 ) : null}
-                {view === 'comissoes' ? <CommissionsView bootstrap={bootstrap} /> : null}
+                {view === 'comissoes' ? <CommissionsView bootstrap={persistedBootstrap} /> : null}
                 {view === 'produtos' ? (
                   <ProductsView
-                    areas={bootstrap.areas}
-                    products={bootstrap.products}
+                    areas={persistedBootstrap.areas}
+                    products={persistedBootstrap.products}
                     onEdit={(product) => setModal({ kind: 'product', product })}
                   />
                 ) : null}
@@ -1106,8 +1120,8 @@ export function SalesOpsApp() {
       </main>
 
       <ProductDialog
-        areas={bootstrap.areas}
-        collaborators={bootstrap.people.filter((person) => person.isCollaborator)}
+        areas={persistedBootstrap.areas}
+        collaborators={persistedBootstrap.people.filter((person) => person.isCollaborator)}
         modal={modal?.kind === 'product' ? modal : null}
         onClose={() => setModal(null)}
         onSave={(payload) => {
@@ -1141,7 +1155,7 @@ export function SalesOpsApp() {
       />
       {bootstrapQuery.isSuccess ? (
         <SaleWizardDialog
-          bootstrap={bootstrap}
+          bootstrap={persistedBootstrap}
           editSale={saleWizard?.mode === 'edit' ? saleWizard.sale : null}
           onClose={() => setSaleWizard(null)}
           onSave={(payload) => {
@@ -1846,6 +1860,7 @@ function PeopleView({
     <div className="grid gap-[14px] xl:grid-cols-3 md:grid-cols-2">
       {people.map((person) => {
         const metrics = personMetrics(bootstrap, person, mode);
+        const pending = isOptimisticId(person.id);
         const cardBody = (
           <>
             <div className="mb-4 flex items-center gap-3">
@@ -1886,10 +1901,16 @@ function PeopleView({
 
         return (
           <button
-            aria-label={`Editar ${person.displayName}`}
-            className={`${panelClass} p-5 text-left transition hover:border-[#d8c79a]`}
+            aria-label={
+              pending ? `Salvando ${person.displayName}` : `Editar ${person.displayName}`
+            }
+            className={`${panelClass} p-5 text-left transition ${
+              pending ? 'cursor-not-allowed opacity-60' : 'hover:border-[#d8c79a]'
+            }`}
+            disabled={pending}
             key={person.id}
             onClick={() => onEdit(person)}
+            title={pending ? 'Salvando...' : undefined}
             type="button"
           >
             {cardBody}
@@ -2123,6 +2144,7 @@ function ClientsView({
               (sale) => sale.clientId === client.id || sale.clientNameSnapshot === client.name,
             );
             const total = sales.reduce((sum, sale) => sum + sale.totalBrl, 0);
+            const pending = isOptimisticId(client.id);
             return (
               <TableRow key={client.id}>
                 <TableCell className="px-4 py-3 text-sm font-semibold">{client.name}</TableCell>
@@ -2134,7 +2156,14 @@ function ClientsView({
                   {formatMoneyBrl(total, { maximumFractionDigits: 0 })}
                 </TableCell>
                 <TableCell className="px-4 py-3 text-center">
-                  <button className={iconButtonClass} onClick={() => onEdit(client)} type="button">
+                  <button
+                    aria-label={pending ? `Salvando ${client.name}` : `Editar ${client.name}`}
+                    className={pending ? iconButtonPendingClass : iconButtonClass}
+                    disabled={pending}
+                    onClick={() => onEdit(client)}
+                    title={pending ? 'Salvando...' : 'Editar'}
+                    type="button"
+                  >
                     <Edit3 className="h-[15px] w-[15px]" />
                   </button>
                 </TableCell>
@@ -2179,6 +2208,7 @@ export function AreasView({
             const productCount = bootstrap.products.filter(
               (product) => product.areaId === area.id,
             ).length;
+            const pending = isOptimisticId(area.id);
             return (
               <TableRow key={area.id}>
                 <TableCell className="px-4 py-3 text-sm font-semibold">{area.name}</TableCell>
@@ -2197,7 +2227,14 @@ export function AreasView({
                   {productCount}
                 </TableCell>
                 <TableCell className="px-4 py-3 text-center">
-                  <button className={iconButtonClass} onClick={() => onEdit(area)} type="button">
+                  <button
+                    aria-label={pending ? `Salvando ${area.name}` : `Editar ${area.name}`}
+                    className={pending ? iconButtonPendingClass : iconButtonClass}
+                    disabled={pending}
+                    onClick={() => onEdit(area)}
+                    title={pending ? 'Salvando...' : 'Editar'}
+                    type="button"
+                  >
                     <Edit3 className="h-[15px] w-[15px]" />
                   </button>
                 </TableCell>
