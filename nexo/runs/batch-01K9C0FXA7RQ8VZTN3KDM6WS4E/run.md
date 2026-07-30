@@ -29,7 +29,7 @@ directly, one slice at a time, each gated by a separate local Verify agent (Gate
 | 04 | itens-section-align | cancelled | - | - | - | wave 1, executor stopped by the user - awaiting a human decision |
 | 05 | pessoas-funcoes-api | done | feat/05-pessoas-funcoes-api | PASS 2/3 | 69feb51 | wave 1 |
 | 06 | combobox-adoption | done | feat/06-combobox-adoption | PASS 2/3 | 762232b | wave 2 |
-| 07 | produtos-servicos-api | todo | | | | wave 2 |
+| 07 | produtos-servicos-api | done | feat/07-produtos-servicos-api | PASS 1/3 | 5859b80 | wave 2 |
 | 08 | service-description-optional | todo | | | | wave 3 |
 | 09 | pessoas-funcoes-web | todo | | | | wave 3 |
 | 10 | produtos-servicos-web | todo | | | | wave 3 |
@@ -89,6 +89,74 @@ on open-price rows to admit the Serviço invariant CHECK.
 Its plan requires running a `SELECT` audit query and recording the result before the migration is
 applied to staging or production.
 This is the only step in the batch that is not safely reversible.
+
+### 07-produtos-servicos-api - Gate 2 PASS first attempt, merged at `5859b80`
+
+`type` renamed to `kind` (`'product' | 'service'`) with DB CHECKs, `open_price` surviving as a
+CHECK-enforced projection of `kind` and still accepted on the wire as a deprecated alias, six
+default-config columns, and `sales_ops_product_funcao_costs` as a child table with a composite
+`(org_id, funcao_id)` FK. Migration 0013. `materializeDefaultPaymentPlan` ships as the normative
+template-to-installments reference that slice 11 mirrors.
+api unit 24 files / 248 tests to 27 / 283; integration 16 / 73 to 18 / 88. `apps/web` byte-untouched.
+
+The verifier proved rather than read every load-bearing claim. It rolled the database genuinely back -
+dropped the table, six columns and seven CHECKs, renamed `kind` back to `type`, deleted the journal row -
+seeded a **contradictory legacy row** (`open_price=true` carrying `250000/9900`), and replayed via
+`globalSetup`; the post-replay catalog was byte-identical apart from the journal surrogate id.
+It mounted the real unmocked router and sent the byte-exact body `master`'s product dialog builds, so the
+deprecated `openPrice` alias is confirmed working and `master` is not broken in the window before slice
+10. Eight contradictory raw superuser writes were all rejected by the CHECKs, so `kind`/`open_price`
+drift is impossible. The cost-set replace held atomic under 40-way concurrency including the empty-list
+case, and a mid-replace FK failure rolled back with the original set intact.
+`materializeDefaultPaymentPlan` was checked against seven adversarial vectors: every one sums exactly,
+in integer cents, with correct month-end clamping.
+
+**The RLS-masking finding reproduced a second time.** Deleting the cost-row `orgId` filter left all eight
+app-role tests green, and only the admin-connection test caught it. Two slices in a row now, which makes
+it a property of this test suite rather than a one-off.
+The verifier also identified the two `updateProduct` filters as **equivalent mutants singly** - each
+backstops the other, and removing both is caught - and said so explicitly rather than counting it as a
+defect.
+
+**A pre-existing defect proven, not merely suspected.** 30 parallel `POST /products` with a duplicate
+`codeSuffix` returned `{"500":29,"201":1}` from an unhandled `23505`. Rather than reason about
+attribution, the verifier created a throwaway database and a `master` worktree and ran the identical
+probe against master's own code: `sequential: 201 500, parallel: {"500":20}`. Identical, so it is
+pre-existing and not introduced here. It needs its own slice; the codebase's own `'duplicate'` sentinel
+idiom from `createArea` is the fix.
+
+Judged acceptable on merit: the additive `entrada_mode_value_mismatch` extension (it genuinely prevents a
+500 of the same class slice 05 shipped, and is strictly additive so slices 08/10/12 are unaffected), and
+deferring the 121-installment ceiling edge to slice 10's editor (pinned by a test, not yet wired to any
+endpoint, and fails as a clean 400 - clamping server-side would silently drop an operator's parcela).
+The plan's Risk 16 correction was upheld: `apps/web/src/sales-ops/types.ts` is a hand-written mirror, so
+the API rename does not touch web typing.
+
+Report: `verify-07.md`.
+
+### SAFETY: `db:migrate` reads the staging `DATABASE_URL`
+
+Found while executing slice 07 and worth stating loudly, because a plan step caused it.
+
+`apps/api/src/db/migrate.ts` reads `DATABASE_URL` with no test override, and `apps/api/.env` sets
+`DATABASE_URL` to **staging**. So `pnpm --filter @fxl-sales/api db:migrate` applies pending migrations
+to staging. Slice 07's own plan contained a Green step that, followed literally, would have migrated
+staging by accident. The executor recognised this and never ran it.
+
+The safe local path is the integration suite's `globalSetup`, which migrates via
+`TEST_MIGRATE_DATABASE_URL` against the local Docker DB. Never use `db:migrate` to migrate locally.
+
+Corollary for the irreversible step in this batch: slice 07's pre-migration data audit found 0 product
+rows and 0 rows that would be altered, but it ran against the **local** database, which is empty.
+That result says nothing about staging or production. The audit query must be re-run against the real
+target before 0013 is applied there:
+
+```sql
+-- re-run against the REAL target before applying 0013
+SELECT id, name, open_price, setup_brl, monthly_brl
+FROM sales_ops_products
+WHERE open_price = true AND (setup_brl <> 0 OR monthly_brl <> 0);
+```
 
 ### Data preservation note: `products.providers`
 
