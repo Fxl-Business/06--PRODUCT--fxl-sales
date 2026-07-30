@@ -33,7 +33,7 @@ directly, one slice at a time, each gated by a separate local Verify agent (Gate
 | 08 | service-description-optional | done | feat/08-service-description-optional | PASS 1/3 | 045bd72 | wave 3 |
 | 09 | pessoas-funcoes-web | done | feat/09-pessoas-funcoes-web | PASS 2/3 | 12aa1dc | wave 3 |
 | 10 | produtos-servicos-web | done | feat/10-produtos-servicos-web | PASS 3/3 | e356c99 | wave 3 |
-| 11 | payment-plan-builder | todo | | | | wave 3 |
+| 11 | payment-plan-builder | done | feat/11-payment-plan-builder | PASS 2/3 | 39103eb | wave 3 |
 | 12 | proposta-overrides | todo | | | | wave 4 |
 
 ## Oracle command forms (verified 2026-07-29 - overrides any plan file that says otherwise)
@@ -292,6 +292,76 @@ in the singular while the rendered segments are plural.
 **Data-loss window restated:** the `providers` removal omits the key on write so a PATCH cannot clear the
 deprecated column - verified byte-identical against the real database, with `providers: []` as the control
 that does clear it. Before any later slice drops the column, run the audit query recorded above.
+
+### 11-payment-plan-builder - Gate 2 PASS, then an orchestrator-requested amendment, merged at `39103eb`
+
+User item 10. Wizard step 2 is declarative: `Entrada (nenhuma | % | R$ fixo)` plus `Restante em N x` plus
+`Recorrência`, always visible, regenerating the parcelas table live. `Dividir em`, `Dividir`, `+ parcela`,
+`Remover parcela N`, `Prazo indeterminado`, `Adicionar recorrência` and `Número de parcelas` are all gone.
+Generation, rounding, due-date and round-trip rules are pure exported functions in `calculations.ts`.
+Web 34 files / 288 tests to 35 / 320.
+
+**The mockup's own arithmetic was wrong and was not copied.** `3 x R$ 12.166,67` is one cent over the total,
+so the hint renders `3 x R$ 12.166,66 (última R$ 12.166,68)`. It can never state a value the table lacks.
+
+**A real pre-existing date bug fixed.** The web's `addMonthsToIsoDate` overflowed month ends
+(`2026-01-31` to `2026-03-03`) while the API's `addMonths` clamps to `2026-02-28`, so the wizard previewed
+recurring due dates the server would never write for any base day 29 to 31.
+
+**The executor found a bug in its own plan's test spec.** The Red case for "infers a fixed entrada when the
+percentage is not clean" used rows `100000/100000/100000` against a 300000 total, which *is* an exact even
+3x split, so `nenhuma + 3x` is the truthful inference. Rewritten with rows where the entrada genuinely
+differs, plus an even-split positive control.
+
+**It also caught the edit path inventing data:** a proposta with `recurringBrl > 0` and zero `M` receivables
+was prefilling ciclos as `'12'`, fabricating a bounded plan. Now blank.
+
+**A contradiction in the orchestrator's own brief, surfaced rather than papered over.** It was told both to
+mirror the API's `materializeDefaultPaymentPlan` exactly and to reuse `splitInstallmentsEqually`. Those
+conflict: the web helper puts the floor remainder on the **last** restante row, the API on the **first**. It
+followed the mandated helper and documented the divergence. The verifier ruled deferral correct, since
+unifying would require either editing `apps/api/**` or abandoning a helper whose last-row remainder is pinned
+by a pre-existing master test. `materializeDefaultPaymentPlan` genuinely has no production caller.
+
+**First Gate 2 PASS**, with money exactness probed across 13 totals by 3 modes by 18 entrada values by 7
+counts plus a DOM grid, and no false positive in `inferPaymentPlanShape` across 25,000 cases. It flagged two
+non-blocking items.
+
+**The orchestrator declined to merge on the PASS and requested an amendment**, because one of those was a
+latent money bug: `generateInstallmentPlan`'s docstring promised exactness while `.slice(0, MAX)` trimmed the
+tail - and the tail carries the floor remainder. Unreachable from the UI only because the clamp lived in the
+caller rather than in the pure function making the promise, which is backwards for a layer extracted
+specifically to be called directly. The Red test made it concrete: **R$ 7.500,00 vanished** at
+`restanteCount: 120` with an entrada. `maxRemainingInstallments(entradaMode)` now lives in `calculations.ts`
+as the single definition, `restanteCountFor` clamps against it, and the `.slice` was deleted rather than kept
+as a guard.
+
+**Amendment PASS.** The verifier ran 128 direct calls at the boundary plus a 1365-case hostile sweep
+(negative, `NaN` and `Infinity` entradas and counts, entrada equal to and above total) plus an exhaustive
+counts 1 to 300 sweep on an indivisible total: every sum exact, every row count within `[1,120]`. It
+confirmed the fix was load-bearing by reconstructing the pre-amendment code and watching the probe fail with
+`expected 100000 to be 100001`. It upheld the executor's honest report that re-adding the `.slice` now stays
+green, proving it an equivalent mutant rather than a coverage gap by tightening it to `.slice(0,119)` and
+watching the repo's own committed test go Red.
+Reports: `verify-11.md`, `verify-11-amendment.md`.
+
+**Sixth false `CLAUDE.md` sentence, corrected.** Its note on the remainder divergence claimed an
+API-generated uneven split reads as hand-edited; in fact the no-entrada case `[33334, 33333, 33333]` reads as
+`fix entrada 33334 + 2x` with `matchesFormula: true` - mislabelled rather than misread. The correction was
+made executable by a test pinning all three inference cases.
+
+**One imprecision recorded, not fixed:** the corrected sentence says the no-entrada case reads as an `R$ fixo`
+entrada. Across 10,296 such plans all read as a formula and reproduced rows to the cent, but **37 read as
+mode `pct`** rather than `fix` (for example total 400 giving `[134,133,133]` and `{pct, 33.5, 2}`). The
+described outcome holds universally; only the mode qualifier is incomplete. Suggested wording: "usually
+`R$ fixo`, occasionally a clean `%`".
+
+**Two more items recorded for later:** a proposta whose receivables are all `void` (won, cancel-contract,
+revert to open) opens step 2 with an R$ 0,00 row where master auto-generated a full-total row - exotic,
+recoverable with one nudge of `Parcelas restantes`, and nothing invalid can be saved meanwhile. And
+`defaultPlanShapeForProduct` clamps to the raw 120 rather than the entrada-aware ceiling, so a template with
+an entrada plus 120 parcelas would display 120 while generating 119; money stays exact and the cadastro
+clamps on save, so it is unreachable through the UI.
 
 ### SAFETY: `db:migrate` reads the staging `DATABASE_URL`
 
