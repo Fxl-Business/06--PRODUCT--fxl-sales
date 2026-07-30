@@ -2,15 +2,19 @@ import { describe, expect, it } from 'vitest';
 import {
   addMonthsToIsoDate,
   buildDashboardModel,
+  buildFuncaoCostBasis,
   buildSalePayload,
+  describeProfessionalCostBase,
   formatMoneyBrl,
   installmentSumCents,
   parseCurrencyInputToCents,
+  professionalCostBaseCents,
+  resolveProfessionalCostCents,
   resolveSaleCommissionDefaults,
   splitInstallmentsEqually,
   type SaleCommissionDefaultsProduct,
 } from '../calculations';
-import type { SalesOpsBootstrap, SalesOpsSale } from '../types';
+import type { SalesOpsBootstrap, SalesOpsProductFuncaoCost, SalesOpsSale } from '../types';
 
 function saleFixture(overrides: Partial<SalesOpsSale> = {}): SalesOpsSale {
   return {
@@ -426,5 +430,136 @@ describe('sales operations web calculations', () => {
     expect(
       resolveSaleCommissionDefaults({ ...commissionProduct, sellerCommissionValue: '0' }, false, null),
     ).toEqual({ sellerCommissionPct: 0, finderCommissionPct: 3 });
+  });
+});
+
+describe('professional cost unit resolution', () => {
+  const devFuncaoId = 'fc000010-0000-4000-8000-000000000010';
+  const testerFuncaoId = 'fc000011-0000-4000-8000-000000000011';
+  const customProductId = '11111111-1111-4111-8111-111111111111';
+  const landingProductId = '22222222-2222-4222-8222-222222222222';
+
+  function costRow(patch: Partial<SalesOpsProductFuncaoCost>): SalesOpsProductFuncaoCost {
+    return {
+      id: `cost-${patch.productId}-${patch.funcaoId}`,
+      orgId: 'org-test',
+      productId: customProductId,
+      funcaoId: devFuncaoId,
+      mode: 'pct',
+      valuePct: '5.00',
+      valueBrl: null,
+      createdAt: '2026-07-13T12:00:00.000Z',
+      updatedAt: null,
+      ...patch,
+    };
+  }
+
+  /** One R$ 20.000,00 FXL Custom item declaring a 5% dev cost and a fixed tester cost. */
+  const singleItemBasis = buildFuncaoCostBasis(
+    [{ productId: customProductId, productName: 'FXL Custom', subtotalBrl: 2000000 }],
+    [
+      costRow({ funcaoId: devFuncaoId, mode: 'pct', valuePct: '5.00' }),
+      costRow({ funcaoId: testerFuncaoId, mode: 'fix', valuePct: null, valueBrl: 30000 }),
+    ],
+  );
+
+  it('resolves a wizard percent against the funcao-scoped item subtotal, floors it, and reads costBrl verbatim in fix mode', () => {
+    // 1. A percentage of the função-scoped base.
+    expect(
+      resolveProfessionalCostCents({ costUnit: 'pct', costPct: '10', costBrl: '0' }, 2000000),
+    ).toBe(200000);
+
+    // 2. Floors, never rounds: 5% of 1999 cents is 99.95.
+    expect(resolveProfessionalCostCents({ costUnit: 'pct', costPct: '5', costBrl: '0' }, 1999)).toBe(
+      99,
+    );
+
+    // 3. `fix` ignores the base entirely.
+    for (const base of [0, 1999, 2000000]) {
+      expect(
+        resolveProfessionalCostCents({ costUnit: 'fix', costPct: '99', costBrl: '300' }, base),
+      ).toBe(30000);
+    }
+
+    // 4. Negative and garbage percentages clamp to zero rather than crediting money back.
+    expect(
+      resolveProfessionalCostCents({ costUnit: 'pct', costPct: '-10', costBrl: '0' }, 2000000),
+    ).toBe(0);
+    expect(
+      resolveProfessionalCostCents({ costUnit: 'pct', costPct: 'abc', costBrl: '0' }, 2000000),
+    ).toBe(0);
+    expect(resolveProfessionalCostCents({ costUnit: 'pct', costPct: '', costBrl: '0' }, 2000000)).toBe(
+      0,
+    );
+  });
+
+  it('bases a percent on the summed subtotals of the items whose produto declares the funcao', () => {
+    // 5. Two declaring items, and the base is the SUBTOTAL, not the default's own cents.
+    const twoItemBasis = buildFuncaoCostBasis(
+      [
+        { productId: customProductId, productName: 'FXL Custom', subtotalBrl: 2000000 },
+        { productId: landingProductId, productName: 'Landing Page', subtotalBrl: 1000000 },
+      ],
+      [
+        costRow({ funcaoId: testerFuncaoId, mode: 'fix', valuePct: null, valueBrl: 30000 }),
+        costRow({
+          productId: landingProductId,
+          funcaoId: testerFuncaoId,
+          mode: 'fix',
+          valuePct: null,
+          valueBrl: 30000,
+        }),
+      ],
+    );
+    expect(professionalCostBaseCents(twoItemBasis.get(testerFuncaoId), 0)).toBe(3000000);
+    // A `fix`-mode produto default still bases a wizard percent on the item subtotal.
+    expect(professionalCostBaseCents(singleItemBasis.get(testerFuncaoId), 0)).toBe(2000000);
+    expect(professionalCostBaseCents(singleItemBasis.get(devFuncaoId), 0)).toBe(2000000);
+  });
+
+  it('falls back to the product-item subtotal total only when no produto declares the funcao', () => {
+    // 6. The fallback branch: an inline-created função no produto declares yet.
+    expect(professionalCostBaseCents(undefined, 3000000)).toBe(3000000);
+    // 7. The empty case the UI warns about instead of silently writing a zero.
+    expect(professionalCostBaseCents(undefined, 0)).toBe(0);
+    // A scoped entry always wins over the fallback.
+    expect(professionalCostBaseCents(singleItemBasis.get(devFuncaoId), 9999999)).toBe(2000000);
+  });
+
+  it('never lets the recurring mensalidade into the percent base', () => {
+    // 8. Neither function takes a recurring value at all, so a R$ 50,00 mensalidade
+    // cannot reach the base of a one-shot professional_cost.
+    const recurringMonthlyCents = 500000;
+    expect(professionalCostBaseCents(singleItemBasis.get(devFuncaoId), 2000000)).toBe(2000000);
+    expect(professionalCostBaseCents(singleItemBasis.get(devFuncaoId), 2000000)).not.toBe(
+      2000000 + recurringMonthlyCents,
+    );
+  });
+
+  it('describes which base a percent was taken from, naming the declaring produtos', () => {
+    // 9. The derivation line and the cents come from the same entry.
+    expect(describeProfessionalCostBase('10', singleItemBasis.get(devFuncaoId), 0)).toBe(
+      '10% de R$ 20.000,00 (FXL Custom)',
+    );
+
+    const repeatedProduct = buildFuncaoCostBasis(
+      [
+        { productId: customProductId, productName: 'FXL Custom', subtotalBrl: 2000000 },
+        { productId: customProductId, productName: 'FXL Custom', subtotalBrl: 1000000 },
+        { productId: landingProductId, productName: 'Landing Page', subtotalBrl: 500000 },
+      ],
+      [
+        costRow({ funcaoId: devFuncaoId, mode: 'pct', valuePct: '5.00' }),
+        costRow({ productId: landingProductId, funcaoId: devFuncaoId, mode: 'pct', valuePct: '5.00' }),
+      ],
+    );
+    expect(describeProfessionalCostBase('10', repeatedProduct.get(devFuncaoId), 0)).toBe(
+      '10% de R$ 35.000,00 (FXL Custom + Landing Page)',
+    );
+
+    expect(describeProfessionalCostBase('10', undefined, 3000000)).toBe(
+      '10% de R$ 30.000,00 (total dos itens de produto)',
+    );
+    expect(describeProfessionalCostBase('10', undefined, 0)).toBe('');
   });
 });
