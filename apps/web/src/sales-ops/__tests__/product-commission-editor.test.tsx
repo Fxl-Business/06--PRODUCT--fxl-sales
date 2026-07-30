@@ -90,6 +90,7 @@ async function renderDialog(existing?: SalesOpsProduct, onSave = vi.fn()) {
         modal={{ kind: 'product', product: existing }}
         onClose={vi.fn()}
         onSave={onSave}
+        products={[]}
         saving={false}
       />,
     );
@@ -273,6 +274,7 @@ describe('product commission editor', () => {
           }}
           onClose={vi.fn()}
           onSave={vi.fn()}
+          products={[]}
           saving={false}
         />,
       );

@@ -657,6 +657,7 @@ describe('combobox adoption in the produto dialog', () => {
           onClose={vi.fn()}
           onCreateArea={props.onCreateArea}
           onSave={onSaveProduct}
+          products={[]}
           saving={false}
         />,
       );

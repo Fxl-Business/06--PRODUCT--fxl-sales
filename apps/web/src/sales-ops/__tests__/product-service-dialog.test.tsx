@@ -144,6 +144,8 @@ type RenderOptions = {
   productKind?: SalesOpsProductKind;
   funcoes?: SalesOpsFuncao[];
   funcaoCosts?: SalesOpsProductFuncaoCost[];
+  /** The org's whole catalogue, i.e. the set the código suffix suggestion reads. */
+  products?: SalesOpsProduct[];
   onSave?: ReturnType<typeof vi.fn>;
 };
 
@@ -169,6 +171,7 @@ async function renderDialog(options: RenderOptions = {}) {
         }}
         onClose={vi.fn()}
         onSave={onSave}
+        products={options.products ?? []}
         saving={false}
       />,
     );
@@ -1253,5 +1256,51 @@ describe('the produto wizard shell', () => {
     expect(maybeButton('Salvar alterações')).toBeUndefined();
     await goToStep(3);
     expect(maybeButton('Salvar alterações')).toBeUndefined();
+  });
+});
+
+/*
+  `(org_id, code_suffix)` is UNIQUE and `createProduct` maps no 23505, so a suffix
+  collision escapes as a bare 500. Seeding a NEW record with `max + 1` is what makes
+  that path unreachable through the UI - and leaving an EXISTING record's stored
+  suffix alone is what keeps it from silently renumbering every sale code the
+  produto has already generated.
+*/
+describe('the código da venda suffix suggestion', () => {
+  const otherProduct = product({
+    id: '22222222-2222-4222-8222-222222222222',
+    name: 'FXL Outro',
+    codeSuffix: '7',
+  });
+
+  const catalogue = [product({ codeSuffix: '3' }), otherProduct];
+
+  it('seeds a new produto with the highest suffix plus one', async () => {
+    await renderDialog({ products: catalogue });
+    expect(labeledInput('Final do código da venda').value).toBe('8');
+  });
+
+  it('leaves an existing produto on its own stored suffix', async () => {
+    // The edit path must never see a recomputed value: 3, not 8.
+    await renderDialog({ products: catalogue, existing: product({ codeSuffix: '3' }) });
+    expect(labeledInput('Final do código da venda').value).toBe('3');
+  });
+
+  it('suggests the same number for a new serviço', async () => {
+    // The suggestion is not gated on `kind`: the unique index is not either.
+    await renderDialog({ products: catalogue, productKind: 'service' });
+    expect(labeledInput('Final do código da venda').value).toBe('8');
+  });
+
+  it('falls back to 0 on an empty catalogue', async () => {
+    await renderDialog({ products: [] });
+    expect(labeledInput('Final do código da venda').value).toBe('0');
+  });
+
+  it('carries the suggestion through submit without coercing it away', async () => {
+    const onSave = await renderDialog({ products: catalogue });
+    await fillIdentity();
+    await submit();
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ codeSuffix: '8' }));
   });
 });

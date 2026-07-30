@@ -255,6 +255,7 @@ describe('areas view', () => {
           modal={{ kind: 'product' }}
           onClose={vi.fn()}
           onSave={onSave}
+          products={[]}
           saving={false}
         />,
       );
