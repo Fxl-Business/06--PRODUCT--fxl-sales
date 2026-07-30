@@ -667,6 +667,15 @@ describe('the produto função cost pool', () => {
 
     await click(buttonByText('Novo produto'));
 
+    // Nome and Área gate every later step, and the função cost editor is on step 4.
+    await changeInput(requireInput('input[placeholder="Nome"]'), 'FXL Produto Novo');
+    await pickOption('Área do produto', existingArea.name);
+    const costStep = [...container.querySelectorAll('button')].find((candidate) =>
+      candidate.textContent?.trim().endsWith('Comissões e custos'),
+    );
+    if (!(costStep instanceof HTMLButtonElement)) throw new Error('step button not found');
+    await click(costStep);
+
     const addCost = [...container.querySelectorAll('button')].find(
       (candidate) =>
         candidate.textContent?.trim() === 'Adicionar' &&

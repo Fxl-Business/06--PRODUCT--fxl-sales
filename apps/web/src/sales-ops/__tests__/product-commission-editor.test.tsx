@@ -159,9 +159,32 @@ async function chooseArea() {
   expect(comboboxText('Área do produto')).toBe(areaFixture.name);
 }
 
+function nameInput(): HTMLInputElement {
+  const match = container.querySelector('input[placeholder="Nome"]');
+  if (!(match instanceof HTMLInputElement)) throw new Error('name input not found');
+  return match;
+}
+
+/** Nome and Área are both on step 1 and both gate every later step of the wizard. */
+async function fillIdentity(name = 'FXL Produto') {
+  await change(nameInput(), name);
+  await chooseArea();
+}
+
+/** The commission editor lives on step 4, `Comissões e custos`. */
+async function goToCommissionStep() {
+  const match = [...container.querySelectorAll('button')].find((candidate) =>
+    candidate.textContent?.trim().endsWith('Comissões e custos'),
+  );
+  if (!(match instanceof HTMLButtonElement)) throw new Error('step button not found');
+  await click(match);
+}
+
 describe('product commission editor', () => {
   it('keeps seller-only 10 percent independent from seller-with-finder 7 percent plus finder 3 percent', async () => {
     await renderDialog();
+    await fillIdentity();
+    await goToCommissionStep();
 
     expect(labeledInput('Comissão do vendedor - somente vendedor').value).toBe('10');
     await click(button('Vendedor + Finder'));
@@ -179,7 +202,7 @@ describe('product commission editor', () => {
   it('submits every commission pair regardless of the active tab', async () => {
     const onSave = await renderDialog();
 
-    await chooseArea();
+    await fillIdentity();
     await submit();
 
     expect(onSave).toHaveBeenCalledWith(
@@ -196,6 +219,7 @@ describe('product commission editor', () => {
 
   it('rehydrates saved independent scenarios when the product dialog is reopened', async () => {
     await renderDialog(product());
+    await goToCommissionStep();
 
     expect(labeledInput('Comissão do vendedor - somente vendedor').value).toBe('10');
     await click(button('Vendedor + Finder'));
@@ -205,6 +229,8 @@ describe('product commission editor', () => {
 
   it('preserves fixed type and value controls across switching, save, and reopen', async () => {
     const onSave = await renderDialog();
+    await fillIdentity();
+    await goToCommissionStep();
 
     await click(labeledButton('Comissão do vendedor - somente vendedor em reais'));
     await change(labeledInput('Comissão do vendedor - somente vendedor'), '1000');
@@ -215,7 +241,6 @@ describe('product commission editor', () => {
     await change(labeledInput('Comissão do finder'), '300');
     await click(button('Somente vendedor'));
     await click(button('Vendedor + Finder'));
-    await chooseArea();
     await submit();
 
     expect(onSave).toHaveBeenCalledWith(
@@ -253,6 +278,7 @@ describe('product commission editor', () => {
       );
     });
 
+    await goToCommissionStep();
     expect(labeledInput('Comissão do vendedor - somente vendedor').value).toBe('1000');
     expect(labeledButton('Comissão do vendedor - somente vendedor em reais').className).toContain(
       'bg-[#201f24]',

@@ -149,6 +149,13 @@ type RenderOptions = {
 
 async function renderDialog(options: RenderOptions = {}) {
   const onSave = options.onSave ?? vi.fn();
+  /*
+    A real remount between two renders in one test. `ProductDialog`'s key is identical
+    for two identical create rows, so without this the second `renderDialog()` of a test
+    would silently keep the first one's form state AND its wizard step, which is never
+    what a test that renders twice means.
+  */
+  await act(async () => root.render(null));
   await act(async () => {
     root.render(
       <ProductDialog
@@ -264,6 +271,48 @@ async function chooseArea() {
   expect(comboboxText('Área do produto')).toBe(areaFixture.name);
 }
 
+function nameInput(): HTMLInputElement {
+  const match = container.querySelector('input[placeholder="Nome"]');
+  if (!(match instanceof HTMLInputElement)) throw new Error('name input not found');
+  return match;
+}
+
+/**
+ * Both controls step 1 gates on. Every test that reaches a later step calls this
+ * FIRST: `Avançar` and the stepper are both disabled until the two are filled, so
+ * navigation is impossible without it.
+ */
+async function fillIdentity(name = 'FXL Produto') {
+  await change(nameInput(), name);
+  await chooseArea();
+}
+
+const stepLabels = {
+  1: 'Identificação',
+  2: 'Valores',
+  3: 'Pagamento',
+  4: 'Comissões e custos',
+} as const;
+
+function stepButton(target: 1 | 2 | 3 | 4): HTMLButtonElement {
+  const label = stepLabels[target];
+  const match = [...container.querySelectorAll('button')].find((candidate) =>
+    candidate.textContent?.trim().endsWith(label),
+  );
+  if (!(match instanceof HTMLButtonElement)) throw new Error(`step button not found: ${label}`);
+  return match;
+}
+
+async function goToStep(target: 1 | 2 | 3 | 4) {
+  await click(stepButton(target));
+}
+
+function codeSuffixInput(): HTMLInputElement {
+  const match = container.querySelector('input[inputmode="numeric"]');
+  if (!(match instanceof HTMLInputElement)) throw new Error('code suffix input not found');
+  return match;
+}
+
 /** The `Adicionar` button of one `DialogSection`, found through its section title. */
 function addButtonOf(sectionTitle: string): HTMLButtonElement {
   const match = [...container.querySelectorAll('button')].find(
@@ -278,6 +327,17 @@ function addButtonOf(sectionTitle: string): HTMLButtonElement {
 }
 
 const COSTS_SECTION = 'Custos padrão por função';
+
+async function addModule(name: string, valueBrl: string) {
+  await click(addButtonOf('Módulos'));
+  const field = container.querySelector('input[placeholder="Nome do módulo"]');
+  if (!(field instanceof HTMLInputElement)) throw new Error('module name input not found');
+  await change(field, name);
+  const row = field.closest('div.rounded-xl');
+  const value = row?.querySelector('input[type="number"]');
+  if (!(value instanceof HTMLInputElement)) throw new Error('module value input not found');
+  await change(value, valueBrl);
+}
 
 async function addCostRow(index: number, funcaoName: string, unit: '%' | 'R$', value: string) {
   await click(addButtonOf(COSTS_SECTION));
@@ -332,7 +392,7 @@ describe('product and service dialog', () => {
   it('sends kind and never sends openPrice', async () => {
     const onSave = await renderDialog({ productKind: 'product' });
 
-    await chooseArea();
+    await fillIdentity();
     await submit();
 
     const payload = onSave.mock.calls[0]?.[0];
@@ -343,7 +403,7 @@ describe('product and service dialog', () => {
   it('sends kind service when the serviço segment is active', async () => {
     const onSave = await renderDialog({ productKind: 'service' });
 
-    await chooseArea();
+    await fillIdentity();
     await submit();
 
     const payload = onSave.mock.calls[0]?.[0];
@@ -353,6 +413,8 @@ describe('product and service dialog', () => {
 
   it('renders editable base value inputs for a serviço and submits them', async () => {
     const onSave = await renderDialog({ productKind: 'service' });
+    await fillIdentity();
+    await goToStep(2);
     await click(labeledButton('Possui mensalidade'));
 
     expect(text()).toContain('Valor base (R$)');
@@ -367,7 +429,6 @@ describe('product and service dialog', () => {
     );
     if (!(baseInput instanceof HTMLInputElement)) throw new Error('base value input not found');
     await change(baseInput, '2500');
-    await chooseArea();
     await submit();
 
     expect(onSave.mock.calls[0]?.[0]).toMatchObject({ kind: 'service', setupBrl: 250000 });
@@ -388,6 +449,7 @@ describe('product and service dialog', () => {
         monthlyBrl: 0,
       }),
     });
+    await goToStep(2);
 
     const base = moneyInput('Valor base (R$)');
     expect(base.value).toBe('');
@@ -411,6 +473,7 @@ describe('product and service dialog', () => {
         monthlyBrl: 20000,
       }),
     });
+    await goToStep(2);
 
     expect(moneyInput('Valor base (R$)').value).toBe('5000');
     expect(moneyInput('Valor da mensalidade (R$)').value).toBe('200');
@@ -433,13 +496,14 @@ describe('product and service dialog', () => {
 
   it('keeps the own-value inputs editable for a produto', async () => {
     const onSave = await renderDialog({ productKind: 'product' });
+    await fillIdentity();
+    await goToStep(2);
 
     const setupInput = [...container.querySelectorAll('input[type="number"]')].find(
       (candidate) => candidate.closest('label')?.textContent?.includes('Setup (R$)'),
     );
     if (!(setupInput instanceof HTMLInputElement)) throw new Error('setup input not found');
     await change(setupInput, '2500');
-    await chooseArea();
     await submit();
 
     expect(onSave.mock.calls[0]?.[0]).toMatchObject({ setupBrl: 250000 });
@@ -447,17 +511,19 @@ describe('product and service dialog', () => {
 
   it('states that every value here is only a default', async () => {
     await renderDialog({ productKind: 'service' });
+    await fillIdentity();
 
     expect(text()).toContain(
       'Tudo aqui é padrão: dentro da proposta você pode alterar qualquer valor sem mexer no cadastro.',
     );
+    await goToStep(4);
     expect(text()).toContain('Comissionamento padrão');
   });
 
   it('submits the app-default plan when nothing is touched', async () => {
     const onSave = await renderDialog({ productKind: 'product' });
 
-    await chooseArea();
+    await fillIdentity();
     await submit();
 
     expect(onSave.mock.calls[0]?.[0]).toMatchObject({
@@ -472,12 +538,13 @@ describe('product and service dialog', () => {
 
   it('submits a percentage entrada into defaultEntradaPct only', async () => {
     const onSave = await renderDialog({ productKind: 'service' });
+    await fillIdentity();
+    await goToStep(3);
 
     await pickOption('Tipo de entrada', '%');
     await change(labeledInput('Valor da entrada'), '50');
     await change(labeledInput('Parcelas restantes'), '3');
     await pickOption('Forma de pagamento padrão', 'Boleto');
-    await chooseArea();
     await submit();
 
     expect(onSave.mock.calls[0]?.[0]).toMatchObject({
@@ -491,10 +558,11 @@ describe('product and service dialog', () => {
 
   it('submits a fixed entrada into defaultEntradaBrl as integer cents', async () => {
     const onSave = await renderDialog({ productKind: 'service' });
+    await fillIdentity();
+    await goToStep(3);
 
     await pickOption('Tipo de entrada', 'R$ fixo');
     await change(labeledInput('Valor da entrada'), '1500');
-    await chooseArea();
     await submit();
 
     expect(onSave.mock.calls[0]?.[0]).toMatchObject({
@@ -506,6 +574,8 @@ describe('product and service dialog', () => {
 
   it('unmounts the entrada value input when the mode is nenhuma', async () => {
     await renderDialog({ productKind: 'service' });
+    await fillIdentity();
+    await goToStep(3);
 
     await pickOption('Tipo de entrada', '%');
     // Positive control: the input exists while a value-carrying mode is selected.
@@ -517,6 +587,8 @@ describe('product and service dialog', () => {
 
   it('caps the entrada plus parcelas pair at the 120 installment ceiling', async () => {
     const onSave = await renderDialog({ productKind: 'service' });
+    await fillIdentity();
+    await goToStep(3);
 
     await change(labeledInput('Parcelas restantes'), '120');
     // With no entrada row, 120 parcelas is exactly the API ceiling.
@@ -528,7 +600,6 @@ describe('product and service dialog', () => {
     expect(labeledInput('Parcelas restantes').getAttribute('max')).toBe('119');
     expect(labeledInput('Parcelas restantes').value).toBe('119');
 
-    await chooseArea();
     await submit();
     expect(onSave.mock.calls[0]?.[0]).toMatchObject({ defaultRemainingInstallments: 119 });
   });
@@ -542,18 +613,20 @@ describe('product and service dialog', () => {
    */
   it('clamps a hand-typed parcela count to the ceiling at submit', async () => {
     const onSave = await renderDialog({ productKind: 'service' });
+    await fillIdentity();
+    await goToStep(3);
 
     await change(labeledInput('Parcelas restantes'), '500');
-    await chooseArea();
     await submit();
     expect(onSave.mock.calls[0]?.[0]).toMatchObject({ defaultRemainingInstallments: 120 });
 
     // With an entrada the row budget is one smaller, so the same typed value clamps lower.
     const onSaveWithEntrada = await renderDialog({ productKind: 'service' });
+    await fillIdentity();
+    await goToStep(3);
     await pickOption('Tipo de entrada', 'R$ fixo');
     await change(labeledInput('Valor da entrada'), '1000');
     await change(labeledInput('Parcelas restantes'), '500');
-    await chooseArea();
     await submit();
     expect(onSaveWithEntrada.mock.calls[0]?.[0]).toMatchObject({
       defaultRemainingInstallments: 119,
@@ -562,9 +635,10 @@ describe('product and service dialog', () => {
 
   it('floors a hand-typed parcela count at one', async () => {
     const onSave = await renderDialog({ productKind: 'service' });
+    await fillIdentity();
+    await goToStep(3);
 
     await change(labeledInput('Parcelas restantes'), '0');
-    await chooseArea();
     await submit();
 
     expect(onSave.mock.calls[0]?.[0]).toMatchObject({ defaultRemainingInstallments: 1 });
@@ -572,23 +646,27 @@ describe('product and service dialog', () => {
 
   it('treats a blank ciclos as prazo indeterminado and shows no checkbox', async () => {
     const onSave = await renderDialog({ productKind: 'service' });
+    await fillIdentity();
 
+    await goToStep(2);
     await click(labeledButton('Possui mensalidade'));
+    await goToStep(3);
     expect(labeledInput('Número de ciclos').value).toBe('');
     expect(text()).toContain('Deixe em branco para prazo indeterminado');
     expect(maybeButton('Prazo indeterminado')).toBeUndefined();
 
-    await chooseArea();
     await submit();
     expect(onSave.mock.calls[0]?.[0]).toMatchObject({ defaultRecurringCycles: null });
   });
 
   it('submits a bounded cycle count', async () => {
     const onSave = await renderDialog({ productKind: 'service' });
+    await fillIdentity();
 
+    await goToStep(2);
     await click(labeledButton('Possui mensalidade'));
+    await goToStep(3);
     await change(labeledInput('Número de ciclos'), '12');
-    await chooseArea();
     await submit();
 
     expect(onSave.mock.calls[0]?.[0]).toMatchObject({ defaultRecurringCycles: 12 });
@@ -596,20 +674,26 @@ describe('product and service dialog', () => {
 
   it('hides the ciclos field and nulls the column when the product has no mensalidade', async () => {
     const onSave = await renderDialog({ productKind: 'service' });
+    await fillIdentity();
+    await goToStep(3);
 
     expect(container.querySelector('input[aria-label="Número de ciclos"]')).toBeNull();
-    await chooseArea();
+    // Positive control: the plan step really is on screen, so the null above is about
+    // the mensalidade switch and not about an unmounted step.
+    expect(labeledInput('Parcelas restantes')).toBeInstanceOf(HTMLInputElement);
     await submit();
     expect(onSave.mock.calls[0]?.[0]).toMatchObject({ defaultRecurringCycles: null });
   });
 
   it('never puts a date in the default payment plan controls', async () => {
     const onSave = await renderDialog({ productKind: 'service' });
+    await fillIdentity();
 
+    await goToStep(2);
     await click(labeledButton('Possui mensalidade'));
+    await goToStep(3);
     expect(container.querySelectorAll('input[type="date"]').length).toBe(0);
 
-    await chooseArea();
     await submit();
     const payload = onSave.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(Object.keys(payload).filter((key) => /date/i.test(key))).toEqual([]);
@@ -617,10 +701,11 @@ describe('product and service dialog', () => {
 
   it('saves função costs as a discriminated pct row and a fix row in cents', async () => {
     const onSave = await renderDialog({ productKind: 'service' });
+    await fillIdentity();
+    await goToStep(4);
 
     await addCostRow(1, 'Desenvolvedor', '%', '5');
     await addCostRow(2, 'Testador', 'R$', '300');
-    await chooseArea();
     await submit();
 
     expect(onSave.mock.calls[0]?.[0]?.productFuncaoCosts).toEqual([
@@ -631,6 +716,8 @@ describe('product and service dialog', () => {
 
   it('never offers a system função as a cost default', async () => {
     await renderDialog({ productKind: 'service', funcoes: [devFuncao, vendedorFuncao] });
+    await fillIdentity();
+    await goToStep(4);
 
     await click(addButtonOf(COSTS_SECTION));
     const offered = await comboboxOptions('Função do custo padrão 1');
@@ -648,6 +735,8 @@ describe('product and service dialog', () => {
       status: 'archived',
     });
     await renderDialog({ productKind: 'service', funcoes: [devFuncao, archived] });
+    await fillIdentity();
+    await goToStep(4);
 
     await click(addButtonOf(COSTS_SECTION));
     const offered = await comboboxOptions('Função do custo padrão 1');
@@ -658,6 +747,8 @@ describe('product and service dialog', () => {
 
   it('does not offer the same função twice', async () => {
     await renderDialog({ productKind: 'service' });
+    await fillIdentity();
+    await goToStep(4);
 
     await addCostRow(1, 'Desenvolvedor', '%', '5');
     await click(addButtonOf(COSTS_SECTION));
@@ -692,6 +783,7 @@ describe('product and service dialog', () => {
         }),
       ],
     });
+    await goToStep(4);
 
     // The trigger names the função rather than falling back to the placeholder, and
     // says it is archived so the operator can tell it is no longer assignable.
@@ -725,6 +817,7 @@ describe('product and service dialog', () => {
         }),
       ],
     });
+    await goToStep(4);
 
     const trigger = comboboxText('Função do custo padrão 1');
     expect(trigger).toBe('Função não encontrada');
@@ -742,6 +835,7 @@ describe('product and service dialog', () => {
         funcaoCost({ funcaoId: archivedFuncao.id, mode: 'pct', valuePct: '5.00' }),
       ],
     });
+    await goToStep(4);
 
     await click(addButtonOf(COSTS_SECTION));
     const offered = await comboboxOptions('Função do custo padrão 2');
@@ -755,6 +849,8 @@ describe('product and service dialog', () => {
 
   it('explains where to register funções when none exist', async () => {
     await renderDialog({ productKind: 'service', funcoes: [] });
+    await fillIdentity();
+    await goToStep(4);
 
     expect(text()).toContain(
       'Nenhuma função cadastrada ainda. Cadastre as funções em Cadastros > Funções para definir custos padrão.',
@@ -764,11 +860,12 @@ describe('product and service dialog', () => {
 
   it('removes a função cost row', async () => {
     const onSave = await renderDialog({ productKind: 'service' });
+    await fillIdentity();
+    await goToStep(4);
 
     await addCostRow(1, 'Desenvolvedor', '%', '5');
     await addCostRow(2, 'Testador', 'R$', '300');
     await click(labeledButton('Remover custo padrão 1'));
-    await chooseArea();
     await submit();
 
     expect(onSave.mock.calls[0]?.[0]?.productFuncaoCosts).toEqual([
@@ -778,9 +875,16 @@ describe('product and service dialog', () => {
 
   it('does not reintroduce any control the payment plan builder removes', async () => {
     await renderDialog({ productKind: 'service' });
+    await fillIdentity();
+    await goToStep(2);
     await click(labeledButton('Possui mensalidade'));
 
-    const rendered = text();
+    // Swept across every step, so a control cannot hide behind an unmounted one.
+    let rendered = text();
+    for (const step of [1, 3, 4] as const) {
+      await goToStep(step);
+      rendered += text();
+    }
     for (const forbidden of [
       'Dividir em',
       '+ parcela',
@@ -792,6 +896,7 @@ describe('product and service dialog', () => {
     }
     // Positive control: the controls this slice is supposed to render ARE mounted under
     // slice 11's own labels, so the negatives above cannot pass by way of an empty dialog.
+    await goToStep(3);
     expect(labeledInput('Parcelas restantes')).toBeInstanceOf(HTMLInputElement);
     expect(labeledInput('Número de ciclos')).toBeInstanceOf(HTMLInputElement);
     expect(rendered).toContain('Plano de pagamento padrão');
@@ -799,13 +904,14 @@ describe('product and service dialog', () => {
 
   it('drops the free-text prestador picker and never writes providers', async () => {
     const onSave = await renderDialog({ productKind: 'product' });
+    await fillIdentity();
+    await goToStep(4);
 
     expect(container.querySelector('datalist#sales-ops-collaborators')).toBeNull();
     expect(text()).not.toContain('Prestadores de serviço');
     // Positive control: the editor that replaced it is on screen.
     expect(text()).toContain(COSTS_SECTION);
 
-    await chooseArea();
     await submit();
     expect(onSave.mock.calls[0]?.[0]).not.toHaveProperty('providers');
   });
@@ -816,6 +922,7 @@ describe('product and service dialog', () => {
         providers: [{ personName: 'Ana', commissionType: 'pct', commissionValue: 5 }],
       }),
     });
+    await goToStep(4);
 
     expect(text()).toContain(
       'Prestadores antigos deste cadastro não foram convertidos automaticamente: Ana. Recadastre o custo por função acima.',
@@ -829,12 +936,15 @@ describe('product and service dialog', () => {
     const onSave = await renderDialog({
       existing: product({ modules: [{ name: 'Extra BI', type: 'Upsell', valueBrl: 50000 }] }),
     });
+    await goToStep(2);
 
     expect(text()).toContain('Módulos');
     const moduleName = container.querySelector('input[placeholder="Nome do módulo"]');
     expect(moduleName instanceof HTMLInputElement && moduleName.value).toBe('Extra BI');
 
+    await goToStep(1);
     await click(labeledButton('Classificar como serviço'));
+    await goToStep(2);
     expect(text()).not.toContain('Módulos');
     expect(container.querySelector('input[placeholder="Nome do módulo"]')).toBeNull();
 
@@ -869,6 +979,7 @@ describe('product and service dialog', () => {
         }),
       ],
     });
+    await goToStep(3);
 
     expect(comboboxText('Tipo de entrada')).toBe('%');
     expect(labeledInput('Valor da entrada').value).toBe('50');
@@ -876,6 +987,7 @@ describe('product and service dialog', () => {
     expect(comboboxText('Forma de pagamento padrão')).toBe('Boleto');
     expect(labeledInput('Número de ciclos').value).toBe('');
 
+    await goToStep(4);
     expect(comboboxText('Função do custo padrão 1')).toBe('Desenvolvedor');
     expect(labeledInput('Custo da função 1').value).toBe('5');
     expect(labeledButton('Custo da função 1 em porcentagem').className).toContain('bg-[#201f24]');
@@ -910,6 +1022,8 @@ describe('product and service dialog', () => {
 
   it('keeps the commission editor working unchanged for a serviço', async () => {
     await renderDialog({ productKind: 'service' });
+    await fillIdentity();
+    await goToStep(4);
 
     expect(labeledInput('Comissão do vendedor - somente vendedor').value).toBe('10');
     await click(button('Vendedor + Finder'));
@@ -921,6 +1035,8 @@ describe('product and service dialog', () => {
 
   it('summarises the default plan back to the operator', async () => {
     await renderDialog({ productKind: 'service' });
+    await fillIdentity();
+    await goToStep(3);
 
     expect(text()).toContain('1x · PIX');
 
@@ -929,9 +1045,213 @@ describe('product and service dialog', () => {
     await change(labeledInput('Parcelas restantes'), '3');
     expect(text()).toContain('Entrada de 50% + 3x do restante · PIX');
 
+    await goToStep(2);
     await click(labeledButton('Possui mensalidade'));
+    await goToStep(3);
     expect(text()).toContain('· mensal por prazo indeterminado');
     await change(labeledInput('Número de ciclos'), '12');
     expect(text()).toContain('· mensal por 12 ciclos');
+  });
+});
+
+describe('the produto wizard shell', () => {
+  it('renders the four numbered steps in order on the proposta wizard shell', async () => {
+    await renderDialog({ productKind: 'product' });
+
+    // The literal ask: the same chrome as the proposta wizard, at the same width.
+    const shell = container.querySelector('div[class*="max-w-[940px]"]');
+    if (!(shell instanceof HTMLElement)) throw new Error('wizard shell not found');
+    for (const token of ['flex', 'flex-col', 'h-[92vh]', 'overflow-hidden', 'rounded-[22px]']) {
+      expect(shell.className.split(' ')).toContain(token);
+    }
+
+    const form = shell.querySelector('form');
+    if (!(form instanceof HTMLFormElement)) throw new Error('form not found');
+    const [stepper, body, footer] = [0, 1, 2].map((index) => form.children.item(index)) as [
+      HTMLElement,
+      HTMLElement,
+      HTMLElement,
+    ];
+    // positive controls: prove we grabbed the right three nodes before asserting on them
+    expect(stepper.textContent).toContain('Identificação');
+    expect(body.textContent).toContain('Tudo aqui é padrão');
+    expect(footer.textContent).toContain('Avançar');
+
+    // only the body scrolls, and it absorbs all the free space - never a calc() height
+    for (const token of ['min-h-0', 'flex-1', 'overflow-y-auto']) {
+      expect(body.className.split(' ')).toContain(token);
+    }
+    expect(body.className).not.toContain('calc(');
+    expect(stepper.className.split(' ')).toContain('shrink-0');
+    expect(footer.className.split(' ')).toContain('shrink-0');
+
+    const rendered = text();
+    for (const label of ['Identificação', 'Valores', 'Pagamento', 'Comissões e custos']) {
+      expect(rendered).toContain(label);
+    }
+    const order = ['Identificação', 'Valores', 'Pagamento', 'Comissões e custos'].map((label) =>
+      rendered.indexOf(label),
+    );
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+    expect(rendered).toContain('Passo 1 de 4');
+  });
+
+  /**
+   * The operator's one hard ordering constraint, pinned directionally in both halves
+   * so it cannot pass against an empty render: the payment rules are only reachable
+   * once Setup and Mensalidade are settled.
+   */
+  it('puts Plano de pagamento padrão on a step after the mensalidade controls', async () => {
+    await renderDialog({ productKind: 'product' });
+    await fillIdentity();
+
+    await goToStep(2);
+    expect(text()).toContain('Possui mensalidade');
+    expect(text()).not.toContain('Plano de pagamento padrão');
+
+    await goToStep(3);
+    expect(text()).toContain('Plano de pagamento padrão');
+    expect(text()).not.toContain('Possui mensalidade');
+  });
+
+  it('blocks Avançar until nome and área are both filled', async () => {
+    await renderDialog({ productKind: 'product' });
+
+    expect(button('Avançar').disabled).toBe(true);
+    expect(stepButton(2).disabled).toBe(true);
+    expect(stepButton(3).disabled).toBe(true);
+    expect(stepButton(4).disabled).toBe(true);
+
+    // Only a name.
+    await change(nameInput(), 'FXL Produto');
+    expect(button('Avançar').disabled).toBe(true);
+
+    // Only an área.
+    await change(nameInput(), '');
+    await chooseArea();
+    expect(button('Avançar').disabled).toBe(true);
+
+    await change(nameInput(), 'FXL Produto');
+    expect(button('Avançar').disabled).toBe(false);
+    expect(stepButton(2).disabled).toBe(false);
+
+    await click(button('Avançar'));
+    expect(text()).toContain('Passo 2 de 4');
+  });
+
+  /**
+   * `Avançar` is disabled while step 1 is incomplete, so the operator's real route to a
+   * blocked step 1 is the implicit form submission Enter gives them from either field.
+   * That path has to name which field is missing rather than doing nothing at all.
+   */
+  it('shows which identity field is missing after a blocked submit', async () => {
+    const onSave = await renderDialog({ productKind: 'product' });
+
+    expect(button('Avançar').disabled).toBe(true);
+    await submit();
+
+    expect(text()).toContain('Informe o nome do produto.');
+    expect(text()).toContain('Selecione a área.');
+    expect(text()).toContain('Passo 1 de 4');
+    expect(onSave).not.toHaveBeenCalled();
+
+    // And it clears field by field, so the message always describes the current form.
+    await change(nameInput(), 'FXL Produto');
+    expect(text()).not.toContain('Informe o nome do produto.');
+    expect(text()).toContain('Selecione a área.');
+  });
+
+  /**
+   * The payload-equivalence guard this whole slice hinges on. Written and passing
+   * against the single-page dialog FIRST, then re-run through the wizard with nothing
+   * changed but the navigation. `toEqual` rather than `toMatchObject` is the
+   * load-bearing choice: it fails both when a field is dropped and when one appears,
+   * which is what would catch an accidental `providers: []` or `openPrice`.
+   */
+  it('emits the identical SaveProductPayload for a fully filled produto', async () => {
+    const onSave = await renderDialog({ productKind: 'product' });
+
+    await change(nameInput(), 'FXL Completo');
+    await chooseArea();
+    await change(codeSuffixInput(), '42');
+
+    await goToStep(2);
+    await change(moneyInput('Setup (R$)'), '2500');
+    await click(labeledButton('Possui mensalidade'));
+    await change(moneyInput('Valor da mensalidade (R$)'), '300');
+    await click(labeledButton('Incide sobre recorrente'));
+    await addModule('Extra BI', '500');
+
+    await goToStep(3);
+    await pickOption('Tipo de entrada', '%');
+    await change(labeledInput('Valor da entrada'), '40');
+    await change(labeledInput('Parcelas restantes'), '6');
+    await pickOption('Forma de pagamento padrão', 'Boleto');
+    await change(labeledInput('Número de ciclos'), '12');
+
+    await goToStep(4);
+    await click(labeledButton('Comissão do vendedor - somente vendedor em reais'));
+    await change(labeledInput('Comissão do vendedor - somente vendedor'), '1200');
+    await click(button('Vendedor + Finder'));
+    await change(labeledInput('Comissão do vendedor - com finder'), '8');
+    await click(labeledButton('Comissão do finder em reais'));
+    await change(labeledInput('Comissão do finder'), '400');
+    await addCostRow(1, 'Desenvolvedor', '%', '5');
+    await addCostRow(2, 'Testador', 'R$', '300');
+
+    await submit();
+
+    expect(onSave.mock.calls[0]?.[0]).toEqual({
+      id: undefined,
+      name: 'FXL Completo',
+      areaId: areaFixture.id,
+      codeSuffix: '42',
+      kind: 'product',
+      setupBrl: 250000,
+      hasMonthly: true,
+      monthlyBrl: 30000,
+      recurringCommission: true,
+      sellerCommissionType: 'fix',
+      sellerCommissionValue: 1200,
+      sellerWithFinderCommissionType: 'pct',
+      sellerWithFinderCommissionValue: 8,
+      finderCommissionType: 'fix',
+      finderCommissionValue: 400,
+      defaultPaymentMethod: 'boleto',
+      defaultEntradaMode: 'pct',
+      defaultEntradaPct: 40,
+      defaultEntradaBrl: null,
+      defaultRemainingInstallments: 6,
+      defaultRecurringCycles: 12,
+      productFuncaoCosts: [
+        { funcaoId: devFuncao.id, mode: 'pct', valuePct: 5 },
+        { funcaoId: testerFuncao.id, mode: 'fix', valueBrl: 30000 },
+      ],
+      modules: [{ name: 'Extra BI', type: 'Upsell', valueBrl: 50000 }],
+      status: 'active',
+    });
+  });
+
+  it('lands on step 1 with an existing produto prefilled and saves from any step', async () => {
+    const existing = product({ name: 'FXL Finance' });
+    const onSave = await renderDialog({ existing });
+
+    expect(text()).toContain('Passo 1 de 4');
+    expect(nameInput().value).toBe('FXL Finance');
+    expect(comboboxText('Área do produto')).toBe(areaFixture.name);
+
+    await click(button('Salvar alterações'));
+    expect(onSave.mock.calls[0]?.[0]).toMatchObject({ id: existing.id, name: 'FXL Finance' });
+  });
+
+  it('offers no mid-wizard save for a new produto', async () => {
+    await renderDialog({ productKind: 'product' });
+    await fillIdentity();
+
+    expect(maybeButton('Salvar alterações')).toBeUndefined();
+    await goToStep(2);
+    expect(maybeButton('Salvar alterações')).toBeUndefined();
+    await goToStep(3);
+    expect(maybeButton('Salvar alterações')).toBeUndefined();
   });
 });

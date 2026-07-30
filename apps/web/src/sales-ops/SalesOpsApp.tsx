@@ -189,6 +189,29 @@ const comboboxTriggerClass =
  * rounded-md/rounded-[10px] pairs in favour of the later token.
  */
 const formSelectClass = `${comboboxTriggerClass} h-11 rounded-[10px]`;
+/*
+  The wizard shell, shared by the proposta wizard and the produto/serviço wizard. Both
+  dialogs are the same object to the operator - a wide, stepped, four-part form - so
+  they are literally the same six strings here rather than two copies that drift. The
+  shell is a flex COLUMN with a real height: only the body scrolls, and the header,
+  the stepper and the footer never shrink, which is why no `calc(...vh-...)` appears
+  in either dialog.
+*/
+const wizardDialogContentClass =
+  'flex h-[92vh] max-h-[92vh] w-[calc(100vw-48px)] max-w-[940px] flex-col gap-0 overflow-hidden rounded-[22px] border-none bg-[#f4f4f6] p-0 shadow-[0_30px_80px_rgba(0,0,0,.3)] sm:rounded-[22px] [&>button]:right-[26px] [&>button]:top-[31px] [&>button]:flex [&>button]:h-9 [&>button]:w-9 [&>button]:items-center [&>button]:justify-center [&>button]:rounded-[10px] [&>button]:border [&>button]:border-[#dcdce2] [&>button]:bg-white [&>button]:opacity-100 [&>button]:shadow-none';
+/** `pr-[78px]` reserves the slot the close button occupies at `right-[26px]`. */
+const wizardHeaderClass =
+  'shrink-0 border-b border-[#e8e8ec] bg-white px-[26px] py-5 pr-[78px] text-left';
+const wizardBodyClass = 'min-h-0 flex-1 overflow-y-auto px-[26px] py-6';
+const wizardFooterClass =
+  'flex shrink-0 items-center justify-between border-t border-[#e8e8ec] bg-white px-[26px] py-4';
+const wizardSecondaryButtonClass =
+  'rounded-[11px] border border-[#dcdce2] bg-white px-5 py-[11px] text-sm font-semibold text-[#57575f] transition hover:bg-[#f2f2f4]';
+const wizardPrimaryButtonClass =
+  'rounded-[11px] bg-[#201f24] px-[22px] py-[11px] text-sm font-bold text-white transition hover:bg-[#33333a] disabled:cursor-not-allowed disabled:opacity-60';
+/** One step's worth of content, on the white card the proposta wizard puts it on. */
+const wizardStepCardClass =
+  'flex flex-col gap-[15px] rounded-[14px] border border-[#e8e8ec] bg-white p-4';
 /**
  * The one grid the step-1 `Itens` header and every item row share. Before this
  * constant the template was copy-pasted six times and the header carried an extra
@@ -3259,6 +3282,84 @@ function UnitInput({
   );
 }
 
+/**
+ * The numbered step bar both wizards wear. Pure presentation with no state of its
+ * own: it neither decides what a step contains nor when one may be entered, so the
+ * proposta wizard and the produto/serviço wizard can gate their steps on completely
+ * different predicates while staying pixel identical in how they show one.
+ */
+function WizardStepper<S extends number>({
+  steps,
+  current,
+  onSelect,
+  isEnabled,
+}: {
+  steps: Array<{ step: S; label: string }>;
+  current: S;
+  onSelect: (step: S) => void;
+  isEnabled: (step: S) => boolean;
+}) {
+  return (
+    <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-[#e8e8ec] bg-white px-[26px] py-4">
+      {steps.map((item, index) => {
+        const done = item.step < current;
+        const active = item.step === current;
+        return (
+          <div className="flex flex-none items-center gap-1" key={item.step}>
+            <button
+              className="flex items-center gap-[9px] focus-visible:outline-none"
+              disabled={!isEnabled(item.step)}
+              onClick={() => onSelect(item.step)}
+              type="button"
+            >
+              <span
+                className={`sales-ops-num flex h-[26px] w-[26px] items-center justify-center rounded-full text-[12.5px] font-bold ${
+                  done
+                    ? 'bg-[#2f7d4b] text-white'
+                    : active
+                      ? 'bg-[#eaa81a] text-white'
+                      : 'bg-[#ececf1] text-[#9b9ba3]'
+                }`}
+              >
+                {done ? <Check className="h-[13px] w-[13px]" /> : item.step}
+              </span>
+              <span
+                className={`whitespace-nowrap text-[13px] font-semibold ${
+                  active || done ? 'text-[#201f24]' : 'text-[#9b9ba3]'
+                }`}
+              >
+                {item.label}
+              </span>
+            </button>
+            {index < steps.length - 1 ? (
+              <span className="mx-1 h-0.5 w-[22px] flex-none bg-[#e7e2d6]" />
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/*
+  Four steps, matching the proposta wizard one for one. The order carries the
+  operator's one hard constraint: `Pagamento` is strictly after `Valores`, so the plan
+  builder can never be reached before Setup and Mensalidade are settled. That is a real
+  data dependency and not only a preference - `Número de ciclos` exists only while
+  `Possui mensalidade` is on, and that switch lives on `Valores`.
+
+  `Módulos` sits on `Valores` rather than with the custos because a módulo is priced
+  sellable value, not a cost: every number the org CHARGES is on one step and every
+  number it PAYS OUT on another, the same seam the proposta wizard draws between its
+  itens and its custos.
+*/
+const productWizardSteps: Array<{ step: 1 | 2 | 3 | 4; label: string }> = [
+  { step: 1, label: 'Identificação' },
+  { step: 2, label: 'Valores' },
+  { step: 3, label: 'Pagamento' },
+  { step: 4, label: 'Comissões e custos' },
+];
+
 export function ProductDialog(props: {
   modal: Extract<ModalState, { kind: 'product' }> | null;
   areas: SalesOpsArea[];
@@ -3320,6 +3421,13 @@ function ProductDialogBody({
    * and visible on the trigger immediately, before the bootstrap refetch lands.
    */
   const [createdAreas, setCreatedAreas] = useState<SalesOpsArea[]>([]);
+  /*
+    `ProductDialog` keys this component on the record being edited, so the same remount
+    that reseeds `form` also resets the wizard: an existing produto always opens on step
+    1, fully prefilled, with no extra effect to keep the two in sync.
+  */
+  const [wizardStep, setWizardStep] = useState<1 | 2 | 3 | 4>(1);
+  const [showIdentityErrors, setShowIdentityErrors] = useState(false);
   const activeModal = modal;
 
   function set<K extends keyof ProductForm>(key: K, value: ProductForm[K]) {
@@ -3349,6 +3457,16 @@ function ProductDialogBody({
   }
 
   const isService = form.kind === 'service';
+  /*
+    The only gate this wizard adds. Both fields are genuinely required - the API rejects
+    a produto without either - and both live on step 1, so `canAdvanceStepOne` is also
+    the full save predicate: once step 1 passes, the record is savable from anywhere.
+    Steps 2-4 add no gate of their own, because every value on them already has a
+    legitimate zero state that the current dialog accepts.
+  */
+  const nameValid = Boolean(form.name.trim());
+  const areaValid = Boolean(form.areaId);
+  const canAdvanceStepOne = nameValid && areaValid;
   const parcelasCeiling = maxRemainingInstallments(form.defaultEntradaMode);
   /**
    * The pool a NEW cost row may draw from: active, non-system funções only. Paying a
@@ -3446,9 +3564,32 @@ function ProductDialogBody({
     }));
   }
 
+  function advanceProductWizard() {
+    if (wizardStep === 1) {
+      setShowIdentityErrors(true);
+      if (!canAdvanceStepOne) return;
+    }
+    setWizardStep((current) => (current < 4 ? ((current + 1) as 2 | 3 | 4) : current));
+  }
+
+  function goBackProductWizard() {
+    setWizardStep((current) => (current > 1 ? ((current - 1) as 1 | 2 | 3) : current));
+  }
+
   function submit(event: FormEvent) {
     event.preventDefault();
-    if (!form.areaId) return;
+    /*
+      Symmetric guards, and the `name` half is new: the `required` attribute that used
+      to be the only thing standing between an empty Nome and a nameless produto is
+      unmounted on steps 2-4 now, so the guard has to live here. Both fields are on step
+      1, so a blocked submit sends the operator back to the step that can fix it and
+      names which field is missing rather than failing silently.
+    */
+    if (!canAdvanceStepOne) {
+      setShowIdentityErrors(true);
+      setWizardStep(1);
+      return;
+    }
     const parcelas = Math.min(
       parcelasCeiling,
       Math.max(1, Math.floor(parseDecimal(form.defaultRemainingInstallments, 1)) || 1),
@@ -3544,29 +3685,33 @@ function ProductDialogBody({
   return (
     <Dialog onOpenChange={(open) => (!open ? onClose() : undefined)} open>
       <DialogContent
-        className="flex h-[92vh] max-h-[92vh] w-[calc(100vw-48px)] max-w-[640px] flex-col gap-0 overflow-hidden rounded-[20px] border-none bg-white p-0 shadow-[0_30px_80px_rgba(0,0,0,.3)] sm:rounded-[20px] [&>button:last-child]:hidden"
+        className={`${wizardDialogContentClass} [&>button:last-child]:hidden`}
         onOpenAutoFocus={(event) => event.preventDefault()}
       >
-        <DialogHeader className="flex-row items-start justify-between space-y-0 border-b border-[#e8e8ec] px-6 py-5 text-left">
-          <div>
-            <DialogTitle className="sales-ops-num text-[19px] font-bold text-[#201f24]">
-              {activeModal.product
-                ? isService
-                  ? 'Editar serviço'
-                  : 'Editar produto'
-                : isService
-                  ? 'Novo serviço'
-                  : 'Novo produto'}
-            </DialogTitle>
-            <DialogDescription className="mt-1 text-[13px] text-[#8b8b92]">
-              {isService
-                ? 'Valor variável, custos por função e padrões de proposta'
-                : 'Catálogo, valores e comissões padrão'}
-            </DialogDescription>
-          </div>
+        <DialogHeader className={`relative ${wizardHeaderClass}`}>
+          <DialogTitle className="sales-ops-num text-[19px] font-bold text-[#201f24]">
+            {activeModal.product
+              ? isService
+                ? 'Editar serviço'
+                : 'Editar produto'
+              : isService
+                ? 'Novo serviço'
+                : 'Novo produto'}
+          </DialogTitle>
+          <DialogDescription className="text-[13px] text-[#8b8b92]">
+            {isService
+              ? 'Valor variável, custos por função e padrões de proposta'
+              : 'Catálogo, valores e comissões padrão'}
+          </DialogDescription>
+          {/*
+            This dialog keeps its own X rather than restyling Radix's, because unifying
+            the two would be a DOM change to the proposta wizard with no visible payoff.
+            It sits exactly where the wizard puts Radix's, so the two headers still read
+            as one piece of chrome.
+          */}
           <button
             aria-label="Fechar"
-            className="flex h-9 w-9 flex-none items-center justify-center rounded-[10px] border border-[#dcdce2] bg-white text-[#201f24] transition hover:bg-[#f2f2f4]"
+            className="absolute right-[26px] top-[31px] flex h-9 w-9 flex-none items-center justify-center rounded-[10px] border border-[#dcdce2] bg-white text-[#201f24] transition hover:bg-[#f2f2f4]"
             onClick={onClose}
             type="button"
           >
@@ -3576,535 +3721,627 @@ function ProductDialogBody({
             </span>
           </button>
         </DialogHeader>
+
+        {/*
+          ONE form around the whole step tree. An unmounted step's values are then
+          ordinary React state rather than lost DOM, so a submit from any step emits the
+          complete payload and no step needs to be visited for its fields to be sent.
+        */}
         <form className="flex min-h-0 flex-1 flex-col" onSubmit={submit}>
-          <div className="flex min-h-0 flex-1 flex-col gap-[15px] overflow-y-auto px-6 py-[22px]">
-            <div className="flex flex-col gap-[11px]">
-              <div className="flex gap-[5px] rounded-[11px] bg-[#f2f2f4] p-1">
-                <SegmentedButton
-                  active={!isService}
-                  ariaLabel="Classificar como produto"
-                  onClick={() => setKind('product')}
-                >
-                  Produto
-                </SegmentedButton>
-                <SegmentedButton
-                  active={isService}
-                  ariaLabel="Classificar como serviço"
-                  onClick={() => setKind('service')}
-                >
-                  Serviço
-                </SegmentedButton>
-              </div>
-              <div className="rounded-[11px] border border-[#f0dfae] bg-[#fdf0cf] px-[14px] py-[11px] text-[13px] text-[#57575f]">
-                Tudo aqui é padrão: dentro da proposta você pode alterar qualquer valor sem mexer no
-                cadastro.
-              </div>
-            </div>
+          <WizardStepper
+            current={wizardStep}
+            /*
+              Nome and Área are the only two fields the API requires and both live on
+              step 1, so `canAdvanceStepOne` is the whole gate: there is nothing further
+              down that could be incomplete.
+            */
+            isEnabled={(step) => step === 1 || canAdvanceStepOne}
+            onSelect={setWizardStep}
+            steps={productWizardSteps}
+          />
 
-            <Field label="Nome" required>
-              <Input
-                className={formInputClass}
-                onChange={(event) => set('name', event.target.value)}
-                placeholder="Nome"
-                required
-                value={form.name}
-              />
-            </Field>
-
-            <div className="flex items-center justify-between gap-3 rounded-xl border border-[#dfe8f2] bg-[#f3f6fa] px-[14px] py-[13px]">
-              <div className="min-w-0 flex-1">
-                <div className="text-[13.5px] font-semibold text-[#201f24]">
-                  Final do código da venda
-                </div>
-                <div className="mt-0.5 text-xs text-[#8b8b92]">
-                  Todo código gerado para vendas deste produto termina neste número
-                </div>
-              </div>
-              <div className="sales-ops-num flex flex-none items-center rounded-[10px] border border-[#dcdce2] bg-white py-2 pl-[13px] pr-1.5 text-[15px] font-bold tracking-[0.06em] text-[#b0b0b8]">
-                0000-
-                <input
-                  className="sales-ops-num w-10 border-none bg-transparent px-0.5 text-center text-[15px] font-bold text-[#3f6ea3] outline-none"
-                  inputMode="numeric"
-                  maxLength={2}
-                  onChange={(event) =>
-                    set('codeSuffix', event.target.value.replace(/\D/g, '').slice(0, 2))
-                  }
-                  placeholder="0"
-                  type="text"
-                  value={form.codeSuffix}
-                />
-              </div>
-            </div>
-
-            <div className="grid gap-3 md:grid-cols-2">
-              <FieldBlock label="Área" required>
-                <Combobox
-                  aria-label="Área do produto"
-                  className={formSelectClass}
-                  emptyMessage="Nenhuma área encontrada"
-                  entityGender="f"
-                  entityLabel="área"
-                  onChange={(value) => set('areaId', value)}
-                  onCreate={onCreateArea ? (name) => void createArea(name) : undefined}
-                  options={areaOptions(selectableAreas)}
-                  placeholder="Selecione a área"
-                  searchPlaceholder="Buscar área..."
-                  value={form.areaId}
-                />
-              </FieldBlock>
-              <Field label={isService ? 'Valor base (R$)' : 'Setup (R$)'}>
-                <Input
-                  className={`sales-ops-num ${formInputClass}`}
-                  onChange={(event) => set('setupBrl', event.target.value)}
-                  // A blank field is the zero state. For a Serviço that is the whole
-                  // catalog as it stands today, so it keeps saying `Definido na venda`
-                  // rather than showing a price nobody set; for a Produto the ghosted
-                  // `0` reads exactly as the literal `0` it replaces.
-                  placeholder={isService ? 'Definido na venda' : '0'}
-                  type="number"
-                  value={form.setupBrl}
-                />
-              </Field>
-            </div>
-
-            <div className="rounded-xl border border-[#ececf1] bg-[#fafafb]">
-              <div className="flex items-center justify-between gap-4 px-[14px] py-3">
-                <div>
-                  <div className="text-[13.5px] font-semibold text-[#201f24]">Possui mensalidade</div>
-                  <div className="text-xs text-[#8b8b92]">Cobrança recorrente além do setup</div>
-                </div>
-                <button
-                  aria-label="Possui mensalidade"
-                  aria-pressed={form.hasMonthly}
-                  className={`relative h-[25px] w-11 flex-none rounded-full transition ${form.hasMonthly ? 'bg-[#2f7d4b]' : 'bg-[#d2d2d8]'}`}
-                  onClick={() => set('hasMonthly', !form.hasMonthly)}
-                  type="button"
-                >
-                  <span
-                    className={`absolute top-[2.5px] h-5 w-5 rounded-full bg-white transition ${form.hasMonthly ? 'right-[2.5px]' : 'left-[2.5px]'}`}
-                  />
-                </button>
-              </div>
-              {form.hasMonthly ? (
-                <div className="flex flex-col gap-[11px] px-[14px] pb-[14px]">
-                  <Field label="Valor da mensalidade (R$)">
-                    <Input
-                      className={`sales-ops-num bg-white ${formInputClass}`}
-                      onChange={(event) => set('monthlyBrl', event.target.value)}
-                      placeholder={isService ? 'Definido na venda' : '0'}
-                      type="number"
-                      value={form.monthlyBrl}
-                    />
-                  </Field>
-                  <div className="flex items-center justify-between gap-4 rounded-[11px] border border-[#ececf1] bg-white px-[13px] py-[11px]">
-                    <div>
-                      <div className="text-[13px] font-semibold text-[#201f24]">
-                        Incide sobre recorrente
-                      </div>
-                      <div className="text-[11.5px] text-[#8b8b92]">
-                        Aplicar comissão também na mensalidade
-                      </div>
+          <div className={wizardBodyClass}>
+            <div className={wizardStepCardClass}>
+              {wizardStep === 1 ? (
+                <>
+                  <div className="flex flex-col gap-[11px]">
+                    <div className="flex gap-[5px] rounded-[11px] bg-[#f2f2f4] p-1">
+                      <SegmentedButton
+                        active={!isService}
+                        ariaLabel="Classificar como produto"
+                        onClick={() => setKind('product')}
+                      >
+                        Produto
+                      </SegmentedButton>
+                      <SegmentedButton
+                        active={isService}
+                        ariaLabel="Classificar como serviço"
+                        onClick={() => setKind('service')}
+                      >
+                        Serviço
+                      </SegmentedButton>
                     </div>
-                    <button
-                      aria-label="Incide sobre recorrente"
-                      aria-pressed={form.recurringCommission}
-                      className={`relative h-[25px] w-11 flex-none rounded-full transition ${form.recurringCommission ? 'bg-[#2f7d4b]' : 'bg-[#d2d2d8]'}`}
-                      onClick={() => set('recurringCommission', !form.recurringCommission)}
-                      type="button"
-                    >
-                      <span
-                        className={`absolute top-[2.5px] h-5 w-5 rounded-full bg-white transition ${form.recurringCommission ? 'right-[2.5px]' : 'left-[2.5px]'}`}
-                      />
-                    </button>
-                  </div>
-                </div>
-              ) : null}
-            </div>
-
-            <DialogSection
-              subtitle="Sugestão aplicada ao criar a proposta"
-              title="Comissionamento padrão"
-            >
-              <div className="mb-[14px] flex gap-[5px] rounded-[11px] bg-[#f2f2f4] p-1">
-                <SegmentedButton
-                  active={commissionMode === 'seller_only'}
-                  onClick={() => setCommissionMode('seller_only')}
-                >
-                  Somente vendedor
-                </SegmentedButton>
-                <SegmentedButton
-                  active={commissionMode === 'with_finder'}
-                  onClick={() => setCommissionMode('with_finder')}
-                >
-                  Vendedor + Finder
-                </SegmentedButton>
-              </div>
-
-              <div className="mb-3">
-                <div className="mb-1.5 text-xs font-semibold text-[#8b8b92]">Comissão do vendedor</div>
-                <div className="flex gap-[9px]">
-                  <div className="flex flex-none gap-[3px] rounded-[9px] bg-[#f2f2f4] p-[3px]">
-                    <UnitToggle
-                      active={
-                        commissionMode === 'seller_only'
-                          ? form.sellerCommissionType === 'pct'
-                          : form.sellerWithFinderCommissionType === 'pct'
-                      }
-                      ariaLabel={`Comissão do vendedor - ${commissionMode === 'seller_only' ? 'somente vendedor' : 'com finder'} em porcentagem`}
-                      onClick={() =>
-                        commissionMode === 'seller_only'
-                          ? set('sellerCommissionType', 'pct')
-                          : set('sellerWithFinderCommissionType', 'pct')
-                      }
-                      value="%"
-                    />
-                    <UnitToggle
-                      active={
-                        commissionMode === 'seller_only'
-                          ? form.sellerCommissionType === 'fix'
-                          : form.sellerWithFinderCommissionType === 'fix'
-                      }
-                      ariaLabel={`Comissão do vendedor - ${commissionMode === 'seller_only' ? 'somente vendedor' : 'com finder'} em reais`}
-                      onClick={() =>
-                        commissionMode === 'seller_only'
-                          ? set('sellerCommissionType', 'fix')
-                          : set('sellerWithFinderCommissionType', 'fix')
-                      }
-                      value="R$"
-                    />
-                  </div>
-                  <UnitInput
-                    ariaLabel={`Comissão do vendedor - ${commissionMode === 'seller_only' ? 'somente vendedor' : 'com finder'}`}
-                    onChange={(value) =>
-                      commissionMode === 'seller_only'
-                        ? set('sellerCommissionValue', value)
-                        : set('sellerWithFinderCommissionValue', value)
-                    }
-                    unit={
-                      (commissionMode === 'seller_only'
-                        ? form.sellerCommissionType
-                        : form.sellerWithFinderCommissionType) === 'fix'
-                        ? 'R$'
-                        : '%'
-                    }
-                    value={
-                      commissionMode === 'seller_only'
-                        ? form.sellerCommissionValue
-                        : form.sellerWithFinderCommissionValue
-                    }
-                  />
-                </div>
-              </div>
-
-              {commissionMode === 'with_finder' ? (
-                <div>
-                  <div className="mb-1.5 text-xs font-semibold text-[#8b8b92]">Comissão do finder</div>
-                  <div className="flex gap-[9px]">
-                    <div className="flex flex-none gap-[3px] rounded-[9px] bg-[#f2f2f4] p-[3px]">
-                      <UnitToggle
-                        active={form.finderCommissionType === 'pct'}
-                        ariaLabel="Comissão do finder em porcentagem"
-                        onClick={() => set('finderCommissionType', 'pct')}
-                        value="%"
-                      />
-                      <UnitToggle
-                        active={form.finderCommissionType === 'fix'}
-                        ariaLabel="Comissão do finder em reais"
-                        onClick={() => set('finderCommissionType', 'fix')}
-                        value="R$"
-                      />
+                    <div className="rounded-[11px] border border-[#f0dfae] bg-[#fdf0cf] px-[14px] py-[11px] text-[13px] text-[#57575f]">
+                      Tudo aqui é padrão: dentro da proposta você pode alterar qualquer valor sem mexer no
+                      cadastro.
                     </div>
-                    <UnitInput
-                      ariaLabel="Comissão do finder"
-                      onChange={(value) => set('finderCommissionValue', value)}
-                      unit={form.finderCommissionType === 'fix' ? 'R$' : '%'}
-                      value={form.finderCommissionValue}
-                    />
                   </div>
-                </div>
-              ) : null}
-            </DialogSection>
 
-            <DialogSection
-              subtitle="Aplicado ao gerar as parcelas da proposta - sem datas fixas"
-              title="Plano de pagamento padrão"
-            >
-              <div className="flex flex-col gap-[11px] rounded-xl border border-[#ececf1] bg-[#fafafb] p-[11px]">
-                <div className="flex flex-wrap items-end gap-[9px]">
-                  <FieldBlock label="Tipo de entrada">
-                    <div className="w-[132px]">
-                      <Combobox
-                        aria-label="Tipo de entrada"
-                        className={cn(formSelectClass, 'bg-white')}
-                        onChange={(value) => setEntradaMode(value as 'none' | 'pct' | 'fix')}
-                        options={entradaModeOptions}
-                        searchPlaceholder="Buscar tipo de entrada..."
-                        value={form.defaultEntradaMode}
-                      />
-                    </div>
-                  </FieldBlock>
-                  {form.defaultEntradaMode === 'none' ? null : (
-                    <Field label="Valor da entrada">
-                      <div className="flex w-[148px]">
-                        <UnitInput
-                          ariaLabel="Valor da entrada"
-                          onChange={(value) => set('defaultEntradaValue', value)}
-                          unit={form.defaultEntradaMode === 'fix' ? 'R$' : '%'}
-                          value={form.defaultEntradaValue}
-                        />
-                      </div>
-                    </Field>
-                  )}
-                  <Field label="Restante">
-                    <div className="flex items-center gap-2">
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <Field label="Nome" required>
                       <Input
-                        aria-label="Parcelas restantes"
-                        className={`sales-ops-num w-[72px] text-center ${formInputClass}`}
-                        max={parcelasCeiling}
-                        min={1}
-                        onChange={(event) =>
-                          set('defaultRemainingInstallments', event.target.value)
-                        }
-                        type="number"
-                        value={form.defaultRemainingInstallments}
+                        aria-invalid={showIdentityErrors && !nameValid}
+                        className={cn(
+                          formInputClass,
+                          showIdentityErrors && !nameValid && 'border-destructive',
+                        )}
+                        onChange={(event) => set('name', event.target.value)}
+                        placeholder="Nome"
+                        required
+                        value={form.name}
                       />
-                      <span className="text-[13px] font-bold text-[#9b9ba3]">x</span>
-                    </div>
-                  </Field>
-                </div>
-                <div className="grid gap-3 md:grid-cols-2">
-                  <FieldBlock label="Forma de pagamento padrão">
-                    <Combobox
-                      aria-label="Forma de pagamento padrão"
-                      className={cn(formSelectClass, 'bg-white')}
-                      onChange={(value) => set('defaultPaymentMethod', value as PaymentMethod)}
-                      options={defaultPaymentMethodOptions}
-                      searchPlaceholder="Buscar forma de pagamento..."
-                      value={form.defaultPaymentMethod}
-                    />
-                  </FieldBlock>
-                  {form.hasMonthly ? (
-                    <Field label="Número de ciclos">
-                      <Input
-                        aria-label="Número de ciclos"
-                        className={`sales-ops-num bg-white ${formInputClass}`}
-                        max={MAX_PLAN_INSTALLMENTS}
-                        min={1}
-                        onChange={(event) => set('defaultRecurringCycles', event.target.value)}
-                        placeholder="Indeterminado"
-                        type="number"
-                        value={form.defaultRecurringCycles}
-                      />
+                      {showIdentityErrors && !nameValid ? (
+                        <span className="flex flex-col gap-1 text-[11.5px] font-semibold text-destructive">
+                          Informe o nome do produto.
+                        </span>
+                      ) : null}
                     </Field>
-                  ) : null}
-                </div>
-                {form.hasMonthly ? (
-                  <div className="text-[11.5px] text-[#8b8b92]">
-                    Deixe em branco para prazo indeterminado
-                  </div>
-                ) : null}
-                <div className="flex items-center gap-2.5 rounded-[11px] border border-[#cfe4cf] bg-[#e2efe2] px-[14px] py-[11px] text-[13px] font-semibold text-[#2f7d4b]">
-                  <RotateCcw className="h-4 w-4 flex-none" />
-                  {planSummary()}
-                </div>
-              </div>
-            </DialogSection>
-
-            <ListEditor
-              addDisabled={noFuncoesAvailable || allFuncoesUsed}
-              addLabel="Adicionar"
-              addTitle={
-                noFuncoesAvailable
-                  ? 'Nenhuma função cadastrada ainda. Cadastre as funções em Cadastros > Funções para definir custos padrão.'
-                  : allFuncoesUsed
-                    ? 'Todas as funções já têm custo padrão'
-                    : undefined
-              }
-              empty={
-                noFuncoesAvailable
-                  ? 'Nenhuma função cadastrada ainda. Cadastre as funções em Cadastros > Funções para definir custos padrão.'
-                  : 'Nenhum custo padrão definido'
-              }
-              footer={
-                legacyProviderNames.length ? (
-                  <div className="mt-2.5 text-[12px] text-[#8b8b92]">
-                    Prestadores antigos deste cadastro não foram convertidos automaticamente:{' '}
-                    {legacyProviderNames.join(', ')}. Recadastre o custo por função acima.
-                  </div>
-                ) : null
-              }
-              onAdd={() =>
-                set('funcaoCosts', [...form.funcaoCosts, { funcaoId: '', mode: 'pct', value: '0' }])
-              }
-              subtitle="Quanto cada função custa neste item por padrão"
-              title="Custos padrão por função"
-            >
-              {form.funcaoCosts.map((row, index) => (
-                <div className="rounded-xl border border-[#ececf1] bg-[#fafafb] p-[11px]" key={index}>
-                  <div className="mb-2 flex items-center gap-2">
-                    <div className="min-w-0 flex-1">
+                    <FieldBlock label="Área" required>
                       <Combobox
-                        aria-label={`Função do custo padrão ${index + 1}`}
-                        className={cn(formSelectClass, 'bg-white')}
-                        emptyMessage="Nenhuma função disponível"
+                        aria-invalid={showIdentityErrors && !areaValid}
+                        aria-label="Área do produto"
+                        className={cn(
+                          formSelectClass,
+                          showIdentityErrors && !areaValid && 'border-destructive',
+                        )}
+                        emptyMessage="Nenhuma área encontrada"
                         entityGender="f"
-                        entityLabel="função"
-                        onChange={(value) => setCostRow(index, { funcaoId: value })}
-                        /*
-                          A função already used by another row is filtered out, so the
-                          client can never send two rows for one função and trip the
-                          API's duplicate_funcao_cost. The row's own stored função is
-                          always admitted, archived or not.
-                        */
-                        options={costRowFuncaoOptions(row)}
-                        placeholder="Selecione a função"
-                        searchPlaceholder="Buscar função..."
-                        value={row.funcaoId}
-                        /*
-                          Belt and braces for a stored funcaoId that is in `funcoes`
-                          under no status at all, e.g. against a stale bootstrap: the
-                          trigger still names it rather than falling back to the
-                          placeholder and reading as a cost for no função.
-                        */
-                        valueLabel={costRowFuncaoValueLabel(row)}
+                        entityLabel="área"
+                        onChange={(value) => set('areaId', value)}
+                        onCreate={onCreateArea ? (name) => void createArea(name) : undefined}
+                        options={areaOptions(selectableAreas)}
+                        placeholder="Selecione a área"
+                        searchPlaceholder="Buscar área..."
+                        value={form.areaId}
                       />
-                    </div>
-                    <button
-                      aria-label={`Remover custo padrão ${index + 1}`}
-                      className="flex h-[34px] w-[34px] flex-none items-center justify-center rounded-[9px] border border-[#e6d3d0] bg-white text-[#b23a22] transition hover:bg-[#fbf0ee]"
-                      onClick={() =>
-                        set(
-                          'funcaoCosts',
-                          form.funcaoCosts.filter((_, rowIndex) => rowIndex !== index),
-                        )
-                      }
-                      type="button"
-                    >
-                      <Trash2 className="h-[15px] w-[15px]" />
-                    </button>
+                      {showIdentityErrors && !areaValid ? (
+                        <span className="flex flex-col gap-1 text-[11.5px] font-semibold text-destructive">
+                          Selecione a área.
+                        </span>
+                      ) : null}
+                    </FieldBlock>
                   </div>
-                  <div className="flex gap-2">
-                    <div className="flex flex-none gap-[3px] rounded-[9px] bg-[#f2f2f4] p-[3px]">
-                      <UnitToggle
-                        active={row.mode === 'pct'}
-                        /*
-                          Indexed rather than name-interpolated: the label has to be
-                          stable from the moment the row is added, before a função is
-                          even chosen.
-                        */
-                        ariaLabel={`Custo da função ${index + 1} em porcentagem`}
-                        onClick={() => setCostRow(index, { mode: 'pct' })}
-                        value="%"
-                      />
-                      <UnitToggle
-                        active={row.mode === 'fix'}
-                        ariaLabel={`Custo da função ${index + 1} em reais`}
-                        onClick={() => setCostRow(index, { mode: 'fix' })}
-                        value="R$"
-                      />
-                    </div>
-                    <UnitInput
-                      ariaLabel={`Custo da função ${index + 1}`}
-                      onChange={(value) => setCostRow(index, { value })}
-                      unit={row.mode === 'fix' ? 'R$' : '%'}
-                      value={row.value}
-                    />
-                  </div>
-                </div>
-              ))}
-            </ListEditor>
 
-            {isService ? null : (
-              <ListEditor
-                addLabel="Adicionar"
-                empty="Nenhum módulo adicionado"
-                onAdd={() =>
-                  set('modules', [...form.modules, { name: '', type: 'Upsell', valueBrl: '0.00' }])
-                }
-                subtitle="Upsell, downsell e complementos"
-                title="Módulos"
-              >
-                {form.modules.map((module, index) => (
-                  <div className="rounded-xl border border-[#ececf1] bg-[#fafafb] p-[11px]" key={index}>
-                    <div className="mb-2 flex items-center gap-2">
-                      <Input
-                        className={`bg-white ${formInputClass}`}
-                        onChange={(event) => {
-                          const next = [...form.modules];
-                          next[index] = { ...module, name: event.target.value };
-                          set('modules', next);
-                        }}
-                        placeholder="Nome do módulo"
-                        value={module.name}
+                  <div className="flex items-center justify-between gap-3 rounded-xl border border-[#dfe8f2] bg-[#f3f6fa] px-[14px] py-[13px]">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[13.5px] font-semibold text-[#201f24]">
+                        Final do código da venda
+                      </div>
+                      <div className="mt-0.5 text-xs text-[#8b8b92]">
+                        Todo código gerado para vendas deste produto termina neste número
+                      </div>
+                    </div>
+                    <div className="sales-ops-num flex flex-none items-center rounded-[10px] border border-[#dcdce2] bg-white py-2 pl-[13px] pr-1.5 text-[15px] font-bold tracking-[0.06em] text-[#b0b0b8]">
+                      0000-
+                      <input
+                        className="sales-ops-num w-10 border-none bg-transparent px-0.5 text-center text-[15px] font-bold text-[#3f6ea3] outline-none"
+                        inputMode="numeric"
+                        maxLength={2}
+                        onChange={(event) =>
+                          set('codeSuffix', event.target.value.replace(/\D/g, '').slice(0, 2))
+                        }
+                        placeholder="0"
+                        type="text"
+                        value={form.codeSuffix}
                       />
+                    </div>
+                  </div>
+                </>
+              ) : null}
+
+              {wizardStep === 2 ? (
+                <>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <Field label={isService ? 'Valor base (R$)' : 'Setup (R$)'}>
+                      <Input
+                        className={`sales-ops-num ${formInputClass}`}
+                        onChange={(event) => set('setupBrl', event.target.value)}
+                        // A blank field is the zero state. For a Serviço that is the whole
+                        // catalog as it stands today, so it keeps saying `Definido na venda`
+                        // rather than showing a price nobody set; for a Produto the ghosted
+                        // `0` reads exactly as the literal `0` it replaces.
+                        placeholder={isService ? 'Definido na venda' : '0'}
+                        type="number"
+                        value={form.setupBrl}
+                      />
+                    </Field>
+                  </div>
+
+                  <div className="rounded-xl border border-[#ececf1] bg-[#fafafb]">
+                    <div className="flex items-center justify-between gap-4 px-[14px] py-3">
+                      <div>
+                        <div className="text-[13.5px] font-semibold text-[#201f24]">Possui mensalidade</div>
+                        <div className="text-xs text-[#8b8b92]">Cobrança recorrente além do setup</div>
+                      </div>
                       <button
-                        aria-label="Remover módulo"
-                        className="flex h-[34px] w-[34px] flex-none items-center justify-center rounded-[9px] border border-[#e6d3d0] bg-white text-[#b23a22] transition hover:bg-[#fbf0ee]"
-                        onClick={() => set('modules', form.modules.filter((_, itemIndex) => itemIndex !== index))}
+                        aria-label="Possui mensalidade"
+                        aria-pressed={form.hasMonthly}
+                        className={`relative h-[25px] w-11 flex-none rounded-full transition ${form.hasMonthly ? 'bg-[#2f7d4b]' : 'bg-[#d2d2d8]'}`}
+                        onClick={() => set('hasMonthly', !form.hasMonthly)}
                         type="button"
                       >
-                        <Trash2 className="h-[15px] w-[15px]" />
+                        <span
+                          className={`absolute top-[2.5px] h-5 w-5 rounded-full bg-white transition ${form.hasMonthly ? 'right-[2.5px]' : 'left-[2.5px]'}`}
+                        />
                       </button>
                     </div>
-                    <div className="flex gap-2">
-                      <div className="flex-[0_0_132px]">
-                        <Combobox
-                          aria-label={`Tipo do módulo ${index + 1}`}
-                          className={cn(formSelectClass, 'bg-white')}
-                          onChange={(value) => {
-                            const next = [...form.modules];
-                            next[index] = { ...module, type: value };
-                            set('modules', next);
-                          }}
-                          options={enumOptions([
-                            'Módulo',
-                            'Upsell',
-                            'Downsell',
-                            'Cross-sell',
-                            'Add-on',
-                          ])}
-                          searchPlaceholder="Buscar tipo..."
-                          value={module.type}
-                        />
+                    {form.hasMonthly ? (
+                      <div className="flex flex-col gap-[11px] px-[14px] pb-[14px]">
+                        <Field label="Valor da mensalidade (R$)">
+                          <Input
+                            className={`sales-ops-num bg-white ${formInputClass}`}
+                            onChange={(event) => set('monthlyBrl', event.target.value)}
+                            placeholder={isService ? 'Definido na venda' : '0'}
+                            type="number"
+                            value={form.monthlyBrl}
+                          />
+                        </Field>
+                        <div className="flex items-center justify-between gap-4 rounded-[11px] border border-[#ececf1] bg-white px-[13px] py-[11px]">
+                          <div>
+                            <div className="text-[13px] font-semibold text-[#201f24]">
+                              Incide sobre recorrente
+                            </div>
+                            <div className="text-[11.5px] text-[#8b8b92]">
+                              Aplicar comissão também na mensalidade
+                            </div>
+                          </div>
+                          <button
+                            aria-label="Incide sobre recorrente"
+                            aria-pressed={form.recurringCommission}
+                            className={`relative h-[25px] w-11 flex-none rounded-full transition ${form.recurringCommission ? 'bg-[#2f7d4b]' : 'bg-[#d2d2d8]'}`}
+                            onClick={() => set('recurringCommission', !form.recurringCommission)}
+                            type="button"
+                          >
+                            <span
+                              className={`absolute top-[2.5px] h-5 w-5 rounded-full bg-white transition ${form.recurringCommission ? 'right-[2.5px]' : 'left-[2.5px]'}`}
+                            />
+                          </button>
+                        </div>
                       </div>
-                      <div className="relative flex-1">
-                        <span className="pointer-events-none absolute left-[11px] top-1/2 -translate-y-1/2 text-[12.5px] font-bold text-[#9b9ba3]">
-                          R$
-                        </span>
-                        <Input
-                          className={`sales-ops-num bg-white pl-8 ${formInputClass}`}
-                          onChange={(event) => {
-                            const next = [...form.modules];
-                            next[index] = { ...module, valueBrl: event.target.value };
-                            set('modules', next);
-                          }}
-                          placeholder="0"
-                          type="number"
-                          value={module.valueBrl}
+                    ) : null}
+                  </div>
+
+                  {isService ? null : (
+                    <ListEditor
+                      addLabel="Adicionar"
+                      empty="Nenhum módulo adicionado"
+                      onAdd={() =>
+                        set('modules', [...form.modules, { name: '', type: 'Upsell', valueBrl: '0.00' }])
+                      }
+                      subtitle="Upsell, downsell e complementos"
+                      title="Módulos"
+                    >
+                      {form.modules.map((module, index) => (
+                        <div className="rounded-xl border border-[#ececf1] bg-[#fafafb] p-[11px]" key={index}>
+                          <div className="mb-2 flex items-center gap-2">
+                            <Input
+                              className={`bg-white ${formInputClass}`}
+                              onChange={(event) => {
+                                const next = [...form.modules];
+                                next[index] = { ...module, name: event.target.value };
+                                set('modules', next);
+                              }}
+                              placeholder="Nome do módulo"
+                              value={module.name}
+                            />
+                            <button
+                              aria-label="Remover módulo"
+                              className="flex h-[34px] w-[34px] flex-none items-center justify-center rounded-[9px] border border-[#e6d3d0] bg-white text-[#b23a22] transition hover:bg-[#fbf0ee]"
+                              onClick={() => set('modules', form.modules.filter((_, itemIndex) => itemIndex !== index))}
+                              type="button"
+                            >
+                              <Trash2 className="h-[15px] w-[15px]" />
+                            </button>
+                          </div>
+                          <div className="flex gap-2">
+                            <div className="flex-[0_0_132px]">
+                              <Combobox
+                                aria-label={`Tipo do módulo ${index + 1}`}
+                                className={cn(formSelectClass, 'bg-white')}
+                                onChange={(value) => {
+                                  const next = [...form.modules];
+                                  next[index] = { ...module, type: value };
+                                  set('modules', next);
+                                }}
+                                options={enumOptions([
+                                  'Módulo',
+                                  'Upsell',
+                                  'Downsell',
+                                  'Cross-sell',
+                                  'Add-on',
+                                ])}
+                                searchPlaceholder="Buscar tipo..."
+                                value={module.type}
+                              />
+                            </div>
+                            <div className="relative flex-1">
+                              <span className="pointer-events-none absolute left-[11px] top-1/2 -translate-y-1/2 text-[12.5px] font-bold text-[#9b9ba3]">
+                                R$
+                              </span>
+                              <Input
+                                className={`sales-ops-num bg-white pl-8 ${formInputClass}`}
+                                onChange={(event) => {
+                                  const next = [...form.modules];
+                                  next[index] = { ...module, valueBrl: event.target.value };
+                                  set('modules', next);
+                                }}
+                                placeholder="0"
+                                type="number"
+                                value={module.valueBrl}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </ListEditor>
+                  )}
+                </>
+              ) : null}
+
+              {wizardStep === 3 ? (
+                <>
+                  <DialogSection
+                    flush
+                    subtitle="Aplicado ao gerar as parcelas da proposta - sem datas fixas"
+                    title="Plano de pagamento padrão"
+                  >
+                    <div className="flex flex-col gap-[11px] rounded-xl border border-[#ececf1] bg-[#fafafb] p-[11px]">
+                      <div className="flex flex-wrap items-end gap-[9px]">
+                        <FieldBlock label="Tipo de entrada">
+                          <div className="w-[132px]">
+                            <Combobox
+                              aria-label="Tipo de entrada"
+                              className={cn(formSelectClass, 'bg-white')}
+                              onChange={(value) => setEntradaMode(value as 'none' | 'pct' | 'fix')}
+                              options={entradaModeOptions}
+                              searchPlaceholder="Buscar tipo de entrada..."
+                              value={form.defaultEntradaMode}
+                            />
+                          </div>
+                        </FieldBlock>
+                        {form.defaultEntradaMode === 'none' ? null : (
+                          <Field label="Valor da entrada">
+                            <div className="flex w-[148px]">
+                              <UnitInput
+                                ariaLabel="Valor da entrada"
+                                onChange={(value) => set('defaultEntradaValue', value)}
+                                unit={form.defaultEntradaMode === 'fix' ? 'R$' : '%'}
+                                value={form.defaultEntradaValue}
+                              />
+                            </div>
+                          </Field>
+                        )}
+                        <Field label="Restante">
+                          <div className="flex items-center gap-2">
+                            <Input
+                              aria-label="Parcelas restantes"
+                              className={`sales-ops-num w-[72px] text-center ${formInputClass}`}
+                              max={parcelasCeiling}
+                              min={1}
+                              onChange={(event) =>
+                                set('defaultRemainingInstallments', event.target.value)
+                              }
+                              type="number"
+                              value={form.defaultRemainingInstallments}
+                            />
+                            <span className="text-[13px] font-bold text-[#9b9ba3]">x</span>
+                          </div>
+                        </Field>
+                      </div>
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <FieldBlock label="Forma de pagamento padrão">
+                          <Combobox
+                            aria-label="Forma de pagamento padrão"
+                            className={cn(formSelectClass, 'bg-white')}
+                            onChange={(value) => set('defaultPaymentMethod', value as PaymentMethod)}
+                            options={defaultPaymentMethodOptions}
+                            searchPlaceholder="Buscar forma de pagamento..."
+                            value={form.defaultPaymentMethod}
+                          />
+                        </FieldBlock>
+                        {form.hasMonthly ? (
+                          <Field label="Número de ciclos">
+                            <Input
+                              aria-label="Número de ciclos"
+                              className={`sales-ops-num bg-white ${formInputClass}`}
+                              max={MAX_PLAN_INSTALLMENTS}
+                              min={1}
+                              onChange={(event) => set('defaultRecurringCycles', event.target.value)}
+                              placeholder="Indeterminado"
+                              type="number"
+                              value={form.defaultRecurringCycles}
+                            />
+                          </Field>
+                        ) : null}
+                      </div>
+                      {form.hasMonthly ? (
+                        <div className="text-[11.5px] text-[#8b8b92]">
+                          Deixe em branco para prazo indeterminado
+                        </div>
+                      ) : null}
+                      <div className="flex items-center gap-2.5 rounded-[11px] border border-[#cfe4cf] bg-[#e2efe2] px-[14px] py-[11px] text-[13px] font-semibold text-[#2f7d4b]">
+                        <RotateCcw className="h-4 w-4 flex-none" />
+                        {planSummary()}
+                      </div>
+                    </div>
+                  </DialogSection>
+                </>
+              ) : null}
+
+              {wizardStep === 4 ? (
+                <>
+                  <DialogSection
+                    flush
+                    subtitle="Sugestão aplicada ao criar a proposta"
+                    title="Comissionamento padrão"
+                  >
+                    <div className="mb-[14px] flex gap-[5px] rounded-[11px] bg-[#f2f2f4] p-1">
+                      <SegmentedButton
+                        active={commissionMode === 'seller_only'}
+                        onClick={() => setCommissionMode('seller_only')}
+                      >
+                        Somente vendedor
+                      </SegmentedButton>
+                      <SegmentedButton
+                        active={commissionMode === 'with_finder'}
+                        onClick={() => setCommissionMode('with_finder')}
+                      >
+                        Vendedor + Finder
+                      </SegmentedButton>
+                    </div>
+
+                    <div className="mb-3">
+                      <div className="mb-1.5 text-xs font-semibold text-[#8b8b92]">Comissão do vendedor</div>
+                      <div className="flex gap-[9px]">
+                        <div className="flex flex-none gap-[3px] rounded-[9px] bg-[#f2f2f4] p-[3px]">
+                          <UnitToggle
+                            active={
+                              commissionMode === 'seller_only'
+                                ? form.sellerCommissionType === 'pct'
+                                : form.sellerWithFinderCommissionType === 'pct'
+                            }
+                            ariaLabel={`Comissão do vendedor - ${commissionMode === 'seller_only' ? 'somente vendedor' : 'com finder'} em porcentagem`}
+                            onClick={() =>
+                              commissionMode === 'seller_only'
+                                ? set('sellerCommissionType', 'pct')
+                                : set('sellerWithFinderCommissionType', 'pct')
+                            }
+                            value="%"
+                          />
+                          <UnitToggle
+                            active={
+                              commissionMode === 'seller_only'
+                                ? form.sellerCommissionType === 'fix'
+                                : form.sellerWithFinderCommissionType === 'fix'
+                            }
+                            ariaLabel={`Comissão do vendedor - ${commissionMode === 'seller_only' ? 'somente vendedor' : 'com finder'} em reais`}
+                            onClick={() =>
+                              commissionMode === 'seller_only'
+                                ? set('sellerCommissionType', 'fix')
+                                : set('sellerWithFinderCommissionType', 'fix')
+                            }
+                            value="R$"
+                          />
+                        </div>
+                        <UnitInput
+                          ariaLabel={`Comissão do vendedor - ${commissionMode === 'seller_only' ? 'somente vendedor' : 'com finder'}`}
+                          onChange={(value) =>
+                            commissionMode === 'seller_only'
+                              ? set('sellerCommissionValue', value)
+                              : set('sellerWithFinderCommissionValue', value)
+                          }
+                          unit={
+                            (commissionMode === 'seller_only'
+                              ? form.sellerCommissionType
+                              : form.sellerWithFinderCommissionType) === 'fix'
+                              ? 'R$'
+                              : '%'
+                          }
+                          value={
+                            commissionMode === 'seller_only'
+                              ? form.sellerCommissionValue
+                              : form.sellerWithFinderCommissionValue
+                          }
                         />
                       </div>
                     </div>
-                  </div>
-                ))}
-              </ListEditor>
-            )}
+
+                    {commissionMode === 'with_finder' ? (
+                      <div>
+                        <div className="mb-1.5 text-xs font-semibold text-[#8b8b92]">Comissão do finder</div>
+                        <div className="flex gap-[9px]">
+                          <div className="flex flex-none gap-[3px] rounded-[9px] bg-[#f2f2f4] p-[3px]">
+                            <UnitToggle
+                              active={form.finderCommissionType === 'pct'}
+                              ariaLabel="Comissão do finder em porcentagem"
+                              onClick={() => set('finderCommissionType', 'pct')}
+                              value="%"
+                            />
+                            <UnitToggle
+                              active={form.finderCommissionType === 'fix'}
+                              ariaLabel="Comissão do finder em reais"
+                              onClick={() => set('finderCommissionType', 'fix')}
+                              value="R$"
+                            />
+                          </div>
+                          <UnitInput
+                            ariaLabel="Comissão do finder"
+                            onChange={(value) => set('finderCommissionValue', value)}
+                            unit={form.finderCommissionType === 'fix' ? 'R$' : '%'}
+                            value={form.finderCommissionValue}
+                          />
+                        </div>
+                      </div>
+                    ) : null}
+                  </DialogSection>
+
+                  <ListEditor
+                    addDisabled={noFuncoesAvailable || allFuncoesUsed}
+                    addLabel="Adicionar"
+                    addTitle={
+                      noFuncoesAvailable
+                        ? 'Nenhuma função cadastrada ainda. Cadastre as funções em Cadastros > Funções para definir custos padrão.'
+                        : allFuncoesUsed
+                          ? 'Todas as funções já têm custo padrão'
+                          : undefined
+                    }
+                    empty={
+                      noFuncoesAvailable
+                        ? 'Nenhuma função cadastrada ainda. Cadastre as funções em Cadastros > Funções para definir custos padrão.'
+                        : 'Nenhum custo padrão definido'
+                    }
+                    footer={
+                      legacyProviderNames.length ? (
+                        <div className="mt-2.5 text-[12px] text-[#8b8b92]">
+                          Prestadores antigos deste cadastro não foram convertidos automaticamente:{' '}
+                          {legacyProviderNames.join(', ')}. Recadastre o custo por função acima.
+                        </div>
+                      ) : null
+                    }
+                    onAdd={() =>
+                      set('funcaoCosts', [...form.funcaoCosts, { funcaoId: '', mode: 'pct', value: '0' }])
+                    }
+                    subtitle="Quanto cada função custa neste item por padrão"
+                    title="Custos padrão por função"
+                  >
+                    {form.funcaoCosts.map((row, index) => (
+                      <div className="rounded-xl border border-[#ececf1] bg-[#fafafb] p-[11px]" key={index}>
+                        <div className="mb-2 flex items-center gap-2">
+                          <div className="min-w-0 flex-1">
+                            <Combobox
+                              aria-label={`Função do custo padrão ${index + 1}`}
+                              className={cn(formSelectClass, 'bg-white')}
+                              emptyMessage="Nenhuma função disponível"
+                              entityGender="f"
+                              entityLabel="função"
+                              onChange={(value) => setCostRow(index, { funcaoId: value })}
+                              /*
+                                A função already used by another row is filtered out, so the
+                                client can never send two rows for one função and trip the
+                                API's duplicate_funcao_cost. The row's own stored função is
+                                always admitted, archived or not.
+                              */
+                              options={costRowFuncaoOptions(row)}
+                              placeholder="Selecione a função"
+                              searchPlaceholder="Buscar função..."
+                              value={row.funcaoId}
+                              /*
+                                Belt and braces for a stored funcaoId that is in `funcoes`
+                                under no status at all, e.g. against a stale bootstrap: the
+                                trigger still names it rather than falling back to the
+                                placeholder and reading as a cost for no função.
+                              */
+                              valueLabel={costRowFuncaoValueLabel(row)}
+                            />
+                          </div>
+                          <button
+                            aria-label={`Remover custo padrão ${index + 1}`}
+                            className="flex h-[34px] w-[34px] flex-none items-center justify-center rounded-[9px] border border-[#e6d3d0] bg-white text-[#b23a22] transition hover:bg-[#fbf0ee]"
+                            onClick={() =>
+                              set(
+                                'funcaoCosts',
+                                form.funcaoCosts.filter((_, rowIndex) => rowIndex !== index),
+                              )
+                            }
+                            type="button"
+                          >
+                            <Trash2 className="h-[15px] w-[15px]" />
+                          </button>
+                        </div>
+                        <div className="flex gap-2">
+                          <div className="flex flex-none gap-[3px] rounded-[9px] bg-[#f2f2f4] p-[3px]">
+                            <UnitToggle
+                              active={row.mode === 'pct'}
+                              /*
+                                Indexed rather than name-interpolated: the label has to be
+                                stable from the moment the row is added, before a função is
+                                even chosen.
+                              */
+                              ariaLabel={`Custo da função ${index + 1} em porcentagem`}
+                              onClick={() => setCostRow(index, { mode: 'pct' })}
+                              value="%"
+                            />
+                            <UnitToggle
+                              active={row.mode === 'fix'}
+                              ariaLabel={`Custo da função ${index + 1} em reais`}
+                              onClick={() => setCostRow(index, { mode: 'fix' })}
+                              value="R$"
+                            />
+                          </div>
+                          <UnitInput
+                            ariaLabel={`Custo da função ${index + 1}`}
+                            onChange={(value) => setCostRow(index, { value })}
+                            unit={row.mode === 'fix' ? 'R$' : '%'}
+                            value={row.value}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </ListEditor>
+                </>
+              ) : null}
+            </div>
           </div>
 
-          <div className="flex flex-none justify-end gap-2.5 border-t border-[#e8e8ec] bg-[#fafafb] px-6 py-4">
-            <button
-              className="min-h-11 rounded-[11px] border border-[#dcdce2] bg-white px-5 text-sm font-semibold text-[#201f24] transition hover:bg-[#f2f2f4]"
-              onClick={onClose}
-              type="button"
-            >
-              Cancelar
-            </button>
-            <button
-              className="min-h-11 rounded-[11px] bg-[#201f24] px-[22px] text-sm font-bold text-white transition hover:bg-[#33333a] disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={saving || !form.areaId}
-              type="submit"
-            >
-              {saving ? 'Salvando' : activeModal.product ? 'Salvar alterações' : 'Adicionar'}
-            </button>
+          <div className={wizardFooterClass}>
+            <div className="flex items-center gap-2.5">
+              <button
+                className={`${wizardSecondaryButtonClass} ${wizardStep === 1 ? 'invisible' : ''}`}
+                onClick={goBackProductWizard}
+                type="button"
+              >
+                Voltar
+              </button>
+              {wizardStep === 1 ? (
+                <button className={wizardSecondaryButtonClass} onClick={onClose} type="button">
+                  Cancelar
+                </button>
+              ) : null}
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-[13px] text-[#9b9ba3]">Passo {wizardStep} de 4</span>
+              {/*
+                The produto equivalent of the proposta wizard's `Salvar rascunho`, in the
+                same slot for the same reason: an EXISTING record is savable the moment
+                step 1 is valid, so making the operator walk to step 4 to change one
+                number would be busywork. A new produto gets no such button, so the create
+                path shows the commission and cost defaults at least once.
+              */}
+              {activeModal.product && wizardStep < 4 ? (
+                <button
+                  className={`${wizardSecondaryButtonClass} disabled:cursor-not-allowed disabled:opacity-45`}
+                  disabled={!canAdvanceStepOne || saving}
+                  title="Salvar sem passar pelos próximos passos"
+                  type="submit"
+                >
+                  Salvar alterações
+                </button>
+              ) : null}
+              <button
+                className={wizardPrimaryButtonClass}
+                disabled={saving || (wizardStep === 1 && !canAdvanceStepOne)}
+                onClick={wizardStep < 4 ? advanceProductWizard : undefined}
+                type={wizardStep < 4 ? 'button' : 'submit'}
+              >
+                {wizardStep < 4
+                  ? 'Avançar'
+                  : saving
+                    ? 'Salvando'
+                    : activeModal.product
+                      ? 'Salvar alterações'
+                      : 'Adicionar'}
+              </button>
+            </div>
           </div>
         </form>
       </DialogContent>
@@ -4121,14 +4358,22 @@ function DialogSection({
   subtitle,
   action,
   children,
+  flush,
 }: {
   title: string;
   subtitle?: string;
   action?: ReactNode;
   children: ReactNode;
+  /**
+   * Drops the separating rule, for a section that is the FIRST thing on a wizard step
+   * and therefore has nothing above it to be separated from. Everywhere else the rule
+   * stays, which is also what keeps `closest('div.border-t')` resolving a repeating
+   * section's own `Adicionar` button.
+   */
+  flush?: boolean;
 }) {
   return (
-    <div className="border-t border-[#ececf1] pt-4">
+    <div className={flush ? undefined : 'border-t border-[#ececf1] pt-4'}>
       <div className="mb-2.5 flex items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="text-[11px] font-bold uppercase tracking-[0.06em] text-[#9b9ba3]">
@@ -6123,8 +6368,8 @@ function SaleWizardDialogBody({
 
   return (
     <Dialog onOpenChange={(nextOpen) => (!nextOpen ? onClose() : undefined)} open>
-      <DialogContent className="flex h-[92vh] max-h-[92vh] w-[calc(100vw-48px)] max-w-[940px] flex-col gap-0 overflow-hidden rounded-[22px] border-none bg-[#f4f4f6] p-0 shadow-[0_30px_80px_rgba(0,0,0,.3)] sm:rounded-[22px] [&>button]:right-[26px] [&>button]:top-[31px] [&>button]:flex [&>button]:h-9 [&>button]:w-9 [&>button]:items-center [&>button]:justify-center [&>button]:rounded-[10px] [&>button]:border [&>button]:border-[#dcdce2] [&>button]:bg-white [&>button]:opacity-100 [&>button]:shadow-none">
-        <DialogHeader className="shrink-0 border-b border-[#e8e8ec] bg-white px-[26px] py-5 pr-[78px] text-left">
+      <DialogContent className={wizardDialogContentClass}>
+        <DialogHeader className={wizardHeaderClass}>
           <DialogTitle className="sales-ops-num text-[19px] font-bold text-[#201f24]">
             {editSale ? 'Editar proposta' : 'Nova proposta'}
           </DialogTitle>
@@ -6133,50 +6378,20 @@ function SaleWizardDialogBody({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-[#e8e8ec] bg-white px-[26px] py-4">
-          {wizardSteps.map((item, index) => {
-            const done = item.step < wizardStep;
-            const active = item.step === wizardStep;
-            return (
-              <div className="flex flex-none items-center gap-1" key={item.step}>
-                <button
-                  className="flex items-center gap-[9px] focus-visible:outline-none"
-                  disabled={
-                    (item.step > 1 && !canAdvanceStepOne) ||
-                    (item.step > 2 && !canAdvanceStepTwo) ||
-                    (item.step > 3 && !canAdvanceStepThree)
-                  }
-                  onClick={() => setWizardStep(item.step)}
-                  type="button"
-                >
-                  <span
-                    className={`sales-ops-num flex h-[26px] w-[26px] items-center justify-center rounded-full text-[12.5px] font-bold ${
-                      done
-                        ? 'bg-[#2f7d4b] text-white'
-                        : active
-                          ? 'bg-[#eaa81a] text-white'
-                          : 'bg-[#ececf1] text-[#9b9ba3]'
-                    }`}
-                  >
-                    {done ? <Check className="h-[13px] w-[13px]" /> : item.step}
-                  </span>
-                  <span
-                    className={`whitespace-nowrap text-[13px] font-semibold ${
-                      active || done ? 'text-[#201f24]' : 'text-[#9b9ba3]'
-                    }`}
-                  >
-                    {item.label}
-                  </span>
-                </button>
-                {index < wizardSteps.length - 1 ? (
-                  <span className="mx-1 h-0.5 w-[22px] flex-none bg-[#e7e2d6]" />
-                ) : null}
-              </div>
-            );
-          })}
-        </div>
+        <WizardStepper
+          current={wizardStep}
+          isEnabled={(step) =>
+            !(
+              (step > 1 && !canAdvanceStepOne) ||
+              (step > 2 && !canAdvanceStepTwo) ||
+              (step > 3 && !canAdvanceStepThree)
+            )
+          }
+          onSelect={setWizardStep}
+          steps={wizardSteps}
+        />
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-[26px] py-6">
+        <div className={wizardBodyClass}>
           {bootstrap.products.length === 0 || sellers.length === 0 ? (
             <EmptyPanel
               text="Cadastre pelo menos um produto e um vendedor para registrar uma proposta."
@@ -7550,9 +7765,9 @@ function SaleWizardDialogBody({
           )}
         </div>
 
-        <div className="flex shrink-0 items-center justify-between border-t border-[#e8e8ec] bg-white px-[26px] py-4">
+        <div className={wizardFooterClass}>
           <button
-            className={`rounded-[11px] border border-[#dcdce2] bg-white px-5 py-[11px] text-sm font-semibold text-[#57575f] transition hover:bg-[#f2f2f4] ${wizardStep === 1 ? 'invisible' : ''}`}
+            className={`${wizardSecondaryButtonClass} ${wizardStep === 1 ? 'invisible' : ''}`}
             onClick={goBack}
             type="button"
           >
@@ -7574,7 +7789,7 @@ function SaleWizardDialogBody({
               </button>
             ) : null}
             <button
-              className="rounded-[11px] bg-[#201f24] px-[22px] py-[11px] text-sm font-bold text-white transition hover:bg-[#33333a] disabled:cursor-not-allowed disabled:opacity-60"
+              className={wizardPrimaryButtonClass}
               disabled={saving || (wizardStep === 1 && !canSave)}
               onClick={advanceWizard}
               type="button"
