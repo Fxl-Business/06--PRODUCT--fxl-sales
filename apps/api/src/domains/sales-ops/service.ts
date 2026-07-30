@@ -8,6 +8,7 @@ import {
   salesOpsPayables,
   salesOpsPeople,
   salesOpsPersonFuncoes,
+  salesOpsProductFuncaoCosts,
   salesOpsProducts,
   salesOpsReceivables,
   salesOpsSaleItems,
@@ -24,6 +25,11 @@ const uuid = z.string().uuid();
 const money = z.number().int().nonnegative();
 const pct = z.number().min(0).max(100);
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+// Declared here rather than beside the sale schemas below because the product
+// default-payment block also uses it, and a `const` referenced above its own
+// declaration line would hit the temporal dead zone at module evaluation.
+const MethodSchema = z.enum(['pix', 'card', 'boleto', 'transfer']);
+export type PaymentMethod = z.infer<typeof MethodSchema>;
 
 const PersonFieldsSchema = z.object({
   displayName: z.string().min(1).max(120),
@@ -56,12 +62,121 @@ export const ProductProviderSchema = z.object({
   commissionValue: z.number().nonnegative(),
 });
 
-export const ProductSchema = z.object({
-  name: z.string().min(1).max(140),
-  type: z.string().min(1).max(60).default('SaaS'),
+/**
+ * Produto | Serviço - the single classification axis on a product.
+ *
+ * A Serviço is structurally a variable-value item: it carries no own price, only
+ * defaults for how the money is split. A Produto keeps its own setupBrl/monthlyBrl.
+ */
+export const ProductKindSchema = z.enum(['product', 'service']);
+export const ProductEntradaModeSchema = z.enum(['none', 'pct', 'fix']);
+export type ProductKind = z.infer<typeof ProductKindSchema>;
+export type ProductEntradaMode = z.infer<typeof ProductEntradaModeSchema>;
+
+/** One default cost for one função. Discriminated so the units can never be ambiguous. */
+export const ProductFuncaoCostSchema = z.discriminatedUnion('mode', [
+  z.object({ funcaoId: uuid, mode: z.literal('pct'), valuePct: pct }),
+  z.object({ funcaoId: uuid, mode: z.literal('fix'), valueBrl: money }),
+]);
+
+/**
+ * `kind` wins; `openPrice` is the legacy alias the pre-slice-10 product dialog
+ * still sends; `current` is the stored row on PATCH.
+ */
+export function resolveProductKind(
+  data: { kind?: ProductKind; openPrice?: boolean },
+  current?: ProductKind,
+): ProductKind {
+  if (data.kind !== undefined) return data.kind;
+  if (data.openPrice !== undefined) return data.openPrice ? 'service' : 'product';
+  return current ?? 'product';
+}
+
+type ProductFieldsForValidation = {
+  kind?: ProductKind;
+  openPrice?: boolean;
+  setupBrl?: number;
+  monthlyBrl?: number;
+  defaultEntradaMode?: ProductEntradaMode;
+  defaultEntradaPct?: number | null;
+  defaultEntradaBrl?: number | null;
+  productFuncaoCosts?: Array<{ funcaoId: string }>;
+};
+
+/**
+ * Partial-tolerant product invariants: every rule is skipped when its inputs are
+ * `undefined`, so the same refine serves ProductSchema and UpdateProductSchema.
+ * The rules a partial payload cannot see (a `kind: 'service'` patch against a row
+ * that already stores a fixed value) are re-run on the merged row in
+ * `updateProduct`.
+ */
+function validateProductFields(data: ProductFieldsForValidation, ctx: z.RefinementCtx): void {
+  if (
+    data.kind !== undefined &&
+    data.openPrice !== undefined &&
+    data.openPrice !== (data.kind === 'service')
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['openPrice'],
+      message: 'kind_open_price_conflict',
+    });
+  }
+
+  const resolvedKind =
+    data.kind ??
+    (data.openPrice === undefined ? undefined : data.openPrice ? 'service' : 'product');
+  if (resolvedKind === 'service' && ((data.setupBrl ?? 0) > 0 || (data.monthlyBrl ?? 0) > 0)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['setupBrl'],
+      message: 'service_cannot_have_fixed_value',
+    });
+  }
+
+  if (data.defaultEntradaMode !== undefined) {
+    const hasPct = data.defaultEntradaPct !== undefined && data.defaultEntradaPct !== null;
+    const hasBrl = data.defaultEntradaBrl !== undefined && data.defaultEntradaBrl !== null;
+    const valid =
+      (data.defaultEntradaMode === 'none' && !hasPct && !hasBrl) ||
+      (data.defaultEntradaMode === 'pct' && hasPct && !hasBrl) ||
+      (data.defaultEntradaMode === 'fix' && hasBrl && !hasPct);
+    if (!valid) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['defaultEntradaMode'],
+        message: 'entrada_mode_value_mismatch',
+      });
+    }
+  }
+
+  if (data.productFuncaoCosts !== undefined) {
+    const seen = new Set<string>();
+    for (const cost of data.productFuncaoCosts) {
+      if (seen.has(cost.funcaoId)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['productFuncaoCosts'],
+          message: 'duplicate_funcao_cost',
+        });
+        break;
+      }
+      seen.add(cost.funcaoId);
+    }
+  }
+}
+
+/**
+ * Base product fields. Deliberately a plain z.object so `.partial()` stays
+ * available for the PATCH schema - mirrors PersonFieldsSchema above.
+ */
+const ProductFieldsSchema = z.object({
+  name: z.string().trim().min(1).max(140),
+  kind: ProductKindSchema.optional(),
+  /** @deprecated legacy alias for `kind`. Kept so the pre-slice-10 dialog keeps working. */
+  openPrice: z.boolean().optional(),
   codeSuffix: z.string().regex(/^\d{1,2}$/).default('0'),
   areaId: uuid,
-  openPrice: z.boolean().default(false),
   setupBrl: money.default(0),
   hasMonthly: z.boolean().default(false),
   monthlyBrl: money.default(0),
@@ -73,10 +188,22 @@ export const ProductSchema = z.object({
   sellerWithFinderCommissionValue: z.number().nonnegative().optional(),
   finderCommissionType: z.enum(['pct', 'fix']).default('pct'),
   finderCommissionValue: z.number().nonnegative().default(3),
+  defaultPaymentMethod: MethodSchema.default('pix'),
+  defaultEntradaMode: ProductEntradaModeSchema.default('none'),
+  defaultEntradaPct: pct.nullable().optional(),
+  defaultEntradaBrl: money.nullable().optional(),
+  defaultRemainingInstallments: z.number().int().min(1).max(120).default(1),
+  /** null = indefinite recurrence; undefined on PATCH = leave unchanged. */
+  defaultRecurringCycles: z.number().int().min(1).max(120).nullable().optional(),
+  productFuncaoCosts: z.array(ProductFuncaoCostSchema).optional(),
   modules: z.array(ProductModuleSchema).default([]),
+  /** @deprecated superseded by productFuncaoCosts; removed from the dialog in slice 10. */
   providers: z.array(ProductProviderSchema).default([]),
   status: z.enum(['active', 'archived']).default('active'),
 });
+
+export const ProductSchema = ProductFieldsSchema.superRefine(validateProductFields);
+export const UpdateProductSchema = ProductFieldsSchema.partial().superRefine(validateProductFields);
 
 export const ClientSchema = z.object({
   name: z.string().min(1).max(160),
@@ -190,8 +317,6 @@ export const SettingsSchema = z.object({
   sellerCanBeFinder: z.boolean().default(true),
 });
 
-const MethodSchema = z.enum(['pix', 'card', 'boleto', 'transfer']);
-
 export const SaleInstallmentSchema = z.object({
   dueDate: isoDate,
   amountBrl: money,
@@ -285,6 +410,7 @@ export const CancelContractSchema = z.object({
 export type CreateSaleInput = z.infer<typeof CreateSaleSchema>;
 export type UpdateSaleInput = z.infer<typeof UpdateSaleSchema>;
 export type ProductInput = z.infer<typeof ProductSchema>;
+export type ProductFuncaoCostInput = z.infer<typeof ProductFuncaoCostSchema>;
 export type ClientInput = z.infer<typeof ClientSchema>;
 export type PersonInput = z.infer<typeof PersonSchema>;
 export type SettingsInput = z.infer<typeof SettingsSchema>;
@@ -302,7 +428,7 @@ type SaleSummaryRow = {
   createdAt?: Date | string;
 };
 
-type ProductSummaryRow = { id: string; name: string; type?: string };
+type ProductSummaryRow = { id: string; name: string; kind?: string };
 type PayableSummaryRow = { amountBrl: number; status: string };
 
 export type SalesOpsSnapshot = {
@@ -340,6 +466,87 @@ function pctOf(amount: number, rate: number): number {
   return Math.floor((amount * rate) / 100);
 }
 
+/**
+ * The stored default-payment block, exactly as a product row returns it
+ * (`defaultEntradaPct` is a numeric(5,2) and therefore a string).
+ */
+export type ProductPaymentDefaults = {
+  defaultPaymentMethod: PaymentMethod;
+  defaultEntradaMode: ProductEntradaMode;
+  defaultEntradaPct: string | null;
+  defaultEntradaBrl: number | null;
+  defaultRemainingInstallments: number;
+  defaultRecurringCycles: number | null;
+};
+
+/**
+ * Turns a product's stored payment TEMPLATE into concrete installments for one
+ * proposta. The template deliberately carries no absolute dates, so the base date
+ * and the total come from the proposta.
+ *
+ * This is the normative reference implementation: slice 11 mirrors it in the web
+ * `calculations` module, and the unit vectors in default-payment-plan.test.ts pin
+ * the arithmetic so the spec cannot silently drift. The split is exact by
+ * construction (the first restante parcela absorbs the rounding remainder), which
+ * is what `validatePaymentPlan` demands of any plan the write endpoints accept.
+ */
+export function materializeDefaultPaymentPlan(input: {
+  defaults: ProductPaymentDefaults;
+  totalBrl: number;
+  baseDate: string;
+  hasMonthly: boolean;
+  monthlyBrl: number;
+}): {
+  installments: Array<{ dueDate: string; amountBrl: number; method: PaymentMethod }>;
+  recurring: { monthlyBrl: number; startDate: string; cycles: number | null } | null;
+} {
+  const { defaults, totalBrl, baseDate, hasMonthly, monthlyBrl } = input;
+  const method = defaults.defaultPaymentMethod;
+
+  const rawEntradaBrl =
+    defaults.defaultEntradaMode === 'pct'
+      ? Math.round((totalBrl * Number(defaults.defaultEntradaPct ?? 0)) / 100)
+      : defaults.defaultEntradaMode === 'fix'
+        ? (defaults.defaultEntradaBrl ?? 0)
+        : 0;
+  // A fixed entrada larger than the proposta total is clamped rather than
+  // rejected, so a cadastro default can never make a small proposta unsavable.
+  const entradaBrl = Math.min(Math.max(rawEntradaBrl, 0), Math.max(totalBrl, 0));
+  const remainingBrl = Math.max(totalBrl, 0) - entradaBrl;
+  const parcelas = defaults.defaultRemainingInstallments;
+
+  const installments: Array<{ dueDate: string; amountBrl: number; method: PaymentMethod }> = [];
+  if (entradaBrl > 0) installments.push({ dueDate: baseDate, amountBrl: entradaBrl, method });
+  if (remainingBrl > 0) {
+    const base = Math.floor(remainingBrl / parcelas);
+    const rest = remainingBrl - base * parcelas;
+    for (let i = 1; i <= parcelas; i += 1) {
+      installments.push({
+        // With no entrada, parcela 1 lands on the base date, so a 1x plan
+        // reproduces today's cash behaviour byte for byte.
+        dueDate: addMonths(baseDate, entradaBrl > 0 ? i : i - 1),
+        amountBrl: i === 1 ? base + rest : base,
+        method,
+      });
+    }
+  }
+  // A 100 percent entrada must not produce a trailing 0-cent parcela, but the
+  // array still has to satisfy `installments: min(1)`.
+  if (installments.length === 0) installments.push({ dueDate: baseDate, amountBrl: 0, method });
+
+  return {
+    installments,
+    recurring: hasMonthly
+      ? {
+          monthlyBrl,
+          startDate: addMonths(baseDate, 1),
+          // null means indefinite: no bounded rows are generated (CLAUDE.md).
+          cycles: defaults.defaultRecurringCycles ?? null,
+        }
+      : null,
+  };
+}
+
 export class SaleInputError extends Error {
   constructor(
     readonly code: 'product_not_found' | 'product_area_missing' | 'area_not_found',
@@ -368,7 +575,7 @@ async function resolveSaleItemContexts(
     ? await tx
         .select({
           id: salesOpsProducts.id,
-          type: salesOpsProducts.type,
+          kind: salesOpsProducts.kind,
           areaId: salesOpsProducts.areaId,
         })
         .from(salesOpsProducts)
@@ -399,7 +606,10 @@ async function resolveSaleItemContexts(
       if (!product.areaId) throw new SaleInputError('product_area_missing', index);
       const area = areasById.get(product.areaId);
       if (!area) throw new SaleInputError('area_not_found', index);
-      return { areaId: area.id, areaNameSnapshot: area.name, productTypeSnapshot: product.type };
+      // product_type_snapshot keeps its column name and its meaning ("the
+      // product's classification at sale time"); it is now fed from `kind`, so new
+      // rows snapshot 'product' or 'service' where they used to snapshot 'SaaS'.
+      return { areaId: area.id, areaNameSnapshot: area.name, productTypeSnapshot: product.kind };
     }
     const area = item.areaId ? areasById.get(item.areaId) : undefined;
     if (!area) throw new SaleInputError('area_not_found', index);
@@ -755,6 +965,26 @@ async function attachPersonFuncoes(
 }
 
 /**
+ * Reads the caller-org rows for a set of função ids, inside an existing tenant
+ * transaction. The `orgId` filter is the load-bearing part: an id that belongs to
+ * another org is simply absent from the result, which every caller treats as
+ * `unknown_funcao` rather than leaking that the id exists.
+ */
+async function selectFuncoesByIds(tx: Db, orgId: string, ids: string[]): Promise<FuncaoRow[]> {
+  if (ids.length === 0) return [];
+  return tx
+    .select()
+    .from(salesOpsFuncoes)
+    .where(and(eq(salesOpsFuncoes.orgId, orgId), inArray(salesOpsFuncoes.id, ids)));
+}
+
+/** Public wrapper around {@link selectFuncoesByIds} for route-level pre-checks. */
+export async function getFuncoesByIds(db: Db, orgId: string, ids: string[]): Promise<FuncaoRow[]> {
+  if (ids.length === 0) return [];
+  return withTenant(db, orgId, (tx) => selectFuncoesByIds(tx, orgId, ids));
+}
+
+/**
  * Resolves the intended função set to concrete org-scoped rows, creating the
  * three legacy slugs on demand so an org provisioned after migration 0012 still
  * has its predefined app roles.
@@ -765,10 +995,7 @@ async function resolvePersonFuncoes(
   plan: Exclude<PersonFuncaoPlan, 'funcao_required' | { kind: 'unchanged' }>,
 ): Promise<FuncaoRow[] | 'unknown_funcao'> {
   if (plan.kind === 'ids') {
-    const found = await tx
-      .select()
-      .from(salesOpsFuncoes)
-      .where(and(eq(salesOpsFuncoes.orgId, orgId), inArray(salesOpsFuncoes.id, plan.funcaoIds)));
+    const found = await selectFuncoesByIds(tx, orgId, plan.funcaoIds);
     // Any id that is unknown, or that belongs to another org and is therefore
     // invisible under this org filter, is a hard rejection.
     if (found.length !== plan.funcaoIds.length) return 'unknown_funcao';
@@ -1113,6 +1340,196 @@ async function findFuncaoClash(
   return bySlug ? 'duplicate_slug' : null;
 }
 
+export type ProductRow = typeof salesOpsProducts.$inferSelect;
+export type ProductFuncaoCostRow = typeof salesOpsProductFuncaoCosts.$inferSelect;
+export type ProductWithCosts = { product: ProductRow; productFuncaoCosts: ProductFuncaoCostRow[] };
+
+/**
+ * Sentinel for a write whose merged row would break the Produto/Serviço
+ * invariant, e.g. `PATCH { kind: 'service' }` against a row that stores a fixed
+ * setupBrl. Mirrors the `'duplicate'` sentinel idiom used by createArea.
+ */
+export const INVALID_PRODUCT_KIND_VALUE = 'invalid_product_kind_value';
+
+/**
+ * Same idea for the entrada block: `PATCH { defaultEntradaPct: 50 }` against a row
+ * whose stored mode is 'none' is only visible once the patch is merged. Returning
+ * a sentinel keeps it a 400 instead of letting the DB CHECK surface as a 500.
+ */
+export const INVALID_PRODUCT_ENTRADA_VALUE = 'invalid_product_entrada_value';
+
+/**
+ * Every numeric(...) column drizzle exposes as a string. One coercion, used by
+ * create and update alike, instead of an inline ternary per column: `undefined`
+ * means "not in this patch", `null` means "store NULL".
+ */
+function numericColumn(value: number | null | undefined): string | null | undefined {
+  if (value === undefined) return undefined;
+  return value === null ? null : String(value);
+}
+
+/**
+ * The product columns written verbatim from the payload: everything except the
+ * numeric(...) columns (coerced by productNumericPatch), the derived `kind` /
+ * `openPrice` pair, and `productFuncaoCosts`, which lives in the child table.
+ *
+ * An explicit allow-list rather than a `...data` spread: it is what guarantees a
+ * request body can never smuggle `orgId`, `id` or `createdAt` into a write.
+ */
+const PRODUCT_PLAIN_COLUMNS = [
+  'name',
+  'codeSuffix',
+  'areaId',
+  'setupBrl',
+  'hasMonthly',
+  'monthlyBrl',
+  'recurringCommission',
+  'hasFinderCommission',
+  'sellerCommissionType',
+  'sellerWithFinderCommissionType',
+  'finderCommissionType',
+  'defaultPaymentMethod',
+  'defaultEntradaMode',
+  'defaultEntradaBrl',
+  'defaultRemainingInstallments',
+  'defaultRecurringCycles',
+  'modules',
+  'providers',
+  'status',
+] as const;
+
+function productPlainPatch(
+  data: Partial<ProductInput>,
+): Partial<typeof salesOpsProducts.$inferInsert> {
+  const patch: Record<string, unknown> = {};
+  for (const key of PRODUCT_PLAIN_COLUMNS) {
+    const value = data[key];
+    // `undefined` means "not in this payload"; drizzle skips it. `null` is kept,
+    // because it is the explicit "store NULL" signal on the nullable columns.
+    if (value !== undefined) patch[key] = value;
+  }
+  return patch as Partial<typeof salesOpsProducts.$inferInsert>;
+}
+
+/** The numeric(...) product columns a PATCH touches, coerced in one place. */
+function productNumericPatch(
+  data: Partial<ProductInput>,
+): Partial<typeof salesOpsProducts.$inferInsert> {
+  const patch: Partial<typeof salesOpsProducts.$inferInsert> = {};
+  if (data.sellerCommissionValue !== undefined) {
+    patch.sellerCommissionValue = String(data.sellerCommissionValue);
+  }
+  if (data.sellerWithFinderCommissionValue !== undefined) {
+    patch.sellerWithFinderCommissionValue = String(data.sellerWithFinderCommissionValue);
+  }
+  if (data.finderCommissionValue !== undefined) {
+    patch.finderCommissionValue = String(data.finderCommissionValue);
+  }
+  if (data.defaultEntradaPct !== undefined) {
+    patch.defaultEntradaPct = numericColumn(data.defaultEntradaPct);
+  }
+  return patch;
+}
+
+/** Cost rows for one product, or for the whole org when productId is omitted. */
+function selectProductFuncaoCosts(
+  tx: Db,
+  orgId: string,
+  productId?: string,
+): Promise<ProductFuncaoCostRow[]> {
+  const scope = productId
+    ? and(
+        eq(salesOpsProductFuncaoCosts.orgId, orgId),
+        eq(salesOpsProductFuncaoCosts.productId, productId),
+      )
+    : eq(salesOpsProductFuncaoCosts.orgId, orgId);
+  return tx
+    .select()
+    .from(salesOpsProductFuncaoCosts)
+    .where(scope)
+    .orderBy(salesOpsProductFuncaoCosts.productId, salesOpsProductFuncaoCosts.funcaoId);
+}
+
+export async function listProductFuncaoCosts(
+  db: Db,
+  orgId: string,
+  productId?: string,
+): Promise<ProductFuncaoCostRow[]> {
+  return withTenant(db, orgId, (tx) => selectProductFuncaoCosts(tx, orgId, productId));
+}
+
+/**
+ * Full set replacement for one product's função cost defaults, exactly like the
+ * `modules` and `providers` arrays: sending the key replaces the set, `[]` clears
+ * it. There is deliberately no DELETE verb on the router.
+ */
+async function replaceProductFuncaoCosts(
+  tx: Db,
+  orgId: string,
+  productId: string,
+  costs: ProductFuncaoCostInput[],
+): Promise<void> {
+  await tx
+    .delete(salesOpsProductFuncaoCosts)
+    .where(
+      and(
+        eq(salesOpsProductFuncaoCosts.orgId, orgId),
+        eq(salesOpsProductFuncaoCosts.productId, productId),
+      ),
+    );
+  if (costs.length === 0) return;
+  await tx.insert(salesOpsProductFuncaoCosts).values(
+    costs.map((cost) => ({
+      // org_id and product_id are always server-side values, never body-supplied.
+      orgId,
+      productId,
+      funcaoId: cost.funcaoId,
+      mode: cost.mode,
+      valuePct: cost.mode === 'pct' ? String(cost.valuePct) : null,
+      valueBrl: cost.mode === 'fix' ? cost.valueBrl : null,
+    })),
+  );
+}
+
+export type ProductRefsResult =
+  | { ok: true }
+  | { ok: false; reason: 'unknown_area' }
+  | { ok: false; reason: 'unknown_funcao'; funcaoId: string };
+
+/**
+ * Resolves every foreign reference a product write carries against the CALLER's
+ * org, so POST and PATCH share one guard instead of duplicating it.
+ *
+ * The função check is the tenancy gate: RLS `WITH CHECK` only validates the child
+ * row's own `org_id` (which the server sets), so without this a caller could paste
+ * another org's funcaoId. The composite FK is the in-transaction backstop for the
+ * residual TOCTOU window.
+ */
+export async function resolveProductRefs(
+  db: Db,
+  orgId: string,
+  data: Partial<ProductInput>,
+): Promise<ProductRefsResult> {
+  return withTenant(db, orgId, async (tx): Promise<ProductRefsResult> => {
+    if (data.areaId !== undefined) {
+      const [area] = await tx
+        .select({ id: salesOpsAreas.id })
+        .from(salesOpsAreas)
+        .where(and(eq(salesOpsAreas.orgId, orgId), eq(salesOpsAreas.id, data.areaId)))
+        .limit(1);
+      if (!area) return { ok: false, reason: 'unknown_area' };
+    }
+    const funcaoIds = [...new Set((data.productFuncaoCosts ?? []).map((cost) => cost.funcaoId))];
+    if (funcaoIds.length > 0) {
+      const found = await selectFuncoesByIds(tx, orgId, funcaoIds);
+      const foundIds = new Set(found.map((funcao) => funcao.id));
+      const missing = funcaoIds.find((funcaoId) => !foundIds.has(funcaoId));
+      if (missing !== undefined) return { ok: false, reason: 'unknown_funcao', funcaoId: missing };
+    }
+    return { ok: true };
+  });
+}
+
 export async function listProducts(db: Db, orgId: string) {
   return withTenant(db, orgId, (tx) =>
     tx
@@ -1123,23 +1540,40 @@ export async function listProducts(db: Db, orgId: string) {
   );
 }
 
-export async function createProduct(db: Db, orgId: string, data: ProductInput) {
+export async function createProduct(
+  db: Db,
+  orgId: string,
+  data: ProductInput,
+): Promise<ProductWithCosts> {
   return withTenant(db, orgId, async (tx) => {
+    const kind = resolveProductKind(data);
     const [product] = await tx
       .insert(salesOpsProducts)
       .values({
-        ...data,
+        ...productPlainPatch(data),
+        name: data.name,
         orgId,
+        kind,
+        // open_price is a derived projection of kind, never authored
+        // independently; sales_ops_products_kind_open_price_check enforces it.
+        openPrice: kind === 'service',
         sellerCommissionValue: String(data.sellerCommissionValue),
+        // The with-finder scenario falls back to the plain seller scenario, so an
+        // org that never configured it still gets a coherent pair of columns.
         sellerWithFinderCommissionType:
           data.sellerWithFinderCommissionType ?? data.sellerCommissionType,
         sellerWithFinderCommissionValue: String(
           data.sellerWithFinderCommissionValue ?? data.sellerCommissionValue,
         ),
         finderCommissionValue: String(data.finderCommissionValue),
+        defaultEntradaPct: numericColumn(data.defaultEntradaPct) ?? null,
       })
       .returning();
-    return product!;
+    await replaceProductFuncaoCosts(tx, orgId, product!.id, data.productFuncaoCosts ?? []);
+    return {
+      product: product!,
+      productFuncaoCosts: await selectProductFuncaoCosts(tx, orgId, product!.id),
+    };
   });
 }
 
@@ -1148,25 +1582,48 @@ export async function updateProduct(
   orgId: string,
   id: string,
   data: Partial<ProductInput>,
-) {
+): Promise<
+  | ProductWithCosts
+  | typeof INVALID_PRODUCT_KIND_VALUE
+  | typeof INVALID_PRODUCT_ENTRADA_VALUE
+  | null
+> {
   return withTenant(db, orgId, async (tx) => {
-    const {
-      sellerCommissionValue,
-      sellerWithFinderCommissionValue,
-      finderCommissionValue,
-      ...rest
-    } = data;
+    const [current] = await tx
+      .select()
+      .from(salesOpsProducts)
+      .where(and(eq(salesOpsProducts.orgId, orgId), eq(salesOpsProducts.id, id)))
+      .limit(1);
+    if (!current) return null;
+
+    const kind = resolveProductKind(data, current.kind as ProductKind);
+    // Re-run the invariants on the MERGED row: a partial payload cannot see the
+    // conflict between `{ kind: 'service' }` and a stored fixed setupBrl.
+    const kindMerged = {
+      kind,
+      setupBrl: data.setupBrl ?? current.setupBrl,
+      monthlyBrl: data.monthlyBrl ?? current.monthlyBrl,
+    };
+    if (!UpdateProductSchema.safeParse(kindMerged).success) return INVALID_PRODUCT_KIND_VALUE;
+
+    const entradaMerged = {
+      defaultEntradaMode: data.defaultEntradaMode ?? (current.defaultEntradaMode as ProductEntradaMode),
+      defaultEntradaPct:
+        data.defaultEntradaPct !== undefined
+          ? data.defaultEntradaPct
+          : current.defaultEntradaPct === null
+            ? null
+            : Number(current.defaultEntradaPct),
+      defaultEntradaBrl:
+        data.defaultEntradaBrl !== undefined ? data.defaultEntradaBrl : current.defaultEntradaBrl,
+    };
+    if (!UpdateProductSchema.safeParse(entradaMerged).success) return INVALID_PRODUCT_ENTRADA_VALUE;
+
     const patch: Partial<typeof salesOpsProducts.$inferInsert> = {
-      ...rest,
-      ...(sellerCommissionValue !== undefined
-        ? { sellerCommissionValue: String(sellerCommissionValue) }
-        : {}),
-      ...(sellerWithFinderCommissionValue !== undefined
-        ? { sellerWithFinderCommissionValue: String(sellerWithFinderCommissionValue) }
-        : {}),
-      ...(finderCommissionValue !== undefined
-        ? { finderCommissionValue: String(finderCommissionValue) }
-        : {}),
+      ...productPlainPatch(data),
+      kind,
+      openPrice: kind === 'service',
+      ...productNumericPatch(data),
       updatedAt: new Date(),
     };
     const [product] = await tx
@@ -1174,7 +1631,15 @@ export async function updateProduct(
       .set(patch)
       .where(and(eq(salesOpsProducts.orgId, orgId), eq(salesOpsProducts.id, id)))
       .returning();
-    return product ?? null;
+    if (!product) return null;
+    // Omitted key leaves the set untouched; present key is a full replace.
+    if (data.productFuncaoCosts !== undefined) {
+      await replaceProductFuncaoCosts(tx, orgId, id, data.productFuncaoCosts);
+    }
+    return {
+      product,
+      productFuncaoCosts: await selectProductFuncaoCosts(tx, orgId, id),
+    };
   });
 }
 
@@ -1766,6 +2231,7 @@ export async function getSalesOpsSnapshot(db: Db, orgId: string) {
       .from(salesOpsProducts)
       .where(eq(salesOpsProducts.orgId, orgId))
       .orderBy(salesOpsProducts.name);
+    const productFuncaoCosts = await selectProductFuncaoCosts(tx, orgId);
     const clients = await tx
       .select()
       .from(salesOpsClients)
@@ -1812,6 +2278,7 @@ export async function getSalesOpsSnapshot(db: Db, orgId: string) {
     return {
       sales,
       products,
+      productFuncaoCosts,
       clients,
       people,
       funcoes,

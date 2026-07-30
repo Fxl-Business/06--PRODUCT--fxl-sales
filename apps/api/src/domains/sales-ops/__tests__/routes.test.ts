@@ -15,6 +15,7 @@ const serviceMocks = vi.hoisted(() => ({
   updateFuncao: vi.fn(),
   getFuncao: vi.fn(),
   createProduct: vi.fn(),
+  resolveProductRefs: vi.fn(),
   createSale: vi.fn(),
   updateSale: vi.fn(),
 }));
@@ -39,6 +40,7 @@ vi.mock('../service.js', async (importOriginal) => {
     updateFuncao: serviceMocks.updateFuncao,
     getFuncao: serviceMocks.getFuncao,
     createProduct: serviceMocks.createProduct,
+    resolveProductRefs: serviceMocks.resolveProductRefs,
     createSale: serviceMocks.createSale,
     updateSale: serviceMocks.updateSale,
   };
@@ -144,9 +146,14 @@ const productPayload = {
 };
 
 const productResult = {
-  id: '44444444-4444-4444-8444-444444444444',
-  orgId: 'verified-org',
-  ...productPayload,
+  product: {
+    id: '44444444-4444-4444-8444-444444444444',
+    orgId: 'verified-org',
+    kind: 'product' as const,
+    openPrice: false,
+    ...productPayload,
+  },
+  productFuncaoCosts: [],
 };
 
 const salePayload = {
@@ -193,6 +200,7 @@ beforeEach(() => {
   serviceMocks.updateFuncao.mockResolvedValue(funcaoResult);
   serviceMocks.getFuncao.mockResolvedValue(funcaoResult);
   serviceMocks.createProduct.mockResolvedValue(productResult);
+  serviceMocks.resolveProductRefs.mockResolvedValue({ ok: true });
   serviceMocks.createSale.mockResolvedValue(saleResult);
   serviceMocks.updateSale.mockResolvedValue({ ok: true, sale: saleResult.sale, ledger: saleResult.ledger });
 });
@@ -546,12 +554,15 @@ describe('Sales Ops product area binding', () => {
     const response = await jsonRequestWithBody('POST', '/products', productWithoutArea);
 
     expect(response.status).toBe(400);
-    expect(serviceMocks.getArea).not.toHaveBeenCalled();
+    expect(serviceMocks.resolveProductRefs).not.toHaveBeenCalled();
     expect(serviceMocks.createProduct).not.toHaveBeenCalled();
   });
 
   it('rejects product creation when the area is not in the verified org', async () => {
-    serviceMocks.getArea.mockResolvedValueOnce(null);
+    serviceMocks.resolveProductRefs.mockResolvedValueOnce({
+      ok: false,
+      reason: 'unknown_area',
+    });
 
     const response = await jsonRequestWithBody('POST', '/products', productPayload);
 
@@ -563,15 +574,70 @@ describe('Sales Ops product area binding', () => {
     expect(serviceMocks.createProduct).not.toHaveBeenCalled();
   });
 
+  it('rejects product creation when a funcao cost points outside the verified org', async () => {
+    const funcaoId = '55555555-5555-4555-8555-555555555555';
+    serviceMocks.resolveProductRefs.mockResolvedValueOnce({
+      ok: false,
+      reason: 'unknown_funcao',
+      funcaoId,
+    });
+
+    const response = await jsonRequestWithBody('POST', '/products', {
+      ...productPayload,
+      productFuncaoCosts: [{ funcaoId, mode: 'pct', valuePct: 5 }],
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: 'validation_error',
+      reason: 'unknown_funcao',
+      funcaoId,
+    });
+    expect(serviceMocks.createProduct).not.toHaveBeenCalled();
+  });
+
   it('creates a product when the area resolves in the verified org', async () => {
     const response = await jsonRequestWithBody('POST', '/products', productPayload);
 
     expect(response.status).toBe(201);
+    expect(await response.json()).toEqual(productResult);
     expect(serviceMocks.createProduct).toHaveBeenCalledWith(
       mockedDb,
       'verified-org',
       expect.objectContaining({ areaId: productPayload.areaId }),
     );
+    // orgId always comes from the verified claim, never from the body.
+    expect(serviceMocks.resolveProductRefs).toHaveBeenCalledWith(
+      mockedDb,
+      'verified-org',
+      expect.objectContaining({ areaId: productPayload.areaId }),
+    );
+  });
+
+  it('accepts the deprecated openPrice alias on the create payload', async () => {
+    const response = await jsonRequestWithBody('POST', '/products', {
+      ...productPayload,
+      openPrice: true,
+    });
+
+    expect(response.status).toBe(201);
+    expect(serviceMocks.createProduct).toHaveBeenCalledWith(
+      mockedDb,
+      'verified-org',
+      expect.objectContaining({ openPrice: true }),
+    );
+  });
+
+  it('rejects a create payload whose kind and openPrice contradict each other', async () => {
+    const response = await jsonRequestWithBody('POST', '/products', {
+      ...productPayload,
+      kind: 'product',
+      openPrice: true,
+    });
+
+    expect(response.status).toBe(400);
+    expect(serviceMocks.resolveProductRefs).not.toHaveBeenCalled();
+    expect(serviceMocks.createProduct).not.toHaveBeenCalled();
   });
 });
 

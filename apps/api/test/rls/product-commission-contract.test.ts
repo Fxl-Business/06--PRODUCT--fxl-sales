@@ -44,7 +44,7 @@ describe('sales operations product commission persistence', () => {
     orgIds.push(orgId);
     const area = await createArea(db, orgId, AreaSchema.parse({ name: 'FXL Tech' }));
     if (area === 'duplicate') throw new Error('unexpected duplicate area');
-    const created = await createProduct(
+    const { product: created } = await createProduct(
       db,
       orgId,
       ProductSchema.parse({
@@ -67,15 +67,21 @@ describe('sales operations product commission persistence', () => {
     const sellerOnlyUpdate = await updateProduct(db, orgId, created.id, {
       sellerCommissionValue: 11,
     });
-    expect(sellerOnlyUpdate?.sellerCommissionValue).toBe('11.00');
-    expect(sellerOnlyUpdate?.sellerWithFinderCommissionValue).toBe('7.00');
+    if (typeof sellerOnlyUpdate === 'string' || !sellerOnlyUpdate) {
+      throw new Error(`unexpected update outcome: ${String(sellerOnlyUpdate)}`);
+    }
+    expect(sellerOnlyUpdate.product.sellerCommissionValue).toBe('11.00');
+    expect(sellerOnlyUpdate.product.sellerWithFinderCommissionValue).toBe('7.00');
 
     const splitUpdate = await updateProduct(db, orgId, created.id, {
       sellerWithFinderCommissionValue: 8,
     });
-    expect(splitUpdate?.sellerCommissionValue).toBe('11.00');
-    expect(splitUpdate?.sellerWithFinderCommissionValue).toBe('8.00');
-    expect(splitUpdate?.finderCommissionValue).toBe('3.00');
+    if (typeof splitUpdate === 'string' || !splitUpdate) {
+      throw new Error(`unexpected update outcome: ${String(splitUpdate)}`);
+    }
+    expect(splitUpdate.product.sellerCommissionValue).toBe('11.00');
+    expect(splitUpdate.product.sellerWithFinderCommissionValue).toBe('8.00');
+    expect(splitUpdate.product.finderCommissionValue).toBe('3.00');
 
     const listed = await listProducts(db, orgId);
     expect(listed).toEqual([
@@ -94,7 +100,7 @@ describe('sales operations product commission persistence', () => {
     orgIds.push(orgId);
     const area = await createArea(db, orgId, AreaSchema.parse({ name: 'FXL Tech' }));
     if (area === 'duplicate') throw new Error('unexpected duplicate area');
-    const created = await createProduct(
+    const { product: created } = await createProduct(
       db,
       orgId,
       ProductSchema.parse({

@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { AreaSchema, ProductSchema } from '../service.js';
+import { AreaSchema, ProductSchema, UpdateProductSchema } from '../service.js';
 
 const completeProductWithoutAreaId = {
   name: 'Commission scenarios',
@@ -31,7 +31,9 @@ describe('sales operations areas contract', () => {
 
   it('requires areaId on product create payloads', () => {
     expect(ProductSchema.safeParse(completeProductWithoutAreaId).success).toBe(false);
-    expect(ProductSchema.partial().safeParse({ name: 'x' }).success).toBe(true);
+    // ProductSchema is now a .superRefine-wrapped ZodEffects, so the partial
+    // variant is the explicitly exported UpdateProductSchema.
+    expect(UpdateProductSchema.safeParse({ name: 'x' }).success).toBe(true);
   });
 
   it('seeds the six FXL areas behind the admin context after enabling forced RLS', () => {
