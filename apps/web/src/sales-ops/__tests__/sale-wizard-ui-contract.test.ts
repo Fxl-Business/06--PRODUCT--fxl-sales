@@ -20,10 +20,21 @@ describe('sale wizard UI contract', () => {
     expect(source).toContain('Cadastrar produto');
     expect(source).toContain('+ item avulso');
     expect(source).toContain('Plano de pagamento');
-    expect(source).toContain('Dividir em');
+    /*
+      Only strings this file is the sole home of are pinned here. The declarative
+      header's own labels (`Tipo de entrada`, `Parcelas restantes`, `Número de ciclos`,
+      `Deixe em branco para prazo indeterminado`) are shared verbatim with the produto
+      cadastro's default-plan editor further up this same file, so a substring
+      assertion on them would pass even if step 2 lost them entirely. Those are pinned
+      by DOM queries in `sale-wizard-payment-plan.test.tsx` instead, where they can
+      actually fail.
+    */
+    expect(source).toContain('Parcelas a receber');
+    expect(source).toContain('Plano ajustado manualmente');
+    expect(source).toContain('Regerar plano');
+    expect(source).toContain('Manter parcelas');
     expect(source).toContain('A soma das parcelas precisa ser igual ao total da proposta.');
-    expect(source).toContain('Adicionar recorrência');
-    expect(source).toContain('Prazo indeterminado');
+    expect(source).toContain('por prazo indeterminado');
     expect(source).toContain('Previsão de contas a pagar');
     expect(source).toContain('Passo {wizardStep} de 4');
     expect(source).toContain('Avançar');
@@ -35,6 +46,25 @@ describe('sale wizard UI contract', () => {
     expect(source).not.toContain('Confirmar venda');
     expect(source).not.toContain('Passo {wizardStep} de 3');
     expect(source).not.toContain('Salvar venda');
+    /*
+      The manual plan controls the declarative builder replaced. Each of these was a
+      real string in this file before the builder landed, so every negative below is
+      about markup that was removed rather than markup that never existed - the
+      positive assertions above are the matching control.
+    */
+    expect(source).not.toContain('Dividir em');
+    expect(source).not.toContain('+ parcela');
+    expect(source).not.toContain('Adicionar recorrência');
+    expect(source).not.toContain('Número de parcelas');
+    expect(source).not.toContain('Remover parcela');
+    /*
+      The `Prazo indeterminado` checkbox is gone, blank ciclos being the only
+      expression of it, so the error copy that pointed at the checkbox is gone too.
+      The checkbox's own absence from step 2 is asserted in the DOM by
+      `sale-wizard-payment-plan.test.tsx`, because the green summary keeps the phrase
+      `, por prazo indeterminado` and a substring negative here would fail on it.
+    */
+    expect(source).not.toContain('marque prazo indeterminado');
   });
 
   it('keeps every picker on the Combobox with no native picker markup left behind', () => {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  addMonthsToIsoDate,
   buildDashboardModel,
   buildSalePayload,
   formatMoneyBrl,
@@ -203,8 +204,27 @@ describe('sales operations web calculations', () => {
     ]);
   });
 
-  it('rolls month-end split dates forward like native Date arithmetic', () => {
-    expect(splitInstallmentsEqually(300, 2, '2026-01-31', 'pix')[1]!.dueDate).toBe('2026-03-03');
+  /*
+    Rewritten deliberately. This used to pin `2026-03-03`, the native
+    `Date.UTC(y, m + 1, 31)` rollover, while the API's own `addMonths` in
+    `apps/api/src/domains/sales-ops/service.ts` clamps to `2026-02-28`. The web
+    therefore previewed recurring due dates the API would never write, for any base
+    day of 29-31. The clamp below is the API's behaviour, so the two now agree.
+  */
+  it('clamps month-end split dates to the last valid day like the API does', () => {
+    expect(splitInstallmentsEqually(300, 2, '2026-01-31', 'pix')[1]!.dueDate).toBe('2026-02-28');
+    expect(splitInstallmentsEqually(300, 2, '2028-01-31', 'pix')[1]!.dueDate).toBe('2028-02-29');
+  });
+
+  it('recomputes each offset from the anchor so a clamped month cannot drift', () => {
+    // The month after a clamped February is the 31st again, not the 28th.
+    expect(addMonthsToIsoDate('2026-01-31', 1)).toBe('2026-02-28');
+    expect(addMonthsToIsoDate('2026-01-31', 2)).toBe('2026-03-31');
+    expect(addMonthsToIsoDate('2026-01-31', 3)).toBe('2026-04-30');
+    expect(addMonthsToIsoDate('2026-01-31', 12)).toBe('2027-01-31');
+    // Ordinary days are untouched, which is the positive control for the clamp.
+    expect(addMonthsToIsoDate('2026-07-10', 1)).toBe('2026-08-10');
+    expect(addMonthsToIsoDate('2026-12-10', 1)).toBe('2027-01-10');
   });
 
   it('sums installment rows from mixed string and numeric inputs', () => {
