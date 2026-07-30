@@ -1,0 +1,1 @@
+{"agent":"plan","slice":"09-produto-codigo-default","status":"PASS","report":"nexo/plans/batch-01K9NX4QPTUI0730CADPRODWIZ/09-produto-codigo-default.md","summary":"Plan complete: seed ProductForm.codeSuffix with a pure nextProductCodeSuffix(products) = max+1 on create only; code_suffix is UNIQUE per org and an unhandled 23505 today.","done":true,"ts":"2026-07-30T19:20:00Z"}

@@ -1,0 +1,1 @@
+{"agent":"plan","slice":"08-produto-wizard","status":"PASS","report":"nexo/plans/batch-01K9NX4QPTUI0730CADPRODWIZ/08-produto-wizard.md","summary":"Four-step produto wizard (Identificacao/Valores/Pagamento/Comissoes e custos) with shared WizardStepper extraction, step-1-only gate, and a full-payload toEqual equivalence oracle.","done":true,"ts":"2026-07-30T19:12:00Z"}

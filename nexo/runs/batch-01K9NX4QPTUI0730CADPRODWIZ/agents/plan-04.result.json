@@ -1,0 +1,1 @@
+{"agent":"plan","slice":"04-wizard-plano-layout","status":"PASS","report":"nexo/plans/batch-01K9NX4QPTUI0730CADPRODWIZ/04-wizard-plano-layout.md","summary":"Step-2 Plano de pagamento header regrouped onto one md:grid-cols-3 grid with each derived line left-aligned under its own control; layout-only, calculations.ts untouched.","done":true,"ts":"2026-07-30T00:00:00Z"}
