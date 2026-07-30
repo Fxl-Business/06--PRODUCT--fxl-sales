@@ -32,7 +32,7 @@ directly, one slice at a time, each gated by a separate local Verify agent (Gate
 | 07 | produtos-servicos-api | done | feat/07-produtos-servicos-api | PASS 1/3 | 5859b80 | wave 2 |
 | 08 | service-description-optional | done | feat/08-service-description-optional | PASS 1/3 | 045bd72 | wave 3 |
 | 09 | pessoas-funcoes-web | done | feat/09-pessoas-funcoes-web | PASS 2/3 | 12aa1dc | wave 3 |
-| 10 | produtos-servicos-web | todo | | | | wave 3 |
+| 10 | produtos-servicos-web | done | feat/10-produtos-servicos-web | PASS 3/3 | e356c99 | wave 3 |
 | 11 | payment-plan-builder | todo | | | | wave 3 |
 | 12 | proposta-overrides | todo | | | | wave 4 |
 
@@ -233,6 +233,65 @@ Prestador picker does look like the better behaviour. Scope is one call site, th
 inverting the new test's assertion rather than deleting it. Blast radius is low because the field stores a
 name snapshot with a free-text `onCreate`, so an already-saved inactive prestador keeps rendering either
 way and only the suggestion list changes.
+
+### 10-produtos-servicos-web - Gate 2 FAIL, FAIL, then PASS, merged at `e356c99`
+
+User items 5 and 9. `cadastros/produtos` (route unchanged) is labelled "Produtos & Serviços" with a
+`Produto | Serviço` segmented filter over one table and per-kind columns; the dialog adapts by kind via
+sections, gains a default payment plan template over the six flat columns and a `Custos padrão por função`
+editor, and the `Preço em aberto` switch is gone because `openPrice` is a server-written projection of
+`kind`. Web 32 files / 240 tests to 34 / 288.
+
+The executor declared **seven behaviour changes with tests** rather than shipping any silently - the right
+response to slice 09 being blocked for a silent one. All seven were judged acceptable on merit.
+
+**Attempt 1 FAIL - an archived función made its cost row read as unset.** `eligibleFuncoes` filtered to
+active non-system funções and the per-row escape hatch operated *inside* that filtered list, so a stored
+cost row whose función had been archived rendered with a placeholder trigger. No data loss, but the row read
+"R$ 300,00 for no função", the value was unrestorable, and picking anything silently retargeted the cost.
+Funções here are never deleted, only archived, so this was the expected end state rather than an edge case,
+and it contradicted a convention `CLAUDE.md` documents one section above.
+
+The executor found a **second symptom of the same root cause** that the report had not identified:
+`allFuncoesUsed` compared `usedFuncaoIds.size` against `eligibleFuncoes.length`, so an archived-función row
+consumed a slot in a pool it is not in and wrongly disabled `Adicionar` while an assignable função was free.
+It also **declined the prescribed `valueLabel` fix**, correctly arguing that `valueLabel` alone repairs
+display while leaving the value unrestorable and retargeting silent. Admission into the row's options is the
+load-bearing half; `valueLabel` was given a reachable job instead, so an unresolvable id reads
+`Função não encontrada` rather than a placeholder and never a raw uuid. The verifier judged this the better
+call.
+
+**Attempt 2 FAIL - `CLAUDE.md` then asserted the opposite of the fix.** The bullet still read "The função
+cost picker offers active, non-system funções only", which the fix deliberately violates. Since this repo
+declares `CLAUDE.md` overrides default behaviour, as written it instructed the next agent to remove the
+escape hatch - and slice 11 rewrites that exact region next.
+
+**Attempt 3 PASS.** The clause was split into two individually-true bullets, and while drafting the
+replacement the executor caught a **fifth** false sentence before shipping it: its draft claimed the escape
+hatch follows "the same rule as the pessoa assignment picker", which is false because the Pessoa dialog
+splits the job across two controls - `assignedFuncoes` resolves unfiltered so chips survive, while
+`selectableFuncoes` filters to active with no prepend, so an archived função genuinely does vanish there. A
+cost row is one control doing both jobs. The verifier upheld that reading independently and confirmed the
+named precedent (`selectableAreas` in the same dialog) has the claimed shape.
+It also proved the amend was documentation and formatting only by getting a byte-identical
+whitespace-stripped md5 on the `ProductsView` region, so attempt 2's clean functional findings transferred.
+Reports: `verify-10.md`, `verify-10-attempt2.md`, `verify-10-attempt3.md`.
+
+**A methodological correction the orchestrator got wrong.** The whitespace check was originally specified as
+`git diff -w`, which is **structurally blind to added lines** - so the instrument could not have caught what
+was actually wrong. Prettier at the repo's own config is the right tool, and it is not installed, so
+`pnpm exec prettier` fails silently and returns empty output; `pnpm dlx prettier@3` is required. Measured
+end state: 23 whitespace-only deltas on the branch against master's 27, with **zero attributable to the
+branch** - `ProductsView` is now cleaner than master, which carried 12 drift lines there.
+
+**Two non-blocking items recorded:** `SalesOpsApp.tsx:3289-3295` has `const usedEligibleCount` at 4 spaces
+where its siblings are at 2 (it escaped the whitespace metric legitimately but by luck, since the re-wrap
+made prettier classify it as content reflow), and `CLAUDE.md:93` calls the list filter bar `Produto | Serviço`
+in the singular while the rendered segments are plural.
+
+**Data-loss window restated:** the `providers` removal omits the key on write so a PATCH cannot clear the
+deprecated column - verified byte-identical against the real database, with `providers: []` as the control
+that does clear it. Before any later slice drops the column, run the audit query recorded above.
 
 ### SAFETY: `db:migrate` reads the staging `DATABASE_URL`
 
