@@ -6698,8 +6698,14 @@ function SaleWizardDialogBody({
                                     popover trigger per item row would be strictly more noise
                                     than the sentence it hid, so this keeps its exact copy and
                                     loses only the warning skin.
+
+                                    #6a6a72 rather than the #8b8b92 muted default: at 11.5px this
+                                    is body copy, so it needs 4.5:1 (WCAG 1.4.3 AA), and #8b8b92
+                                    gives only 3.38:1. The amber it replaced was 4.35:1, itself
+                                    just under, so dropping the warning skin had to darken the
+                                    tone rather than inherit the lighter one.
                                   */
-                                  <span className="text-[11.5px] text-[#8b8b92]">
+                                  <span className="text-[11.5px] text-[#6a6a72]">
                                     Item avulso - informe a área, a descrição e o valor
                                   </span>
                                 )}
@@ -6899,7 +6905,7 @@ function SaleWizardDialogBody({
                                   </span>
                                 ) : (
                                   /* Same slot, same reasoning as the free-item hint above. */
-                                  <span className="text-[11.5px] text-[#8b8b92]">
+                                  <span className="text-[11.5px] text-[#6a6a72]">
                                     {descriptionHint}
                                   </span>
                                 )}

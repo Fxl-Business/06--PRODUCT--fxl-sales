@@ -285,6 +285,23 @@ async function click(element: HTMLElement) {
   await act(async () => element.dispatchEvent(new MouseEvent('click', { bubbles: true })));
 }
 
+function hexFrom(className: string): string {
+  const match = /#([0-9a-f]{6})/.exec(className);
+  if (!match) throw new Error(`no hex colour in: ${className}`);
+  return match[1]!;
+}
+
+/** WCAG 2.x relative luminance and contrast, white background. */
+function contrastOnWhite(hex: string): number {
+  const channels = [0, 2, 4].map((offset) => {
+    const value = Number.parseInt(hex.slice(offset, offset + 2), 16) / 255;
+    return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  });
+  const luminance =
+    0.2126 * channels[0]! + 0.7152 * channels[1]! + 0.0722 * channels[2]!;
+  return 1.05 / (luminance + 0.05);
+}
+
 async function pickOption(ariaLabel: string, optionLabel: string) {
   await click(comboboxTrigger(ariaLabel));
   const row = [...container.querySelectorAll('[role="option"]')].find((candidate) =>
@@ -526,6 +543,25 @@ describe('sale wizard UI contract', () => {
     expect(source).toContain(
       'rounded-[10px] border border-[#f0dfae] bg-[#fdf0cf] px-3 py-2 text-[12.5px] font-semibold text-[#9c7210]',
     );
+  });
+
+  it('keeps the per-item helper lines above the AA contrast floor', () => {
+    /*
+      Dropping the amber warning skin (4.35:1) could not simply inherit the muted
+      default #8b8b92, which is 3.38:1 - under WCAG 1.4.3 AA's 4.5:1 for body copy,
+      and these render at 11.5px. #6a6a72 is 5.36:1. Pinned because the tone is the
+      kind of thing a later restyle silently lightens back to the house default.
+    */
+    const helperSpans =
+      source.match(
+        /<span className="text-\[11\.5px\] text-\[#[0-9a-f]{6}\]">\s*(?:Item avulso - informe|\{descriptionHint\})/g,
+      ) ?? [];
+    // Both, and only these two - the slice deliberately did not restyle the
+    // pre-existing 11.5px muted text elsewhere in the app.
+    expect(helperSpans).toHaveLength(2);
+    for (const span of helperSpans) {
+      expect(contrastOnWhite(hexFrom(span))).toBeGreaterThanOrEqual(4.5);
+    }
   });
 
   it('opens the stored description on the edit path with no click', async () => {
