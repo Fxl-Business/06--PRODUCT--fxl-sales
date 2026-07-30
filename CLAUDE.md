@@ -56,6 +56,7 @@ Keep the repository folder name unchanged until the editor session can safely mo
   Produto opens `ProductDialog` prefilled instead, because a produto is invalid without an área.
   The `Custos padrão por função` picker inside `ProductDialog` gets no create row, because creating a função is admin-gated and belongs to `cadastros/funcoes`; its empty state points there.
   The vendedor and finder pickers get no create row, because a pessoa is invalid without a função; the função picker inside the Pessoa dialog does have one, because a função needs only a name.
+  The proposta wizard's `FUNÇÃO NO PROJETO` picker has one too, for the same reason as the Pessoa dialog's; the two deliberate exclusions above are unchanged.
 
 ## Sales Ops Routing
 

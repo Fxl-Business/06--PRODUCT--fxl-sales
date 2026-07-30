@@ -421,6 +421,17 @@ describe('sale wizard UI contract', () => {
     // The only way to reach a datalist is an `Input list=` attribute, so ban that too.
     expect(source).not.toContain('list="');
     expect(source).not.toContain('NativeSelect');
+
+    /*
+      The wizard's FUNÇÃO NO PROJETO picker offers inline create like every other
+      sales-ops picker. The create ROW is asserted in the DOM by
+      sale-wizard-funcao-costs.test.tsx; what is pinned here is the wiring, because a
+      substring test cannot see a rendered row.
+      Two occurrences: PersonDialog and SaleWizardDialog. A count rather than
+      `toContain`, which would still pass if the wizard's line were deleted.
+    */
+    expect(source).toContain('createFuncaoForProfessional');
+    expect(source.match(/onCreateFuncao=\{createFuncaoByName\}/g)).toHaveLength(2);
   });
 
   /**

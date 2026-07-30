@@ -1,0 +1,1 @@
+{"agent":"verify","slice":"05-wizard-funcao-create","status":"PASS","report":"nexo/runs/batch-01K9NX4QPTUI0730CADPRODWIZ/verify-05.md","summary":"PASS: inline funcao create wired in the wizard, all three optimistic-id defences genuine, web 371/39 api 300/29, lint and type-check clean, scope exclusions intact.","done":true,"ts":"2026-07-30T17:26:00Z"}

@@ -44,6 +44,8 @@ const devFuncaoId = 'fc000010-0000-4000-8000-000000000010';
 const testerFuncaoId = 'fc000011-0000-4000-8000-000000000011';
 const vendedorFuncaoId = 'fc000001-0000-4000-8000-000000000001';
 const archivedFuncaoId = 'fc000012-0000-4000-8000-000000000012';
+/** The server uuid an inline `+ Criar nova função` create resolves with. */
+const newFuncaoId = 'fc000013-0000-4000-8000-000000000013';
 const saleId = '77777777-7777-4777-8777-777777777777';
 
 const funcaoVendedor: SalesOpsPersonFuncao = {
@@ -301,7 +303,11 @@ let container: HTMLDivElement;
 let root: Root;
 let onSave: ReturnType<typeof vi.fn<(payload: CreateSalePayload) => void>>;
 
-async function renderWizard(sale: SalesOpsSale | null = null) {
+async function renderWizard(
+  sale: SalesOpsSale | null = null,
+  onCreateFuncao?: (name: string) => Promise<SalesOpsFuncao | null>,
+  bootstrapOverride?: SalesOpsBootstrap,
+) {
   (
     globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
   ).IS_REACT_ACT_ENVIRONMENT = true;
@@ -312,9 +318,10 @@ async function renderWizard(sale: SalesOpsSale | null = null) {
   await act(async () => {
     root.render(
       <SaleWizardDialog
-        bootstrap={sale ? editBootstrap : bootstrap}
+        bootstrap={bootstrapOverride ?? (sale ? editBootstrap : bootstrap)}
         editSale={sale}
         onClose={vi.fn()}
+        onCreateFuncao={onCreateFuncao}
         onSave={onSave}
         open
         saving={false}
@@ -351,6 +358,19 @@ function comboboxTrigger(ariaLabel: string): HTMLButtonElement {
 
 function comboboxText(ariaLabel: string): string {
   return comboboxTrigger(ariaLabel).textContent?.trim() ?? '';
+}
+
+/** The open panel's search box; the primitive labels it with its own placeholder. */
+function panelSearch(placeholder: string): HTMLInputElement {
+  const match = container.querySelector(`input[aria-label="${placeholder}"]`);
+  if (!(match instanceof HTMLInputElement)) throw new Error(`search not found: ${placeholder}`);
+  return match;
+}
+
+/** `data-combobox-create` is set by the primitive, so it is a stable hook. */
+function createRow(): HTMLElement | null {
+  const match = container.querySelector('[data-combobox-create="true"]');
+  return match instanceof HTMLElement ? match : null;
 }
 
 function optionLabels(): string[] {
@@ -642,6 +662,68 @@ describe('sale wizard profissionais alocados', () => {
         ],
       }),
     );
+  });
+
+  it('offers an inline create row in the funcao picker and selects the created funcao immediately', async () => {
+    const onCreateFuncao = vi.fn(async (name: string) => funcao(newFuncaoId, name));
+    await renderWizard(null, onCreateFuncao);
+    await goToCosts();
+    await addProfessional();
+    await click(comboboxTrigger('Função do profissional 1'));
+
+    // Negative control first: with an empty query there is no create row, which is
+    // exactly the state the defect left behind for every query.
+    expect(createRow()).toBeNull();
+
+    await typeInto(panelSearch('Buscar função...'), 'Arquiteto');
+    expect(createRow()?.textContent?.trim()).toBe('+ Criar nova função "Arquiteto"');
+    // The empty message must not be what renders instead of the create row.
+    expect(container.textContent).not.toContain('Nenhuma função cadastrada');
+
+    await click(createRow()!);
+    await flushReact();
+    expect(onCreateFuncao).toHaveBeenCalledWith('Arquiteto');
+    // Selectable immediately: the `bootstrap` prop is deliberately never refreshed
+    // here, so only the wizard's own buffer can be showing this label.
+    expect(comboboxText('Função do profissional 1')).toBe('Arquiteto');
+  });
+
+  it('sends the real server funcaoId for an inline-created funcao, never an optimistic placeholder', async () => {
+    const onCreateFuncao = vi.fn(async (name: string) => funcao(newFuncaoId, name));
+    await renderWizard(null, onCreateFuncao);
+    await goToCosts();
+    await addProfessional();
+    await click(comboboxTrigger('Função do profissional 1'));
+    await typeInto(panelSearch('Buscar função...'), 'Arquiteto');
+    await click(createRow()!);
+    await flushReact();
+    await pickOption('Profissional 1', 'Bruno Entrega');
+    await flushReact();
+    await click(buttonByText('Salvar rascunho'));
+
+    const payload = onSave.mock.calls.at(-1)![0];
+    expect(payload.professionals[0]!.funcaoId).toBe(newFuncaoId);
+    expect(String(payload.professionals[0]!.funcaoId)).not.toMatch(/^optimistic:/);
+    expect(payload.professionals[0]!.role).toBe('Arquiteto');
+  });
+
+  it('never offers an optimistic funcao row in the profissional picker', async () => {
+    await renderWizard(null, undefined, {
+      ...bootstrap,
+      funcoes: [
+        ...bootstrap.funcoes,
+        funcao('optimistic:funcoes:Arquiteto', 'Arquiteto Otimista'),
+      ],
+    });
+    await goToCosts();
+    await addProfessional();
+
+    const options = await openPicker('Função do profissional 1');
+    // `SaleWizardDialog` is exported and takes `bootstrap` as a prop, so it holds
+    // its own end of the placeholder-id contract rather than trusting its caller.
+    expect(options).not.toContain('Arquiteto Otimista');
+    // Positive control: the rest of the list is still there.
+    expect(options).toContain('Desenvolvedor');
   });
 
   it('shows the funcao on the Custo profissional row of the payables preview', async () => {
