@@ -486,6 +486,48 @@ describe('sale wizard UI contract', () => {
     expect(buttonExists(revealLabel)).toBe(false);
   });
 
+  /**
+   * First-run explanatory copy moved behind an `InfoHint`; live UI did not move.
+   * Every negative below quotes a string that was really in this file before the
+   * move, so none of them can pass vacuously.
+   */
+  it('keeps first-run explanatory copy behind an info hint and live UI inline', () => {
+    // Positive control: the tips still exist as copy - they moved, they were not deleted.
+    expect(source).toContain('InfoHint');
+    expect(source).toContain(
+      'Aloque os profissionais do projeto e ajuste os percentuais - a margem líquida e as comissões são calculadas em tempo real.',
+    );
+    expect(source).toContain(
+      'Esta é uma previsão - nada é lançado no financeiro até a proposta ser marcada como Ganha.',
+    );
+    /*
+      Tip A's copy is soft-wrapped in the JSX, so it is pinned by the sentence's
+      contiguous head here and by a DOM assertion on the whole sentence in
+      `product-service-dialog.test.tsx`.
+    */
+    expect(source).toContain('Tudo aqui é padrão: dentro da proposta você pode alterar qualquer');
+    // Three tips moved, and only three: produto title, step 3, step 4.
+    expect(source.match(/<InfoHint /g)).toHaveLength(3);
+    // ...but no longer inside a standalone amber banner div.
+    expect(source).not.toContain(
+      'className="rounded-[11px] border border-[#f0dfae] bg-[#fdf0cf] px-[14px] py-[11px] text-[13px] text-[#57575f]"',
+    );
+    // The per-item helper lines lost the warning skin but not a single character of copy.
+    expect(source).toContain('Item avulso - informe a área, a descrição e o valor');
+    expect(source).not.toContain('<AlertTriangle className="h-[13px] w-[13px]" />');
+    expect(source).not.toContain('AlertTriangle');
+    // Untouchable: the action-required bar and the state indicators.
+    expect(source).toContain('Você ajustou as parcelas manualmente. Aplicar');
+    expect(source).toContain('Manter parcelas');
+    expect(source).toContain('Alterado manualmente');
+    expect(source).toContain('Definido na venda');
+    expect(source).toContain('Sem área');
+    // The planDirty bar keeps its own amber skin, byte for byte.
+    expect(source).toContain(
+      'rounded-[10px] border border-[#f0dfae] bg-[#fdf0cf] px-3 py-2 text-[12.5px] font-semibold text-[#9c7210]',
+    );
+  });
+
   it('opens the stored description on the edit path with no click', async () => {
     await renderWizard(editSale);
 

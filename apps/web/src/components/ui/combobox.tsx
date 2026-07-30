@@ -7,6 +7,7 @@ import {
   shouldShowCreateRow,
   type ComboboxOption,
 } from './combobox-filter';
+import { useInlineLayer } from './inline-layer';
 
 export type { ComboboxOption };
 
@@ -83,6 +84,13 @@ export const Combobox = React.forwardRef<HTMLButtonElement, ComboboxProps>(
     const [open, setOpen] = React.useState(false);
     const [query, setQuery] = React.useState('');
     const [activeIndex, setActiveIndex] = React.useState(0);
+
+    /*
+      Tells a surrounding `DialogContent` that something inner is open, so its
+      Escape is spent on this panel instead of on the whole dialog. A no-op on a
+      plain page.
+    */
+    useInlineLayer(open);
 
     const wrapperRef = React.useRef<HTMLDivElement | null>(null);
     const triggerRef = React.useRef<HTMLButtonElement | null>(null);
@@ -218,8 +226,13 @@ export const Combobox = React.forwardRef<HTMLButtonElement, ComboboxProps>(
           commitActiveRow();
           return;
         case 'Escape':
-          // All three together, so Escape closes only the combobox and not a
-          // surrounding Radix Dialog.
+          /*
+            These three keep Escape from reaching a React handler ABOVE this
+            one. They do NOT protect a surrounding Radix Dialog and cannot:
+            Radix listens on `document` in the CAPTURE phase, which has already
+            run by the time this handler is reached. `useInlineLayer` is what
+            guards the dialog - see `inline-layer.ts`.
+          */
           event.preventDefault();
           event.stopPropagation();
           event.nativeEvent.stopImmediatePropagation();

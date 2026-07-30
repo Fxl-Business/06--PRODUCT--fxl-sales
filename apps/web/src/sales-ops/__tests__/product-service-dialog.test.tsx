@@ -516,11 +516,50 @@ describe('product and service dialog', () => {
     await renderDialog({ productKind: 'service' });
     await fillIdentity();
 
-    expect(text()).toContain(
-      'Tudo aqui é padrão: dentro da proposta você pode alterar qualquer valor sem mexer no cadastro.',
-    );
     await goToStep(4);
     expect(text()).toContain('Comissionamento padrão');
+  });
+
+  /**
+   * The tip is first-run explanatory copy: true on every step, useless after the
+   * first read, and it used to eat a full banner row at the top of step 1. It now
+   * hangs off the dialog title, which is the heading that owns it, and it is only
+   * ever in the layout while the operator asked for it.
+   */
+  it('keeps the default-values explanation behind an info hint instead of a banner', async () => {
+    await renderDialog({ productKind: 'service' });
+
+    const tip =
+      'Tudo aqui é padrão: dentro da proposta você pode alterar qualquer valor sem mexer no cadastro.';
+    expect(text()).not.toContain(tip);
+
+    const hintTriggers = [...container.querySelectorAll('button')].filter((candidate) =>
+      candidate.getAttribute('aria-label')?.startsWith('Mais informações sobre'),
+    );
+    expect(hintTriggers).toHaveLength(1);
+    expect(hintTriggers[0]!.getAttribute('aria-expanded')).toBe('false');
+
+    await click(hintTriggers[0]!);
+    expect(text()).toContain(tip);
+    expect(hintTriggers[0]!.getAttribute('aria-expanded')).toBe('true');
+
+    // A second click puts the space back.
+    await click(hintTriggers[0]!);
+    expect(text()).not.toContain(tip);
+  });
+
+  /**
+   * Positive control for the classification rule: a Serviço's zero-state value slot
+   * is a STATE INDICATOR, not a tip, so it stays inline and un-hidden.
+   */
+  it('leaves the definido na venda state indicator inline when the tip moves', async () => {
+    await renderDialog({ productKind: 'service' });
+    await fillIdentity();
+    await goToStep(2);
+    await click(labeledButton('Possui mensalidade'));
+
+    expect(moneyInput('Valor base (R$)').placeholder).toBe('Definido na venda');
+    expect(moneyInput('Valor da mensalidade (R$)').placeholder).toBe('Definido na venda');
   });
 
   it('submits the app-default plan when nothing is touched', async () => {
@@ -1077,7 +1116,9 @@ describe('the produto wizard shell', () => {
     ];
     // positive controls: prove we grabbed the right three nodes before asserting on them
     expect(stepper.textContent).toContain('Identificação');
-    expect(body.textContent).toContain('Tudo aqui é padrão');
+    // Step 1's own copy. The `Tudo aqui é padrão` banner that used to anchor this
+    // assertion is gone: it is an `InfoHint` on the title now, i.e. in the HEADER.
+    expect(body.textContent).toContain('Final do código da venda');
     expect(footer.textContent).toContain('Avançar');
 
     // only the body scrolls, and it absorbs all the free space - never a calc() height

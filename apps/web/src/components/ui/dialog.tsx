@@ -3,6 +3,7 @@ import * as DialogPrimitive from "@radix-ui/react-dialog"
 import { X } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { InlineLayerContext, useInlineLayerHost } from "./inline-layer"
 
 const Dialog = DialogPrimitive.Root
 
@@ -34,36 +35,53 @@ DialogOverlay.displayName = DialogPrimitive.Overlay.displayName
  * handlers below are applied after `{...props}` so ordering cannot defeat
  * them either. `Esc`, the `X` affordance and `Cancelar` / `Voltar` are
  * deliberately left working.
+ *
+ * `onEscapeKeyDown` is omitted for the same reason, and handled internally: it
+ * is not a switch a call site may flip, it is the seam that makes Escape close
+ * the INNERMOST open thing. See `inline-layer.ts` - the inline panels of
+ * `Combobox` and `InfoHint` are not Radix layers, so without this an Escape
+ * meant to put a picker away would discard the whole dialog's typed work.
  */
 type DialogContentProps = Omit<
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>,
-  "onPointerDownOutside" | "onInteractOutside"
+  "onPointerDownOutside" | "onInteractOutside" | "onEscapeKeyDown"
 >
 
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   DialogContentProps
->(({ className, children, ...props }, ref) => (
-  <DialogPortal>
-    <DialogOverlay />
-    <DialogPrimitive.Content
-      ref={ref}
-      className={cn(
-        "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg",
-        className
-      )}
-      {...props}
-      onInteractOutside={(event) => event.preventDefault()}
-      onPointerDownOutside={(event) => event.preventDefault()}
-    >
-      {children}
-      <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground">
-        <X className="h-4 w-4" />
-        <span className="sr-only">Fechar</span>
-      </DialogPrimitive.Close>
-    </DialogPrimitive.Content>
-  </DialogPortal>
-))
+>(({ className, children, ...props }, ref) => {
+  const inlineLayers = useInlineLayerHost()
+
+  return (
+    <DialogPortal>
+      <DialogOverlay />
+      <DialogPrimitive.Content
+        ref={ref}
+        className={cn(
+          "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border bg-background p-6 shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg",
+          className
+        )}
+        {...props}
+        onEscapeKeyDown={(event) => {
+          // Only while something inner is open, so Escape stays the dialog's
+          // close affordance the rest of the time.
+          if (inlineLayers.hasOpenLayer()) event.preventDefault()
+        }}
+        onInteractOutside={(event) => event.preventDefault()}
+        onPointerDownOutside={(event) => event.preventDefault()}
+      >
+        <InlineLayerContext.Provider value={inlineLayers}>
+          {children}
+        </InlineLayerContext.Provider>
+        <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground">
+          <X className="h-4 w-4" />
+          <span className="sr-only">Fechar</span>
+        </DialogPrimitive.Close>
+      </DialogPrimitive.Content>
+    </DialogPortal>
+  )
+})
 DialogContent.displayName = DialogPrimitive.Content.displayName
 
 const DialogHeader = ({
