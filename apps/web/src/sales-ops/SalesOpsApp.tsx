@@ -1427,6 +1427,7 @@ export function SalesOpsApp() {
           onClose={() => setSaleWizard(null)}
           onCreateArea={createAreaByName}
           onCreateClient={createClientByName}
+          onCreateFuncao={createFuncaoByName}
           onCreateProduct={(name) => setModal({ kind: 'product', prefillName: name })}
           onSave={(payload) => {
             if (saleWizard?.mode === 'edit') {
@@ -4991,6 +4992,7 @@ export function SaleWizardDialog(props: {
   onClose: () => void;
   onCreateClient?: (name: string) => Promise<SalesOpsClient | null>;
   onCreateArea?: (name: string) => Promise<SalesOpsArea | null>;
+  onCreateFuncao?: (name: string) => Promise<SalesOpsFuncao | null>;
   onCreateProduct?: (name: string) => void;
   onSave: (payload: CreateSalePayload) => void;
   saving: boolean;
@@ -5009,6 +5011,7 @@ export function SaleWizardDialog(props: {
       onClose={props.onClose}
       onCreateArea={props.onCreateArea}
       onCreateClient={props.onCreateClient}
+      onCreateFuncao={props.onCreateFuncao}
       onCreateProduct={props.onCreateProduct}
       onSave={props.onSave}
       saving={props.saving}
@@ -5022,6 +5025,7 @@ function SaleWizardDialogBody({
   onClose,
   onCreateClient,
   onCreateArea,
+  onCreateFuncao,
   onCreateProduct,
   onSave,
   saving,
@@ -5031,6 +5035,7 @@ function SaleWizardDialogBody({
   onClose: () => void;
   onCreateClient?: (name: string) => Promise<SalesOpsClient | null>;
   onCreateArea?: (name: string) => Promise<SalesOpsArea | null>;
+  onCreateFuncao?: (name: string) => Promise<SalesOpsFuncao | null>;
   onCreateProduct?: (name: string) => void;
   onSave: (payload: CreateSalePayload) => void;
   saving: boolean;
@@ -5064,17 +5069,39 @@ function SaleWizardDialogBody({
         .sort((a, b) => a.displayName.localeCompare(b.displayName, 'pt-BR')),
     [bootstrap.people],
   );
-  /** System funções last, then alphabetical, matching the cadastro picker's order. */
-  const allocatableFuncoes = useMemo(
-    () =>
-      bootstrap.funcoes
-        .filter((funcao) => funcao.status === 'active')
-        .sort(
-          (a, b) =>
-            Number(a.isSystem) - Number(b.isSystem) || a.name.localeCompare(b.name, 'pt-BR'),
-        ),
-    [bootstrap.funcoes],
-  );
+  /**
+   * Funções created from a profissional row's own create row. `bootstrap` only
+   * refreshes once the invalidated refetch lands, so without this the função the
+   * operator just created would not be selectable for a beat. Same buffer idiom as
+   * `createdAreas` below and as `createdFuncoes` in PersonDialogBody. It is declared
+   * here rather than beside `createdAreas` because `allocatableFuncoes` reads it in a
+   * dependency array, which a `const` further down would hit in its temporal dead zone.
+   */
+  const [createdFuncoes, setCreatedFuncoes] = useState<SalesOpsFuncao[]>([]);
+  /**
+   * System funções last, then alphabetical, matching the cadastro picker's order.
+   * Merges in funções created from this wizard's own create row, deduped by id so
+   * the refetch that eventually delivers them cannot double a row.
+   *
+   * The `isOptimisticId` filter is the local proof of the invariant in
+   * `optimistic.ts`: a `funcaoId` chosen here lands in a request body, and a
+   * placeholder id fails the Postgres uuid cast. `withoutOptimisticRows` already
+   * strips one upstream, but `SaleWizardDialog` is exported and takes `bootstrap`
+   * as a prop, so it must hold its own end of the contract.
+   */
+  const allocatableFuncoes = useMemo(() => {
+    const merged = [
+      ...bootstrap.funcoes,
+      ...createdFuncoes.filter(
+        (created) => !bootstrap.funcoes.some((funcao) => funcao.id === created.id),
+      ),
+    ];
+    return merged
+      .filter((funcao) => funcao.status === 'active' && !isOptimisticId(funcao.id))
+      .sort(
+        (a, b) => Number(a.isSystem) - Number(b.isSystem) || a.name.localeCompare(b.name, 'pt-BR'),
+      );
+  }, [bootstrap.funcoes, createdFuncoes]);
   const firstProduct = bootstrap.products[0];
   const firstClient = bootstrap.clients[0];
   const firstSeller = sellers[0];
@@ -5777,6 +5804,42 @@ function SaleWizardDialogBody({
       current.some((area) => area.id === created.id) ? current : [...current, created],
     );
     setItem(index, { areaId: created.id });
+  }
+
+  /**
+   * The one place a profissional row's função is written. Extracted so the picker's
+   * `onChange` and its create row cannot drift apart on the cost re-derivation rule.
+   */
+  function applyFuncaoToProfessional(index: number, funcaoId: string, funcaoName: string) {
+    setProfessionals((current) =>
+      current.map((item, itemIndex) => {
+        if (itemIndex !== index) return item;
+        const next = { ...item, funcaoId, funcaoName };
+        // Re-derive only a cost the operator never typed into.
+        return item.costManual
+          ? next
+          : { ...next, costBrl: centsToInput(funcaoCostBasis.get(funcaoId)?.cents ?? 0) };
+      }),
+    );
+  }
+
+  /**
+   * Mirrors `createAreaForItem` above and `handleCreateFuncao` in PersonDialogBody:
+   * the Combobox `onCreate` is `(query: string) => void`, so the async create is
+   * wrapped rather than returned, and a rejected create resolves to null and leaves
+   * the row untouched. No dialog in this app surfaces API errors today.
+   *
+   * `created` is the row the API RETURNED, never a row read back out of the query
+   * cache, which is what keeps a placeholder id out of `professionals[].funcaoId`.
+   */
+  async function createFuncaoForProfessional(index: number, name: string) {
+    if (!onCreateFuncao) return;
+    const created = await onCreateFuncao(name);
+    if (!created) return;
+    setCreatedFuncoes((current) =>
+      current.some((funcao) => funcao.id === created.id) ? current : [...current, created],
+    );
+    applyFuncaoToProfessional(index, created.id, created.name);
   }
 
   function showFinder() {
@@ -6876,26 +6939,13 @@ function SaleWizardDialogBody({
                                   const funcao = allocatableFuncoes.find(
                                     (candidate) => candidate.id === value,
                                   );
-                                  setProfessionals((current) =>
-                                    current.map((item, itemIndex) => {
-                                      if (itemIndex !== index) return item;
-                                      const next = {
-                                        ...item,
-                                        funcaoId: value,
-                                        funcaoName: funcao?.name ?? '',
-                                      };
-                                      // Re-derive only a cost the operator never typed into.
-                                      return item.costManual
-                                        ? next
-                                        : {
-                                            ...next,
-                                            costBrl: centsToInput(
-                                              funcaoCostBasis.get(value)?.cents ?? 0,
-                                            ),
-                                          };
-                                    }),
-                                  );
+                                  applyFuncaoToProfessional(index, value, funcao?.name ?? '');
                                 }}
+                                onCreate={
+                                  onCreateFuncao
+                                    ? (name) => void createFuncaoForProfessional(index, name)
+                                    : undefined
+                                }
                                 options={allocatableFuncoes.map((funcao) => ({
                                   value: funcao.id,
                                   label: funcao.name,
