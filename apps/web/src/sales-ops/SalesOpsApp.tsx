@@ -17,7 +17,6 @@ import {
   Plus,
   RotateCcw,
   Save,
-  Search,
   Settings,
   Trash2,
   UserRound,
@@ -36,6 +35,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
+import { Combobox, type ComboboxOption } from '@/components/ui/combobox';
 import {
   Dialog,
   DialogContent,
@@ -149,8 +149,19 @@ const iconButtonClass = `${iconButtonBaseClass} border-[#dcdce2] bg-white text-[
 const iconButtonPendingClass = `${iconButtonBaseClass} cursor-not-allowed border-[#ececf1] bg-[#f6f6f8] text-[#b6b6bd]`;
 const formInputClass =
   'h-11 rounded-[10px] border-[#dcdce2] bg-[#fafafb] px-3 text-sm text-[#201f24] shadow-none outline-none ring-0 transition focus-visible:border-[#eaa81a] focus-visible:ring-0 focus-visible:ring-offset-0 disabled:bg-[#f4f4f6] disabled:text-[#9b9ba3] disabled:opacity-100';
-const formSelectClass =
-  'h-11 appearance-none rounded-[10px] border-[#dcdce2] bg-[#fafafb] px-3 pr-9 text-sm font-medium text-[#201f24] outline-none transition focus:border-[#eaa81a] disabled:cursor-not-allowed disabled:opacity-60';
+/**
+ * The compact 40px picker, used by the `Filtros` bar and nothing else: that bar's
+ * vertical rhythm is built around 40px and no `Input` sits on its row.
+ */
+const comboboxTriggerClass =
+  'h-10 rounded-md border-[#dcdce2] bg-[#fafafb] px-3 text-sm font-medium text-[#201f24] transition focus-visible:border-[#eaa81a] focus-visible:ring-0 focus-visible:ring-offset-0 disabled:cursor-not-allowed disabled:opacity-60';
+/**
+ * Every picker inside a form or a dialog. Deliberately the same 44px height, 14px
+ * font size and 10px radius as `formInputClass`, so a picker and the `Input` beside
+ * it on the same grid row line up. `cn`'s tailwind-merge resolves the h-10/h-11 and
+ * rounded-md/rounded-[10px] pairs in favour of the later token.
+ */
+const formSelectClass = `${comboboxTriggerClass} h-11 rounded-[10px]`;
 
 const workspaceVisuals: Record<
   SalesOpsWorkspace,
@@ -167,7 +178,7 @@ const workspaceVisuals: Record<
 };
 
 type ModalState =
-  | { kind: 'product'; product?: SalesOpsProduct }
+  | { kind: 'product'; product?: SalesOpsProduct; prefillName?: string }
   | { kind: 'client'; client?: SalesOpsClient }
   | { kind: 'area'; area?: SalesOpsArea }
   | { kind: 'person'; person?: SalesOpsPerson; roleHint: 'seller' | 'finder' | 'collaborator' }
@@ -176,6 +187,23 @@ type ModalState =
 type SaleWizardRequest = { mode: 'create' } | { mode: 'edit'; sale: SalesOpsSale };
 
 type SalesFilters = { status: SalesOpsStatus | 'all'; areaId: string | 'all' };
+
+/** `all` is a real value here, not a placeholder: it is what "no status filter" means. */
+const salesStatusFilterOptions: ComboboxOption[] = [
+  { value: 'all', label: 'Todos os status' },
+  { value: 'draft', label: 'Rascunho' },
+  { value: 'open', label: 'Aberta' },
+  { value: 'won', label: 'Ganha' },
+  { value: 'lost', label: 'Perdida' },
+  { value: 'cancelled', label: 'Cancelada' },
+];
+
+const paymentMethodOptions: ComboboxOption[] = [
+  { value: 'pix', label: 'Pix' },
+  { value: 'card', label: 'Cartão' },
+  { value: 'boleto', label: 'Boleto' },
+  { value: 'transfer', label: 'Transferência' },
+];
 
 function titleForView(view: SalesOpsView, workspace: SalesOpsWorkspace) {
   const personal = workspace === 'meus-dados';
@@ -426,32 +454,58 @@ function Field({
   );
 }
 
-function NativeSelect({
-  value,
-  onChange,
+/**
+ * `Field`'s twin for a `Combobox`. A `<label>` must not contain two labelable
+ * elements, and an open combobox panel contributes a second one (its search
+ * `<input>`) next to the trigger `<button>`, so picker rows use a `<div>` and take
+ * their accessible name from the trigger's `aria-label` instead.
+ */
+function FieldBlock({
+  label,
   children,
-  className = '',
-  disabled,
-  'aria-label': ariaLabel,
+  required,
 }: {
-  value: string;
-  onChange: (value: string) => void;
+  label: string;
   children: ReactNode;
-  className?: string;
-  disabled?: boolean;
-  'aria-label'?: string;
+  required?: boolean;
 }) {
   return (
-    <select
-      aria-label={ariaLabel}
-      className={`h-10 rounded-md border border-[#dcdce2] bg-[#fafafb] px-3 text-sm font-medium text-[#201f24] outline-none transition focus:border-[#eaa81a] disabled:cursor-not-allowed disabled:opacity-60 ${className}`}
-      disabled={disabled}
-      onChange={(event) => onChange(event.target.value)}
-      value={value}
-    >
+    <div className="flex flex-col gap-[6px]">
+      <span className="text-xs font-semibold text-[#8b8b92]">
+        {label}
+        {required ? <span className="text-[#b23a22]"> *</span> : null}
+      </span>
       {children}
-    </select>
+    </div>
   );
+}
+
+/** Turn a closed enum into combobox options without repeating the shape at 8 call sites. */
+function enumOptions(values: readonly string[]): ComboboxOption[] {
+  return values.map((value) => ({ value, label: value }));
+}
+
+function areaOptions(areas: SalesOpsArea[]): ComboboxOption[] {
+  return areas.map((area) => ({ value: area.id, label: area.name }));
+}
+
+function productOptions(
+  products: SalesOpsProduct[],
+  areaNameById: Map<string, string>,
+): ComboboxOption[] {
+  return products.map((product) => ({
+    value: product.id,
+    label: product.name,
+    description: product.areaId ? areaNameById.get(product.areaId) : undefined,
+  }));
+}
+
+function personOptions(people: SalesOpsPerson[]): ComboboxOption[] {
+  return people.map((person) => ({
+    value: person.id,
+    label: person.displayName,
+    description: person.contactEmail ?? undefined,
+  }));
 }
 
 function Toggle({
@@ -567,6 +621,30 @@ export function SalesOpsApp() {
     modal?.kind === 'person' &&
     ((view === 'vendedores' && modal.roleHint === 'seller') ||
       (view === 'finders' && modal.roleHint === 'finder'));
+
+  /**
+   * Inline creates from a picker's `+ Criar novo ...` row. `mutateAsync` is read inside
+   * the function body rather than captured at render, so a caller that never reaches a
+   * create row never needs the hook to expose it. A rejection resolves to `null` and the
+   * picker keeps its previous value; the operator can still use the cadastro screen.
+   */
+  async function createClientByName(name: string): Promise<SalesOpsClient | null> {
+    try {
+      const { client } = await saveClient.mutateAsync({ name: name.trim() });
+      return client;
+    } catch {
+      return null;
+    }
+  }
+
+  async function createAreaByName(name: string): Promise<SalesOpsArea | null> {
+    try {
+      const { area } = await saveArea.mutateAsync({ name: name.trim(), status: 'active' });
+      return area;
+    } catch {
+      return null;
+    }
+  }
 
   useEffect(() => {
     mountedRef.current = true;
@@ -977,39 +1055,36 @@ export function SalesOpsApp() {
               <span className="text-xs font-bold uppercase tracking-[0.08em] text-[#9b9ba3]">
                 Filtros
               </span>
-              <NativeSelect
-                aria-label="Filtrar por status"
-                className="w-[190px]"
-                onChange={(value) =>
-                  setSalesFilters((current) => ({
-                    ...current,
-                    status: value as SalesFilters['status'],
-                  }))
-                }
-                value={salesFilters.status}
-              >
-                <option value="all">Todos os status</option>
-                <option value="draft">Rascunho</option>
-                <option value="open">Aberta</option>
-                <option value="won">Ganha</option>
-                <option value="lost">Perdida</option>
-                <option value="cancelled">Cancelada</option>
-              </NativeSelect>
-              <NativeSelect
-                aria-label="Filtrar por área"
-                className="w-[190px]"
-                onChange={(value) =>
-                  setSalesFilters((current) => ({ ...current, areaId: value }))
-                }
-                value={salesFilters.areaId}
-              >
-                <option value="all">Todas as áreas</option>
-                {persistedBootstrap.areas.map((area) => (
-                  <option key={area.id} value={area.id}>
-                    {area.name}
-                  </option>
-                ))}
-              </NativeSelect>
+              <div className="w-[190px]">
+                <Combobox
+                  aria-label="Filtrar por status"
+                  className={comboboxTriggerClass}
+                  onChange={(value) =>
+                    setSalesFilters((current) => ({
+                      ...current,
+                      status: value as SalesFilters['status'],
+                    }))
+                  }
+                  options={salesStatusFilterOptions}
+                  searchPlaceholder="Buscar status..."
+                  value={salesFilters.status}
+                />
+              </div>
+              <div className="w-[190px]">
+                <Combobox
+                  aria-label="Filtrar por área"
+                  className={comboboxTriggerClass}
+                  onChange={(value) =>
+                    setSalesFilters((current) => ({ ...current, areaId: value }))
+                  }
+                  options={[
+                    { value: 'all', label: 'Todas as áreas' },
+                    ...areaOptions(persistedBootstrap.areas),
+                  ]}
+                  searchPlaceholder="Buscar área..."
+                  value={salesFilters.areaId}
+                />
+              </div>
               <span className="ml-auto text-[13px] text-[#8b8b92]">
                 <span className="sales-ops-num font-bold text-[#201f24]">
                   {filteredSales.length}
@@ -1023,12 +1098,12 @@ export function SalesOpsApp() {
               <span className="text-xs font-bold uppercase tracking-[0.08em] text-[#9b9ba3]">
                 Filtros
               </span>
-              <NativeSelect className="w-[190px]" onChange={() => undefined} value="all">
-                <option value="all">Todos os status</option>
-              </NativeSelect>
-              <NativeSelect className="w-[190px]" onChange={() => undefined} value="all">
-                <option value="all">Todos os responsáveis</option>
-              </NativeSelect>
+              {/*
+                The status and responsável pickers that used to sit here were inert:
+                `onChange={() => undefined}` with a single option each. Rendering them as
+                searchable Comboboxes would ship a control that provably cannot filter, so
+                they are removed until the comissões filters are actually wired.
+              */}
               <span className="ml-auto text-[13px] text-[#8b8b92]">
                 <span className="sales-ops-num font-bold text-[#201f24]">
                   {bootstrap.payables.length}
@@ -1124,6 +1199,7 @@ export function SalesOpsApp() {
         collaborators={persistedBootstrap.people.filter((person) => person.isCollaborator)}
         modal={modal?.kind === 'product' ? modal : null}
         onClose={() => setModal(null)}
+        onCreateArea={createAreaByName}
         onSave={(payload) => {
           saveProduct.mutate(payload, { onSuccess: () => setModal(null) });
         }}
@@ -1158,6 +1234,9 @@ export function SalesOpsApp() {
           bootstrap={persistedBootstrap}
           editSale={saleWizard?.mode === 'edit' ? saleWizard.sale : null}
           onClose={() => setSaleWizard(null)}
+          onCreateArea={createAreaByName}
+          onCreateClient={createClientByName}
+          onCreateProduct={(name) => setModal({ kind: 'product', prefillName: name })}
           onSave={(payload) => {
             if (saleWizard?.mode === 'edit') {
               updateSale.mutate(
@@ -2363,26 +2442,30 @@ function SettingsView({
                   value={form.defaultTaxPct ?? 6}
                 />
               </Field>
-              <Field label="Moeda">
-                <NativeSelect
+              <FieldBlock label="Moeda">
+                <Combobox
+                  aria-label="Moeda"
+                  className={formSelectClass}
                   onChange={(value) => set('currency', value)}
+                  options={[
+                    { value: 'BRL', label: 'Real (BRL)' },
+                    { value: 'USD', label: 'Dólar (USD)' },
+                  ]}
+                  searchPlaceholder="Buscar moeda..."
                   value={form.currency ?? 'BRL'}
-                >
-                  <option value="BRL">Real (BRL)</option>
-                  <option value="USD">Dólar (USD)</option>
-                </NativeSelect>
-              </Field>
+                />
+              </FieldBlock>
             </div>
-            <Field label="Regime tributário">
-              <NativeSelect
+            <FieldBlock label="Regime tributário">
+              <Combobox
+                aria-label="Regime tributário"
+                className={formSelectClass}
                 onChange={(value) => set('taxRegime', value)}
+                options={enumOptions(['Simples Nacional', 'Lucro Presumido', 'Lucro Real'])}
+                searchPlaceholder="Buscar regime..."
                 value={form.taxRegime ?? 'Simples Nacional'}
-              >
-                <option value="Simples Nacional">Simples Nacional</option>
-                <option value="Lucro Presumido">Lucro Presumido</option>
-                <option value="Lucro Real">Lucro Real</option>
-              </NativeSelect>
-            </Field>
+              />
+            </FieldBlock>
             <Field label="Dia de fechamento do período">
               <Input
                 className="sales-ops-num bg-[#fafafb]"
@@ -2425,15 +2508,19 @@ function SettingsView({
                   value={form.dateFormat ?? 'dd/mm/aaaa'}
                 />
               </Field>
-              <Field label="Idioma">
-                <NativeSelect
+              <FieldBlock label="Idioma">
+                <Combobox
+                  aria-label="Idioma"
+                  className={formSelectClass}
                   onChange={(value) => set('language', value)}
+                  options={[
+                    { value: 'pt-BR', label: 'Português (BR)' },
+                    { value: 'en', label: 'English' },
+                  ]}
+                  searchPlaceholder="Buscar idioma..."
                   value={form.language ?? 'pt-BR'}
-                >
-                  <option value="pt-BR">Português (BR)</option>
-                  <option value="en">English</option>
-                </NativeSelect>
-              </Field>
+                />
+              </FieldBlock>
             </div>
           </div>
         </div>
@@ -2467,9 +2554,9 @@ type ProductForm = {
   providers: Array<{ personName: string; commissionType: 'pct' | 'fix'; commissionValue: string }>;
 };
 
-function productForm(product?: SalesOpsProduct): ProductForm {
+function productForm(product?: SalesOpsProduct, prefillName?: string): ProductForm {
   return {
-    name: product?.name ?? '',
+    name: product?.name ?? prefillName ?? '',
     areaId: product?.areaId ?? '',
     codeSuffix: product?.codeSuffix ?? '0',
     openPrice: product?.openPrice ?? false,
@@ -2633,17 +2720,21 @@ export function ProductDialog(props: {
   areas: SalesOpsArea[];
   collaborators: SalesOpsPerson[];
   onClose: () => void;
+  onCreateArea?: (name: string) => Promise<SalesOpsArea | null>;
   onSave: (payload: SaveProductPayload) => void;
   saving: boolean;
 }) {
   if (!props.modal) return null;
   return (
     <ProductDialogBody
-      key={props.modal.product?.id ?? 'new-product'}
+      // The typed name is part of the form's identity: opening the dialog twice from two
+      // different produto create rows has to re-seed the Nome field.
+      key={props.modal.product?.id ?? `new-product-${props.modal.prefillName ?? ''}`}
       areas={props.areas}
       collaborators={props.collaborators}
       modal={props.modal}
       onClose={props.onClose}
+      onCreateArea={props.onCreateArea}
       onSave={props.onSave}
       saving={props.saving}
     />
@@ -2655,6 +2746,7 @@ function ProductDialogBody({
   areas,
   collaborators,
   onClose,
+  onCreateArea,
   onSave,
   saving,
 }: {
@@ -2662,11 +2754,19 @@ function ProductDialogBody({
   areas: SalesOpsArea[];
   collaborators: SalesOpsPerson[];
   onClose: () => void;
+  onCreateArea?: (name: string) => Promise<SalesOpsArea | null>;
   onSave: (payload: SaveProductPayload) => void;
   saving: boolean;
 }) {
-  const [form, setForm] = useState<ProductForm>(() => productForm(modal?.product));
+  const [form, setForm] = useState<ProductForm>(() =>
+    productForm(modal?.product, modal?.prefillName),
+  );
   const [commissionMode, setCommissionMode] = useState<'seller_only' | 'with_finder'>('seller_only');
+  /**
+   * An área created from the picker's own create row, kept locally so it is selectable
+   * and visible on the trigger immediately, before the bootstrap refetch lands.
+   */
+  const [createdAreas, setCreatedAreas] = useState<SalesOpsArea[]>([]);
   const activeModal = modal;
 
   function set<K extends keyof ProductForm>(key: K, value: ProductForm[K]) {
@@ -2678,8 +2778,22 @@ function ProductDialogBody({
     modal.product?.areaId != null
       ? areas.find((area) => area.id === modal.product?.areaId)
       : undefined;
-  const selectableAreas =
+  const knownAreas =
     currentArea && currentArea.status !== 'active' ? [currentArea, ...activeAreas] : activeAreas;
+  const selectableAreas = [
+    ...knownAreas,
+    ...createdAreas.filter((created) => !knownAreas.some((area) => area.id === created.id)),
+  ];
+
+  async function createArea(name: string) {
+    if (!onCreateArea) return;
+    const created = await onCreateArea(name);
+    if (!created) return;
+    setCreatedAreas((current) =>
+      current.some((area) => area.id === created.id) ? current : [...current, created],
+    );
+    set('areaId', created.id);
+  }
 
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -2793,26 +2907,21 @@ function ProductDialogBody({
             />
 
             <div className="grid gap-3 md:grid-cols-2">
-              <Field label="Área" required>
-                <div className="relative">
-                  <NativeSelect
-                    aria-label="Área do produto"
-                    className={`${formSelectClass} w-full`}
-                    onChange={(value) => set('areaId', value)}
-                    value={form.areaId}
-                  >
-                    <option disabled value="">
-                      Selecione a área
-                    </option>
-                    {selectableAreas.map((area) => (
-                      <option key={area.id} value={area.id}>
-                        {area.name}
-                      </option>
-                    ))}
-                  </NativeSelect>
-                  <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-[13px] w-[13px] -translate-y-1/2 text-[#8b8b92]" />
-                </div>
-              </Field>
+              <FieldBlock label="Área" required>
+                <Combobox
+                  aria-label="Área do produto"
+                  className={formSelectClass}
+                  emptyMessage="Nenhuma área encontrada"
+                  entityGender="f"
+                  entityLabel="área"
+                  onChange={(value) => set('areaId', value)}
+                  onCreate={onCreateArea ? (name) => void createArea(name) : undefined}
+                  options={areaOptions(selectableAreas)}
+                  placeholder="Selecione a área"
+                  searchPlaceholder="Buscar área..."
+                  value={form.areaId}
+                />
+              </FieldBlock>
               <Field label="Setup (R$)">
                 {form.openPrice ? (
                   <DefinedOnSaleNotice />
@@ -3016,21 +3125,26 @@ function ProductDialogBody({
                     </button>
                   </div>
                   <div className="flex gap-2">
-                    <NativeSelect
-                      className={`${formSelectClass} flex-[0_0_132px] bg-white`}
-                      onChange={(value) => {
-                        const next = [...form.modules];
-                        next[index] = { ...module, type: value };
-                        set('modules', next);
-                      }}
-                      value={module.type}
-                    >
-                      {['Módulo', 'Upsell', 'Downsell', 'Cross-sell', 'Add-on'].map((option) => (
-                        <option key={option} value={option}>
-                          {option}
-                        </option>
-                      ))}
-                    </NativeSelect>
+                    <div className="flex-[0_0_132px]">
+                      <Combobox
+                        aria-label={`Tipo do módulo ${index + 1}`}
+                        className={cn(formSelectClass, 'bg-white')}
+                        onChange={(value) => {
+                          const next = [...form.modules];
+                          next[index] = { ...module, type: value };
+                          set('modules', next);
+                        }}
+                        options={enumOptions([
+                          'Módulo',
+                          'Upsell',
+                          'Downsell',
+                          'Cross-sell',
+                          'Add-on',
+                        ])}
+                        searchPlaceholder="Buscar tipo..."
+                        value={module.type}
+                      />
+                    </div>
                     <div className="relative flex-1">
                       <span className="pointer-events-none absolute left-[11px] top-1/2 -translate-y-1/2 text-[12.5px] font-bold text-[#9b9ba3]">
                         R$
@@ -3071,17 +3185,36 @@ function ProductDialogBody({
               {form.providers.map((provider, index) => (
                 <div className="rounded-xl border border-[#ececf1] bg-[#fafafb] p-[11px]" key={index}>
                   <div className="mb-2 flex items-center gap-2">
-                    <Input
-                      className={`bg-white ${formInputClass}`}
-                      list="sales-ops-collaborators"
-                      onChange={(event) => {
-                        const next = [...form.providers];
-                        next[index] = { ...provider, personName: event.target.value };
-                        set('providers', next);
-                      }}
-                      placeholder="Nome"
-                      value={provider.personName}
-                    />
+                    <div className="min-w-0 flex-1">
+                      <Combobox
+                        aria-label={`Prestador ${index + 1}`}
+                        className={cn(formSelectClass, 'bg-white')}
+                        emptyMessage="Nenhum prestador cadastrado"
+                        entityGender="m"
+                        entityLabel="prestador"
+                        onChange={(value) => {
+                          const next = [...form.providers];
+                          next[index] = { ...provider, personName: value };
+                          set('providers', next);
+                        }}
+                        // The stored field is a name snapshot, not an id, so a typed name is
+                        // as valid as a listed one. This replaces the free-text datalist.
+                        onCreate={(name) => {
+                          const next = [...form.providers];
+                          next[index] = { ...provider, personName: name };
+                          set('providers', next);
+                        }}
+                        options={collaborators.map((person) => ({
+                          value: person.displayName,
+                          label: person.displayName,
+                          description: person.contactEmail ?? undefined,
+                        }))}
+                        placeholder="Nome"
+                        searchPlaceholder="Buscar ou digitar um nome..."
+                        value={provider.personName}
+                        valueLabel={provider.personName}
+                      />
+                    </div>
                     <button
                       aria-label="Remover prestador"
                       className="flex h-[34px] w-[34px] flex-none items-center justify-center rounded-[9px] border border-[#e6d3d0] bg-white text-[#b23a22] transition hover:bg-[#fbf0ee]"
@@ -3130,11 +3263,6 @@ function ProductDialogBody({
                 </div>
               ))}
             </ListEditor>
-            <datalist id="sales-ops-collaborators">
-              {collaborators.map((person) => (
-                <option key={person.id} value={person.displayName} />
-              ))}
-            </datalist>
           </div>
 
           <div className="flex flex-none justify-end gap-2.5 border-t border-[#e8e8ec] bg-[#fafafb] px-6 py-4">
@@ -3392,16 +3520,19 @@ function AreaDialogBody({
               value={name}
             />
           </Field>
-          <Field label="Status">
-            <NativeSelect
+          <FieldBlock label="Status">
+            <Combobox
               aria-label="Status da área"
+              className={formSelectClass}
               onChange={(value) => setStatus(value as 'active' | 'archived')}
+              options={[
+                { value: 'active', label: 'Ativa' },
+                { value: 'archived', label: 'Arquivada' },
+              ]}
+              searchPlaceholder="Buscar status..."
               value={status}
-            >
-              <option value="active">Ativa</option>
-              <option value="archived">Arquivada</option>
-            </NativeSelect>
-          </Field>
+            />
+          </FieldBlock>
           <div className="flex justify-end gap-3 border-t border-[#e8e8ec] pt-4">
             <SecondaryButton onClick={onClose}>Cancelar</SecondaryButton>
             <PrimaryButton disabled={saving || !name.trim()} type="submit">
@@ -3490,12 +3621,19 @@ function PersonDialogBody({
               value={contactEmail}
             />
           </Field>
-          <Field label="Status">
-            <NativeSelect onChange={(value) => setStatus(value as 'active' | 'inactive')} value={status}>
-              <option value="active">Ativo</option>
-              <option value="inactive">Inativo</option>
-            </NativeSelect>
-          </Field>
+          <FieldBlock label="Status">
+            <Combobox
+              aria-label="Status da pessoa"
+              className={formSelectClass}
+              onChange={(value) => setStatus(value as 'active' | 'inactive')}
+              options={[
+                { value: 'active', label: 'Ativo' },
+                { value: 'inactive', label: 'Inativo' },
+              ]}
+              searchPlaceholder="Buscar status..."
+              value={status}
+            />
+          </FieldBlock>
           <div className="grid gap-2 md:grid-cols-3">
             <RoleToggle checked={isSeller} label="Vendedor" onChange={setIsSeller} />
             <RoleToggle checked={isFinder} label="Finder" onChange={setIsFinder} />
@@ -3682,6 +3820,9 @@ export function SaleWizardDialog(props: {
   bootstrap: SalesOpsBootstrap;
   editSale: SalesOpsSale | null;
   onClose: () => void;
+  onCreateClient?: (name: string) => Promise<SalesOpsClient | null>;
+  onCreateArea?: (name: string) => Promise<SalesOpsArea | null>;
+  onCreateProduct?: (name: string) => void;
   onSave: (payload: CreateSalePayload) => void;
   saving: boolean;
 }) {
@@ -3697,6 +3838,9 @@ export function SaleWizardDialog(props: {
       bootstrap={props.bootstrap}
       editSale={props.editSale}
       onClose={props.onClose}
+      onCreateArea={props.onCreateArea}
+      onCreateClient={props.onCreateClient}
+      onCreateProduct={props.onCreateProduct}
       onSave={props.onSave}
       saving={props.saving}
     />
@@ -3707,12 +3851,18 @@ function SaleWizardDialogBody({
   bootstrap,
   editSale,
   onClose,
+  onCreateClient,
+  onCreateArea,
+  onCreateProduct,
   onSave,
   saving,
 }: {
   bootstrap: SalesOpsBootstrap;
   editSale: SalesOpsSale | null;
   onClose: () => void;
+  onCreateClient?: (name: string) => Promise<SalesOpsClient | null>;
+  onCreateArea?: (name: string) => Promise<SalesOpsArea | null>;
+  onCreateProduct?: (name: string) => void;
   onSave: (payload: CreateSalePayload) => void;
   saving: boolean;
 }) {
@@ -3785,6 +3935,11 @@ function SaleWizardDialogBody({
       : []),
   );
   const [professionals, setProfessionals] = useState<ProfessionalForm[]>(prefill?.professionals ?? []);
+  /**
+   * Áreas created from an item row's own create row, kept locally so the new área is
+   * selectable and visible on the trigger before the bootstrap refetch lands.
+   */
+  const [createdAreas, setCreatedAreas] = useState<SalesOpsArea[]>([]);
   const [installmentRows, setInstallmentRows] = useState<InstallmentRowForm[]>(() =>
     prefill && prefill.installmentRows.length > 0
       ? prefill.installmentRows
@@ -3859,7 +4014,13 @@ function SaleWizardDialogBody({
   }
 
   const activeAreas = bootstrap.areas.filter((area) => area.status === 'active');
-  const areaNameById = new Map(bootstrap.areas.map((area) => [area.id, area.name]));
+  const selectableAreas = [
+    ...activeAreas,
+    ...createdAreas.filter((created) => !activeAreas.some((area) => area.id === created.id)),
+  ];
+  const areaNameById = new Map(
+    [...bootstrap.areas, ...createdAreas].map((area) => [area.id, area.name]),
+  );
   const planSumCents = installmentSumCents(installmentRows);
   const planDeltaCents = planSumCents - totalCents;
   const planRowsValid =
@@ -4064,6 +4225,32 @@ function SaleWizardDialogBody({
     }
   }
 
+  /**
+   * The cliente create row. When a create handler is wired the typed name becomes a real
+   * cliente and the proposta carries its id. With no handler, or when the create fails,
+   * this falls back to exactly what the old datalist did: keep the typed name as the
+   * snapshot and leave `clientId` empty, so the proposta still saves.
+   */
+  async function createClient(name: string) {
+    setClientName(name);
+    setClientId('');
+    if (!onCreateClient) return;
+    const created = await onCreateClient(name);
+    if (!created) return;
+    setClientId(created.id);
+    setClientName(created.name);
+  }
+
+  async function createAreaForItem(index: number, name: string) {
+    if (!onCreateArea) return;
+    const created = await onCreateArea(name);
+    if (!created) return;
+    setCreatedAreas((current) =>
+      current.some((area) => area.id === created.id) ? current : [...current, created],
+    );
+    setItem(index, { areaId: created.id });
+  }
+
   function showFinder() {
     setFinderVisible(true);
     setFinderPersonId((current) => current || finders[0]?.id || sellerPersonId);
@@ -4245,43 +4432,46 @@ function SaleWizardDialogBody({
                 <div className="flex flex-col gap-[18px]">
                   <div className="rounded-[14px] border border-[#e8e8ec] bg-white p-4">
                     <div className="mb-4 text-[13px] font-bold">Cliente e responsáveis</div>
-                    <Field label="Cliente" required>
-                      <div className="relative">
-                        <Input
-                          className={`pr-10 ${formInputClass}`}
-                          list="sales-ops-client-options"
-                          onChange={(event) => {
-                            const value = event.target.value;
-                            const client = bootstrap.clients.find((candidate) => candidate.name === value);
-                            setClientName(value);
-                            setClientId(client?.id ?? '');
-                          }}
-                          placeholder="Buscar ou digitar um novo cliente..."
-                          value={clientName}
-                        />
-                        <Search className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#96969e]" />
-                        <datalist id="sales-ops-client-options">
-                          {bootstrap.clients.map((client) => (
-                            <option key={client.id} value={client.name} />
-                          ))}
-                        </datalist>
-                      </div>
-                    </Field>
+                    <FieldBlock label="Cliente" required>
+                      <Combobox
+                        aria-label="Cliente"
+                        className={formSelectClass}
+                        emptyMessage="Nenhum cliente encontrado"
+                        entityGender="m"
+                        entityLabel="cliente"
+                        onChange={(value) => {
+                          const client = bootstrap.clients.find(
+                            (candidate) => candidate.id === value,
+                          );
+                          setClientId(value);
+                          setClientName(client?.name ?? '');
+                        }}
+                        onCreate={(name) => void createClient(name)}
+                        options={bootstrap.clients.map((client) => ({
+                          value: client.id,
+                          label: client.name,
+                        }))}
+                        placeholder="Buscar ou digitar um novo cliente..."
+                        searchPlaceholder="Buscar ou digitar um novo cliente..."
+                        value={clientId}
+                        // A name typed into the create row is not in `options`; this keeps it
+                        // visible on the trigger with no clientId, as the datalist did.
+                        valueLabel={clientName}
+                      />
+                    </FieldBlock>
 
                     <div className="mt-4 grid gap-4 md:grid-cols-2">
-                      <Field label="Vendedor" required>
-                        <NativeSelect
-                          className="h-11 rounded-[10px]"
+                      <FieldBlock label="Vendedor" required>
+                        <Combobox
+                          aria-label="Vendedor"
+                          className={formSelectClass}
+                          emptyMessage="Nenhum vendedor cadastrado"
                           onChange={handleSellerChange}
+                          options={personOptions(sellers)}
+                          searchPlaceholder="Buscar vendedor..."
                           value={sellerPersonId}
-                        >
-                          {sellers.map((person) => (
-                            <option key={person.id} value={person.id}>
-                              {person.displayName}
-                            </option>
-                          ))}
-                        </NativeSelect>
-                      </Field>
+                        />
+                      </FieldBlock>
 
                       {finderVisible ? (
                         <div>
@@ -4295,19 +4485,16 @@ function SaleWizardDialogBody({
                               remover
                             </button>
                           </div>
-                          <NativeSelect
-                            className="h-11 rounded-[10px]"
+                          <Combobox
+                            aria-label="Finder"
+                            className={formSelectClass}
                             disabled={sellerIsFinder}
+                            emptyMessage="Nenhum finder cadastrado"
                             onChange={setFinderPersonId}
+                            options={personOptions(finders)}
+                            searchPlaceholder="Buscar finder..."
                             value={finderPersonId}
-                          >
-                            {finders.length === 0 ? <option value="">Sem finder cadastrado</option> : null}
-                            {finders.map((person) => (
-                              <option key={person.id} value={person.id}>
-                                {person.displayName}
-                              </option>
-                            ))}
-                          </NativeSelect>
+                          />
                           {settings.sellerCanBeFinder ? (
                             <button
                               className="mt-[9px] flex items-center gap-2 text-[13px] text-[#57575f]"
@@ -4359,7 +4546,9 @@ function SaleWizardDialogBody({
                       <div className="text-[13px] font-bold">Itens</div>
                       <div className="flex items-center gap-2">
                         <button
-                          className="rounded-[9px] border border-[#dcdce2] bg-white px-3 py-[7px] text-[12.5px] font-semibold text-[#9c7210] transition hover:bg-[#f2f2f4]"
+                          className="rounded-[9px] border border-[#dcdce2] bg-white px-3 py-[7px] text-[12.5px] font-semibold text-[#9c7210] transition hover:bg-[#f2f2f4] disabled:cursor-not-allowed disabled:opacity-45"
+                          disabled={!onCreateProduct}
+                          onClick={() => onCreateProduct?.('')}
                           type="button"
                         >
                           Cadastrar produto
@@ -4399,18 +4588,23 @@ function SaleWizardDialogBody({
                           return (
                             <div className="flex flex-col gap-[5px]" key={`free-${index}`}>
                               <div className="grid grid-cols-[minmax(0,1fr)_70px_130px_120px_36px] items-center gap-[9px]">
-                                <NativeSelect
+                                <Combobox
                                   aria-label={`Área do item ${index + 1}`}
-                                  className="h-10 rounded-[9px] text-[13.5px]"
+                                  className={formSelectClass}
+                                  emptyMessage="Nenhuma área encontrada"
+                                  entityGender="f"
+                                  entityLabel="área"
                                   onChange={(value) => setItem(index, { areaId: value })}
+                                  onCreate={
+                                    onCreateArea
+                                      ? (name) => void createAreaForItem(index, name)
+                                      : undefined
+                                  }
+                                  options={areaOptions(selectableAreas)}
+                                  placeholder="Selecione a área"
+                                  searchPlaceholder="Buscar área..."
                                   value={item.areaId}
-                                >
-                                  {activeAreas.map((area) => (
-                                    <option key={area.id} value={area.id}>
-                                      {area.name}
-                                    </option>
-                                  ))}
-                                </NativeSelect>
+                                />
                                 <div className="sales-ops-num text-center text-[13.5px] text-[#57575f]">1</div>
                                 <Input
                                   aria-invalid={showItemErrors && !unitValid}
@@ -4489,18 +4683,23 @@ function SaleWizardDialogBody({
                           <div className="flex flex-col gap-[5px]" key={`${item.productId}-${index}`}>
                             <div className="grid grid-cols-[minmax(0,1fr)_70px_130px_120px_36px] items-center gap-[9px]">
                               <div className="flex flex-col gap-1">
-                                <NativeSelect
+                                <Combobox
                                   aria-label={`Produto / serviço do item ${index + 1}`}
-                                  className="h-10 rounded-[9px] text-[13.5px]"
+                                  className={formSelectClass}
+                                  emptyMessage="Nenhum produto encontrado"
+                                  entityGender="m"
+                                  entityLabel="produto"
                                   onChange={(value) => setItem(index, { productId: value })}
+                                  // Deliberately not an inline create: a produto is invalid
+                                  // without an área and carries pricing plus three commission
+                                  // pairs, so the create row opens ProductDialog prefilled.
+                                  onCreate={
+                                    onCreateProduct ? (name) => onCreateProduct(name) : undefined
+                                  }
+                                  options={productOptions(bootstrap.products, areaNameById)}
+                                  searchPlaceholder="Buscar produto..."
                                   value={item.productId}
-                                >
-                                  {bootstrap.products.map((candidate) => (
-                                    <option key={candidate.id} value={candidate.id}>
-                                      {candidate.name}
-                                    </option>
-                                  ))}
-                                </NativeSelect>
+                                />
                                 {product?.areaId ? (
                                   <span className="self-start rounded-full bg-[#ececf1] px-2 py-[2px] text-[11px] font-bold text-[#57575f]">
                                     {areaNameById.get(product.areaId) ?? 'Área'}
@@ -4704,9 +4903,9 @@ function SaleWizardDialogBody({
                               }}
                               value={row.amountBrl}
                             />
-                            <NativeSelect
+                            <Combobox
                               aria-label={`Forma de pagamento da parcela ${index + 1}`}
-                              className="h-10 rounded-[9px] text-[13.5px]"
+                              className={formSelectClass}
                               onChange={(value) => {
                                 setPlanAuto(false);
                                 setInstallmentRows((current) =>
@@ -4715,13 +4914,10 @@ function SaleWizardDialogBody({
                                   ),
                                 );
                               }}
+                              options={paymentMethodOptions}
+                              searchPlaceholder="Buscar forma..."
                               value={row.method}
-                            >
-                              <option value="pix">Pix</option>
-                              <option value="card">Cartão</option>
-                              <option value="boleto">Boleto</option>
-                              <option value="transfer">Transferência</option>
-                            </NativeSelect>
+                            />
                             <button
                               aria-label={`Remover parcela ${index + 1}`}
                               className="flex h-8 w-8 items-center justify-center rounded-[8px] border border-[#f0dcd5] bg-[#fbeee9] text-[#b23a22] transition hover:bg-[#f6e0d9] disabled:cursor-not-allowed disabled:opacity-40"
@@ -4899,8 +5095,12 @@ function SaleWizardDialogBody({
                           className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_150px_36px] items-center gap-[9px]"
                           key={`${professional.personId}-${index}`}
                         >
-                          <NativeSelect
-                            className="h-10 rounded-[9px] text-[13.5px]"
+                          <Combobox
+                            aria-label={`Profissional ${index + 1}`}
+                            className={formSelectClass}
+                            emptyMessage="Nenhum prestador cadastrado"
+                            entityGender="m"
+                            entityLabel="profissional"
                             onChange={(value) => {
                               const person = collaborators.find((candidate) => candidate.id === value);
                               setProfessionals((current) =>
@@ -4915,15 +5115,23 @@ function SaleWizardDialogBody({
                                 ),
                               );
                             }}
+                            // Replaces the old "Digite manualmente" option, which cleared the
+                            // name and then offered no field to type it into.
+                            onCreate={(name) => {
+                              setProfessionals((current) =>
+                                current.map((item, itemIndex) =>
+                                  itemIndex === index
+                                    ? { ...item, personId: '', personName: name }
+                                    : item,
+                                ),
+                              );
+                            }}
+                            options={personOptions(collaborators)}
+                            placeholder="Buscar ou digitar um nome..."
+                            searchPlaceholder="Buscar ou digitar um nome..."
                             value={professional.personId}
-                          >
-                            <option value="">Digite manualmente</option>
-                            {collaborators.map((person) => (
-                              <option key={person.id} value={person.id}>
-                                {person.displayName}
-                              </option>
-                            ))}
-                          </NativeSelect>
+                            valueLabel={professional.personName}
+                          />
                           <Input
                             className={formInputClass}
                             onChange={(event) =>

@@ -267,10 +267,14 @@ function labeledInput(label: string): HTMLInputElement {
   return match;
 }
 
-function labeledSelect(label: string): HTMLSelectElement {
-  const match = container.querySelector(`select[aria-label="${label}"]`);
-  if (!(match instanceof HTMLSelectElement)) throw new Error(`select not found: ${label}`);
+function comboboxTrigger(ariaLabel: string): HTMLButtonElement {
+  const match = container.querySelector(`button[role="combobox"][aria-label="${ariaLabel}"]`);
+  if (!(match instanceof HTMLButtonElement)) throw new Error(`combobox not found: ${ariaLabel}`);
   return match;
+}
+
+function comboboxText(ariaLabel: string): string {
+  return comboboxTrigger(ariaLabel).textContent?.trim() ?? '';
 }
 
 function fieldInput(label: string): HTMLInputElement {
@@ -283,11 +287,9 @@ function fieldInput(label: string): HTMLInputElement {
 }
 
 function professionalRowInputs(): { role: HTMLInputElement; cost: HTMLInputElement } {
-  const select = [...container.querySelectorAll('select')].find((candidate) =>
-    [...candidate.options].some((option) => option.textContent?.trim() === 'Digite manualmente'),
-  );
-  if (!select) throw new Error('professional row not found');
-  const row = select.parentElement;
+  // The Combobox wrapper is a `div.relative`, so the row grid is the trigger's
+  // grandparent. `closest('div.grid')` finds it without a test-only attribute.
+  const row = comboboxTrigger('Profissional 1').closest('div.grid');
   const inputs = row ? [...row.querySelectorAll('input')] : [];
   if (inputs.length < 2) throw new Error('professional row inputs not found');
   return { role: inputs[0]!, cost: inputs[1]! };
@@ -308,16 +310,16 @@ async function changeInput(input: HTMLInputElement, value: string) {
 describe('sale wizard edit path', () => {
   it('prefills every step from the existing proposta', async () => {
     expect(container.textContent).toContain('Editar proposta');
-    expect(fieldInput('Cliente').value).toBe('SegPro');
+    expect(comboboxText('Cliente')).toBe('SegPro');
     expect(labeledInput('Valor unitário do item 1').value).toBe('2500');
     expect(labeledInput('Descrição do item 2').value).toBe('Consultoria de processos');
-    expect(labeledSelect('Área do item 2').value).toBe(areaTwoId);
+    expect(comboboxText('Área do item 2')).toBe('FXL Advisor');
 
     await click(buttonByText('Avançar'));
     expect(container.textContent).toContain('Plano de pagamento');
     expect(labeledInput('Valor da parcela 1').value).toBe('1500');
     expect(labeledInput('Valor da parcela 2').value).toBe('1500');
-    expect(labeledSelect('Forma de pagamento da parcela 2').value).toBe('boleto');
+    expect(comboboxText('Forma de pagamento da parcela 2')).toBe('Boleto');
     expect(labeledInput('Valor da mensalidade').value).toBe('1000');
     expect(labeledInput('Número de ciclos').value).toBe('2');
 

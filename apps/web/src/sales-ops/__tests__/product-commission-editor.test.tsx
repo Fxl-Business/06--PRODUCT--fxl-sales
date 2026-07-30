@@ -135,18 +135,28 @@ async function submit() {
   await act(async () => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
 }
 
-async function changeSelect(select: HTMLSelectElement, value: string) {
-  await act(async () => {
-    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
-    setter?.call(select, value);
-    select.dispatchEvent(new Event('change', { bubbles: true }));
-  });
+function comboboxTrigger(ariaLabel: string): HTMLButtonElement {
+  const match = container.querySelector(`button[role="combobox"][aria-label="${ariaLabel}"]`);
+  if (!(match instanceof HTMLButtonElement)) throw new Error(`combobox not found: ${ariaLabel}`);
+  return match;
+}
+
+function comboboxText(ariaLabel: string): string {
+  return comboboxTrigger(ariaLabel).textContent?.trim() ?? '';
+}
+
+async function pickOption(ariaLabel: string, optionLabel: string) {
+  await click(comboboxTrigger(ariaLabel));
+  const row = [...container.querySelectorAll('[role="option"]')].find((candidate) =>
+    candidate.textContent?.trim().startsWith(optionLabel),
+  );
+  if (!(row instanceof HTMLElement)) throw new Error(`option not found: ${optionLabel}`);
+  await click(row);
 }
 
 async function chooseArea() {
-  const select = container.querySelector('select[aria-label="Área do produto"]');
-  if (!(select instanceof HTMLSelectElement)) throw new Error('area select not found');
-  await changeSelect(select, areaFixture.id);
+  await pickOption('Área do produto', areaFixture.name);
+  expect(comboboxText('Área do produto')).toBe(areaFixture.name);
 }
 
 describe('product commission editor', () => {

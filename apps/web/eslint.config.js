@@ -21,6 +21,35 @@ export default tseslint.config(
       ],
       '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+      /**
+       * The native picker ban (CLAUDE.md, "UI Controls"). Browser pickers cannot be
+       * searched, cannot show a "create new" affordance and cannot be styled to match
+       * the app, so this codebase has exactly one single-select control: `Combobox`.
+       */
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: 'JSXOpeningElement[name.name="select"]',
+          message:
+            'Native <select> is banned. Use <Combobox> from @/components/ui/combobox (CLAUDE.md, UI Controls).',
+        },
+        {
+          selector: 'JSXOpeningElement[name.name="datalist"]',
+          message:
+            'Native <datalist> is banned. Use <Combobox> from @/components/ui/combobox (CLAUDE.md, UI Controls).',
+        },
+        {
+          selector: 'JSXOpeningElement[name.name="option"]',
+          message:
+            '<option> only exists inside a native picker, which is banned. Use <Combobox> options (CLAUDE.md, UI Controls).',
+        },
+        {
+          selector:
+            'JSXOpeningElement[name.name="input"] > JSXAttribute[name.name="type"][value.value="number"]',
+          message:
+            'Use <Input type="number"> from @/components/ui/input; a raw <input type="number"> renders OS spin buttons.',
+        },
+      ],
     },
   },
   {

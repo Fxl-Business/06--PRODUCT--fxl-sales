@@ -176,10 +176,24 @@ function labeledInput(label: string): HTMLInputElement {
   return match;
 }
 
-function labeledSelect(label: string): HTMLSelectElement {
-  const match = container.querySelector(`select[aria-label="${label}"]`);
-  if (!(match instanceof HTMLSelectElement)) throw new Error(`select not found: ${label}`);
+function comboboxTrigger(ariaLabel: string): HTMLButtonElement {
+  const match = container.querySelector(`button[role="combobox"][aria-label="${ariaLabel}"]`);
+  if (!(match instanceof HTMLButtonElement)) throw new Error(`combobox not found: ${ariaLabel}`);
   return match;
+}
+
+function comboboxText(ariaLabel: string): string {
+  return comboboxTrigger(ariaLabel).textContent?.trim() ?? '';
+}
+
+/** Open the picker and commit the row whose visible label starts with `optionLabel`. */
+async function pickOption(ariaLabel: string, optionLabel: string) {
+  await click(comboboxTrigger(ariaLabel));
+  const row = [...container.querySelectorAll('[role="option"]')].find((candidate) =>
+    candidate.textContent?.trim().startsWith(optionLabel),
+  );
+  if (!(row instanceof HTMLElement)) throw new Error(`option not found: ${optionLabel}`);
+  await click(row);
 }
 
 function labeledButton(label: string): HTMLButtonElement {
@@ -204,13 +218,6 @@ async function changeInput(input: HTMLInputElement, value: string) {
   });
 }
 
-async function changeSelect(select: HTMLSelectElement, value: string) {
-  await act(async () => {
-    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
-    setter?.call(select, value);
-    select.dispatchEvent(new Event('change', { bubbles: true }));
-  });
-}
 
 describe('sale wizard custom item labels', () => {
   it('keeps repeated custom labels independent and submits them in review order', async () => {
@@ -300,7 +307,8 @@ describe('sale wizard custom item labels', () => {
 
   it('uses the catalog name for a fixed-price item without rendering a custom label field', async () => {
     await changeInput(labeledInput('Nome / descrição do item 1'), 'Rótulo que não pode vazar');
-    await changeSelect(labeledSelect('Produto / serviço do item 1'), fixedProductId);
+    await pickOption('Produto / serviço do item 1', 'FXL Finance');
+    expect(comboboxText('Produto / serviço do item 1')).toBe('FXL Finance');
 
     expect(container.querySelector('input[aria-label="Nome / descrição do item 1"]')).toBeNull();
     await click(buttonByText('Avançar'));

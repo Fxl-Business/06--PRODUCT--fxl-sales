@@ -1,15 +1,9 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
+import { Combobox } from '@/components/ui/combobox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import type { PriceBandSummary, ReferralLink } from '@/finder/types';
 import { useCreateLink, useFinderApps, useFinderProducts } from './useLinks';
 
@@ -90,40 +84,28 @@ export function LinkGeneratorForm({ onSuccess }: LinkGeneratorFormProps) {
     <form onSubmit={handleSubmit} className="space-y-4">
       <div className="space-y-2">
         <Label htmlFor="app">{t('finder.links.form.app')}</Label>
-        <Select
-          value={appId}
-          onValueChange={(v) => {
+        <Combobox
+          id="app"
+          onChange={(v) => {
             setAppId(v);
             setProductId('');
           }}
-        >
-          <SelectTrigger id="app">
-            <SelectValue placeholder={t('finder.links.form.appPlaceholder')} />
-          </SelectTrigger>
-          <SelectContent>
-            {apps.map((a) => (
-              <SelectItem key={a.id} value={a.id}>
-                {a.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+          options={apps.map((a) => ({ value: a.id, label: a.name }))}
+          placeholder={t('finder.links.form.appPlaceholder')}
+          value={appId}
+        />
       </div>
 
       <div className="space-y-2">
         <Label htmlFor="product">{t('finder.links.form.product')}</Label>
-        <Select value={productId} onValueChange={setProductId} disabled={!appId}>
-          <SelectTrigger id="product">
-            <SelectValue placeholder={t('finder.links.form.productPlaceholder')} />
-          </SelectTrigger>
-          <SelectContent>
-            {products.map((p) => (
-              <SelectItem key={p.id} value={p.id}>
-                {p.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <Combobox
+          disabled={!appId}
+          id="product"
+          onChange={setProductId}
+          options={products.map((p) => ({ value: p.id, label: p.name }))}
+          placeholder={t('finder.links.form.productPlaceholder')}
+          value={productId}
+        />
       </div>
 
       <div className="space-y-2">

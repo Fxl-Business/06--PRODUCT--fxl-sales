@@ -36,4 +36,18 @@ describe('sale wizard UI contract', () => {
     expect(source).not.toContain('Passo {wizardStep} de 3');
     expect(source).not.toContain('Salvar venda');
   });
+
+  it('keeps every picker on the Combobox with no native picker markup left behind', () => {
+    // Positive control: the pickers really are Comboboxes, so the negatives below are
+    // about a migration that happened rather than about markup that never existed.
+    expect(source).toContain("from '@/components/ui/combobox'");
+    expect(source).toContain('<Combobox');
+
+    expect(source).not.toContain('<select');
+    expect(source).not.toContain('<option');
+    expect(source).not.toContain('<datalist');
+    // The only way to reach a datalist is an `Input list=` attribute, so ban that too.
+    expect(source).not.toContain('list="');
+    expect(source).not.toContain('NativeSelect');
+  });
 });

@@ -106,12 +106,30 @@ async function change(input: HTMLInputElement, value: string) {
   });
 }
 
-async function changeSelect(select: HTMLSelectElement, value: string) {
+async function click(element: Element) {
   await act(async () => {
-    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
-    setter?.call(select, value);
-    select.dispatchEvent(new Event('change', { bubbles: true }));
+    element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
   });
+}
+
+function comboboxTrigger(ariaLabel: string): HTMLButtonElement {
+  const match = container.querySelector(`button[role="combobox"][aria-label="${ariaLabel}"]`);
+  if (!(match instanceof HTMLButtonElement)) throw new Error(`combobox not found: ${ariaLabel}`);
+  return match;
+}
+
+function comboboxText(ariaLabel: string): string {
+  return comboboxTrigger(ariaLabel).textContent?.trim() ?? '';
+}
+
+/** Open the picker and commit the row whose visible label starts with `optionLabel`. */
+async function pickOption(ariaLabel: string, optionLabel: string) {
+  await click(comboboxTrigger(ariaLabel));
+  const row = [...container.querySelectorAll('[role="option"]')].find((candidate) =>
+    candidate.textContent?.trim().startsWith(optionLabel),
+  );
+  if (!(row instanceof HTMLElement)) throw new Error(`option not found: ${optionLabel}`);
+  await click(row);
 }
 
 async function submit() {
@@ -172,9 +190,9 @@ describe('areas view', () => {
     if (!(nameInput instanceof HTMLInputElement)) throw new Error('name input not found');
     await change(nameInput, '  FXL BPO Sales  ');
 
-    const statusSelect = container.querySelector('select[aria-label="Status da área"]');
-    if (!(statusSelect instanceof HTMLSelectElement)) throw new Error('status select not found');
-    await changeSelect(statusSelect, 'archived');
+    expect(comboboxText('Status da área')).toBe('Ativa');
+    await pickOption('Status da área', 'Arquivada');
+    expect(comboboxText('Status da área')).toBe('Arquivada');
 
     await submit();
 
@@ -246,9 +264,9 @@ describe('areas view', () => {
     await submit();
     expect(onSave).not.toHaveBeenCalled();
 
-    const areaSelect = container.querySelector('select[aria-label="Área do produto"]');
-    if (!(areaSelect instanceof HTMLSelectElement)) throw new Error('area select not found');
-    await changeSelect(areaSelect, areaFixture.id);
+    expect(comboboxText('Área do produto')).toBe('Selecione a área');
+    await pickOption('Área do produto', 'FXL Tech');
+    expect(comboboxText('Área do produto')).toBe('FXL Tech');
 
     await submit();
 

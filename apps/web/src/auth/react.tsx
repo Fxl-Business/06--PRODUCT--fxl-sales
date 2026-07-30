@@ -11,7 +11,9 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { Combobox } from '@/components/ui/combobox';
 import { Skeleton } from '@/components/ui/skeleton';
+import { isOrgLabelFallback, orgLabel } from '@/lib/displayNames';
 import { getRoleFromHubClaims, getRolesFromHubClaims, parseJwtPayload, type AppRole } from './claims';
 import { getHubBffBasePath, loadHubBrowserConfig } from './provider';
 import { createHubAccessTokenCache } from './token';
@@ -232,20 +234,24 @@ function HubUserControls() {
   return (
     <>
       {workspaces.length > 1 ? (
-        <select
-          aria-label="Workspace"
-          className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-          defaultValue={workspaces.find((workspace) => workspace.name === workspaceName)?.id}
-          onChange={(event) => {
-            void setActive(event.target.value);
-          }}
-        >
-          {workspaces.map((workspace) => (
-            <option key={workspace.id} value={workspace.id}>
-              {workspace.name ?? workspace.id}
-            </option>
-          ))}
-        </select>
+        <div className="w-56">
+          <Combobox
+            aria-label="Workspace"
+            className="h-9 rounded-md border-input bg-background px-3 text-sm"
+            onChange={(workspaceId) => {
+              void setActive(workspaceId);
+            }}
+            options={workspaces.map((workspace) => ({
+              value: workspace.id,
+              label: orgLabel(workspace),
+              // CLAUDE.md forbids a raw workspace id as a primary label. When there is no
+              // name, the id drops to the muted secondary line instead.
+              description: isOrgLabelFallback(workspace) ? workspace.id : undefined,
+            }))}
+            searchPlaceholder="Buscar workspace..."
+            value={workspaces.find((workspace) => workspace.name === workspaceName)?.id ?? ''}
+          />
+        </div>
       ) : null}
       <button
         aria-label="Sair"

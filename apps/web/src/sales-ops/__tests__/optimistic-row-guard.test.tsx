@@ -275,9 +275,9 @@ function requireInput(selector: string): HTMLInputElement {
   return match;
 }
 
-function requireSelect(selector: string): HTMLSelectElement {
-  const match = container.querySelector(selector);
-  if (!(match instanceof HTMLSelectElement)) throw new Error(`select not found: ${selector}`);
+function comboboxTrigger(ariaLabel: string): HTMLButtonElement {
+  const match = container.querySelector(`button[role="combobox"][aria-label="${ariaLabel}"]`);
+  if (!(match instanceof HTMLButtonElement)) throw new Error(`combobox not found: ${ariaLabel}`);
   return match;
 }
 
@@ -509,13 +509,24 @@ describe('an unsaved row is never offered to a picker', () => {
     expect(vi.mocked(salesOpsApi.bootstrap)).toHaveBeenCalledTimes(1);
 
     await click(buttonByText('Novo produto'));
-    const areaSelect = requireSelect('select[aria-label="Área do produto"]');
-    const options = [...areaSelect.querySelectorAll('option')];
-    const values = options.map((option) => option.value);
+    await click(comboboxTrigger('Área do produto'));
+    const rows = [...container.querySelectorAll<HTMLElement>('[role="option"]')];
+    const offered = rows.map((row) => row.textContent?.trim());
 
-    // Positive control: the persisted área is offered.
-    expect(values).toContain(existingArea.id);
-    expect(values.some((value) => value.startsWith('optimistic:'))).toBe(false);
-    expect(options.map((option) => option.textContent?.trim())).not.toContain('AAA Área Nova');
+    // Positive control: the persisted área is offered, and it is the only one.
+    expect(offered).toEqual([existingArea.name]);
+    expect(offered).not.toContain('AAA Área Nova');
+
+    // And the id the picker hands to a real request is the persisted uuid, never the
+    // placeholder. Asserting the payload rather than a DOM attribute keeps the id-level
+    // guarantee the `option[value]` check used to give.
+    await click(rows[0]!);
+    await changeInput(requireInput('input[placeholder="Nome"]'), 'FXL Produto Novo');
+    await submitDialogForm();
+
+    expect(vi.mocked(salesOpsApi.saveProduct)).toHaveBeenCalledTimes(1);
+    const productPayload = vi.mocked(salesOpsApi.saveProduct).mock.calls[0]?.[0];
+    expect(productPayload?.areaId).toBe(existingArea.id);
+    expect(String(productPayload?.areaId)).not.toMatch(/^optimistic:/);
   });
 });

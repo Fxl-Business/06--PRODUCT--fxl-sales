@@ -232,24 +232,28 @@ async function changeInput(input: HTMLInputElement, value: string) {
   await flushReact();
 }
 
-async function changeSelect(select: HTMLSelectElement, value: string) {
-  await act(async () => {
-    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
-    setter?.call(select, value);
-    select.dispatchEvent(new Event('change', { bubbles: true }));
-  });
-  await flushReact();
+function comboboxTrigger(ariaLabel: string): HTMLButtonElement {
+  const match = container.querySelector(`button[role="combobox"][aria-label="${ariaLabel}"]`);
+  if (!(match instanceof HTMLButtonElement)) throw new Error(`combobox not found: ${ariaLabel}`);
+  return match;
+}
+
+function comboboxText(ariaLabel: string): string {
+  return comboboxTrigger(ariaLabel).textContent?.trim() ?? '';
+}
+
+async function pickOption(ariaLabel: string, optionLabel: string) {
+  await click(comboboxTrigger(ariaLabel));
+  const row = [...container.querySelectorAll('[role="option"]')].find((candidate) =>
+    candidate.textContent?.trim().startsWith(optionLabel),
+  );
+  if (!(row instanceof HTMLElement)) throw new Error(`option not found: ${optionLabel}`);
+  await click(row);
 }
 
 function requireInput(selector: string): HTMLInputElement {
   const match = container.querySelector(selector);
   if (!(match instanceof HTMLInputElement)) throw new Error(`input not found: ${selector}`);
-  return match;
-}
-
-function requireSelect(selector: string): HTMLSelectElement {
-  const match = container.querySelector(selector);
-  if (!(match instanceof HTMLSelectElement)) throw new Error(`select not found: ${selector}`);
   return match;
 }
 
@@ -336,7 +340,8 @@ describe('cadastros list refresh after a create', () => {
 
     await click(buttonByText('Novo produto'));
     await changeInput(requireInput('input[placeholder="Nome"]'), 'FXL Produto Novo');
-    await changeSelect(requireSelect('select[aria-label="Área do produto"]'), existingArea.id);
+    await pickOption('Área do produto', existingArea.name);
+    expect(comboboxText('Área do produto')).toBe(existingArea.name);
     await submitDialogForm();
 
     expect(vi.mocked(salesOpsApi.saveProduct)).toHaveBeenCalledTimes(1);
@@ -362,7 +367,8 @@ describe('cadastros list refresh after a create', () => {
 
     await click(buttonByText('Novo produto'));
     await changeInput(requireInput('input[placeholder="Nome"]'), 'FXL Produto Novo');
-    await changeSelect(requireSelect('select[aria-label="Área do produto"]'), existingArea.id);
+    await pickOption('Área do produto', existingArea.name);
+    expect(comboboxText('Área do produto')).toBe(existingArea.name);
     await submitDialogForm();
 
     await act(async () => {
