@@ -178,6 +178,75 @@ export function describeFuncaoCostBasis(entry: FuncaoCostBasisEntry | undefined)
     .join(' + ');
 }
 
+export type ProfessionalCostUnit = 'pct' | 'fix';
+
+/**
+ * The cents a wizard `%` professional cost is measured against.
+ *
+ * INPUT MODE ONLY: nothing here is persisted. `sales_ops_sale_professionals` stores a
+ * single integer-cents `cost_brl`, so a `%` is resolved before it ever reaches the wire.
+ *
+ * Primary base: the item subtotals of the proposta items whose produto declares this
+ * função, which is exactly what `buildFuncaoCostBasis` already summed. NOT the proposta
+ * total, and never the recurring mensalidade - a `professional_cost` payable is one-shot
+ * at win, so pricing it off a monthly stream would charge a pay-once cost against every
+ * cycle.
+ *
+ * Fallback, when no produto on this proposta declares the função (the inline-created
+ * função case): the sum of every PRODUCT item subtotal. Free-form items contribute
+ * nothing and the recorrência is still excluded, so both branches obey the same rule.
+ */
+export function professionalCostBaseCents(
+  entry: FuncaoCostBasisEntry | undefined,
+  productItemsSubtotalCents: number,
+): number {
+  const scoped = scopedBaseCents(entry);
+  if (scoped > 0) return scoped;
+  return Math.max(0, Math.floor(productItemsSubtotalCents));
+}
+
+/**
+ * A função gets at most one contribution per item (one cost row per
+ * `(productId, funcaoId)`), so this sum is exactly "the item subtotals of the items
+ * whose produto declares this função", with no double counting.
+ */
+function scopedBaseCents(entry: FuncaoCostBasisEntry | undefined): number {
+  return (entry?.contributions ?? []).reduce(
+    (sum, contribution) => sum + contribution.subtotalBrl,
+    0,
+  );
+}
+
+/** `10% de R$ 20.000,00 (FXL Custom)`, or `... (total dos itens de produto)` on the fallback base. */
+export function describeProfessionalCostBase(
+  pct: string | number,
+  entry: FuncaoCostBasisEntry | undefined,
+  productItemsSubtotalCents: number,
+): string {
+  const base = professionalCostBaseCents(entry, productItemsSubtotalCents);
+  if (base <= 0) return '';
+  const source =
+    scopedBaseCents(entry) > 0
+      ? [...new Set((entry?.contributions ?? []).map((contribution) => contribution.productName))].join(
+          ' + ',
+        )
+      : 'total dos itens de produto';
+  return `${toNumber(pct, 0)}% de ${formatMoneyBrl(base)} (${source})`;
+}
+
+/**
+ * The ONE place a wizard professional row turns into cents. `fix` reads the reais input,
+ * `pct` delegates to `resolveFuncaoCostCents` so there is a single percentage-of-basis
+ * implementation in the app.
+ */
+export function resolveProfessionalCostCents(
+  row: { costUnit: ProfessionalCostUnit; costPct: string; costBrl: string },
+  baseCents: number,
+): number {
+  if (row.costUnit === 'fix') return parseCurrencyInputToCents(row.costBrl);
+  return resolveFuncaoCostCents({ mode: 'pct', valuePct: row.costPct, valueBrl: null }, baseCents);
+}
+
 function cleanId(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;

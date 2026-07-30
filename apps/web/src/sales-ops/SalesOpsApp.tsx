@@ -115,6 +115,7 @@ import {
   buildSalePayload,
   defaultPlanShapeForProduct,
   describeFuncaoCostBasis,
+  describeProfessionalCostBase,
   entradaCentsFor,
   formatMoneyBrl,
   generateInstallmentPlan,
@@ -125,10 +126,13 @@ import {
   MAX_PLAN_INSTALLMENTS,
   maxRemainingInstallments,
   parseCurrencyInputToCents,
+  professionalCostBaseCents,
+  resolveProfessionalCostCents,
   resolveSaleCommissionDefaults,
   restanteCountFor,
   type PaymentPlanEntradaMode,
   type PaymentPlanShape,
+  type ProfessionalCostUnit,
 } from './calculations';
 import type {
   SaveAreaPayload,
@@ -4715,12 +4719,23 @@ type ProfessionalForm = {
   funcaoId: string;
   /** The label the picker shows; a resolved função name, or the legacy snapshot. */
   funcaoName: string;
+  /**
+   * INPUT MODE only, never persisted: `sales_ops_sale_professionals.cost_brl` is a
+   * single integer-cents column, so a `%` row resolves to cents before it reaches the
+   * payload and an edited proposta always reopens in `fix`.
+   */
+  costUnit: ProfessionalCostUnit;
+  /** Percent points as typed. Read only while `costUnit === 'pct'`. */
+  costPct: string;
+  /** Reais as typed. Read only while `costUnit === 'fix'`. */
   costBrl: string;
   /**
    * Set the moment the operator types in this row's `CUSTO ALOCADO`, and seeded
    * `true` for every prefilled row, because a persisted cost is by definition a
    * decision that was already saved. While it is false the cost re-derives from
    * the produto's default for the row's função; once true it is never recomputed.
+   * A `%` row is costManual by construction, because choosing a percentage is
+   * itself a decision.
    */
   costManual: boolean;
 };
@@ -4956,6 +4971,10 @@ function deriveWizardPrefill(sale: SalesOpsSale, bootstrap: SalesOpsBootstrap): 
         // A legacy row has no funcaoId and no snapshot column value worth trusting
         // over `role`, so the deprecated mirror is the fallback label.
         funcaoName: row.funcaoNameSnapshot || row.role,
+        // A stored cost is cents, so it always reopens in `R$`: the unit is an input
+        // mode and there is no column that could have remembered a percentage.
+        costUnit: 'fix' as const,
+        costPct: '0',
         costBrl: centsToInput(row.costBrl),
         // Unconditional: a persisted cost is a saved decision, so nothing on the
         // edit path may recompute it behind the operator.
@@ -5435,6 +5454,18 @@ function SaleWizardDialogBody({
     })),
     bootstrap.productFuncaoCosts,
   );
+  /*
+    The fallback base for a wizard `%` whose função no produto declares. PRODUCT items
+    only and item subtotals only, so the recorrência exclusion that governs
+    `buildFuncaoCostBasis` governs this too.
+  */
+  const productItemsSubtotalCents = items
+    .filter((item) => item.kind === 'product' && item.productId)
+    .reduce(
+      (sum, item) =>
+        sum + Math.max(1, Number(item.quantity) || 1) * parseCurrencyToCents(item.unitBrl),
+      0,
+    );
   const funcaoCostKeyNow = JSON.stringify(
     [...funcaoCostBasis.entries()].map(([funcaoId, entry]) => [funcaoId, entry.cents]),
   );
@@ -5442,7 +5473,12 @@ function SaleWizardDialogBody({
     setFuncaoCostKey(funcaoCostKeyNow);
     setProfessionals((current) =>
       current.map((row) =>
-        row.costManual || !row.funcaoId
+        /*
+          The `costUnit === 'pct'` clause is redundant by the invariant that a `%` row
+          is always `costManual`; it is written out so the invariant is visible at the
+          guard that depends on it. The body writes only `costBrl`, the `fix` field.
+        */
+        row.costManual || row.costUnit === 'pct' || !row.funcaoId
           ? row
           : { ...row, costBrl: centsToInput(funcaoCostBasis.get(row.funcaoId)?.cents ?? 0) },
       ),
@@ -5525,7 +5561,7 @@ function SaleWizardDialogBody({
     );
 
   const professionalCents = professionals.reduce(
-    (sum, professional) => sum + parseCurrencyToCents(professional.costBrl),
+    (sum, professional) => sum + professionalRowCents(professional),
     0,
   );
   const otherCents = parseCurrencyToCents(otherCostsBrl);
@@ -5626,7 +5662,7 @@ function SaleWizardDialogBody({
         : `Alocação - ${professional.personName || 'prestador'}`,
       type: 'Custo profissional',
       date: displayDate(baseDate),
-      value: parseCurrencyToCents(professional.costBrl),
+      value: professionalRowCents(professional),
       className: 'bg-[#e6edf4] text-[#3f6ea3]',
     })),
     ...(otherCents > 0
@@ -5645,6 +5681,79 @@ function SaleWizardDialogBody({
   function selectedProduct(item: SaleItemForm) {
     if (item.kind === 'free') return undefined;
     return bootstrap.products.find((product) => product.id === item.productId) ?? firstProduct;
+  }
+
+  function professionalRowBaseCents(row: ProfessionalForm): number {
+    return professionalCostBaseCents(
+      row.funcaoId ? funcaoCostBasis.get(row.funcaoId) : undefined,
+      productItemsSubtotalCents,
+    );
+  }
+
+  /*
+    The single seam every consumer of a professional cost goes through. A `%` row is
+    DERIVED on every render rather than mirrored into `costBrl`, which is what keeps the
+    number and the derivation line under it from ever disagreeing, and what avoids a
+    second render-phase setState loop next to the four that already exist.
+  */
+  function professionalRowCents(row: ProfessionalForm): number {
+    return resolveProfessionalCostCents(row, professionalRowBaseCents(row));
+  }
+
+  /*
+    Toggling the unit is an explicit decision about this row's number, so it PINS the row
+    in both directions and never un-pins it. That is what stops the render-phase
+    produto-default guard from resurrecting a stale default over a number the operator
+    just derived: a row that has been toggled even once can no longer be re-derived from
+    the cadastro.
+  */
+  function setProfessionalCostUnit(index: number, unit: ProfessionalCostUnit) {
+    setProfessionals((current) =>
+      current.map((item, itemIndex) => {
+        if (itemIndex !== index || item.costUnit === unit) return item;
+        if (unit === 'pct') {
+          /*
+            Seed the percentage that reproduces the cents currently on the row, to two
+            decimals, so the toggle does not blank a number the operator can see. The
+            rounding can move the resolved cents by up to half a basis point of the base;
+            the derivation line states the percentage and the base, so what is on screen
+            is always what is computed.
+          */
+          const base = professionalRowBaseCents(item);
+          const cents = parseCurrencyToCents(item.costBrl);
+          const seeded = base > 0 ? String(Math.round((cents / base) * 10000) / 100) : '0';
+          return { ...item, costUnit: 'pct', costPct: seeded, costManual: true };
+        }
+        // Back to R$: freeze the exact cents the percentage resolved to, losslessly.
+        return {
+          ...item,
+          costUnit: 'fix',
+          costBrl: centsToInput(professionalRowCents(item)),
+          costManual: true,
+        };
+      }),
+    );
+  }
+
+  /*
+    The ONE `Restaurar padrão` handler, shared by the `%` footer and the `fix` chip.
+    Restoring the produto default means restoring its CENTS, so the row must land back
+    in `R$`; leaving it in `%` would keep showing a percentage the cadastro never stated.
+  */
+  function restoreProfessionalDefault(index: number, defaultCents: number) {
+    setProfessionals((current) =>
+      current.map((item, itemIndex) =>
+        itemIndex === index
+          ? {
+              ...item,
+              costManual: false,
+              costUnit: 'fix' as const,
+              costPct: '0',
+              costBrl: centsToInput(defaultCents),
+            }
+          : item,
+      ),
+    );
   }
 
   /**
@@ -5956,7 +6065,8 @@ function SaleWizardDialogBody({
         // ignores this; it is sent so a legacy row with no funcaoId stays a valid
         // payload rather than tripping funcao_or_role_required.
         role: professional.funcaoName,
-        costBrl: parseCurrencyToCents(professional.costBrl),
+        // Resolved here, never on the wire: `cost_brl` is a single integer-cents column.
+        costBrl: professionalRowCents(professional),
       })),
     };
     return buildSalePayload(draft);
@@ -6849,6 +6959,10 @@ function SaleWizardDialogBody({
                               // silently invented a cargo nobody chose.
                               funcaoId: '',
                               funcaoName: '',
+                              // `fix` is the default everywhere, so a fresh row behaves
+                              // exactly as it did before the unit toggle existed.
+                              costUnit: 'fix',
+                              costPct: '0',
                               costBrl: '0.00',
                               costManual: false,
                             },
@@ -6859,10 +6973,15 @@ function SaleWizardDialogBody({
                         + profissional
                       </button>
                     </div>
-                    <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_150px_36px] gap-[9px] px-0.5 pb-[7px] text-[11px] font-bold uppercase tracking-[0.05em] text-[#9b9ba3]">
+                    {/*
+                      212px = a 96px toggle group + an 8px gap + a ~108px input, so the
+                      `% | R$` pair fits beside the number instead of squeezing it.
+                    */}
+                    <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_212px_36px] gap-[9px] px-0.5 pb-[7px] text-[11px] font-bold uppercase tracking-[0.05em] text-[#9b9ba3]">
                       <span>Profissional</span>
                       <span>Função no projeto</span>
-                      <span className="text-right">Custo alocado</span>
+                      {/* Left-aligned now: the control group starts at this cell's left edge. */}
+                      <span>Custo alocado</span>
                       <span />
                     </div>
                     <div className="flex flex-col gap-2">
@@ -6882,7 +7001,7 @@ function SaleWizardDialogBody({
                           !professional.funcaoName.trim();
                         return (
                           <div
-                            className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_150px_36px] items-start gap-[9px]"
+                            className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_212px_36px] items-start gap-[9px]"
                             key={`${professional.personId}-${index}`}
                           >
                             <Combobox
@@ -6960,25 +7079,86 @@ function SaleWizardDialogBody({
                               />
                             </div>
                             <div className="flex flex-col items-end gap-1">
-                              <Input
-                                aria-label={`Custo alocado do profissional ${index + 1}`}
-                                className={`sales-ops-num w-full text-right ${formInputClass}`}
-                                onChange={(event) =>
-                                  setProfessionals((current) =>
-                                    current.map((item, itemIndex) =>
-                                      itemIndex === index
-                                        ? {
-                                            ...item,
-                                            costBrl: event.target.value,
-                                            costManual: true,
-                                          }
-                                        : item,
-                                    ),
-                                  )
-                                }
-                                value={professional.costBrl}
-                              />
-                              {professional.costManual ? (
+                              <div className="flex w-full gap-2">
+                                <div className="flex flex-none gap-[3px] rounded-[9px] bg-[#f2f2f4] p-[3px]">
+                                  <UnitToggle
+                                    active={professional.costUnit === 'pct'}
+                                    /*
+                                      Indexed, not name-interpolated: stable from the
+                                      moment the row is added.
+                                    */
+                                    ariaLabel={`Custo do profissional ${index + 1} em porcentagem`}
+                                    onClick={() => setProfessionalCostUnit(index, 'pct')}
+                                    value="%"
+                                  />
+                                  <UnitToggle
+                                    active={professional.costUnit === 'fix'}
+                                    ariaLabel={`Custo do profissional ${index + 1} em reais`}
+                                    onClick={() => setProfessionalCostUnit(index, 'fix')}
+                                    value="R$"
+                                  />
+                                </div>
+                                <UnitInput
+                                  // Unchanged label: the existing DOM tests address the
+                                  // row by it.
+                                  ariaLabel={`Custo alocado do profissional ${index + 1}`}
+                                  onChange={(value) =>
+                                    setProfessionals((current) =>
+                                      current.map((item, itemIndex) =>
+                                        itemIndex === index
+                                          ? item.costUnit === 'pct'
+                                            ? { ...item, costPct: value, costManual: true }
+                                            : { ...item, costBrl: value, costManual: true }
+                                          : item,
+                                      ),
+                                    )
+                                  }
+                                  unit={professional.costUnit === 'fix' ? 'R$' : '%'}
+                                  value={
+                                    professional.costUnit === 'fix'
+                                      ? professional.costBrl
+                                      : professional.costPct
+                                  }
+                                />
+                              </div>
+                              {/*
+                                The `%` branch comes FIRST: a percent row is always
+                                costManual, so the chip branch would otherwise hide its
+                                own derivation. The chip string still lives in the `fix`
+                                branch below.
+                              */}
+                              {professional.costUnit === 'pct' ? (
+                                <div className="flex flex-col items-end gap-1">
+                                  {professionalRowBaseCents(professional) > 0 ? (
+                                    <span className="text-right text-[11.5px] leading-tight text-[#9b9ba3]">
+                                      {describeProfessionalCostBase(
+                                        professional.costPct,
+                                        basis,
+                                        productItemsSubtotalCents,
+                                      )}{' '}
+                                      = {formatMoneyBrl(professionalRowCents(professional))}
+                                    </span>
+                                  ) : (
+                                    /*
+                                      The empty-basis case, never a silent zero: with no
+                                      product item on the proposta a percentage has
+                                      nothing to be a percentage OF.
+                                    */
+                                    <span className="text-right text-[11.5px] font-semibold leading-tight text-[#9c7210]">
+                                      Nenhum item de produto na proposta - o percentual resolve para R$ 0,00.
+                                    </span>
+                                  )}
+                                  {basis ? (
+                                    <button
+                                      className="text-[11px] font-semibold text-[#9c7210] underline"
+                                      onClick={() => restoreProfessionalDefault(index, basis.cents)}
+                                      type="button"
+                                    >
+                                      Restaurar padrão
+                                    </button>
+                                  ) : null}
+                                </div>
+                              ) : professional.costManual ? (
                                 <div className="flex items-center gap-2">
                                   <span className="rounded-full bg-[#fdf0cf] px-[7px] py-[2px] text-[11px] font-semibold text-[#9c7210]">
                                     Alterado manualmente
@@ -6986,19 +7166,7 @@ function SaleWizardDialogBody({
                                   {basis ? (
                                     <button
                                       className="text-[11px] font-semibold text-[#9c7210] underline"
-                                      onClick={() =>
-                                        setProfessionals((current) =>
-                                          current.map((item, itemIndex) =>
-                                            itemIndex === index
-                                              ? {
-                                                  ...item,
-                                                  costManual: false,
-                                                  costBrl: centsToInput(basis.cents),
-                                                }
-                                              : item,
-                                          ),
-                                        )
-                                      }
+                                      onClick={() => restoreProfessionalDefault(index, basis.cents)}
                                       type="button"
                                     >
                                       Restaurar padrão

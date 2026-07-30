@@ -346,6 +346,14 @@ describe('sale wizard UI contract', () => {
     expect(source).toContain('Restaurar padrão');
     expect(source).toContain('Custos profissionais');
     expect(source).toContain('Selecione a função de cada profissional alocado.');
+    /*
+      `CUSTO ALOCADO` takes `%` or `R$`. These labels are distinct from the produto
+      dialog's `Custo da função ${index + 1} em porcentagem` further up this same
+      file, so they can only pass if the wizard's own toggle is really there.
+    */
+    expect(source).toContain('Custo do profissional ${index + 1} em porcentagem');
+    expect(source).toContain('Custo do profissional ${index + 1} em reais');
+    expect(source).toContain('Nenhum item de produto na proposta');
     expect(source).not.toContain('Custos + imposto');
     // The two free-text escape hatches Profissionais alocados used to carry.
     expect(source).not.toContain('Digite manualmente');

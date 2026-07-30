@@ -1,0 +1,1 @@
+{"agent":"exec","slice":"06-wizard-custo-mode","status":"PASS","report":"nexo/runs/batch-01K9NX4QPTUI0730CADPRODWIZ/exec-06.md","summary":"Wizard CUSTO ALOCADO now accepts % or R$ as an input-mode-only toggle resolving against the funcao-scoped item subtotal; no migration, 381 web / 300 api tests green, lint and type-check clean.","done":true,"ts":"2026-07-30T17:35:00Z"}

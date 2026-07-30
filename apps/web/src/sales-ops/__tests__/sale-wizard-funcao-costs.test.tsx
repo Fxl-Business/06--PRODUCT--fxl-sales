@@ -434,10 +434,31 @@ async function addProfessional() {
   await flushReact();
 }
 
-/** The panel text under a row's `CUSTO ALOCADO`, chip or derivation alike. */
+/**
+ * The panel text under a row's `CUSTO ALOCADO`, chip or derivation alike.
+ *
+ * The input is nested inside `UnitInput`'s `relative flex-1` wrapper, so
+ * `parentElement` no longer reaches the cell and the `.items-end` cell is the hook.
+ */
 function rowFooterText(index = 1): string {
   const cost = labeledInput(`Custo alocado do profissional ${index}`);
-  return cost.parentElement?.textContent?.trim() ?? '';
+  return cost.closest('.items-end')?.textContent?.trim() ?? '';
+}
+
+/** For the icon-only buttons, which carry an aria-label and no text. */
+function buttonByLabel(label: string): HTMLButtonElement {
+  const match = container.querySelector(`button[aria-label="${label}"]`);
+  if (!(match instanceof HTMLButtonElement)) throw new Error(`button not found: ${label}`);
+  return match;
+}
+
+async function setCostUnit(unit: '%' | 'R$', index = 1) {
+  const label =
+    unit === '%'
+      ? `Custo do profissional ${index} em porcentagem`
+      : `Custo do profissional ${index} em reais`;
+  await click(buttonByLabel(label));
+  await flushReact();
 }
 
 describe('sale wizard profissionais alocados', () => {
@@ -724,6 +745,118 @@ describe('sale wizard profissionais alocados', () => {
     expect(options).not.toContain('Arquiteto Otimista');
     // Positive control: the rest of the list is still there.
     expect(options).toContain('Desenvolvedor');
+  });
+
+  it('toggles CUSTO ALOCADO to % and resolves against the funcao-scoped item subtotal', async () => {
+    await renderWizard();
+    await goToCosts();
+    await addProfessional();
+    await pickOption('Profissional 1', 'Bruno Entrega');
+    await pickOption('Função do profissional 1', 'Desenvolvedor');
+    await flushReact();
+
+    await setCostUnit('%');
+    await typeInto(labeledInput('Custo alocado do profissional 1'), '10');
+    await flushReact();
+
+    expect(labeledInput('Custo alocado do profissional 1').value).toBe('10');
+    // The base is the item SUBTOTAL of the declaring produto, never the proposta total.
+    expect(rowFooterText()).toContain('10% de R$ 20.000,00 (FXL Custom)');
+    expect(rowFooterText()).toContain('R$ 2.000,00');
+
+    await click(buttonByText('Salvar rascunho'));
+    const payload = onSave.mock.calls.at(-1)![0];
+    // Resolved before the wire: the column is a single integer-cents `cost_brl`.
+    expect(payload.professionals[0]!.costBrl).toBe(200000);
+  });
+
+  it('warns instead of silently writing zero when no product item backs the percentage', async () => {
+    await renderWizard();
+    await click(buttonByText('+ item avulso'));
+    await flushReact();
+    await pickOption('Área do item 2', 'FXL Tech');
+    await typeInto(labeledInput('Descrição do item 2'), 'Consultoria avulsa');
+    await typeInto(labeledInput('Valor unitário do item 2'), '5000');
+    await flushReact();
+    // The only remaining item is free-form, so nothing declares a função and nothing
+    // feeds the fallback base either.
+    await click(buttonByLabel('Remover item 1'));
+    await flushReact();
+
+    await goToCosts();
+    await addProfessional();
+    await pickOption('Profissional 1', 'Bruno Entrega');
+    await pickOption('Função do profissional 1', 'Desenvolvedor');
+    await flushReact();
+    await setCostUnit('%');
+    await typeInto(labeledInput('Custo alocado do profissional 1'), '10');
+    await flushReact();
+
+    expect(rowFooterText()).toContain('Nenhum item de produto na proposta');
+    await click(buttonByText('Salvar rascunho'));
+    expect(onSave.mock.calls.at(-1)![0].professionals[0]!.costBrl).toBe(0);
+  });
+
+  it('toggling back to R$ freezes the resolved cents', async () => {
+    await renderWizard();
+    await goToCosts();
+    await addProfessional();
+    await pickOption('Profissional 1', 'Bruno Entrega');
+    await pickOption('Função do profissional 1', 'Desenvolvedor');
+    await flushReact();
+
+    await setCostUnit('%');
+    await typeInto(labeledInput('Custo alocado do profissional 1'), '10');
+    await flushReact();
+    await setCostUnit('R$');
+
+    expect(labeledInput('Custo alocado do profissional 1').value).toBe('2000');
+    await click(buttonByText('Salvar rascunho'));
+    expect(onSave.mock.calls.at(-1)![0].professionals[0]!.costBrl).toBe(200000);
+  });
+
+  it('does not let a produto default clobber a percent row, and re-bases it live', async () => {
+    await renderWizard();
+    await goToCosts();
+    await addProfessional();
+    await pickOption('Função do profissional 1', 'Desenvolvedor');
+    await flushReact();
+    await setCostUnit('%');
+    await typeInto(labeledInput('Custo alocado do profissional 1'), '10');
+    await flushReact();
+
+    await backToProposta();
+    await typeInto(labeledInput('Valor unitário do item 1'), '40000');
+    await flushReact();
+    await goToCosts();
+
+    // The percentage is the operator's decision and survives; the cents follow the base.
+    expect(labeledInput('Custo alocado do profissional 1').value).toBe('10');
+    expect(rowFooterText()).toContain('10% de R$ 40.000,00 (FXL Custom)');
+    expect(rowFooterText()).toContain('R$ 4.000,00');
+  });
+
+  it('returns a percent row to R$ and to the produto default on Restaurar padrão', async () => {
+    await renderWizard();
+    await goToCosts();
+    await addProfessional();
+    await pickOption('Função do profissional 1', 'Desenvolvedor');
+    await flushReact();
+    await setCostUnit('%');
+    await typeInto(labeledInput('Custo alocado do profissional 1'), '10');
+    await flushReact();
+
+    const restore = [...container.querySelectorAll('button')].find(
+      (candidate) => candidate.textContent?.trim() === 'Restaurar padrão',
+    );
+    if (!(restore instanceof HTMLButtonElement)) throw new Error('Restaurar padrão not found');
+    await click(restore);
+    await flushReact();
+
+    // Back to the produto's own cents, in R$, un-pinned.
+    expect(labeledInput('Custo alocado do profissional 1').value).toBe('1000');
+    expect(rowFooterText()).toContain('5% de FXL Custom (R$ 20.000,00)');
+    expect(rowFooterText()).not.toContain('Alterado manualmente');
   });
 
   it('shows the funcao on the Custo profissional row of the payables preview', async () => {
