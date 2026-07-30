@@ -199,6 +199,15 @@ function labeledButton(label: string): HTMLButtonElement {
   return match;
 }
 
+/** The money `<Input>` inside the `<Field>` whose visible label matches. */
+function moneyInput(label: string): HTMLInputElement {
+  const match = [...container.querySelectorAll('input[type="number"]')].find((candidate) =>
+    candidate.closest('label')?.textContent?.includes(label),
+  );
+  if (!(match instanceof HTMLInputElement)) throw new Error(`money input not found: ${label}`);
+  return match;
+}
+
 async function click(element: Element) {
   await act(async () => {
     element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
@@ -342,22 +351,72 @@ describe('product and service dialog', () => {
     expect(payload).not.toHaveProperty('openPrice');
   });
 
-  it('replaces every own-value input with the definido na venda notice for a serviço', async () => {
-    await renderDialog({ productKind: 'service' });
+  it('renders editable base value inputs for a serviço and submits them', async () => {
+    const onSave = await renderDialog({ productKind: 'service' });
     await click(labeledButton('Possui mensalidade'));
 
-    expect(text()).toContain('Serviços têm valor variável, definido em cada proposta.');
+    expect(text()).toContain('Valor base (R$)');
     expect(text()).toContain('Valor da mensalidade (R$)');
-    expect(text().match(/Definido na venda/g)?.length).toBe(2);
-
-    await click(labeledButton('Classificar como produto'));
-    // Positive control: a produto really does render two editable money inputs there,
-    // so the absence above is about the kind and not about a field that never existed.
+    // The dashed notice and the kind-specific banner are gone: the dialog already
+    // says once, at the top, that everything in it is a default.
     expect(text()).not.toContain('Definido na venda');
-    expect(container.querySelectorAll('input[type="number"]').length).toBeGreaterThan(0);
+    expect(text()).not.toContain('Serviços têm valor variável');
+
+    const baseInput = [...container.querySelectorAll('input[type="number"]')].find(
+      (candidate) => candidate.closest('label')?.textContent?.includes('Valor base (R$)'),
+    );
+    if (!(baseInput instanceof HTMLInputElement)) throw new Error('base value input not found');
+    await change(baseInput, '2500');
+    await chooseArea();
+    await submit();
+
+    expect(onSave.mock.calls[0]?.[0]).toMatchObject({ kind: 'service', setupBrl: 250000 });
   });
 
-  it('zeroes the own value when a produto is reclassified as a serviço', async () => {
+  it('keeps definido na venda as the zero state for a serviço with no base value', async () => {
+    // Every Serviço that predates slice 07 stores 0, so this is what the whole
+    // existing catalog opens as. `0` is the ABSENCE of a base value, and printing a
+    // literal 0 in the field would state a price nobody set - the same lie the list
+    // avoids by printing `Variável` instead of `R$ 0,00` for this very row.
+    await renderDialog({
+      existing: product({
+        id: '99999999-9999-4999-8999-999999999999',
+        kind: 'service',
+        openPrice: true,
+        setupBrl: 0,
+        hasMonthly: true,
+        monthlyBrl: 0,
+      }),
+    });
+
+    const base = moneyInput('Valor base (R$)');
+    expect(base.value).toBe('');
+    expect(base.placeholder).toBe('Definido na venda');
+
+    const monthly = moneyInput('Valor da mensalidade (R$)');
+    expect(monthly.value).toBe('');
+    expect(monthly.placeholder).toBe('Definido na venda');
+  });
+
+  it('seeds the stored base value of a serviço that has one', async () => {
+    // Positive control for the case above: the blank is about the value being 0,
+    // not about the kind, so a valued Serviço still opens on its own number.
+    await renderDialog({
+      existing: product({
+        id: '99999999-9999-4999-8999-999999999998',
+        kind: 'service',
+        openPrice: true,
+        setupBrl: 500000,
+        hasMonthly: true,
+        monthlyBrl: 20000,
+      }),
+    });
+
+    expect(moneyInput('Valor base (R$)').value).toBe('5000');
+    expect(moneyInput('Valor da mensalidade (R$)').value).toBe('200');
+  });
+
+  it('preserves the own value when a produto is reclassified as a serviço', async () => {
     const onSave = await renderDialog({
       existing: product({ setupBrl: 100000, hasMonthly: true, monthlyBrl: 50000 }),
     });
@@ -367,8 +426,8 @@ describe('product and service dialog', () => {
 
     expect(onSave.mock.calls[0]?.[0]).toMatchObject({
       kind: 'service',
-      setupBrl: 0,
-      monthlyBrl: 0,
+      setupBrl: 100000,
+      monthlyBrl: 50000,
     });
   });
 

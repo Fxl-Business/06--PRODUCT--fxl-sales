@@ -3,6 +3,7 @@
 import * as React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { formatMoneyBrl } from '../calculations';
 import { ProductsView } from '../SalesOpsApp';
 import type {
   SalesOpsArea,
@@ -235,6 +236,27 @@ describe('produtos e serviços view', () => {
     expect(cellUnder('Valor').textContent?.trim()).toBe('Variável');
     expect(cellUnder('Plano padrão').textContent?.trim()).toBe('50% + 3x');
     expect(cellUnder('Custos padrão').textContent?.trim()).toBe('2 funções');
+  });
+
+  it('prints the base value in the Valor column when a serviço carries one', async () => {
+    await renderView({ products: [servico({ setupBrl: 500000 })], kind: 'service' });
+
+    const valor = cellUnder('Valor').textContent?.trim();
+    expect(valor).toBe(formatMoneyBrl(500000, { maximumFractionDigits: 0 }));
+    expect(valor).not.toBe('Variável');
+  });
+
+  it('falls back to the mensalidade when a serviço has no setup but does recur', async () => {
+    // The `||` rule productBaseValueBrl inherits from the wizard: a row with no
+    // setup that recurs suggests its mensalidade.
+    await renderView({
+      products: [servico({ setupBrl: 0, hasMonthly: true, monthlyBrl: 20000 })],
+      kind: 'service',
+    });
+
+    expect(cellUnder('Valor').textContent?.trim()).toBe(
+      formatMoneyBrl(20000, { maximumFractionDigits: 0 }),
+    );
   });
 
   it('counts custos padrão from the flat productFuncaoCosts prop, scoped per product', async () => {

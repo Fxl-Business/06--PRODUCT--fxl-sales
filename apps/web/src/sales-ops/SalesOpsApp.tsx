@@ -126,6 +126,7 @@ import {
   MAX_PLAN_INSTALLMENTS,
   maxRemainingInstallments,
   parseCurrencyInputToCents,
+  productBaseValueBrl,
   professionalCostBaseCents,
   resolveProfessionalCostCents,
   resolveSaleCommissionDefaults,
@@ -409,6 +410,26 @@ function parseCurrencyToCents(value: string | number | undefined): number {
 function centsToInput(cents: number | undefined): string {
   const value = (cents ?? 0) / 100;
   return Number.isInteger(value) ? String(value) : value.toFixed(2);
+}
+
+/**
+ * `centsToInput` for a field where 0 means "nobody set a value", which is what
+ * setupBrl/monthlyBrl mean on a catalog row: there is no separate flag, so 0 IS the
+ * absence. Seeding a literal `0` would state a price nobody chose - the same lie the
+ * list avoids by printing `Variável` rather than `R$ 0,00` - and would make an
+ * operator clear the field before typing.
+ *
+ * Deliberately kind-blind, exactly like `productBaseValueBrl`. `productForm` runs
+ * once in a `useState` initializer and the dialog's remount key does not include
+ * `form.kind`, so a seed that branched on the kind would go stale the moment the
+ * `Produto | Serviço` control was toggled. Only the PLACEHOLDER is kind-aware,
+ * because it is read at render time.
+ *
+ * A blank field parses back to 0, so this changes what the operator sees and never
+ * what is submitted.
+ */
+function centsToOptionalInput(cents: number | undefined): string {
+  return cents ? centsToInput(cents) : '';
 }
 
 /** `null` is accepted because that is what drizzle hands back for a nullable numeric. */
@@ -2416,12 +2437,23 @@ export function ProductsView({
                   {isService ? (
                     <>
                       {/*
-                          Never a money figure: a serviço has no own value by definition
-                          and the DB CHECK keeps setup/mensalidade at zero, so R$ 0,00
-                          would be a lie and `Aberto` would leak a deprecated flag name.
+                          A serviço's own value is a BASE value, a per-proposta
+                          default. `0` is how "no base value" is stored - there is
+                          no separate flag - so it prints `Variável` rather than
+                          `R$ 0,00`, which would be a lie about a price nobody set.
                         */}
-                      <TableCell className="px-4 py-3 text-right text-[13.5px] text-[#9b9ba3]">
-                        Variável
+                      <TableCell
+                        className={
+                          productBaseValueBrl(product) > 0
+                            ? 'sales-ops-num px-4 py-3 text-right text-[13.5px]'
+                            : 'px-4 py-3 text-right text-[13.5px] text-[#9b9ba3]'
+                        }
+                      >
+                        {productBaseValueBrl(product) > 0
+                          ? formatMoneyBrl(productBaseValueBrl(product), {
+                              maximumFractionDigits: 0,
+                            })
+                          : 'Variável'}
                       </TableCell>
                       <TableCell className="sales-ops-num px-4 py-3 text-[13.5px]">
                         {defaultPlanSummary(product)}
@@ -3092,9 +3124,9 @@ function productForm(
     areaId: product?.areaId ?? '',
     codeSuffix: product?.codeSuffix ?? '0',
     kind: product?.kind ?? kindHint ?? 'product',
-    setupBrl: centsToInput(product?.setupBrl),
+    setupBrl: centsToOptionalInput(product?.setupBrl),
     hasMonthly: product?.hasMonthly ?? false,
-    monthlyBrl: centsToInput(product?.monthlyBrl),
+    monthlyBrl: centsToOptionalInput(product?.monthlyBrl),
     recurringCommission: product?.recurringCommission ?? false,
     sellerCommissionType: product?.sellerCommissionType ?? 'pct',
     sellerCommissionValue: pctToInput(product?.sellerCommissionValue, 10),
@@ -3223,14 +3255,6 @@ function UnitInput({
       <span className="pointer-events-none absolute right-[13px] top-1/2 -translate-y-1/2 text-[13px] font-bold text-[#9b9ba3]">
         {unit}
       </span>
-    </div>
-  );
-}
-
-function DefinedOnSaleNotice() {
-  return (
-    <div className="flex h-11 items-center rounded-[10px] border border-dashed border-[#dcc98f] bg-[#fbf6ea] px-3 text-[13px] font-semibold text-[#9c7210]">
-      Definido na venda
     </div>
   );
 }
@@ -3445,9 +3469,9 @@ function ProductDialogBody({
       // `kind` only. `openPrice` is a server-written projection of it now, and sending
       // both would be a `kind_open_price_conflict`.
       kind: form.kind,
-      setupBrl: isService ? 0 : parseCurrencyToCents(form.setupBrl),
+      setupBrl: parseCurrencyToCents(form.setupBrl),
       hasMonthly: form.hasMonthly,
-      monthlyBrl: isService || !form.hasMonthly ? 0 : parseCurrencyToCents(form.monthlyBrl),
+      monthlyBrl: form.hasMonthly ? parseCurrencyToCents(form.monthlyBrl) : 0,
       recurringCommission: form.hasMonthly && form.recurringCommission,
       sellerCommissionType: form.sellerCommissionType,
       sellerCommissionValue: parseDecimal(form.sellerCommissionValue, 10),
@@ -3612,12 +3636,6 @@ function ProductDialogBody({
               </div>
             </div>
 
-            {isService ? (
-              <div className="rounded-[11px] border border-[#f0e2bd] bg-[#fbf3e0] px-[14px] py-[11px] text-[13px] font-semibold text-[#9c7210]">
-                Serviços têm valor variável, definido em cada proposta.
-              </div>
-            ) : null}
-
             <div className="grid gap-3 md:grid-cols-2">
               <FieldBlock label="Área" required>
                 <Combobox
@@ -3634,17 +3652,18 @@ function ProductDialogBody({
                   value={form.areaId}
                 />
               </FieldBlock>
-              <Field label="Setup (R$)">
-                {isService ? (
-                  <DefinedOnSaleNotice />
-                ) : (
-                  <Input
-                    className={`sales-ops-num ${formInputClass}`}
-                    onChange={(event) => set('setupBrl', event.target.value)}
-                    type="number"
-                    value={form.setupBrl}
-                  />
-                )}
+              <Field label={isService ? 'Valor base (R$)' : 'Setup (R$)'}>
+                <Input
+                  className={`sales-ops-num ${formInputClass}`}
+                  onChange={(event) => set('setupBrl', event.target.value)}
+                  // A blank field is the zero state. For a Serviço that is the whole
+                  // catalog as it stands today, so it keeps saying `Definido na venda`
+                  // rather than showing a price nobody set; for a Produto the ghosted
+                  // `0` reads exactly as the literal `0` it replaces.
+                  placeholder={isService ? 'Definido na venda' : '0'}
+                  type="number"
+                  value={form.setupBrl}
+                />
               </Field>
             </div>
 
@@ -3669,16 +3688,13 @@ function ProductDialogBody({
               {form.hasMonthly ? (
                 <div className="flex flex-col gap-[11px] px-[14px] pb-[14px]">
                   <Field label="Valor da mensalidade (R$)">
-                    {isService ? (
-                      <DefinedOnSaleNotice />
-                    ) : (
-                      <Input
-                        className={`sales-ops-num bg-white ${formInputClass}`}
-                        onChange={(event) => set('monthlyBrl', event.target.value)}
-                        type="number"
-                        value={form.monthlyBrl}
-                      />
-                    )}
+                    <Input
+                      className={`sales-ops-num bg-white ${formInputClass}`}
+                      onChange={(event) => set('monthlyBrl', event.target.value)}
+                      placeholder={isService ? 'Definido na venda' : '0'}
+                      type="number"
+                      value={form.monthlyBrl}
+                    />
                   </Field>
                   <div className="flex items-center justify-between gap-4 rounded-[11px] border border-[#ececf1] bg-white px-[13px] py-[11px]">
                     <div>
@@ -5192,9 +5208,7 @@ function SaleWizardDialogBody({
             areaId: '',
             customLabel: '',
             quantity: '1',
-            unitBrl: centsToInput(
-              firstProduct.openPrice ? 0 : firstProduct.setupBrl || firstProduct.monthlyBrl,
-            ),
+            unitBrl: centsToInput(productBaseValueBrl(firstProduct)),
             descriptionOpen: false,
           },
         ]
@@ -5762,10 +5776,21 @@ function SaleWizardDialogBody({
    * they disagree, the wizard either blocks with no visible reason or shows an
    * error it does not enforce.
    *
-   * A Serviço needs a value but not a description, because `saleItemDisplayName`
-   * falls back to the catalog name. An open-price row that is not a Serviço needs
-   * both. A fixed-price Produto needs neither - it has a catalog price and a
-   * catalog name, and the description field is not even rendered.
+   * A Serviço always needs a negotiated value, base value or not: the base value
+   * merely PREFILLS the field (see `productBaseValueBrl`), so a serviço that has
+   * one satisfies the gate without a keystroke while one that does not still
+   * blocks - and blanking the field blocks either way. A Serviço needs no
+   * description, because `saleItemDisplayName` falls back to the catalog name. An
+   * open-price row that is not a Serviço needs both. A fixed-price Produto needs
+   * neither - it has a catalog price and a catalog name, and the description field
+   * is not even rendered.
+   *
+   * `openPrice` is kept here purely as a CLASSIFICATION fallback for a row whose
+   * `kind` never arrived, and is deliberately not folded into `isService` even
+   * though the DB CHECK pins the two equal. It is the conservative direction: an
+   * unclassifiable row keeps its negotiated-value gate instead of silently passing
+   * as a fixed-price Produto and letting an item through at R$ 0. The MONEY question
+   * is a different one and goes through `productBaseValueBrl`, which is kind-blind.
    */
   function productRowRequirements(product: SalesOpsProduct | undefined) {
     const isService = isServiceProduct(product);
@@ -5800,7 +5825,7 @@ function SaleWizardDialogBody({
           next.descriptionOpen = false;
           const product = bootstrap.products.find((candidate) => candidate.id === patch.productId);
           if (product) {
-            next.unitBrl = centsToInput(product.openPrice ? 0 : product.setupBrl || product.monthlyBrl);
+            next.unitBrl = centsToInput(productBaseValueBrl(product));
           }
         }
         return next;
@@ -5819,7 +5844,7 @@ function SaleWizardDialogBody({
         areaId: '',
         customLabel: '',
         quantity: '1',
-        unitBrl: centsToInput(product.openPrice ? 0 : product.setupBrl || product.monthlyBrl),
+        unitBrl: centsToInput(productBaseValueBrl(product)),
         descriptionOpen: false,
       },
     ]);

@@ -66,8 +66,10 @@ export const ProductProviderSchema = z.object({
 /**
  * Produto | Serviço - the single classification axis on a product.
  *
- * A Serviço is structurally a variable-value item: it carries no own price, only
- * defaults for how the money is split. A Produto keeps its own setupBrl/monthlyBrl.
+ * Both kinds may carry an own value in setupBrl/monthlyBrl. The difference is what
+ * the value MEANS: a Produto's is a catalog price, a Serviço's is a base value the
+ * proposta prefills and the operator negotiates. `0` is how a Serviço says it has
+ * no base value at all, which is what every pre-0015 Serviço stores.
  */
 export const ProductKindSchema = z.enum(['product', 'service']);
 export const ProductEntradaModeSchema = z.enum(['none', 'pct', 'fix']);
@@ -96,8 +98,6 @@ export function resolveProductKind(
 type ProductFieldsForValidation = {
   kind?: ProductKind;
   openPrice?: boolean;
-  setupBrl?: number;
-  monthlyBrl?: number;
   defaultEntradaMode?: ProductEntradaMode;
   defaultEntradaPct?: number | null;
   defaultEntradaBrl?: number | null;
@@ -107,9 +107,8 @@ type ProductFieldsForValidation = {
 /**
  * Partial-tolerant product invariants: every rule is skipped when its inputs are
  * `undefined`, so the same refine serves ProductSchema and UpdateProductSchema.
- * The rules a partial payload cannot see (a `kind: 'service'` patch against a row
- * that already stores a fixed value) are re-run on the merged row in
- * `updateProduct`.
+ * The one rule a partial payload cannot see on its own - the entrada mode/value
+ * pairing - is re-run on the merged row in `updateProduct`.
  */
 function validateProductFields(data: ProductFieldsForValidation, ctx: z.RefinementCtx): void {
   if (
@@ -121,17 +120,6 @@ function validateProductFields(data: ProductFieldsForValidation, ctx: z.Refineme
       code: z.ZodIssueCode.custom,
       path: ['openPrice'],
       message: 'kind_open_price_conflict',
-    });
-  }
-
-  const resolvedKind =
-    data.kind ??
-    (data.openPrice === undefined ? undefined : data.openPrice ? 'service' : 'product');
-  if (resolvedKind === 'service' && ((data.setupBrl ?? 0) > 0 || (data.monthlyBrl ?? 0) > 0)) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['setupBrl'],
-      message: 'service_cannot_have_fixed_value',
     });
   }
 
@@ -1467,16 +1455,11 @@ export type ProductFuncaoCostRow = typeof salesOpsProductFuncaoCosts.$inferSelec
 export type ProductWithCosts = { product: ProductRow; productFuncaoCosts: ProductFuncaoCostRow[] };
 
 /**
- * Sentinel for a write whose merged row would break the Produto/Serviço
- * invariant, e.g. `PATCH { kind: 'service' }` against a row that stores a fixed
- * setupBrl. Mirrors the `'duplicate'` sentinel idiom used by createArea.
- */
-export const INVALID_PRODUCT_KIND_VALUE = 'invalid_product_kind_value';
-
-/**
- * Same idea for the entrada block: `PATCH { defaultEntradaPct: 50 }` against a row
- * whose stored mode is 'none' is only visible once the patch is merged. Returning
- * a sentinel keeps it a 400 instead of letting the DB CHECK surface as a 500.
+ * Sentinel for a PATCH whose MERGED entrada block contradicts itself, e.g.
+ * `PATCH { defaultEntradaPct: 50 }` against a row whose stored mode is 'none' -
+ * only visible once the patch is merged. Returning a sentinel keeps it a 400
+ * instead of letting the DB CHECK surface as a 500. Mirrors the `'duplicate'`
+ * sentinel idiom used by createArea.
  */
 export const INVALID_PRODUCT_ENTRADA_VALUE = 'invalid_product_entrada_value';
 
@@ -1704,12 +1687,7 @@ export async function updateProduct(
   orgId: string,
   id: string,
   data: Partial<ProductInput>,
-): Promise<
-  | ProductWithCosts
-  | typeof INVALID_PRODUCT_KIND_VALUE
-  | typeof INVALID_PRODUCT_ENTRADA_VALUE
-  | null
-> {
+): Promise<ProductWithCosts | typeof INVALID_PRODUCT_ENTRADA_VALUE | null> {
   return withTenant(db, orgId, async (tx) => {
     const [current] = await tx
       .select()
@@ -1719,14 +1697,6 @@ export async function updateProduct(
     if (!current) return null;
 
     const kind = resolveProductKind(data, current.kind as ProductKind);
-    // Re-run the invariants on the MERGED row: a partial payload cannot see the
-    // conflict between `{ kind: 'service' }` and a stored fixed setupBrl.
-    const kindMerged = {
-      kind,
-      setupBrl: data.setupBrl ?? current.setupBrl,
-      monthlyBrl: data.monthlyBrl ?? current.monthlyBrl,
-    };
-    if (!UpdateProductSchema.safeParse(kindMerged).success) return INVALID_PRODUCT_KIND_VALUE;
 
     const entradaMerged = {
       defaultEntradaMode: data.defaultEntradaMode ?? (current.defaultEntradaMode as ProductEntradaMode),
