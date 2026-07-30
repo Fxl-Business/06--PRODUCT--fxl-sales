@@ -198,3 +198,27 @@ export function reconcileOptimisticRow<K extends OptimisticCollection>(
   const personLabel = label as (candidate: SalesOpsPerson) => string;
   return { ...snapshot, people: upsert(snapshot.people, rowId, row, personLabel) };
 }
+
+/**
+ * The invariant this slice enforces: an optimistic row is visible in the cadastro
+ * that created it and nowhere else. Its id is a client-side placeholder, so it must
+ * never reach a request body or a request path - a `POST /sales-ops/sales` carrying
+ * one fails the Postgres uuid cast and costs the operator a whole wizard of typing.
+ *
+ * Every surface other than the three cadastros lists reads this snapshot. The early
+ * return hands back the identical object in the normal case (nothing optimistic in
+ * flight), so no downstream `useMemo` or prop identity changes.
+ */
+export function withoutOptimisticRows(snapshot: SalesOpsBootstrap): SalesOpsBootstrap {
+  const areas = snapshot.areas.filter((row) => !isOptimisticId(row.id));
+  const clients = snapshot.clients.filter((row) => !isOptimisticId(row.id));
+  const people = snapshot.people.filter((row) => !isOptimisticId(row.id));
+  if (
+    areas.length === snapshot.areas.length &&
+    clients.length === snapshot.clients.length &&
+    people.length === snapshot.people.length
+  ) {
+    return snapshot;
+  }
+  return { ...snapshot, areas, clients, people };
+}
