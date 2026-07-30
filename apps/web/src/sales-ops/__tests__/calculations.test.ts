@@ -263,6 +263,90 @@ describe('sales operations web calculations', () => {
     expect(payload.items[0]?.areaId).toBe('x');
   });
 
+  it('carries funcaoId on a professional and still emits role for the legacy path', () => {
+    const base = {
+      clientId: undefined,
+      clientName: 'Cliente',
+      sellerPersonId: undefined,
+      sellerName: 'Vendedor',
+      status: 'draft' as const,
+      baseDate: '2026-07-10',
+      sellerCommissionPct: '10',
+      finderCommissionPct: '3',
+      taxPct: '6',
+      otherCostsBrl: 0,
+      installments: [{ dueDate: '2026-07-10', amountBrl: 500000, method: 'pix' as const }],
+      recurring: null,
+      items: [
+        {
+          productName: 'Consultoria',
+          productType: 'Avulso',
+          areaId: 'x',
+          quantity: '1',
+          unitBrl: 500000,
+        },
+      ],
+    };
+
+    expect(
+      buildSalePayload({
+        ...base,
+        professionals: [
+          {
+            personId: '  44444444-4444-4444-8444-444444444444  ',
+            personName: '  Ana Martins  ',
+            funcaoId: '  fc000010-0000-4000-8000-000000000010  ',
+            role: '  Desenvolvedor  ',
+            // Already CENTS: the wizard converts before calling, exactly as it does
+            // for otherCostsBrl and every installment amount.
+            costBrl: 100000,
+          },
+        ],
+      }).professionals,
+    ).toEqual([
+      {
+        personId: '44444444-4444-4444-8444-444444444444',
+        personName: 'Ana Martins',
+        funcaoId: 'fc000010-0000-4000-8000-000000000010',
+        role: 'Desenvolvedor',
+        costBrl: 100000,
+      },
+    ]);
+
+    // Legacy path: no funcaoId, so `role` is the only thing keeping the payload
+    // valid against SaleProfessionalSchema's funcao_or_role_required refine.
+    expect(
+      buildSalePayload({
+        ...base,
+        professionals: [{ personName: 'Dev Externo', role: 'Operacional', costBrl: 50000 }],
+      }).professionals,
+    ).toEqual([
+      {
+        personId: undefined,
+        personName: 'Dev Externo',
+        funcaoId: undefined,
+        role: 'Operacional',
+        costBrl: 50000,
+      },
+    ]);
+
+    // An empty role becomes `undefined` rather than '', because the API declares
+    // it as `.min(1).optional()` and '' would be a 400.
+    expect(
+      buildSalePayload({
+        ...base,
+        professionals: [
+          {
+            personName: 'Ana',
+            funcaoId: 'fc000010-0000-4000-8000-000000000010',
+            role: '   ',
+            costBrl: 0,
+          },
+        ],
+      }).professionals[0]?.role,
+    ).toBeUndefined();
+  });
+
   it('passes the recurring method through and defaults to pix when absent', () => {
     const base = {
       clientId: undefined,

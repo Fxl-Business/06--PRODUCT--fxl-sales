@@ -6,6 +6,7 @@ import type {
   SaleDraft,
   SalesOpsBootstrap,
   SalesOpsProduct,
+  SalesOpsProductFuncaoCost,
   SalesOpsSale,
   SalesOpsSettings,
 } from './types';
@@ -89,6 +90,92 @@ export function resolveSaleCommissionDefaults(
       finderFallback,
     ),
   };
+}
+
+/**
+ * The ONE place slice 07's `SalesOpsProductFuncaoCost` shape is interpreted.
+ *
+ * `mode: 'pct'` reads `valuePct`, a percent serialized by drizzle as a string;
+ * `mode: 'fix'` reads `valueBrl`, integer cents. If that contract ever moves, this
+ * function body is the whole delta.
+ */
+export function resolveFuncaoCostCents(
+  cost: Pick<SalesOpsProductFuncaoCost, 'mode' | 'valuePct' | 'valueBrl'>,
+  subtotalBrl: number,
+): number {
+  if (cost.mode === 'fix') return Math.max(0, Math.floor(toNumber(cost.valueBrl ?? 0)));
+  return Math.max(0, Math.floor((subtotalBrl * toNumber(cost.valuePct ?? 0)) / 100));
+}
+
+export type FuncaoCostContribution = {
+  productName: string;
+  subtotalBrl: number;
+  mode: CommissionType;
+  /** Percent points for `pct`, integer cents for `fix`. */
+  value: number;
+  cents: number;
+};
+
+export type FuncaoCostBasisEntry = { cents: number; contributions: FuncaoCostContribution[] };
+
+export type FuncaoCostBasisItem = {
+  productId?: string;
+  productName: string;
+  subtotalBrl: number;
+};
+
+/**
+ * The default `CUSTO ALOCADO` per função, plus the derivation that produced it, so
+ * the number rendered and the number explained can never disagree.
+ *
+ * The base is the item SUBTOTAL of the proposta items whose product declares a
+ * default for that função, summed. Not the proposta total, and deliberately NOT
+ * the recurring mensalidade: a `professional_cost` payable is one-shot at win with
+ * `receivableId: null`, so pricing it off a monthly stream would charge a
+ * pay-once cost against every cycle. Free-form items contribute nothing, because
+ * a row with no product has no cadastro defaults to read.
+ */
+export function buildFuncaoCostBasis(
+  items: FuncaoCostBasisItem[],
+  costs: SalesOpsProductFuncaoCost[],
+): Map<string, FuncaoCostBasisEntry> {
+  const costsByProduct = new Map<string, SalesOpsProductFuncaoCost[]>();
+  for (const cost of costs) {
+    const bucket = costsByProduct.get(cost.productId);
+    if (bucket) bucket.push(cost);
+    else costsByProduct.set(cost.productId, [cost]);
+  }
+
+  const basis = new Map<string, FuncaoCostBasisEntry>();
+  for (const item of items) {
+    if (!item.productId) continue;
+    for (const cost of costsByProduct.get(item.productId) ?? []) {
+      const cents = resolveFuncaoCostCents(cost, item.subtotalBrl);
+      const entry = basis.get(cost.funcaoId) ?? { cents: 0, contributions: [] };
+      entry.cents += cents;
+      entry.contributions.push({
+        productName: item.productName,
+        subtotalBrl: item.subtotalBrl,
+        mode: cost.mode,
+        value: cost.mode === 'fix' ? toNumber(cost.valueBrl ?? 0) : toNumber(cost.valuePct ?? 0),
+        cents,
+      });
+      basis.set(cost.funcaoId, entry);
+    }
+  }
+  return basis;
+}
+
+/** `5% de FXL Custom (R$ 20.000,00) + R$ 300,00 de Landing Page`. */
+export function describeFuncaoCostBasis(entry: FuncaoCostBasisEntry | undefined): string {
+  if (!entry || entry.contributions.length === 0) return '';
+  return entry.contributions
+    .map((contribution) =>
+      contribution.mode === 'fix'
+        ? `${formatMoneyBrl(contribution.value)} de ${contribution.productName}`
+        : `${contribution.value}% de ${contribution.productName} (${formatMoneyBrl(contribution.subtotalBrl)})`,
+    )
+    .join(' + ');
 }
 
 function cleanId(value: string | undefined): string | undefined {
@@ -468,7 +555,14 @@ export function buildSalePayload(draft: SaleDraft): CreateSalePayload {
     professionals: draft.professionals.map((professional) => ({
       personId: cleanId(professional.personId),
       personName: professional.personName.trim(),
-      role: professional.role.trim(),
+      funcaoId: cleanId(professional.funcaoId),
+      /*
+        The API derives `funcao_name_snapshot` from the resolved cadastro row and
+        ignores whatever arrives here, so `role` is sent only to keep the legacy
+        free-text path (`funcaoId` absent) a valid payload. `undefined` rather than
+        `''` because SaleProfessionalSchema.role is `.min(1).optional()`.
+      */
+      role: professional.role?.trim() || undefined,
       costBrl: Math.max(0, Math.floor(toNumber(professional.costBrl))),
     })),
   };

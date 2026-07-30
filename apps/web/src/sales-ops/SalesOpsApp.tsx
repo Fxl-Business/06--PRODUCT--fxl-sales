@@ -107,11 +107,14 @@ import type {
   SalesOpsSettings,
   SalesOpsStatus,
 } from './types';
+import { computeSaleFinancials } from '@fxl-sales/shared-utils/sale-financials';
 import {
   addMonthsToIsoDate,
   buildDashboardModel,
+  buildFuncaoCostBasis,
   buildSalePayload,
   defaultPlanShapeForProduct,
+  describeFuncaoCostBasis,
   entradaCentsFor,
   formatMoneyBrl,
   generateInstallmentPlan,
@@ -402,8 +405,8 @@ function salePrimaryProductName(bootstrap: SalesOpsBootstrap, saleId: string): s
 
 /**
  * The two predefined app funções. Every função read in this file goes through
- * `hasFuncao` or `isCollaboratorPerson`, never through an inline slug comparison, so
- * there is exactly one adaptation point if the slugs ever move.
+ * `hasFuncao`, never through an inline slug comparison, so there is exactly one
+ * adaptation point if the slugs ever move.
  *
  * Deliberately not exported: `react-refresh/only-export-components` allows only
  * component exports from this module, and nothing outside it needs these.
@@ -415,20 +418,14 @@ function hasFuncao(person: SalesOpsPerson, slug: string): boolean {
   return person.funcoes.some((funcao) => funcao.slug === slug);
 }
 
-/**
- * Prestadores: the professionals-cost population. Character for character how the
- * API derives the deprecated `is_collaborator` column (`deriveBooleanMirrors` in
- * `apps/api/src/domains/sales-ops/service.ts`), so the web and the server never
- * disagree on who counts as a prestador. In particular `status` is NOT part of it
- * on either side: a call site that wants only active pessoas filters for that
- * itself, and the two existing call sites deliberately differ (see their comments).
- *
- * Deliberately NOT keyed on the `prestador` slug: that função is non-system and an
- * org may rename or archive it.
- */
-function isCollaboratorPerson(person: SalesOpsPerson): boolean {
-  return person.funcoes.some((funcao) => !funcao.isSystem);
-}
+/*
+  `isCollaboratorPerson` lived here and had exactly one consumer left: the wizard's
+  Profissional picker. That picker now offers every ACTIVE pessoa, because
+  restricting allocation to "carries a non-system função" hid a vendedor who also
+  delivers - the rigidity this batch exists to remove. With no consumer the helper
+  was dead code, so it is gone rather than kept as a decorative export. The
+  deprecated `is_collaborator` column on the API side is untouched.
+*/
 
 function salesForPerson(bootstrap: SalesOpsBootstrap, person: SalesOpsPerson, mode: 'seller' | 'finder') {
   return bootstrap.sales.filter((sale) => {
@@ -4664,8 +4661,36 @@ type InstallmentRowForm = { dueDate: string; amountBrl: string; method: PaymentM
 type ProfessionalForm = {
   personId: string;
   personName: string;
-  role: string;
+  /** `''` on a legacy row whose stored função is only a free-text snapshot. */
+  funcaoId: string;
+  /** The label the picker shows; a resolved função name, or the legacy snapshot. */
+  funcaoName: string;
   costBrl: string;
+  /**
+   * Set the moment the operator types in this row's `CUSTO ALOCADO`, and seeded
+   * `true` for every prefilled row, because a persisted cost is by definition a
+   * decision that was already saved. While it is false the cost re-derives from
+   * the produto's default for the row's função; once true it is never recomputed.
+   */
+  costManual: boolean;
+};
+
+/**
+ * The four step-3 numbers a produto supplies as a DEFAULT rather than a
+ * constraint. Pinning is per field and never global, so hand-typing the seller
+ * percentage must not freeze the finder percentage.
+ */
+type OverrideField =
+  | 'sellerCommissionPct'
+  | 'finderCommissionPct'
+  | 'taxPct'
+  | 'otherCostsBrl';
+
+const OVERRIDE_FIELDS_NONE: Record<OverrideField, boolean> = {
+  sellerCommissionPct: false,
+  finderCommissionPct: false,
+  taxPct: false,
+  otherCostsBrl: false,
 };
 
 function commissionDefaultsSourceKey(
@@ -4872,8 +4897,14 @@ function deriveWizardPrefill(sale: SalesOpsSale, bootstrap: SalesOpsBootstrap): 
       .map((row) => ({
         personId: row.personId ?? '',
         personName: row.personNameSnapshot,
-        role: row.role,
+        funcaoId: row.funcaoId ?? '',
+        // A legacy row has no funcaoId and no snapshot column value worth trusting
+        // over `role`, so the deprecated mirror is the fallback label.
+        funcaoName: row.funcaoNameSnapshot || row.role,
         costBrl: centsToInput(row.costBrl),
+        // Unconditional: a persisted cost is a saved decision, so nothing on the
+        // edit path may recompute it behind the operator.
+        costManual: true,
       })),
     // Verbatim, so reopening and saving an untouched proposta round-trips the plan
     // byte for byte. The inference above only describes these rows, it never edits them.
@@ -4965,11 +4996,30 @@ function SaleWizardDialogBody({
       ),
     [bootstrap.people],
   );
-  // Active only, unlike the produto Prestador picker above: a new proposta should not
-  // suggest an inactive pessoa as a profissional. Pre-existing asymmetry, preserved.
-  const collaborators = useMemo(
-    () => bootstrap.people.filter((person) => isCollaboratorPerson(person) && person.status === 'active'),
+  /*
+    Every ACTIVE pessoa, not only the ones `isCollaboratorPerson` recognises.
+    Restricting allocation to collaborators hid a vendedor who also delivers,
+    which is exactly the rigidity this batch removes, and slice 05 already reduced
+    `isCollaborator` to a derived convenience flag. Inactive is still excluded: a
+    new proposta should not suggest an inactive pessoa as a profissional.
+  */
+  const allocatablePeople = useMemo(
+    () =>
+      bootstrap.people
+        .filter((person) => person.status === 'active')
+        .sort((a, b) => a.displayName.localeCompare(b.displayName, 'pt-BR')),
     [bootstrap.people],
+  );
+  /** System funções last, then alphabetical, matching the cadastro picker's order. */
+  const allocatableFuncoes = useMemo(
+    () =>
+      bootstrap.funcoes
+        .filter((funcao) => funcao.status === 'active')
+        .sort(
+          (a, b) =>
+            Number(a.isSystem) - Number(b.isSystem) || a.name.localeCompare(b.name, 'pt-BR'),
+        ),
+    [bootstrap.funcoes],
   );
   const firstProduct = bootstrap.products[0];
   const firstClient = bootstrap.clients[0];
@@ -5005,6 +5055,29 @@ function SaleWizardDialogBody({
       : commissionDefaultsSourceKey(firstProduct, false, bootstrap.settings),
   );
   const [otherCostsBrl, setOtherCostsBrl] = useState(prefill?.otherCostsBrl ?? '0.00');
+  /*
+    Which of the four step-3 numbers the operator owns. On CREATE nothing is
+    pinned, so every produto change re-proposes the cadastro default. On EDIT the
+    registry is SEEDED by comparing each stored value against the default it would
+    have inherited: a stored value that differs is a deliberate override and is
+    pinned for the whole session, which is what makes a mid-edit produto change
+    unable to clobber it. A stored value that equals the default is not pinned,
+    which is also correct - it rejoins the re-apply path.
+  */
+  const [manualOverrides, setManualOverrides] = useState<Record<OverrideField, boolean>>(() => {
+    if (!prefill) return OVERRIDE_FIELDS_NONE;
+    const defaults = resolveSaleCommissionDefaults(
+      prefilledPrimaryProduct,
+      prefilledHasFinder,
+      bootstrap.settings,
+    );
+    return {
+      sellerCommissionPct: prefill.sellerCommissionPct !== String(defaults.sellerCommissionPct),
+      finderCommissionPct: prefill.finderCommissionPct !== String(defaults.finderCommissionPct),
+      taxPct: prefill.taxPct !== String(settings.defaultTaxPct ?? 6),
+      otherCostsBrl: prefill.otherCostsBrl !== '0.00',
+    };
+  });
   const [wizardStep, setWizardStep] = useState<1 | 2 | 3 | 4>(1);
   const [showItemErrors, setShowItemErrors] = useState(false);
   const [finderVisible, setFinderVisible] = useState(prefill?.finderVisible ?? false);
@@ -5027,6 +5100,8 @@ function SaleWizardDialogBody({
       : []),
   );
   const [professionals, setProfessionals] = useState<ProfessionalForm[]>(prefill?.professionals ?? []);
+  /** Source key for the per-função cost re-prefill; see the sync block below. */
+  const [funcaoCostKey, setFuncaoCostKey] = useState('');
   /**
    * Áreas created from an item row's own create row, kept locally so the new área is
    * selectable and visible on the trigger before the bootstrap refetch lands.
@@ -5070,6 +5145,7 @@ function SaleWizardDialogBody({
     planShapeSourceKey(prefill ? prefilledPrimaryProduct : firstProduct),
   );
   const [showPlanErrors, setShowPlanErrors] = useState(false);
+  const [showCostErrors, setShowCostErrors] = useState(false);
   const [recurringMode, setRecurringMode] = useState<'none' | 'monthly'>(
     prefill?.recurringEnabled ? 'monthly' : 'none',
   );
@@ -5098,6 +5174,32 @@ function SaleWizardDialogBody({
     bootstrap.settings,
   );
 
+  /**
+   * The defaults the CURRENT produto and finder participation would propose. Both
+   * the re-apply below and the `Alterado manualmente` marker read this one memo,
+   * so the marker can never disagree with what `Restaurar padrão` would write.
+   */
+  const resolvedDefaults = useMemo<Record<OverrideField, string>>(() => {
+    const commission = resolveSaleCommissionDefaults(
+      primaryItemProduct,
+      hasFinderForSale,
+      bootstrap.settings,
+    );
+    return {
+      sellerCommissionPct: String(commission.sellerCommissionPct),
+      finderCommissionPct: String(commission.finderCommissionPct),
+      taxPct: String(settings.defaultTaxPct ?? 6),
+      otherCostsBrl: '0.00',
+    };
+  }, [primaryItemProduct, hasFinderForSale, bootstrap.settings, settings.defaultTaxPct]);
+
+  /*
+    The source key advances UNCONDITIONALLY, so this render-phase guard still
+    terminates on the next render; only the two setters are skipped for a pinned
+    field. `taxPct` and `otherCostsBrl` have no re-apply path at all and keep
+    their single initialisation; they join the registry only so the marker and
+    `Restaurar padrão` work uniformly across all four inputs.
+  */
   if (commissionDefaultsSource !== currentCommissionDefaultsSource) {
     const defaults = resolveSaleCommissionDefaults(
       primaryItemProduct,
@@ -5105,8 +5207,54 @@ function SaleWizardDialogBody({
       bootstrap.settings,
     );
     setCommissionDefaultsSource(currentCommissionDefaultsSource);
-    setSellerCommissionPct(String(defaults.sellerCommissionPct));
-    setFinderCommissionPct(String(defaults.finderCommissionPct));
+    if (!manualOverrides.sellerCommissionPct) {
+      setSellerCommissionPct(String(defaults.sellerCommissionPct));
+    }
+    if (!manualOverrides.finderCommissionPct) {
+      setFinderCommissionPct(String(defaults.finderCommissionPct));
+    }
+  }
+
+  function markManual(field: OverrideField) {
+    setManualOverrides((current) => (current[field] ? current : { ...current, [field]: true }));
+  }
+
+  /** True only when the field is pinned AND actually diverges from the default. */
+  function isOverridden(field: OverrideField, value: string): boolean {
+    return manualOverrides[field] && value !== resolvedDefaults[field];
+  }
+
+  /**
+   * The chip plus `Restaurar padrão` under an overridden step-3 input.
+   *
+   * Requiring BOTH the pin and a real divergence keeps the marker honest:
+   * retyping the default value by hand is not a divergence and is not flagged.
+   * Restoring clears the flag AND writes the default back in the same handler, so
+   * the field rejoins the produto re-apply path immediately.
+   */
+  function overrideMarker(
+    field: OverrideField,
+    value: string,
+    setValue: (next: string) => void,
+  ): ReactNode {
+    if (!isOverridden(field, value)) return null;
+    return (
+      <span className="mt-1 flex items-center gap-2">
+        <span className="rounded-full bg-[#fdf0cf] px-[7px] py-[2px] text-[11px] font-semibold text-[#9c7210]">
+          Alterado manualmente
+        </span>
+        <button
+          className="text-[11px] font-semibold text-[#9c7210] underline"
+          onClick={() => {
+            setManualOverrides((current) => ({ ...current, [field]: false }));
+            setValue(resolvedDefaults[field]);
+          }}
+          type="button"
+        >
+          Restaurar padrão
+        </button>
+      </span>
+    );
   }
 
   const canSave = Boolean(clientName.trim() && sellerPersonId && items.length > 0);
@@ -5179,6 +5327,39 @@ function SaleWizardDialogBody({
     setRecurringCycles('12');
   }
 
+  /*
+    The fourth render-phase source-key sync, deliberately shaped exactly like
+    `planAutoKey` and `recurringSource` above: advance the key first, then apply at
+    most one setState. The key is derived from the computed basis, which is a pure
+    function of the items and the cadastro cost rows, so the next render always
+    finds the keys equal and the sequence terminates.
+
+    Only rows the operator never typed into are re-derived, and only when the row
+    carries a funcaoId. Changing a row's PESSOA never moves its cost: a pessoa is
+    not a cost driver, the função is.
+  */
+  const funcaoCostBasis = buildFuncaoCostBasis(
+    items.map((item) => ({
+      productId: item.kind === 'product' ? item.productId || undefined : undefined,
+      productName: saleItemDisplayName(item),
+      subtotalBrl: Math.max(1, Number(item.quantity) || 1) * parseCurrencyToCents(item.unitBrl),
+    })),
+    bootstrap.productFuncaoCosts,
+  );
+  const funcaoCostKeyNow = JSON.stringify(
+    [...funcaoCostBasis.entries()].map(([funcaoId, entry]) => [funcaoId, entry.cents]),
+  );
+  if (funcaoCostKey !== funcaoCostKeyNow) {
+    setFuncaoCostKey(funcaoCostKeyNow);
+    setProfessionals((current) =>
+      current.map((row) =>
+        row.costManual || !row.funcaoId
+          ? row
+          : { ...row, costBrl: centsToInput(funcaoCostBasis.get(row.funcaoId)?.cents ?? 0) },
+      ),
+    );
+  }
+
   const activeAreas = bootstrap.areas.filter((area) => area.status === 'active');
   const selectableAreas = [
     ...activeAreas,
@@ -5217,6 +5398,17 @@ function SaleWizardDialogBody({
       /^\d{4}-\d{2}-\d{2}$/.test(recurringStartDate) &&
       recurringCyclesValid);
   const canAdvanceStepTwo = planValid && recurringValid;
+  /*
+    New rather than an extension: step 3 had no advance guard at all, because until
+    now `FUNÇÃO NO PROJETO` was free text seeded with the literal 'Operacional' and
+    could not be empty. A row is valid with a funcaoId, or with a legacy free-text
+    snapshot it inherited from a stored proposta; a row with neither would reach
+    the API as a `funcao_or_role_required` 400.
+  */
+  const professionalsValid = professionals.every(
+    (professional) => Boolean(professional.funcaoId) || Boolean(professional.funcaoName.trim()),
+  );
+  const canAdvanceStepThree = professionalsValid;
 
   const itemsValid = items.every((item) => {
     if (item.kind === 'free') {
@@ -5247,15 +5439,7 @@ function SaleWizardDialogBody({
     (sum, professional) => sum + parseCurrencyToCents(professional.costBrl),
     0,
   );
-  const sellerCommissionCents = Math.floor((totalCents * parseDecimal(sellerCommissionPct, 0)) / 100);
-  const finderCommissionCents = hasFinderForSale
-    ? Math.floor((totalCents * parseDecimal(finderCommissionPct, 0)) / 100)
-    : 0;
-  const taxCents = Math.floor((totalCents * parseDecimal(taxPct, 0)) / 100);
   const otherCents = parseCurrencyToCents(otherCostsBrl);
-  const marginCents =
-    totalCents - professionalCents - sellerCommissionCents - finderCommissionCents - taxCents - otherCents;
-  const marginPct = totalCents > 0 ? Math.round((marginCents / totalCents) * 1000) / 10 : 0;
 
   const selectedSeller = sellers.find((person) => person.id === sellerPersonId);
   const selectedFinder = sellerIsFinder
@@ -5267,15 +5451,53 @@ function SaleWizardDialogBody({
       dueDate: row.dueDate,
       amountCents: parseCurrencyToCents(row.amountBrl),
     })),
-    // `cycles: null` generates no bounded rows anywhere, so an indefinite
-    // mensalidade contributes nothing to this preview either.
-    ...(recurringMode === 'monthly' && !recurringIndefinite && settings.commissionOnRecurring
+    /*
+      `cycles: null` generates no bounded rows anywhere, so an indefinite
+      mensalidade contributes nothing to this preview either.
+
+      This list used to be gated on `settings.commissionOnRecurring`, which made
+      the preview LIE whenever the toggle was off: `buildSaleLedger` and
+      `materializeWonPayables` ignore that setting entirely and generate a
+      commission for every non-void receivable. Making the server honour it would
+      change payables materialization, which is out of scope, so the preview is
+      aligned to the server instead. `commissionOnRecurring` is a dead setting.
+    */
+    ...(recurringMode === 'monthly' && !recurringIndefinite
       ? Array.from({ length: recurringCyclesCount }, (_, index) => ({
           dueDate: addMonthsToIsoDate(recurringStartDate, index),
           amountCents: recurringMonthlyCents,
         }))
       : []),
   ];
+
+  /*
+    The SAME `computeSaleFinancials` the API's `buildSaleLedger` calls, fed the
+    same inputs, so the Margem líquida shown in Custos e margem and Revisão is
+    byte for byte the `net_margin_brl` a save persists. Before this the wizard
+    rounded each percentage once over the item total and left a bounded
+    recorrência out of the base entirely, so any proposta with a recorrência or
+    with uneven parcelas displayed one number and saved another.
+  */
+  const financials = computeSaleFinancials({
+    itemsTotalBrl: totalCents,
+    boundedRecurringBrl:
+      recurringMode === 'monthly' && !recurringIndefinite
+        ? recurringMonthlyCents * recurringCyclesCount
+        : 0,
+    receivableAmountsBrl: previewReceivables.map((row) => row.amountCents),
+    sellerCommissionPct: parseDecimal(sellerCommissionPct, 0),
+    finderCommissionPct: parseDecimal(finderCommissionPct, 0),
+    hasFinder: hasFinderForSale,
+    taxPct: parseDecimal(taxPct, 0),
+    otherCostsBrl: otherCents,
+    professionalCostsBrl: professionalCents,
+  });
+  const sellerCommissionCents = financials.sellerCommissionBrl;
+  const finderCommissionCents = financials.finderCommissionBrl;
+  const taxCents = financials.taxBrl;
+  const marginCents = financials.netMarginBrl;
+  /** Two decimals, so the bar width and the persisted percentage agree exactly. */
+  const marginPct = Number(financials.netMarginPct);
 
   const payablesPreview = [
     ...previewReceivables.flatMap((receivable, index) => {
@@ -5308,7 +5530,11 @@ function SaleWizardDialogBody({
       return rows;
     }),
     ...professionals.map((professional) => ({
-      label: `Alocação - ${professional.personName || 'prestador'}`,
+      // Preview text only. The persisted `beneficiaryName` deliberately stays the
+      // pessoa alone, so this does not rewrite payables that already exist.
+      label: professional.funcaoName
+        ? `Alocação - ${professional.personName || 'prestador'} · ${professional.funcaoName}`
+        : `Alocação - ${professional.personName || 'prestador'}`,
       type: 'Custo profissional',
       date: displayDate(baseDate),
       value: parseCurrencyToCents(professional.costBrl),
@@ -5503,6 +5729,10 @@ function SaleWizardDialogBody({
       setShowPlanErrors(true);
       if (!canAdvanceStepTwo) return;
     }
+    if (wizardStep === 3) {
+      setShowCostErrors(true);
+      if (!canAdvanceStepThree) return;
+    }
     if (wizardStep < 4) {
       setWizardStep((current) => (current + 1) as 2 | 3 | 4);
       return;
@@ -5580,7 +5810,11 @@ function SaleWizardDialogBody({
       professionals: professionals.map((professional) => ({
         personId: professional.personId,
         personName: professional.personName,
-        role: professional.role,
+        funcaoId: professional.funcaoId,
+        // The API derives funcao_name_snapshot from the resolved cadastro row and
+        // ignores this; it is sent so a legacy row with no funcaoId stays a valid
+        // payload rather than tripping funcao_or_role_required.
+        role: professional.funcaoName,
         costBrl: parseCurrencyToCents(professional.costBrl),
       })),
     };
@@ -5621,7 +5855,11 @@ function SaleWizardDialogBody({
               <div className="flex flex-none items-center gap-1" key={item.step}>
                 <button
                   className="flex items-center gap-[9px] focus-visible:outline-none"
-                  disabled={(item.step > 1 && !canAdvanceStepOne) || (item.step > 2 && !canAdvanceStepTwo)}
+                  disabled={
+                    (item.step > 1 && !canAdvanceStepOne) ||
+                    (item.step > 2 && !canAdvanceStepTwo) ||
+                    (item.step > 3 && !canAdvanceStepThree)
+                  }
                   onClick={() => setWizardStep(item.step)}
                   type="button"
                 >
@@ -6381,10 +6619,14 @@ function SaleWizardDialogBody({
                           setProfessionals((current) => [
                             ...current,
                             {
-                              personId: collaborators[0]?.id ?? '',
-                              personName: collaborators[0]?.displayName ?? '',
-                              role: 'Operacional',
+                              personId: allocatablePeople[0]?.id ?? '',
+                              personName: allocatablePeople[0]?.displayName ?? '',
+                              // No seeded função: the old hardcoded 'Operacional'
+                              // silently invented a cargo nobody chose.
+                              funcaoId: '',
+                              funcaoName: '',
                               costBrl: '0.00',
+                              costManual: false,
                             },
                           ])
                         }
@@ -6405,116 +6647,238 @@ function SaleWizardDialogBody({
                           Nenhum profissional alocado
                         </div>
                       ) : null}
-                      {professionals.map((professional, index) => (
-                        <div
-                          className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_150px_36px] items-center gap-[9px]"
-                          key={`${professional.personId}-${index}`}
-                        >
-                          <Combobox
-                            aria-label={`Profissional ${index + 1}`}
-                            className={formSelectClass}
-                            emptyMessage="Nenhum prestador cadastrado"
-                            entityGender="m"
-                            entityLabel="profissional"
-                            onChange={(value) => {
-                              const person = collaborators.find((candidate) => candidate.id === value);
-                              setProfessionals((current) =>
-                                current.map((item, itemIndex) =>
-                                  itemIndex === index
-                                    ? {
-                                        ...item,
-                                        personId: value,
-                                        personName: person?.displayName ?? '',
-                                      }
-                                    : item,
-                                ),
-                              );
-                            }}
-                            // Replaces the old "Digite manualmente" option, which cleared the
-                            // name and then offered no field to type it into.
-                            onCreate={(name) => {
-                              setProfessionals((current) =>
-                                current.map((item, itemIndex) =>
-                                  itemIndex === index
-                                    ? { ...item, personId: '', personName: name }
-                                    : item,
-                                ),
-                              );
-                            }}
-                            options={personOptions(collaborators)}
-                            placeholder="Buscar ou digitar um nome..."
-                            searchPlaceholder="Buscar ou digitar um nome..."
-                            value={professional.personId}
-                            valueLabel={professional.personName}
-                          />
-                          <Input
-                            className={formInputClass}
-                            onChange={(event) =>
-                              setProfessionals((current) =>
-                                current.map((item, itemIndex) =>
-                                  itemIndex === index ? { ...item, role: event.target.value } : item,
-                                ),
-                              )
-                            }
-                            value={professional.role}
-                          />
-                          <Input
-                            className={`sales-ops-num text-right ${formInputClass}`}
-                            onChange={(event) =>
-                              setProfessionals((current) =>
-                                current.map((item, itemIndex) =>
-                                  itemIndex === index
-                                    ? { ...item, costBrl: event.target.value }
-                                    : item,
-                                ),
-                              )
-                            }
-                            value={professional.costBrl}
-                          />
-                          <button
-                            className="flex h-8 w-8 items-center justify-center rounded-[8px] border border-[#f0dcd5] bg-[#fbeee9] text-[#b23a22] transition hover:bg-[#f6e0d9]"
-                            onClick={() =>
-                              setProfessionals((current) =>
-                                current.filter((_, itemIndex) => itemIndex !== index),
-                              )
-                            }
-                            type="button"
+                      {professionals.map((professional, index) => {
+                        const basis = professional.funcaoId
+                          ? funcaoCostBasis.get(professional.funcaoId)
+                          : undefined;
+                        const derivation = describeFuncaoCostBasis(basis);
+                        const funcaoMissing =
+                          showCostErrors &&
+                          !professional.funcaoId &&
+                          !professional.funcaoName.trim();
+                        return (
+                          <div
+                            className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_150px_36px] items-start gap-[9px]"
+                            key={`${professional.personId}-${index}`}
                           >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
-                      ))}
+                            <Combobox
+                              aria-label={`Profissional ${index + 1}`}
+                              className={formSelectClass}
+                              emptyMessage="Nenhuma pessoa cadastrada"
+                              entityGender="m"
+                              entityLabel="profissional"
+                              onChange={(value) => {
+                                const person = allocatablePeople.find(
+                                  (candidate) => candidate.id === value,
+                                );
+                                // The cost is deliberately untouched: a pessoa is
+                                // not a cost driver, the função is.
+                                setProfessionals((current) =>
+                                  current.map((item, itemIndex) =>
+                                    itemIndex === index
+                                      ? {
+                                          ...item,
+                                          personId: value,
+                                          personName: person?.displayName ?? '',
+                                        }
+                                      : item,
+                                  ),
+                                );
+                              }}
+                              onCreate={(name) => {
+                                setProfessionals((current) =>
+                                  current.map((item, itemIndex) =>
+                                    itemIndex === index
+                                      ? { ...item, personId: '', personName: name }
+                                      : item,
+                                  ),
+                                );
+                              }}
+                              options={personOptions(allocatablePeople)}
+                              placeholder="Buscar ou digitar um nome..."
+                              searchPlaceholder="Buscar ou digitar um nome..."
+                              value={professional.personId}
+                              valueLabel={professional.personName}
+                            />
+                            <div className="flex flex-col gap-1">
+                              <Combobox
+                                aria-invalid={funcaoMissing}
+                                aria-label={`Função do profissional ${index + 1}`}
+                                className={cn(
+                                  formSelectClass,
+                                  funcaoMissing && 'border-destructive',
+                                )}
+                                emptyMessage="Nenhuma função cadastrada"
+                                entityGender="f"
+                                entityLabel="função"
+                                onChange={(value) => {
+                                  const funcao = allocatableFuncoes.find(
+                                    (candidate) => candidate.id === value,
+                                  );
+                                  setProfessionals((current) =>
+                                    current.map((item, itemIndex) => {
+                                      if (itemIndex !== index) return item;
+                                      const next = {
+                                        ...item,
+                                        funcaoId: value,
+                                        funcaoName: funcao?.name ?? '',
+                                      };
+                                      // Re-derive only a cost the operator never typed into.
+                                      return item.costManual
+                                        ? next
+                                        : {
+                                            ...next,
+                                            costBrl: centsToInput(
+                                              funcaoCostBasis.get(value)?.cents ?? 0,
+                                            ),
+                                          };
+                                    }),
+                                  );
+                                }}
+                                options={allocatableFuncoes.map((funcao) => ({
+                                  value: funcao.id,
+                                  label: funcao.name,
+                                }))}
+                                placeholder="Selecionar função..."
+                                searchPlaceholder="Buscar função..."
+                                value={professional.funcaoId}
+                                // A legacy free-text snapshot such as `Operacional`
+                                // still renders as this row's label, with a null
+                                // funcaoId behind it.
+                                valueLabel={professional.funcaoName}
+                              />
+                            </div>
+                            <div className="flex flex-col items-end gap-1">
+                              <Input
+                                aria-label={`Custo alocado do profissional ${index + 1}`}
+                                className={`sales-ops-num w-full text-right ${formInputClass}`}
+                                onChange={(event) =>
+                                  setProfessionals((current) =>
+                                    current.map((item, itemIndex) =>
+                                      itemIndex === index
+                                        ? {
+                                            ...item,
+                                            costBrl: event.target.value,
+                                            costManual: true,
+                                          }
+                                        : item,
+                                    ),
+                                  )
+                                }
+                                value={professional.costBrl}
+                              />
+                              {professional.costManual ? (
+                                <div className="flex items-center gap-2">
+                                  <span className="rounded-full bg-[#fdf0cf] px-[7px] py-[2px] text-[11px] font-semibold text-[#9c7210]">
+                                    Alterado manualmente
+                                  </span>
+                                  {basis ? (
+                                    <button
+                                      className="text-[11px] font-semibold text-[#9c7210] underline"
+                                      onClick={() =>
+                                        setProfessionals((current) =>
+                                          current.map((item, itemIndex) =>
+                                            itemIndex === index
+                                              ? {
+                                                  ...item,
+                                                  costManual: false,
+                                                  costBrl: centsToInput(basis.cents),
+                                                }
+                                              : item,
+                                          ),
+                                        )
+                                      }
+                                      type="button"
+                                    >
+                                      Restaurar padrão
+                                    </button>
+                                  ) : null}
+                                </div>
+                              ) : derivation ? (
+                                <span className="text-right text-[11.5px] leading-tight text-[#9b9ba3]">
+                                  {derivation}
+                                </span>
+                              ) : null}
+                            </div>
+                            <button
+                              className="flex h-8 w-8 items-center justify-center rounded-[8px] border border-[#f0dcd5] bg-[#fbeee9] text-[#b23a22] transition hover:bg-[#f6e0d9]"
+                              onClick={() =>
+                                setProfessionals((current) =>
+                                  current.filter((_, itemIndex) => itemIndex !== index),
+                                )
+                              }
+                              type="button"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        );
+                      })}
                     </div>
+                    {showCostErrors && !professionalsValid ? (
+                      <div className="mt-3 rounded-[10px] border border-[#f0dcd5] bg-[#fbeee9] px-3 py-2 text-[12.5px] font-semibold text-[#b23a22]">
+                        Selecione a função de cada profissional alocado.
+                      </div>
+                    ) : null}
                   </div>
 
+                  {/*
+                    Every one of these four is a produto DEFAULT, not a constraint.
+                    Typing in one pins it for the rest of the session, so a later
+                    produto change re-proposes only the fields nobody touched.
+                  */}
                   <div className="grid gap-4 md:grid-cols-4">
                     <Field label="Outros custos (R$)">
                       <Input
                         className={`sales-ops-num bg-white ${formInputClass}`}
-                        onChange={(event) => setOtherCostsBrl(event.target.value)}
+                        onChange={(event) => {
+                          markManual('otherCostsBrl');
+                          setOtherCostsBrl(event.target.value);
+                        }}
                         value={otherCostsBrl}
                       />
+                      {overrideMarker('otherCostsBrl', otherCostsBrl, setOtherCostsBrl)}
                     </Field>
                     <Field label="Comissão vendedor %">
                       <Input
                         className={`sales-ops-num bg-white ${formInputClass}`}
-                        onChange={(event) => setSellerCommissionPct(event.target.value)}
+                        onChange={(event) => {
+                          markManual('sellerCommissionPct');
+                          setSellerCommissionPct(event.target.value);
+                        }}
                         value={sellerCommissionPct}
                       />
+                      {overrideMarker(
+                        'sellerCommissionPct',
+                        sellerCommissionPct,
+                        setSellerCommissionPct,
+                      )}
                     </Field>
                     <Field label="Comissão finder %">
                       <Input
                         className={`sales-ops-num bg-white ${formInputClass}`}
-                        onChange={(event) => setFinderCommissionPct(event.target.value)}
+                        onChange={(event) => {
+                          markManual('finderCommissionPct');
+                          setFinderCommissionPct(event.target.value);
+                        }}
                         value={finderCommissionPct}
                       />
+                      {overrideMarker(
+                        'finderCommissionPct',
+                        finderCommissionPct,
+                        setFinderCommissionPct,
+                      )}
                     </Field>
                     <Field label="Imposto %">
                       <Input
                         className={`sales-ops-num bg-white ${formInputClass}`}
-                        onChange={(event) => setTaxPct(event.target.value)}
+                        onChange={(event) => {
+                          markManual('taxPct');
+                          setTaxPct(event.target.value);
+                        }}
                         value={taxPct}
                       />
+                      {overrideMarker('taxPct', taxPct, setTaxPct)}
                     </Field>
                   </div>
 
@@ -6625,10 +6989,21 @@ function SaleWizardDialogBody({
                             </span>
                           </div>
                         ) : null}
+                        {/*
+                          `financials.totalBrl`, NOT the itens total: this is the
+                          same basis the Margem líquida beside it uses and the same
+                          one `sales_ops_sales.total_brl` persists, so a bounded
+                          recorrência is inside it. Rendering the itens total here
+                          let the card claim `Total R$ 1.000,00` next to a margin of
+                          R$ 3.000, which reads as nonsense. An indeterminada
+                          recorrência generates no bounded rows anywhere, so it
+                          contributes nothing here either, and the Recorrência line
+                          above still states the mensalidade separately.
+                        */}
                         <div className="mt-0.5 flex justify-between gap-4 border-t border-[#eeeef1] pt-2">
                           <span className="text-[#8b8b92]">Total</span>
                           <span className="sales-ops-num text-[15px] font-bold text-[#9c7210]">
-                            {formatMoneyBrl(totalCents)}
+                            {formatMoneyBrl(financials.totalBrl)}
                           </span>
                         </div>
                       </div>
@@ -6658,22 +7033,40 @@ function SaleWizardDialogBody({
                         </span>
                       </div>
                       <div className="mt-3 text-[12.5px] leading-[1.9] text-[#c9c9d0]">
+                        {/*
+                          The effective percentages are on the labels and the three
+                          costs are split out, so an override is visible exactly
+                          where the operator confirms the proposta rather than
+                          hidden inside one lumped costs-plus-tax total.
+                        */}
                         <div className="flex justify-between gap-4">
-                          <span>Comissão vendedor</span>
+                          <span>Comissão vendedor ({sellerCommissionPct}%)</span>
                           <span className="sales-ops-num font-semibold text-[#f3f3f5]">
                             {formatMoneyBrl(sellerCommissionCents)}
                           </span>
                         </div>
                         <div className="flex justify-between gap-4">
-                          <span>Comissão finder</span>
+                          <span>Comissão finder ({finderCommissionPct}%)</span>
                           <span className="sales-ops-num font-semibold text-[#f3f3f5]">
                             {formatMoneyBrl(finderCommissionCents)}
                           </span>
                         </div>
                         <div className="flex justify-between gap-4">
-                          <span>Custos + imposto</span>
+                          <span>Custos profissionais</span>
                           <span className="sales-ops-num font-semibold text-[#f3f3f5]">
-                            {formatMoneyBrl(professionalCents + taxCents + otherCents)}
+                            {formatMoneyBrl(professionalCents)}
+                          </span>
+                        </div>
+                        <div className="flex justify-between gap-4">
+                          <span>Imposto ({taxPct}%)</span>
+                          <span className="sales-ops-num font-semibold text-[#f3f3f5]">
+                            {formatMoneyBrl(taxCents)}
+                          </span>
+                        </div>
+                        <div className="flex justify-between gap-4">
+                          <span>Outros custos</span>
+                          <span className="sales-ops-num font-semibold text-[#f3f3f5]">
+                            {formatMoneyBrl(otherCents)}
                           </span>
                         </div>
                       </div>

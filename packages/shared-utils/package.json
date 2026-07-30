@@ -17,6 +17,10 @@
     "./hmac": {
       "types": "./dist/hmac.d.ts",
       "import": "./dist/hmac.js"
+    },
+    "./sale-financials": {
+      "types": "./dist/sale-financials.d.ts",
+      "import": "./dist/sale-financials.js"
     }
   },
   "scripts": {

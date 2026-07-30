@@ -155,7 +155,17 @@ function baseBootstrap(patch: Partial<SalesOpsBootstrap> = {}): SalesOpsBootstra
       },
     ],
     areas: [area(), area({ id: areaConsultoriaId, name: 'FXL Consultoria' })],
-    funcoes: [],
+    // `FUNÇÃO NO PROJETO` is a Combobox over this cadastro now, so the wizard needs
+    // at least one active função for a profissional row to be completable.
+    funcoes: [
+      {
+        ...funcaoPrestador,
+        orgId: 'org-test',
+        status: 'active' as const,
+        createdAt: '2026-07-29T12:00:00.000Z',
+        updatedAt: null,
+      },
+    ],
     payables: [],
     saleItems: [],
     receivables: [],
@@ -517,7 +527,9 @@ describe('combobox adoption in the proposta wizard', () => {
 
     await advanceToStep(3);
     await click(buttonByText('+ profissional'));
-    expect(comboboxText('Profissional 1')).toBe('Carla Prestadora');
+    // The picker now offers EVERY active pessoa, sorted by name, so a new row is
+    // seeded with 'Ana Martins' rather than the first `isCollaborator` pessoa.
+    expect(comboboxText('Profissional 1')).toBe('Ana Martins');
 
     await click(comboboxTrigger('Profissional 1'));
     await typeInPanel('Dev Externo');
@@ -526,12 +538,22 @@ describe('combobox adoption in the proposta wizard', () => {
 
     expect(comboboxText('Profissional 1')).toBe('Dev Externo');
 
+    // A função is required now; the old hardcoded `role: 'Operacional'` seed is gone.
+    await click(comboboxTrigger('Função do profissional 1'));
+    await click(optionRows().find((row) => row.textContent?.trim() === 'Prestador')!);
+
     await click(buttonByText('Avançar'));
     await click(buttonByText('Salvar proposta'));
 
     const payload = spies.onSave.mock.calls[0]?.[0];
     expect(payload?.professionals).toEqual([
-      { personId: undefined, personName: 'Dev Externo', role: 'Operacional', costBrl: 0 },
+      {
+        personId: undefined,
+        personName: 'Dev Externo',
+        funcaoId: funcaoPrestador.id,
+        role: 'Prestador',
+        costBrl: 0,
+      },
     ]);
   });
 

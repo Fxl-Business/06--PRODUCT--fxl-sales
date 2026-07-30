@@ -227,6 +227,15 @@ export type SalesOpsSaleProfessional = {
   saleId: string;
   personId: string | null;
   personNameSnapshot: string;
+  /**
+   * `null` on a legacy row whose free-text `role` matched no função in the org's
+   * cadastro. Such a row keeps its label in `funcaoNameSnapshot` and renders
+   * through the picker's `valueLabel`; no função is invented from historical text.
+   */
+  funcaoId?: string | null;
+  /** Server-derived from the resolved cadastro row; never authored by the client. */
+  funcaoNameSnapshot?: string;
+  /** @deprecated derived mirror of `funcaoNameSnapshot`; kept while legacy rows exist. */
   role: string;
   costBrl: number;
 };
@@ -303,7 +312,13 @@ export type SaleDraftItem = {
 export type SaleDraftProfessional = {
   personId?: string;
   personName: string;
-  role: string;
+  funcaoId?: string;
+  /**
+   * Optional because a `funcaoId` row does not need it. The API's
+   * `SaleProfessionalSchema` requires one of the two, and the payload builder
+   * emits the função name here so a legacy free-text row stays valid.
+   */
+  role?: string;
   costBrl: string | number;
 };
 
@@ -362,7 +377,8 @@ export type CreateSalePayload = {
   professionals: Array<{
     personId?: string;
     personName: string;
-    role: string;
+    funcaoId?: string;
+    role?: string;
     costBrl: number;
   }>;
 };

@@ -308,13 +308,17 @@ function fieldInput(label: string): HTMLInputElement {
   return input;
 }
 
-function professionalRowInputs(): { role: HTMLInputElement; cost: HTMLInputElement } {
-  // The Combobox wrapper is a `div.relative`, so the row grid is the trigger's
-  // grandparent. `closest('div.grid')` finds it without a test-only attribute.
-  const row = comboboxTrigger('Profissional 1').closest('div.grid');
-  const inputs = row ? [...row.querySelectorAll('input')] : [];
-  if (inputs.length < 2) throw new Error('professional row inputs not found');
-  return { role: inputs[0]!, cost: inputs[1]! };
+/**
+ * `FUNÇÃO NO PROJETO` is a Combobox over the funções cadastro now, not a text
+ * input, so the old positional `row.querySelectorAll('input')[0]` no longer
+ * addresses it. Both fields carry an explicit aria-label, which is a stronger
+ * handle than a DOM position that any layout change silently invalidates.
+ */
+function professionalRow(index = 1): { funcao: string; cost: HTMLInputElement } {
+  return {
+    funcao: comboboxText(`Função do profissional ${index}`),
+    cost: labeledInput(`Custo alocado do profissional ${index}`),
+  };
 }
 
 async function click(element: HTMLElement) {
@@ -379,9 +383,32 @@ describe('sale wizard edit path', () => {
     await click(buttonByText('Avançar'));
     expect(container.textContent).toContain('Profissionais alocados');
     expect(fieldInput('Comissão vendedor %').value).toBe('8');
-    const { role, cost } = professionalRowInputs();
-    expect(role.value).toBe('Operacional');
+    // A legacy stored row: no funcaoId, so the picker renders its free-text
+    // snapshot as the trigger label rather than dropping it.
+    const { funcao, cost } = professionalRow();
+    expect(funcao).toBe('Operacional');
     expect(cost.value).toBe('500');
+  });
+
+  it('sends the legacy professional row back as a role with no funcaoId', async () => {
+    await click(buttonByText('Avançar'));
+    await click(buttonByText('Avançar'));
+    await click(buttonByText('Avançar'));
+    await click(buttonByText('Salvar proposta'));
+
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        professionals: [
+          {
+            personId: undefined,
+            personName: 'Dev Externo',
+            funcaoId: undefined,
+            role: 'Operacional',
+            costBrl: 50000,
+          },
+        ],
+      }),
+    );
   });
 
   it('submits the reconstructed update payload with status open', async () => {

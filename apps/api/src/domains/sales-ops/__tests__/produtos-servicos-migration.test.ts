@@ -169,6 +169,17 @@ describe('produtos & serviços schema migration 0013', () => {
 
     expect(entry?.tag).toBe('0013_produtos_servicos_defaults');
     expect(journal.entries.filter((row) => row.idx === 13)).toHaveLength(1);
-    expect(journal.entries.some((row) => row.idx === 14)).toBe(false);
+    /*
+      This used to assert `some(idx === 14) === false`, i.e. "0013 is the last
+      migration ever journaled", which every subsequent slice is obliged to break
+      and which was never this test's subject. The claim that IS its subject -
+      0013 occupies idx 13 and nothing collides with it - is kept above and
+      strengthened here into the journal invariant that made it worth asserting:
+      every idx is unique and strictly increasing, so no later migration can take
+      13 or land out of order.
+    */
+    const indices = journal.entries.map((row) => row.idx);
+    expect(new Set(indices).size).toBe(indices.length);
+    expect([...indices].sort((a, b) => a - b)).toEqual(indices);
   });
 });
