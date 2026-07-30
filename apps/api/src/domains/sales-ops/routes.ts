@@ -7,17 +7,20 @@ import {
   CancelContractSchema,
   ClientSchema,
   CreateSaleSchema,
+  FuncaoSchema,
   PersonSchema,
   ProductSchema,
   SaleInputError,
   SaleTransitionSchema,
   SettingsSchema,
   UpdateAreaSchema,
+  UpdateFuncaoSchema,
   UpdatePersonSchema,
   UpdateSaleSchema,
   cancelContract,
   createArea,
   createClient,
+  createFuncao,
   createPerson,
   createProduct,
   createSale,
@@ -27,12 +30,14 @@ import {
   getSettings,
   listAreas,
   listClients,
+  listFuncoes,
   listPeople,
   listProducts,
   listSales,
   transitionSale,
   updateArea,
   updateClient,
+  updateFuncao,
   updatePerson,
   updateProduct,
   updateSale,
@@ -58,12 +63,25 @@ salesOpsRouter.get('/people', async (c) => {
   return c.json({ people });
 });
 
+/** Sentinels the person write path returns for an unresolvable função set. */
+const PERSON_FUNCAO_ERRORS = ['unknown_funcao', 'funcao_required'] as const;
+
+function isPersonFuncaoError(value: unknown): value is (typeof PERSON_FUNCAO_ERRORS)[number] {
+  return (
+    typeof value === 'string' &&
+    (PERSON_FUNCAO_ERRORS as readonly string[]).includes(value)
+  );
+}
+
 salesOpsRouter.post('/people', requireAdmin, async (c) => {
   const parsed = PersonSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) {
     return c.json({ error: 'validation_error', issues: parsed.error.flatten() }, 400);
   }
   const person = await createPerson(getDb(), c.get('orgId'), parsed.data);
+  if (isPersonFuncaoError(person)) {
+    return c.json({ error: 'validation_error', reason: person }, 400);
+  }
   return c.json({ person }, 201);
 });
 
@@ -73,6 +91,9 @@ salesOpsRouter.patch('/people/:id', requireAdmin, async (c) => {
     return c.json({ error: 'validation_error', issues: parsed.error.flatten() }, 400);
   }
   const person = await updatePerson(getDb(), c.get('orgId'), c.req.param('id'), parsed.data);
+  if (isPersonFuncaoError(person)) {
+    return c.json({ error: 'validation_error', reason: person }, 400);
+  }
   if (!person) return c.json({ error: 'not_found' }, 404);
   return c.json({ person });
 });
@@ -155,6 +176,50 @@ salesOpsRouter.patch('/areas/:id', async (c) => {
   if (area === 'duplicate') return c.json({ error: 'conflict', reason: 'area_name_taken' }, 409);
   if (!area) return c.json({ error: 'not_found' }, 404);
   return c.json({ area });
+});
+
+// Funções are readable by any authenticated org member (every picker needs them)
+// but only an admin may create or edit one, mirroring the pessoas gate.
+// There is deliberately no DELETE verb: removal is PATCH { status: 'archived' },
+// exactly as for áreas and produtos, so an archived função keeps backing the
+// assignments that historical propostas were labelled from.
+salesOpsRouter.get('/funcoes', async (c) => {
+  const funcoes = await listFuncoes(getDb(), c.get('orgId'));
+  return c.json({ funcoes });
+});
+
+salesOpsRouter.post('/funcoes', requireAdmin, async (c) => {
+  const parsed = FuncaoSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) {
+    return c.json({ error: 'validation_error', issues: parsed.error.flatten() }, 400);
+  }
+  const funcao = await createFuncao(getDb(), c.get('orgId'), parsed.data);
+  if (funcao === 'reserved_slug') {
+    return c.json({ error: 'validation_error', reason: 'reserved_funcao_slug' }, 400);
+  }
+  if (funcao === 'duplicate') return c.json({ error: 'conflict', reason: 'funcao_name_taken' }, 409);
+  if (funcao === 'duplicate_slug') {
+    return c.json({ error: 'conflict', reason: 'funcao_slug_taken' }, 409);
+  }
+  return c.json({ funcao }, 201);
+});
+
+salesOpsRouter.patch('/funcoes/:id', requireAdmin, async (c) => {
+  const parsed = UpdateFuncaoSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) {
+    return c.json({ error: 'validation_error', issues: parsed.error.flatten() }, 400);
+  }
+  const funcao = await updateFuncao(getDb(), c.get('orgId'), c.req.param('id'), parsed.data);
+  if (funcao === 'reserved_slug') {
+    return c.json({ error: 'validation_error', reason: 'reserved_funcao_slug' }, 400);
+  }
+  if (funcao === 'is_system') return c.json({ error: 'conflict', reason: 'funcao_is_system' }, 409);
+  if (funcao === 'duplicate') return c.json({ error: 'conflict', reason: 'funcao_name_taken' }, 409);
+  if (funcao === 'duplicate_slug') {
+    return c.json({ error: 'conflict', reason: 'funcao_slug_taken' }, 409);
+  }
+  if (!funcao) return c.json({ error: 'not_found' }, 404);
+  return c.json({ funcao });
 });
 
 salesOpsRouter.get('/sales', async (c) => {
