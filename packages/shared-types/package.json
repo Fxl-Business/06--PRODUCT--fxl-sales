@@ -20,7 +20,7 @@
     }
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc --build --force",
     "type-check": "tsc --noEmit",
     "lint": "echo 'no lint for shared-types'"
   },

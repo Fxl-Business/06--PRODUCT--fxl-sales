@@ -10,7 +10,7 @@
     "build:packages": "pnpm --filter @fxl-sales/shared-types build && pnpm --filter @fxl-sales/shared-utils build",
     "type-check": "pnpm run build:packages && pnpm -r type-check",
     "lint": "pnpm -r lint",
-    "test": "pnpm run build:packages && pnpm -r --if-present test && node scripts/no-legacy-auth.mjs",
+    "test": "pnpm run build:packages && pnpm -r --if-present test && node scripts/no-legacy-auth.mjs && node scripts/build-contract.mjs",
     "perf:audit": "node scripts/perf-audit.mjs",
     "install:all": "pnpm install",
     "prepare": "husky || true"

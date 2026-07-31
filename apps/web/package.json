@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "pnpm --filter @fxl-sales/web^... build && tsc --noEmit && vite build",
     "preview": "vite preview",
     "type-check": "tsc --noEmit",
     "lint": "eslint src/",
