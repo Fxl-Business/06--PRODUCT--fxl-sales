@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "current_milestone_id": "v2.3.0",
+  "current_milestone_id": "v2.4.0",
   "delivery": {
     "mode": "promotion",
     "trunk": "master",
@@ -19,5 +19,13 @@
     "decision": "skipped-autopilot",
     "decided_at": "2026-07-29",
     "note": "User invoked --autopilot after locking design answers 1-9 in chat."
+  },
+  "gate3": {
+    "release": "v2.3.0",
+    "commit": "b34c964ba80540a319e3ef19f73db2ef13fd4d3c",
+    "flow": "ship-prod-ready",
+    "decision": "approved-full-promotion",
+    "decided_at": "2026-07-30",
+    "note": "--auto carried Gate 1 only, so production approval was asked once and granted explicitly. Promoted master -> staging -> production with no validation pause. Three migration hazards in 0012/0013/0015 were surfaced and accepted; see nexo/milestones/v2.3.0/SUMMARY.md."
   }
 }
