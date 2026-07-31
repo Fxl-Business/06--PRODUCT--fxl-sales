@@ -27,5 +27,13 @@
     "decision": "approved-full-promotion",
     "decided_at": "2026-07-30",
     "note": "--auto carried Gate 1 only, so production approval was asked once and granted explicitly. Promoted master -> staging -> production with no validation pause. Three migration hazards in 0012/0013/0015 were surfaced and accepted; see nexo/milestones/v2.3.0/SUMMARY.md."
+  },
+  "gate3_hotfix": {
+    "release": "v2.3.1",
+    "commit": "cd852bdb20c222cf612959a48f9568824363a572",
+    "flow": "hotfix",
+    "decision": "approved-in-invocation",
+    "decided_at": "2026-07-31",
+    "note": "The v2.3.0 Vercel web deploy failed with TS2307 on a workspace subpath. User approved the production deploy explicitly in the request. Release-verify added a clean-clone deploy simulation and a negative control proving v2.3.0 fails and v2.3.1 passes on the same machine and lockfile."
   }
 }

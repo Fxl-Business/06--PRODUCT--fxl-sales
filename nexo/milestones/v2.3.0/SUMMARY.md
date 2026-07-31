@@ -33,6 +33,17 @@ Independent release verification passed lint, type-check, 749 unit and contract 
 The tagged commit was promoted through `staging` and then `production` without a staging validation pause under the explicit production-ready approval recorded at Gate 3.
 Both promotions were fast-forwards from `db8df37`, the `v2.2.0` commit, and `master`, `staging` and `production` all rest at the tagged commit.
 
+## Hotfix v2.3.1
+
+`v2.3.0` did not reach production intact.
+The `apps/web` deploy failed on Vercel with `TS2307: Cannot find module '@fxl-sales/shared-utils/sale-financials'`, while the API half deployed normally, so production briefly served the previous web bundle against the new API schema.
+
+`v2.3.0` shipped the first `apps/web` import of `@fxl-sales/shared-utils` in the repo's history, and `vercel.json` builds only the web app while `packages/*/dist` is gitignored.
+Every root script builds the packages first, so no local command could observe the gap and the release-verify PASS was accurate about the command it ran.
+
+Fixed and promoted as `v2.3.1` (`cd852bdb20c222cf612959a48f9568824363a572`) on 2026-07-31.
+Full detail in `nexo/runs/20260731-hotfix-vercel-build-contract/run.md`.
+
 ## Migration risk carried into production
 
 Six migrations ship in this release, `0010_sales_ops_areas` through `0015_servico_base_value`, and the API image applies them at container start before the server serves traffic.
