@@ -7,16 +7,45 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useReducer,
   useRef,
   useState,
   type ReactNode,
 } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { Button } from '@/components/ui/button';
 import { Combobox } from '@/components/ui/combobox';
 import { Skeleton } from '@/components/ui/skeleton';
 import { isOrgLabelFallback, orgLabel } from '@/lib/displayNames';
 import { getRoleFromHubClaims, getRolesFromHubClaims, parseJwtPayload, type AppRole } from './claims';
 import { getHubBffBasePath, loadHubBrowserConfig } from './provider';
+import {
+  captureReturnTo,
+  clearLoginAttempts,
+  consumeReturnTo,
+  isLoginBlocked,
+  registerLoginAttempt,
+} from './session-recovery';
 import { createHubAccessTokenCache } from './token';
+
+/**
+ * The bounded revalidation ladder. `HubClient.getToken()` collapses three genuinely
+ * different outcomes - the network threw, the BFF answered non-200, the body did not
+ * parse - into a single `null`, so the provider cannot tell "the network hiccuped"
+ * from "your session is dead". Treating both as dead is what destroyed a half-filled
+ * form every time a refresh blipped.
+ *
+ * A `null` observed while a token is already held therefore does not touch the
+ * profile; it schedules a re-read instead. Four consecutive nulls (~6 seconds of
+ * continuous failure) exhaust the ladder and the session really is torn down, so a
+ * genuinely dead session can never leave the app stranded half-authenticated.
+ */
+export const SESSION_REVALIDATE_DELAYS_MS = [500, 1_500, 4_000] as const;
+
+/** `''` makes every `new URL(value, origin)` throw, so a missing DOM means "no restore". */
+function currentOrigin(): string {
+  return typeof window === 'undefined' ? '' : window.location.origin;
+}
 
 type AuthProfile = {
   isLoaded: boolean;
@@ -116,6 +145,23 @@ function HubAuthProvider({ children }: { children: ReactNode }) {
   );
   const tokenCache = useMemo(() => createHubAccessTokenCache(client), [client]);
   const operationGeneration = useRef(0);
+  /**
+   * The token last pushed into React state. `undefined` is a sentinel that no apply
+   * has happened yet, so the very first apply - including a first apply of `null`,
+   * which must flip `isLoaded` - always runs.
+   */
+  const lastAppliedToken = useRef<string | null | undefined>(undefined);
+  /** A token has been observed and not yet invalidated. Gates the ladder. */
+  const hasSessionRef = useRef(false);
+  const revalidateAttempts = useRef(0);
+  const revalidateTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /**
+   * Clearing the pending timer at unmount does not cover the interleaving where the
+   * timer has ALREADY fired and its refresh is still in flight: `revalidateTimer` is
+   * null by then, so the cleanup finds nothing, and the late resolution schedules a
+   * fresh rung that nothing will ever clear.
+   */
+  const mountedRef = useRef(true);
   const [profile, setProfile] = useState<AuthProfile>({
     isLoaded: false,
     isSignedIn: false,
@@ -124,6 +170,12 @@ function HubAuthProvider({ children }: { children: ReactNode }) {
   const [workspaces, setWorkspaces] = useState<HubWorkspacePreview[]>([]);
 
   const applyToken = useCallback((token: string | null) => {
+    // `profileFromToken` is pure over the token, so the same token deterministically
+    // yields the same profile. Without this guard every one of the ~40 token reads per
+    // screen built a fresh profile object and a fresh workspaces array, both of which
+    // only bail out on `Object.is`, and re-rendered every consumer of the auth context.
+    if (lastAppliedToken.current === token) return;
+    lastAppliedToken.current = token;
     const next = profileFromToken(token);
     setWorkspaces(next.workspaces);
     setProfile({
@@ -138,20 +190,88 @@ function HubAuthProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  /**
+   * One `useMemo` so `scheduleRevalidate` and `observeToken` can call each other
+   * directly (hoisted function declarations) instead of through a latest-ref, and so
+   * every one of them keeps a stable identity - `getToken` is handed to ~40 call sites
+   * and must not change on every render.
+   */
+  const { clearRevalidateTimer, failSession, observeToken } = useMemo(() => {
+    function clearRevalidateTimer() {
+      if (revalidateTimer.current === null) return;
+      clearTimeout(revalidateTimer.current);
+      revalidateTimer.current = null;
+    }
+
+    function failSession() {
+      clearRevalidateTimer();
+      revalidateAttempts.current = 0;
+      hasSessionRef.current = false;
+      applyToken(null);
+    }
+
+    function scheduleRevalidate() {
+      // While a timer is pending, further nulls are no-ops. ~40 concurrent readers
+      // must produce ONE ladder, not 40.
+      if (revalidateTimer.current !== null) return;
+      const attempt = revalidateAttempts.current;
+      if (attempt >= SESSION_REVALIDATE_DELAYS_MS.length) {
+        failSession();
+        return;
+      }
+      revalidateAttempts.current = attempt + 1;
+      revalidateTimer.current = setTimeout(() => {
+        revalidateTimer.current = null;
+        void tokenCache.getToken().then(observeToken, () => observeToken(null));
+      }, SESSION_REVALIDATE_DELAYS_MS[attempt]);
+    }
+
+    function observeToken(token: string | null) {
+      // A resolution that lands after unmount is dropped whole: applying it would be a
+      // setState on a dead root, and rescheduling from it would leak a timer forever.
+      if (!mountedRef.current) return;
+      if (token !== null) {
+        clearRevalidateTimer();
+        revalidateAttempts.current = 0;
+        hasSessionRef.current = true;
+        // A normal re-login (attempt 1, callback, token) leaves the loop guard at
+        // zero, so it can never fire during ordinary operation.
+        clearLoginAttempts();
+        applyToken(token);
+        return;
+      }
+      // Cold start: no profile to preserve and no in-progress work to lose, so an
+      // immediate sign-out and re-login is the fastest correct answer.
+      if (!hasSessionRef.current) {
+        applyToken(null);
+        return;
+      }
+      scheduleRevalidate();
+    }
+
+    return { clearRevalidateTimer, failSession, observeToken };
+  }, [applyToken, tokenCache]);
+
   const getToken = useCallback(async () => {
     const token = await tokenCache.getToken();
-    applyToken(token);
+    observeToken(token);
     return token;
-  }, [applyToken, tokenCache]);
+  }, [observeToken, tokenCache]);
 
   const login = useCallback(() => client.login(), [client]);
 
   const logout = useCallback(async () => {
     operationGeneration.current += 1;
     tokenCache.clear();
-    applyToken(null);
+    // Kills any in-flight ladder and clears `hasSessionRef`, so a late resolution
+    // cannot resurrect a profile after an explicit sign-out.
+    failSession();
+    clearLoginAttempts();
+    // A deliberate logout must not bounce the next login into the previous
+    // operator's screen.
+    consumeReturnTo(currentOrigin());
     await client.logout();
-  }, [applyToken, client, tokenCache]);
+  }, [client, failSession, tokenCache]);
 
   const setActive = useCallback(
     async (workspaceId: string) => {
@@ -160,9 +280,9 @@ function HubAuthProvider({ children }: { children: ReactNode }) {
       const result = await client.setActive(workspaceId);
       if (switchGeneration !== operationGeneration.current) return;
       tokenCache.seed(result.accessToken, result.expiresIn);
-      applyToken(result.accessToken);
+      observeToken(result.accessToken);
     },
-    [applyToken, client, tokenCache],
+    [client, observeToken, tokenCache],
   );
 
   useEffect(() => {
@@ -170,15 +290,27 @@ function HubAuthProvider({ children }: { children: ReactNode }) {
     void tokenCache
       .getToken()
       .then((token) => {
-        if (active) applyToken(token);
+        if (active) observeToken(token);
       })
       .catch(() => {
-        if (active) applyToken(null);
+        // A throw on cold start is still an immediate sign-out because
+        // `hasSessionRef` is false; a throw once signed in enters the ladder.
+        if (active) observeToken(null);
       });
     return () => {
       active = false;
     };
-  }, [applyToken, tokenCache]);
+  }, [observeToken, tokenCache]);
+
+  // Re-armed in the effect body, not only initialized at `useRef`, so a StrictMode
+  // mount-unmount-mount cannot leave the provider permanently marked as unmounted.
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      clearRevalidateTimer();
+    };
+  }, [clearRevalidateTimer]);
 
   const value = useMemo(
     () => ({
@@ -196,14 +328,77 @@ function HubAuthProvider({ children }: { children: ReactNode }) {
   return <HubAuthContext.Provider value={value}>{children}</HubAuthContext.Provider>;
 }
 
+/**
+ * The terminal state of the anti-redirect-loop guard. Strings are hardcoded pt-BR to
+ * match the rest of this file (`Sair`, `Buscar workspace...`); `src/i18n/**` is outside
+ * this slice's boundary.
+ */
+function SessionRecoveryPanel({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div className="flex h-screen flex-col items-center justify-center gap-4 px-6 text-center">
+      <h1 className="text-2xl font-semibold">Não foi possível restabelecer sua sessão</h1>
+      <p className="max-w-md text-muted-foreground">
+        Tentamos entrar novamente algumas vezes e a sessão não foi aceita. Isso costuma ser
+        temporário.
+      </p>
+      <Button onClick={onRetry} variant="outline">
+        Tentar novamente
+      </Button>
+    </div>
+  );
+}
+
 function HubProtected({ children }: { children: ReactNode }) {
   const { isLoaded, isSignedIn, login } = useHubAuthContext();
+  // The router location, not `window.location`: it is the app's own truth, identical
+  // to the browser's under `BrowserRouter`, and testable without stubbing globals.
+  const location = useLocation();
+  const navigate = useNavigate();
+  // The manual retry is the only thing that can change the loop guard's answer while
+  // this component stays mounted, so it is the only thing that has to force a re-read.
+  const [, recheckLoginGuard] = useReducer((ticks: number) => ticks + 1, 0);
+  const restoredRef = useRef(false);
+  const currentPath = `${location.pathname}${location.search}`;
+  /**
+   * Derived from the stored attempt counter, never mirrored into React state. A
+   * `setLoginBlocked(true)` inside the login effect would create a second source of
+   * truth for one fact and would be a synchronous setState in an effect body.
+   */
+  const loginBlocked = isLoaded && !isSignedIn && isLoginBlocked();
 
   useEffect(() => {
-    if (isLoaded && !isSignedIn) {
-      login();
-    }
-  }, [isLoaded, isSignedIn, login]);
+    // `restoredRef` plus consume-before-validate makes a StrictMode double effect inert.
+    if (!isLoaded || !isSignedIn || restoredRef.current) return;
+    restoredRef.current = true;
+    const target = consumeReturnTo(currentOrigin());
+    // `replace` so the post-callback root entry does not linger in history and send
+    // the operator back to the dashboard on Back.
+    if (target && target !== currentPath) navigate(target, { replace: true });
+  }, [currentPath, isLoaded, isSignedIn, navigate]);
+
+  useEffect(() => {
+    if (!isLoaded || isSignedIn || loginBlocked) return;
+    // Belt and braces: the render guard above already refuses, and `registerLoginAttempt`
+    // refuses again here without incrementing, so the counter cannot run away.
+    if (!registerLoginAttempt()) return;
+    // CLAUDE.md, "Sales Ops Routing": the URL is the single source of truth for the
+    // active workspace and page, so restoring the URL restores the screen.
+    captureReturnTo(currentPath, currentOrigin());
+    login();
+  }, [currentPath, isLoaded, isSignedIn, login, loginBlocked]);
+
+  if (loginBlocked) {
+    return (
+      <SessionRecoveryPanel
+        onRetry={() => {
+          // Clearing the counter flips `loginBlocked` back to false on the next render,
+          // which re-arms the login effect. No direct `login()` call is needed.
+          clearLoginAttempts();
+          recheckLoginGuard();
+        }}
+      />
+    );
+  }
 
   if (!isLoaded || !isSignedIn) {
     return <Skeleton className="h-screen w-full" />;
