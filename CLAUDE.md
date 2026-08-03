@@ -28,6 +28,23 @@ Keep the repository folder name unchanged until the editor session can safely mo
   `requireToken(getToken)` in `apps/web/src/lib/require-token.ts` throws `AuthTokenUnavailableError`, and `apiFetch` / `apiFetchBlob` take a REQUIRED non-empty `token` and assert it before calling `fetch`, so a null token can never become an anonymous request that reads as a server outage.
   `no-restricted-syntax` in `apps/web/eslint.config.js` fails lint if `(await getToken()) ?? ...` comes back.
   The sales-ops error panel routes `isAuthFailure` (an unavailable token, or an `ApiError` with `status: 401`) to `Sessão expirada` rather than to the generic API-fault copy.
+- The Hub BFF session store is DURABLE, in Postgres, and `createAppAuthBff` must always pass it.
+  Omitting `sessionStore` makes `createHubBff` fall back to the SDK's `InMemoryHubSessionStore`, which puts the Hub refresh token in one process's memory: every restart or redeploy then logs every user out, and a second replica cannot see a session the first created.
+  `apps/api/src/middleware/__tests__/app-auth-bff-wiring.test.ts` asserts the exact store instance reaches `createHubBff`, so deleting the option fails a test rather than silently regressing.
+- `HubSessionStore` is a SYNCHRONOUS interface, so the store hydrates around the handler instead of awaiting inside it.
+  `createHubSessionScopeMiddleware` on `/auth/*` reads the session and login cookies, awaits a load of just those rows into an `AsyncLocalStorage`-scoped working set, runs the BFF handler where every store method is a pure `Map` operation, then awaits a one-transaction flush.
+  The working set is per-request, NOT a cache, which is what makes replicas correct: the Hub rotates the refresh token on every `/auth/refresh`, so a cached token would be stale the moment another replica rotated it.
+  A hydrate failure answers `503`, never an empty working set, because a false "no session" makes the SDK delete the session cookie and log every user out over a brief database blip.
+- `hub_bff_sessions` and `hub_bff_login_txns` are global, non-tenant tables and cannot be otherwise: a session row is written at `/auth/callback`, before any workspace is known, so there is no `org_id` to key a tenant policy on.
+  Both carry FORCE RLS with only the `app.fxl_admin` policy, so the ordinary `getDb()` connection sees zero rows; the store goes through `getAdminDb()`.
+  Refresh tokens and PKCE verifiers are AES-256-GCM sealed with the row id as AEAD additional data, keyed by HKDF-SHA256 from `FXL_HUB_SECRET_KEY` unless `HUB_SESSION_ENCRYPTION_KEY` overrides it, so rotating either one logs every user out.
+  Read that override through the validated `env` object, never `process.env`: `.env.dev.example` ships it blank and `??` does not catch `''`, which fails the 32-char floor and stops the API booting.
+- A null token read does NOT immediately sign the user out.
+  `HubClient.getToken()` collapses a network throw, a non-200 and an unparseable body into one `null`, so the provider runs a bounded revalidation ladder (`SESSION_REVALIDATE_DELAYS_MS`) and gives up only after four CONSECUTIVE failures.
+  The counter resets on every recovery; making it a lifetime total signs the operator out on roughly the fourth unrelated blip, which is the original destroyed-form bug, and `apps/web/src/auth/__tests__/react.test.tsx` pins the reset.
+- `sanitizeReturnTo` in `apps/web/src/auth/session-recovery.ts` re-asserts its structural checks on the NORMALIZED value it returns, not only on the raw input.
+  Validating only the raw string let dot-segment normalization through, so `/..//evil.example` returned `//evil.example` and resolved off-origin.
+  The stored path is destroyed BEFORE it is validated, so a hostile value is consumed exactly once and cannot be retried on a later mount.
 
 ## Tenancy
 

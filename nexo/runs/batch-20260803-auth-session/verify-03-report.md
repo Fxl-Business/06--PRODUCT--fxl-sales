@@ -180,8 +180,8 @@ returned value actually points.
 | 10 | `\t/cadastros` (leading tab) | REJECTED | - | no |
 | 11 | `\n/cadastros` (leading newline) | REJECTED | - | no |
 | 12 | `\r/cadastros` (leading CR) | REJECTED | - | no |
-| 13 | ` /cadastros` (leading NUL) | REJECTED | - | no |
-| 14 | `/cad astros` (embedded NUL) | REJECTED | - | no |
+| 13 | `/cadastros` (leading NUL) | REJECTED | - | no |
+| 14 | `/cadastros` (embedded NUL) | REJECTED | - | no |
 | 15 | `/cadastros` (embedded DEL) | REJECTED | - | no |
 | 16 | `" /cadastros"` (leading space) | REJECTED | - | no |
 | 17 | `/ca\tdastros` (tab inside) | REJECTED | - | no |
