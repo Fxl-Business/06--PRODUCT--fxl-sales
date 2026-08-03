@@ -7,6 +7,7 @@ import {
 } from '@/lib/api-client';
 import { NO_CACHE_EFFECT, useAppMutation } from '@/lib/app-mutation';
 import { queryKeys } from '@/lib/query-keys';
+import { requireToken } from '@/lib/require-token';
 
 /**
  * Admin payouts hooks (Phase 06 T09/T10, D-J/D-Q). All calls go through the
@@ -18,7 +19,7 @@ export function useFindersReady() {
   const { getToken } = useAccessToken();
   return useQuery({
     queryKey: queryKeys.payouts.findersReady(),
-    queryFn: async () => adminPayoutsApi.findersReady((await getToken()) ?? ''),
+    queryFn: async () => adminPayoutsApi.findersReady(await requireToken(getToken)),
     select: (d): FinderCommissionSummary[] => (Array.isArray(d.finders) ? d.finders : []),
   });
 }
@@ -27,7 +28,7 @@ export function usePayoutsList() {
   const { getToken } = useAccessToken();
   return useQuery({
     queryKey: queryKeys.payouts.list(),
-    queryFn: async () => adminPayoutsApi.list((await getToken()) ?? ''),
+    queryFn: async () => adminPayoutsApi.list(await requireToken(getToken)),
     select: (d): PayoutRow[] => (Array.isArray(d.payouts) ? d.payouts : []),
   });
 }
@@ -36,7 +37,7 @@ export function useCreatePayoutBatches() {
   const { getToken } = useAccessToken();
   return useAppMutation({
     mutationFn: async (finderIds: string[]) =>
-      adminPayoutsApi.createBatches(finderIds, (await getToken()) ?? ''),
+      adminPayoutsApi.createBatches(finderIds, await requireToken(getToken)),
     invalidates: [queryKeys.payouts.all],
   });
 }
@@ -45,7 +46,7 @@ export function useMarkPayoutPaid() {
   const { getToken } = useAccessToken();
   return useAppMutation({
     mutationFn: async (payoutId: string) =>
-      adminPayoutsApi.markPaid(payoutId, (await getToken()) ?? ''),
+      adminPayoutsApi.markPaid(payoutId, await requireToken(getToken)),
     invalidates: [queryKeys.payouts.all],
   });
 }
@@ -62,7 +63,7 @@ export function useDownloadPayoutCsv() {
     mutationFn: async (payoutId: string) => {
       const { blob, filename } = await adminPayoutsApi.downloadCsv(
         payoutId,
-        (await getToken()) ?? '',
+        await requireToken(getToken),
       );
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');

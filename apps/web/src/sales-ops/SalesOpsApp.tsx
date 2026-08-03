@@ -63,6 +63,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { isAuthFailure } from '@/lib/require-token';
 import { cn } from '@/lib/utils';
 import {
   useCancelSalesOpsContract,
@@ -1332,10 +1333,22 @@ export function SalesOpsApp() {
           <div className="min-h-0 flex-1 overflow-y-auto px-[22px] py-5">
             {bootstrapQuery.isLoading ? <LoadingPanel /> : null}
             {bootstrapQuery.isError ? (
-              <EmptyPanel
-                text="A API de vendas não respondeu corretamente. Verifique o servidor local e tente novamente."
-                title="Não foi possível carregar"
-              />
+              isAuthFailure(bootstrapQuery.error) ? (
+                /*
+                  An expired or unrenewable Hub session used to render as the API-fault
+                  panel below, so a logged-out operator was told the server was broken.
+                  Covers both halves: no token was available, and a token the API rejected.
+                */
+                <EmptyPanel
+                  text="Sua sessão do FXL Hub expirou ou não pôde ser renovada. Atualize a página para entrar novamente."
+                  title="Sessão expirada"
+                />
+              ) : (
+                <EmptyPanel
+                  text="A API de vendas não respondeu corretamente. Verifique o servidor local e tente novamente."
+                  title="Não foi possível carregar"
+                />
+              )
             ) : null}
             {!bootstrapQuery.isLoading && !bootstrapQuery.isError ? (
               <>

@@ -2,11 +2,16 @@
  * Thin fetch wrapper for talking to apps/api.
  *
  * Usage with TanStack Query:
- *   useQuery({ queryKey: ['items'], queryFn: () => apiFetch<Item[]>('/items') })
+ *   useQuery({ queryKey: ['items'], queryFn: async () => apiFetch<Item[]>('/items', {
+ *     method: 'GET', token: await requireToken(getToken),
+ *   }) })
  *
- * Auth: pass the active provider access token via getToken().
- * In the template, no pages call this - left here as the canonical helper to extend.
+ * Auth: `token` is REQUIRED and must be non-empty. It comes from
+ * requireToken(getToken) in ./require-token, never from `(await getToken()) ?? ""`
+ * - a blank token used to be laundered into a header-less anonymous request.
  */
+
+import { assertBearerToken } from './require-token';
 
 const baseUrl = import.meta.env.VITE_API_URL ?? 'http://localhost:3006';
 
@@ -18,14 +23,16 @@ export type ApiError = {
 
 export async function apiFetch<T>(
   path: string,
-  init?: RequestInit & { token?: string },
+  init: RequestInit & { token: string },
 ): Promise<T> {
-  const { token, headers, ...rest } = init ?? {};
+  const { token, headers, ...rest } = init;
+  // Throws BEFORE fetch: an empty token must never become an anonymous request.
+  assertBearerToken(token);
   const res = await fetch(`${baseUrl}${path}`, {
     ...rest,
     headers: {
       'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      Authorization: `Bearer ${token}`,
       ...headers,
     },
   });
@@ -50,13 +57,14 @@ export async function apiFetch<T>(
  */
 export async function apiFetchBlob(
   path: string,
-  init?: RequestInit & { token?: string },
+  init: RequestInit & { token: string },
 ): Promise<{ blob: Blob; filename: string | null }> {
-  const { token, headers, ...rest } = init ?? {};
+  const { token, headers, ...rest } = init;
+  assertBearerToken(token);
   const res = await fetch(`${baseUrl}${path}`, {
     ...rest,
     headers: {
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      Authorization: `Bearer ${token}`,
       ...headers,
     },
   });

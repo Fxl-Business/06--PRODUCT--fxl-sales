@@ -8,6 +8,7 @@ import {
 import { adminProductsApi } from '@/lib/api-client';
 import { useAppMutation } from '@/lib/app-mutation';
 import { queryKeys } from '@/lib/query-keys';
+import { requireToken } from '@/lib/require-token';
 import type {
   AppRow,
   CreateProductBody,
@@ -160,7 +161,7 @@ export function useAdminProducts(appId?: string) {
   const { getToken } = useAccessToken();
   return useQuery({
     queryKey: queryKeys.adminProducts.list(appId),
-    queryFn: async () => adminProductsApi.list(appId, (await getToken()) ?? ''),
+    queryFn: async () => adminProductsApi.list(appId, await requireToken(getToken)),
     select: (d): ProductListRow[] => (Array.isArray(d.products) ? d.products : []),
   });
 }
@@ -169,7 +170,7 @@ export function useAdminProduct(id: string) {
   const { getToken } = useAccessToken();
   return useQuery({
     queryKey: queryKeys.adminProducts.detail(id),
-    queryFn: async () => adminProductsApi.get(id, (await getToken()) ?? ''),
+    queryFn: async () => adminProductsApi.get(id, await requireToken(getToken)),
     enabled: Boolean(id),
   });
 }
@@ -179,7 +180,7 @@ export function useCreateProduct() {
   const queryClient = useQueryClient();
   return useAppMutation({
     mutationFn: async (data: CreateProductBody) =>
-      adminProductsApi.create(data, (await getToken()) ?? ''),
+      adminProductsApi.create(data, await requireToken(getToken)),
     invalidates: [queryKeys.adminProducts.all],
     onMutate: async (data) => {
       await queryClient.cancelQueries({ queryKey: queryKeys.adminProducts.all });
@@ -198,7 +199,7 @@ export function useUpdateProduct() {
   const { getToken } = useAccessToken();
   return useAppMutation({
     mutationFn: async ({ id, data }: { id: string; data: UpdateProductBody }) =>
-      adminProductsApi.update(id, data, (await getToken()) ?? ''),
+      adminProductsApi.update(id, data, await requireToken(getToken)),
     invalidates: ({ variables }) => [
       queryKeys.adminProducts.all,
       queryKeys.adminProducts.detail(variables.id),
@@ -215,7 +216,8 @@ export function useUpsertPriceBand(productId: string) {
     }: {
       component: PriceBandComponent;
       data: UpsertPriceBandBody;
-    }) => adminProductsApi.upsertPriceBand(productId, component, data, (await getToken()) ?? ''),
+    }) =>
+      adminProductsApi.upsertPriceBand(productId, component, data, await requireToken(getToken)),
     invalidates: [queryKeys.adminProducts.detail(productId)],
   });
 }
@@ -224,7 +226,7 @@ export function useUpsertCommissionRule(productId: string) {
   const { getToken } = useAccessToken();
   return useAppMutation({
     mutationFn: async (data: UpsertCommissionRuleBody) =>
-      adminProductsApi.upsertCommissionRule(productId, data, (await getToken()) ?? ''),
+      adminProductsApi.upsertCommissionRule(productId, data, await requireToken(getToken)),
     invalidates: [queryKeys.adminProducts.detail(productId)],
   });
 }

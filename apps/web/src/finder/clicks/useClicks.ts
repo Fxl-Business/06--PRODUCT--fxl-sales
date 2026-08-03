@@ -2,6 +2,7 @@ import { useAccessToken } from '@/auth/react';
 import { useQuery } from '@tanstack/react-query';
 import { finderClicksApi } from '@/lib/api-client';
 import { queryKeys } from '@/lib/query-keys';
+import { requireToken } from '@/lib/require-token';
 import type { ClickRow, ClickStats } from '@/finder/types';
 
 /**
@@ -15,7 +16,7 @@ export function useFinderClicks(linkId?: string) {
   return useQuery({
     queryKey: queryKeys.finderClicks.list(linkId),
     queryFn: async () =>
-      finderClicksApi.list(linkId ? { linkId } : undefined, (await getToken()) ?? ''),
+      finderClicksApi.list(linkId ? { linkId } : undefined, await requireToken(getToken)),
     select: (d): ClickRow[] => (Array.isArray(d.clicks) ? d.clicks : []),
   });
 }
@@ -24,6 +25,7 @@ export function useFinderClickStats() {
   const { getToken } = useAccessToken();
   return useQuery({
     queryKey: queryKeys.finderClicks.stats(),
-    queryFn: async (): Promise<ClickStats> => finderClicksApi.getStats((await getToken()) ?? ''),
+    queryFn: async (): Promise<ClickStats> =>
+      finderClicksApi.getStats(await requireToken(getToken)),
   });
 }

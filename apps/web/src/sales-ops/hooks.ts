@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAccessToken } from '@/auth/react';
 import { useAppMutation } from '@/lib/app-mutation';
 import { queryKeys } from '@/lib/query-keys';
+import { requireToken } from '@/lib/require-token';
 import {
   salesOpsApi,
   type SaveAreaPayload,
@@ -30,10 +31,6 @@ import type {
   SalesOpsFuncao,
   SalesOpsPerson,
 } from './types';
-
-async function requireToken(getToken: () => Promise<string | null>): Promise<string> {
-  return (await getToken()) ?? '';
-}
 
 /**
  * Hoisted so its identity is stable across renders. An inline `select` arrow
