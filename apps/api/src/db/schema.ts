@@ -863,3 +863,45 @@ export const salesOpsPayables = pgTable(
     index('sales_ops_payables_sale_id_idx').on(t.saleId),
   ],
 );
+
+// ─────────────────────────────────────────────────────────────────────────────
+// hub_bff_sessions / hub_bff_login_txns - the durable Hub BFF session store.
+//
+// GLOBAL, NON-TENANT tables, and they cannot be anything else: a session row is
+// written at /auth/callback BEFORE any workspace is known, so there is no org_id
+// to key a tenant policy on. They still carry ENABLE + FORCE ROW LEVEL SECURITY
+// with the admin-context policy ONLY, because these rows are bearer credentials
+// rather than idempotency keys: from the ordinary tenant connection (getDb(),
+// which never sets app.fxl_admin) both tables read as empty and refuse writes.
+// The store reads and writes exclusively through getAdminDb().
+//
+// hub_refresh_token_enc and code_verifier_enc are AES-256-GCM sealed with the
+// row id as AEAD additional data (see auth/session-crypto.ts), so a database
+// dump alone yields no usable credential. `state` is deliberately plaintext: it
+// is a CSRF nonce that also travels in the query string, it is worthless
+// without the verifier, and keeping it readable makes an incident diagnosable.
+// ─────────────────────────────────────────────────────────────────────────────
+export const hubBffSessions = pgTable(
+  'hub_bff_sessions',
+  {
+    id: text('id').primaryKey(), // opaque, 256-bit, base64url
+    hubRefreshTokenEnc: text('hub_refresh_token_enc').notNull(), // AES-256-GCM, aad = id
+    accountId: text('account_id'),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index('hub_bff_sessions_expires_at_idx').on(t.expiresAt)],
+);
+
+export const hubBffLoginTxns = pgTable(
+  'hub_bff_login_txns',
+  {
+    id: text('id').primaryKey(),
+    codeVerifierEnc: text('code_verifier_enc').notNull(), // AES-256-GCM, aad = id
+    state: text('state').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index('hub_bff_login_txns_expires_at_idx').on(t.expiresAt)],
+);
