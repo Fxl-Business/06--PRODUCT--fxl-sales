@@ -1,4 +1,5 @@
 import cron, { type ScheduledTask } from 'node-cron';
+import { deleteExpiredHubBffSessions } from '../auth/hub-session-store.js';
 import { getAdminDb } from '../db/client.js';
 import { promoteHoldExpired } from '../domains/commissions/service.js';
 
@@ -17,6 +18,7 @@ import { promoteHoldExpired } from '../domains/commissions/service.js';
  */
 
 let task: ScheduledTask | null = null;
+let sessionCleanupTask: ScheduledTask | null = null;
 
 export function setupNightlyJob(): void {
   if (task) return; // single instance guard
@@ -29,6 +31,20 @@ export function setupNightlyJob(): void {
       console.error('[nightly-job] hold promotion failed:', err);
     }
   });
+
+  // Durable Hub BFF session sweeper. Its own try/catch so a failure in one task
+  // can never skip the other. Expiry is ALSO enforced on read, so a missed run
+  // never makes an expired row usable - this only bounds table growth.
+  sessionCleanupTask = cron.schedule('15 3 * * *', async () => {
+    try {
+      const removed = await runHubSessionCleanup();
+      console.log(
+        `[nightly-job] hub session cleanup: ${removed.sessions} sessions, ${removed.loginTxns} login txns removed`,
+      );
+    } catch (err) {
+      console.error('[nightly-job] hub session cleanup failed:', err);
+    }
+  });
 }
 
 /** Extracted for testability + the manual admin trigger endpoint. */
@@ -37,10 +53,19 @@ export async function runHoldPromotion(): Promise<{ promoted: number }> {
   return { promoted };
 }
 
+/** Extracted for testability, mirroring runHoldPromotion(). */
+export async function runHubSessionCleanup(): Promise<{ sessions: number; loginTxns: number }> {
+  return deleteExpiredHubBffSessions(getAdminDb());
+}
+
 /** Graceful shutdown - stop the scheduled task (plan-brief Wave 4 failure-list). */
 export function stopNightlyJob(): void {
   if (task) {
     task.stop();
     task = null;
+  }
+  if (sessionCleanupTask) {
+    sessionCleanupTask.stop();
+    sessionCleanupTask = null;
   }
 }

@@ -37,6 +37,9 @@ const schema = z.object({
   FXL_HUB_REDIRECT_URI: emptyToUndefinedUrl,
   FXL_HUB_POST_LOGIN_REDIRECT: emptyToUndefinedUrl,
   FXL_HUB_POST_LOGIN_ERROR_REDIRECT: emptyToUndefinedUrl,
+  // Optional override for the Hub BFF session encryption key. Defaults to an
+  // HKDF-SHA256 derivation from FXL_HUB_SECRET_KEY, so no deploy needs this set.
+  HUB_SESSION_ENCRYPTION_KEY: emptyToUndefined,
   SENTRY_DSN: emptyToUndefinedUrl,
   // Public origin used to build referral full URLs.
   PUBLIC_LINK_BASE_URL: emptyToUndefinedUrl,

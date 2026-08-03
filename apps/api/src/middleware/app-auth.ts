@@ -1,7 +1,10 @@
 import type { HubSdkConfig } from '@fxl-business/hub-sdk';
 import { createHubBff, requireHubAuth } from '@fxl-business/hub-sdk/server';
-import type { MiddlewareHandler } from 'hono';
+import { Hono, type MiddlewareHandler } from 'hono';
+import { createHubSessionScopeMiddleware } from '../auth/hub-session-scope.js';
+import { createHubSessionStore } from '../auth/hub-session-store.js';
 import { tryLoadHubAuthConfig } from '../config/auth-provider.js';
+import { env } from '../env.js';
 
 type EnvLike = Record<string, string | undefined>;
 
@@ -155,13 +158,42 @@ export const appAuthMiddleware: MiddlewareHandler = async (c, next) => {
 };
 
 export function createAppAuthBff() {
-  if (!hubSdkConfig) {
+  if (!hubSdkConfig || !hubAuthConfig) {
     return null;
   }
 
-  return createHubBff(hubSdkConfig, {
+  // ONE boolean drives both the SDK's cookie name and our cookie read.
+  const secureCookies = (process.env.NODE_ENV ?? 'development') === 'production';
+
+  const session = createHubSessionStore({
+    databaseUrlPresent: Boolean(env.DATABASE_URL),
+    nodeEnv: process.env.NODE_ENV ?? 'development',
+    // Read the VALIDATED env, never process.env: .env.dev.example ships
+    // `HUB_SESSION_ENCRYPTION_KEY=` (blank) and CLAUDE.md documents that file as
+    // the one an operator copies to .env. `process.env.X ?? secret` keeps the
+    // empty string, createSessionSealer('') throws its 32-char floor, and
+    // server.ts calls this at module top level - so a blank value would stop the
+    // API booting. env.ts's emptyToUndefined turns '' into undefined, which is
+    // what makes the documented HKDF-from-FXL_HUB_SECRET_KEY default apply.
+    encryptionIkm: env.HUB_SESSION_ENCRYPTION_KEY ?? hubAuthConfig.secretKey,
+  });
+
+  const bff = createHubBff(hubSdkConfig, {
+    sessionStore: session.store,
+    secureCookies,
     redirectUri: resolveHubRedirectUri(process.env),
     postLoginRedirect: resolveHubPostLoginRedirect(process.env),
     postLoginErrorRedirect: resolveHubPostLoginErrorRedirect(process.env),
   });
+
+  if (session.kind === 'memory') {
+    return bff;
+  }
+
+  // The hydrate/flush scope is mounted INSIDE the returned router, so server.ts
+  // stays `app.route('', authBff)` and the middleware cannot be forgotten.
+  const router = new Hono();
+  router.use('/auth/*', createHubSessionScopeMiddleware(session.store, { secureCookies }));
+  router.route('', bff);
+  return router;
 }
