@@ -24,6 +24,10 @@ Keep the repository folder name unchanged until the editor session can safely mo
 - Feature gates check `auth.claims.entitlements.modules`.
 - The core module for this product is `sales.core`.
 - Browser Hub access tokens are memory-only, cached until JWT `exp` minus 30 seconds, and concurrent `getToken()` calls share one in-flight refresh per provider; logout and workspace generation guards reject late responses.
+- A missing access token is never defaulted.
+  `requireToken(getToken)` in `apps/web/src/lib/require-token.ts` throws `AuthTokenUnavailableError`, and `apiFetch` / `apiFetchBlob` take a REQUIRED non-empty `token` and assert it before calling `fetch`, so a null token can never become an anonymous request that reads as a server outage.
+  `no-restricted-syntax` in `apps/web/eslint.config.js` fails lint if `(await getToken()) ?? ...` comes back.
+  The sales-ops error panel routes `isAuthFailure` (an unavailable token, or an `ApiError` with `status: 401`) to `Sessão expirada` rather than to the generic API-fault copy.
 
 ## Tenancy
 

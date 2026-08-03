@@ -49,6 +49,12 @@ export default tseslint.config(
           message:
             'Use <Input type="number"> from @/components/ui/input; a raw <input type="number"> renders OS spin buttons.',
         },
+        {
+          selector:
+            "LogicalExpression[operator='??'] > AwaitExpression.left > CallExpression[callee.name='getToken']",
+          message:
+            'A missing access token must never be defaulted. Use `await requireToken(getToken)` from @/lib/require-token; `(await getToken()) ?? ""` sends an anonymous request that surfaces as a generic server fault.',
+        },
       ],
     },
   },

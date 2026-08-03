@@ -7,6 +7,7 @@ import {
 } from '@/lib/api-client';
 import { useAppMutation } from '@/lib/app-mutation';
 import { queryKeys } from '@/lib/query-keys';
+import { requireToken } from '@/lib/require-token';
 
 /**
  * Admin commissions hooks (Phase 05 T11, D-J/D-K). The lock mutation is the manual
@@ -16,7 +17,7 @@ export function useAdminCommissions(filters?: { status?: CommissionStatus; finde
   const { getToken } = useAccessToken();
   return useQuery({
     queryKey: queryKeys.adminCommissions.list(filters),
-    queryFn: async () => adminCommissionsApi.list(filters, (await getToken()) ?? ''),
+    queryFn: async () => adminCommissionsApi.list(filters, await requireToken(getToken)),
     select: (d): AdminCommissionRow[] => (Array.isArray(d.commissions) ? d.commissions : []),
   });
 }
@@ -25,7 +26,7 @@ export function useLockCommission() {
   const { getToken } = useAccessToken();
   return useAppMutation({
     mutationFn: async (commissionId: string) =>
-      adminCommissionsApi.lock(commissionId, (await getToken()) ?? ''),
+      adminCommissionsApi.lock(commissionId, await requireToken(getToken)),
     invalidates: [queryKeys.adminCommissions.all],
   });
 }
@@ -34,7 +35,7 @@ export function useReverseCommission() {
   const { getToken } = useAccessToken();
   return useAppMutation({
     mutationFn: async ({ commissionId, reason }: { commissionId: string; reason: string }) =>
-      adminCommissionsApi.reverse(commissionId, reason, (await getToken()) ?? ''),
+      adminCommissionsApi.reverse(commissionId, reason, await requireToken(getToken)),
     invalidates: [queryKeys.adminCommissions.all],
   });
 }

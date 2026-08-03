@@ -2,6 +2,7 @@ import { useAccessToken } from '@/auth/react';
 import { useQuery } from '@tanstack/react-query';
 import { adminConversionsApi, type AdminConversionRow } from '@/lib/api-client';
 import { queryKeys } from '@/lib/query-keys';
+import { requireToken } from '@/lib/require-token';
 
 /**
  * Admin conversions reconciliation hook (Phase 05 T10). Resolves the active auth token
@@ -12,7 +13,7 @@ export function useAdminConversions(filters?: { source?: string; finderId?: stri
   const { getToken } = useAccessToken();
   return useQuery({
     queryKey: queryKeys.adminConversions.list(filters),
-    queryFn: async () => adminConversionsApi.list(filters, (await getToken()) ?? ''),
+    queryFn: async () => adminConversionsApi.list(filters, await requireToken(getToken)),
     select: (d): AdminConversionRow[] => (Array.isArray(d.conversions) ? d.conversions : []),
   });
 }

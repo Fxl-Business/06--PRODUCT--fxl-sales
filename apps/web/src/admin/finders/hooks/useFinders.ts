@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { adminFindersApi } from '@/lib/api-client';
 import { useAppMutation } from '@/lib/app-mutation';
 import { queryKeys } from '@/lib/query-keys';
+import { requireToken } from '@/lib/require-token';
 import type { FinderRow, FinderStatus } from '@/admin/types';
 
 /**
@@ -15,7 +16,7 @@ export function useFinders(status?: FinderStatus) {
   const { getToken } = useAccessToken();
   return useQuery({
     queryKey: queryKeys.adminFinders.list(status),
-    queryFn: async () => adminFindersApi.list(status, (await getToken()) ?? ''),
+    queryFn: async () => adminFindersApi.list(status, await requireToken(getToken)),
     select: (data): FinderRow[] => (Array.isArray(data.items) ? data.items : []),
   });
 }
@@ -24,7 +25,7 @@ export function useFinder(id: string) {
   const { getToken } = useAccessToken();
   return useQuery({
     queryKey: queryKeys.adminFinders.detail(id),
-    queryFn: async () => adminFindersApi.get(id, (await getToken()) ?? ''),
+    queryFn: async () => adminFindersApi.get(id, await requireToken(getToken)),
     select: (data): FinderRow => data.finder,
   });
 }
@@ -32,7 +33,7 @@ export function useFinder(id: string) {
 export function useApproveFinder() {
   const { getToken } = useAccessToken();
   return useAppMutation({
-    mutationFn: async (id: string) => adminFindersApi.approve(id, (await getToken()) ?? ''),
+    mutationFn: async (id: string) => adminFindersApi.approve(id, await requireToken(getToken)),
     invalidates: ({ variables }) => [
       queryKeys.adminFinders.all,
       queryKeys.adminFinders.detail(variables),
@@ -44,7 +45,7 @@ export function useSuspendFinder() {
   const { getToken } = useAccessToken();
   return useAppMutation({
     mutationFn: async ({ id, reason }: { id: string; reason: string }) =>
-      adminFindersApi.suspend(id, reason, (await getToken()) ?? ''),
+      adminFindersApi.suspend(id, reason, await requireToken(getToken)),
     invalidates: ({ variables }) => [
       queryKeys.adminFinders.all,
       queryKeys.adminFinders.detail(variables.id),
