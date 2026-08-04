@@ -73,8 +73,10 @@ describe('sale margin parity - wizard model', () => {
     );
 
     // 5% of the ITEM subtotal, and nothing else. A recorrência of any size cannot
-    // reach this function: it takes items only, because a professional_cost payable
-    // is one-shot at win and pricing it off a monthly stream would double-count it.
+    // reach this function: it takes items only, because a professional_cost is a
+    // PAY-ONCE TOTAL and pricing it off a monthly stream would double-count it. The
+    // per-receivable split decides only WHEN that total is paid, under
+    // `Σ parts === cost_brl`, and it skips the `M`-labelled rows too.
     expect(basis.get(devFuncaoId)?.cents).toBe(100000);
     // Positive control: doubling the ITEM subtotal does move the number, so the
     // insensitivity above is about the recorrência and not a frozen result.

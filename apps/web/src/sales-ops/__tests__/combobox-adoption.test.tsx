@@ -554,6 +554,8 @@ describe('combobox adoption in the proposta wizard', () => {
         funcaoId: funcaoPrestador.id,
         role: 'Prestador',
         costBrl: 0,
+        // Nobody opened `Detalhe de pagamento`, so the row asks for the default split.
+        costSplitBp: null,
       },
     ]);
   });

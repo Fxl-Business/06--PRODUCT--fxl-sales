@@ -405,6 +405,8 @@ describe('sale wizard edit path', () => {
             funcaoId: undefined,
             role: 'Operacional',
             costBrl: 50000,
+            // The stored row predates `cost_split_bp`, so it reopens on the default.
+            costSplitBp: null,
           },
         ],
       }),
@@ -435,7 +437,13 @@ describe('sale wizard edit path', () => {
     );
     expect(payload.items[1]?.productId).toBeUndefined();
     expect(payload.professionals).toEqual([
-      { personId: undefined, personName: 'Dev Externo', role: 'Operacional', costBrl: 50000 },
+      {
+        personId: undefined,
+        personName: 'Dev Externo',
+        role: 'Operacional',
+        costBrl: 50000,
+        costSplitBp: null,
+      },
     ]);
   });
 

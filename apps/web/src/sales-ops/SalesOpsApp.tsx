@@ -117,6 +117,12 @@ import type {
   SalesOpsStatus,
 } from './types';
 import { computeSaleFinancials } from '@fxl-sales/shared-utils/sale-financials';
+/*
+  The SUBPATH, never the package root, for the same reason as `/sale-financials`
+  above: the root re-exports the Node-only hmac module and will not bundle.
+*/
+import { SPLIT_BP_TOTAL } from '@fxl-sales/shared-utils/professional-split';
+import { ProfessionalSplitPanel } from './ProfessionalSplitPanel';
 import {
   addMonthsToIsoDate,
   buildDashboardModel,
@@ -126,6 +132,7 @@ import {
   describeFuncaoCostBasis,
   describeProfessionalCostBase,
   entradaCentsFor,
+  formatIsoDateBr,
   formatMoneyBrl,
   generateInstallmentPlan,
   inferPaymentPlanShape,
@@ -427,11 +434,9 @@ function dateOnly(value: string) {
   return value.slice(0, 10);
 }
 
+/** Accepts a timestamp or a date-only string; `formatIsoDateBr` owns the formatting. */
 function displayDate(value: string) {
-  const iso = dateOnly(value);
-  const [year, month, day] = iso.split('-');
-  if (!year || !month || !day) return value;
-  return `${day}/${month}/${year}`;
+  return formatIsoDateBr(dateOnly(value));
 }
 
 function inputDateToday() {
@@ -5126,6 +5131,11 @@ type ProfessionalForm = {
    * INPUT MODE only, never persisted: `sales_ops_sale_professionals.cost_brl` is a
    * single integer-cents column, so a `%` row resolves to cents before it reaches the
    * payload and an edited proposta always reopens in `fix`.
+   *
+   * `costSplitBp` below is the deliberate opposite and the contrast is the point: a
+   * unit is how a number was TYPED and nothing re-evaluates it, while a split is a
+   * RULE that must survive a later `costBrl` edit unchanged and be re-resolved against
+   * whatever the plan then is.
    */
   costUnit: ProfessionalCostUnit;
   /** Percent points as typed. Read only while `costUnit === 'pct'`. */
@@ -5141,6 +5151,25 @@ type ProfessionalForm = {
    * itself a decision.
    */
   costManual: boolean;
+  /**
+   * The manual payment schedule in BASIS POINTS, or `null` for the default pro-rata
+   * over the parcelas. Unlike `costUnit` this IS persisted, in
+   * `sales_ops_sale_professionals.cost_split_bp`.
+   *
+   * REQUIRED and non-optional on purpose: three places construct a row (the
+   * `+ profissional` handler, the produto seeding guard and `deriveWizardPrefill`),
+   * and an optional field would let one of them forget the seed and send `undefined`
+   * - which `professionalSplitsValid` would happily pass and the payload would carry
+   * as "no override" whatever the operator had actually set.
+   */
+  costSplitBp: number[] | null;
+  /**
+   * Disclosure state for `Detalhe de pagamento`. UI only, never sent. Mirrors
+   * `SaleItemForm.descriptionOpen`, including why it rides on the ROW rather than in
+   * an index-keyed set: rows are deleted with `filter((_, i) => i !== index)`, so
+   * index-keyed state would slide onto the wrong row after a delete.
+   */
+  splitOpen: boolean;
 };
 
 /**
@@ -5382,6 +5411,12 @@ function deriveWizardPrefill(sale: SalesOpsSale, bootstrap: SalesOpsBootstrap): 
         // Unconditional: a persisted cost is a saved decision, so nothing on the
         // edit path may recompute it behind the operator.
         costManual: true,
+        // A stored override reopens verbatim; a stored NULL stays null so the API
+        // keeps re-deriving the pro rata against whatever the plan becomes.
+        costSplitBp: row.costSplitBp ?? null,
+        // Closed, override or not. Opening it for a stored split would push the
+        // whole table down on every edit of a proposta nobody asked to re-schedule.
+        splitOpen: false,
       })),
     // Verbatim, so reopening and saving an untouched proposta round-trips the plan
     // byte for byte. The inference above only describes these rows, it never edits them.
@@ -5983,6 +6018,10 @@ function SaleWizardDialogBody({
               `deriveWizardPrefill`, where a persisted cost is a saved decision.
             */
             costManual: false,
+            // The produto declares WHAT a função costs, never WHEN it is paid, so a
+            // seeded row starts on the default pro-rata like any other.
+            costSplitBp: null,
+            splitOpen: false,
           })),
         ]);
       }
@@ -6044,7 +6083,40 @@ function SaleWizardDialogBody({
   */
   const professionalPeopleValid = professionals.every(professionalRowWillPersist);
   const professionalsValid = professionalFuncoesValid && professionalPeopleValid;
-  const canAdvanceStepThree = professionalsValid;
+  /*
+    The parcelas a `professional_cost` can be paid out of, and the ONLY input the
+    `Detalhe de pagamento` panel takes. `installmentRows` and nothing else, which is
+    exactly the set the server's `resolveProfessionalSplit` is handed after its
+    `isRecurringReceivableLabel` filter: step 2 holds the recorrência as separate
+    state, so the two agree by construction rather than by a duplicated filter.
+
+    A zero-amount row is excluded because it is not a parcela anyone will be paid
+    from - and because a trailing zero-weight row would otherwise absorb the whole
+    floor remainder of the bp vector. Step 2's `planRowsValid` requires every amount
+    `> 0` before it lets the operator reach step 3, so in practice this filter drops
+    nothing; the empty case is the wizard's mirror of the server's `m === 0` one-shot
+    fallback and the panel answers it with copy instead of dividing by nothing.
+  */
+  const splitParcelas = installmentRows
+    .map((row) => ({ dueDate: row.dueDate, amountCents: parseCurrencyInputToCents(row.amountBrl) }))
+    .filter((row) => row.amountCents > 0);
+  const splitParcelaCount = splitParcelas.length;
+  /*
+    An override must be a real schedule: at least one part, never more parts than
+    there are parcelas to bind them to, and summing to exactly 100%. `Math.max(1, …)`
+    keeps a mid-edit empty plan from rejecting a row nobody has touched.
+
+    `costSplitBp === null` is always valid - that IS the default - so this gate can
+    only ever fire on a schedule the operator authored and can see.
+  */
+  const professionalSplitsValid = professionals.every(
+    (professional) =>
+      professional.costSplitBp === null ||
+      (professional.costSplitBp.length >= 1 &&
+        professional.costSplitBp.length <= Math.max(1, splitParcelaCount) &&
+        professional.costSplitBp.reduce((sum, part) => sum + part, 0) === SPLIT_BP_TOTAL),
+  );
+  const canAdvanceStepThree = professionalsValid && professionalSplitsValid;
 
   const itemsValid = items.every((item) => {
     if (item.kind === 'free') {
@@ -6697,6 +6769,13 @@ function SaleWizardDialogBody({
           role: professional.funcaoName,
           // Resolved here, never on the wire: `cost_brl` is a single integer-cents column.
           costBrl: professionalRowCents(professional),
+          /*
+            The opposite decision to `costBrl`, deliberately: a schedule is sent as the
+            RULE the operator authored, not as the cents it currently resolves to, so a
+            later `cost_brl` edit re-divides the new total instead of leaving a stale
+            array behind. `null` travels as `null` and the API stores NULL.
+          */
+          costSplitBp: professional.costSplitBp,
         })),
     };
     return buildSalePayload(draft);
@@ -7582,6 +7661,9 @@ function SaleWizardDialogBody({
                               costPct: '0',
                               costBrl: '0.00',
                               costManual: false,
+                              // Default pro-rata until the operator says otherwise.
+                              costSplitBp: null,
+                              splitOpen: false,
                             },
                           ])
                         }
@@ -7806,6 +7888,43 @@ function SaleWizardDialogBody({
                                   {derivation}
                                 </span>
                               ) : null}
+                              {/*
+                                Inside the EXISTING cost cell, as its last child, rather
+                                than in a new grid column: this slice edits no grid
+                                template and adds no column header, which is what keeps
+                                it clear of the professionals table's column order.
+
+                                Muted `#6a6a72` and not the amber `#9c7210` above it: the
+                                schedule is a normal affordance, not a warning, and the
+                                cell must not read as carrying two alerts. `#6a6a72`
+                                rather than `#8b8b92` because the lighter grey measures
+                                3.38:1 on white and fails WCAG AA (nexo/ROADMAP.md).
+
+                                The `(Nx)` suffix is the whole "this row diverges" signal;
+                                there is deliberately no second `Alterado manualmente`
+                                chip competing with the cost's.
+                              */}
+                              <button
+                                aria-expanded={professional.splitOpen}
+                                aria-label={`Detalhe de pagamento do profissional ${index + 1}`}
+                                className="text-[11px] font-semibold text-[#6a6a72] underline transition hover:text-[#201f24]"
+                                onClick={() =>
+                                  setProfessionals((current) =>
+                                    current.map((item, itemIndex) =>
+                                      itemIndex === index
+                                        ? { ...item, splitOpen: !item.splitOpen }
+                                        : item,
+                                    ),
+                                  )
+                                }
+                                type="button"
+                              >
+                                Detalhe de pagamento (
+                                {professional.costSplitBp
+                                  ? professional.costSplitBp.length
+                                  : Math.max(1, splitParcelaCount)}
+                                x)
+                              </button>
                             </div>
                             <button
                               /*
@@ -7824,6 +7943,29 @@ function SaleWizardDialogBody({
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                             </button>
+                            {/*
+                              A `col-span-full` sibling of the row's own cells, so it
+                              survives any column count and needs no grid-template edit.
+                              IN FLOW - no `absolute`, no `z-50`, no portal - which is
+                              why it must NOT call `useInlineLayer`; see the panel's own
+                              header comment.
+                            */}
+                            {professional.splitOpen ? (
+                              <ProfessionalSplitPanel
+                                costCents={professionalRowCents(professional)}
+                                onChange={(next) =>
+                                  setProfessionals((current) =>
+                                    current.map((item, itemIndex) =>
+                                      itemIndex === index ? { ...item, costSplitBp: next } : item,
+                                    ),
+                                  )
+                                }
+                                parcelas={splitParcelas}
+                                personName={professional.personName}
+                                rowNumber={index + 1}
+                                splitBp={professional.costSplitBp}
+                              />
+                            ) : null}
                           </div>
                         );
                       })}
@@ -7845,6 +7987,11 @@ function SaleWizardDialogBody({
                     {showCostErrors && !professionalFuncoesValid ? (
                       <div className="mt-3 rounded-[10px] border border-[#f0dcd5] bg-[#fbeee9] px-3 py-2 text-[12.5px] font-semibold text-[#b23a22]">
                         Selecione a função de cada profissional alocado.
+                      </div>
+                    ) : null}
+                    {showCostErrors && !professionalSplitsValid ? (
+                      <div className="mt-3 rounded-[10px] border border-[#f0dcd5] bg-[#fbeee9] px-3 py-2 text-[12.5px] font-semibold text-[#b23a22]">
+                        A divisão de pagamento de cada profissional deve somar 100%.
                       </div>
                     ) : null}
                   </div>
