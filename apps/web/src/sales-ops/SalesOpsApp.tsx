@@ -139,6 +139,7 @@ import {
   planFuncaoCostSeeds,
   productBaseValueBrl,
   professionalCostBaseCents,
+  professionalRowWillPersist,
   resolveProfessionalCostCents,
   resolveSaleCommissionDefaults,
   restanteCountFor,
@@ -6041,9 +6042,7 @@ function SaleWizardDialogBody({
     rejects a blank `personName` (`z.string().min(1)`), so without this the operator
     would meet an opaque 400 instead of a sentence naming the empty field.
   */
-  const professionalPeopleValid = professionals.every((professional) =>
-    Boolean(professional.personName.trim()),
-  );
+  const professionalPeopleValid = professionals.every(professionalRowWillPersist);
   const professionalsValid = professionalFuncoesValid && professionalPeopleValid;
   const canAdvanceStepThree = professionalsValid;
 
@@ -6072,7 +6071,29 @@ function SaleWizardDialogBody({
         : Boolean(selectedProduct(item)?.areaId),
     );
 
-  const professionalCents = professionals.reduce(
+  /*
+    Only the rows `createPayload` will actually SEND, through the same
+    `professionalRowWillPersist` predicate that filters the payload. A produto-seeded
+    row carries no pessoa until the operator picks one, so counting it here made the
+    `Margem líquida` in this footer disagree with the `net_margin_brl` the
+    `Salvar rascunho` button beside it persists - the one thing CLAUDE.md pins about
+    this number. A row rejoins the sum the moment it names a pessoa.
+  */
+  const persistedProfessionals = professionals.filter(professionalRowWillPersist);
+  /*
+    A row that names a função but no pessoa is a real allocation the operator can see
+    and a row `Salvar rascunho` will not persist - and on reopen `if (!editSale)`
+    correctly refuses to re-seed, so the produto's declared funções are gone for good.
+    `draftValid` deliberately does not gate on professionals (a rascunho must stay
+    saveable from step 1), so the loss is made VISIBLE rather than prevented. Making
+    it recoverable is filed in nexo/ROADMAP.md.
+  */
+  const hasUnsavedProfessionalRow = professionals.some(
+    (professional) =>
+      !professionalRowWillPersist(professional) &&
+      (Boolean(professional.funcaoId) || Boolean(professional.funcaoName.trim())),
+  );
+  const professionalCents = persistedProfessionals.reduce(
     (sum, professional) => sum + professionalRowCents(professional),
     0,
   );
@@ -6166,7 +6187,10 @@ function SaleWizardDialogBody({
       }
       return rows;
     }),
-    ...professionals.map((professional) => ({
+    // Same rows the payload carries, so this preview cannot list a payable no save
+    // would create. Step 4 is unreachable while a row lacks a pessoa anyway; this
+    // keeps the two facts stated in one place rather than two.
+    ...persistedProfessionals.map((professional) => ({
       // Preview text only. The persisted `beneficiaryName` deliberately stays the
       // pessoa alone, so this does not rewrite payables that already exist.
       label: professional.funcaoName
@@ -6656,11 +6680,13 @@ function SaleWizardDialogBody({
         the seeded row is the app's own proposal, it carries no operator input by
         definition (any keystroke fills the pessoa or pins the cost), and it is the
         same thing the edit path already does by never re-seeding a saved proposta.
-        The row's cost cannot reach a persisted margin the operator approved either,
-        because step 4 is unreachable while any row lacks a pessoa.
+
+        The predicate is SHARED with `professionalCents`, so a row dropped here is
+        also a row the step-3 `Custos profissionais` never counted: the margin the
+        operator reads is the margin this payload persists. Spelling the same test
+        at two call sites is precisely how those two once disagreed.
       */
-      professionals: professionals
-        .filter((professional) => professional.personName.trim() !== '')
+      professionals: persistedProfessionals
         .map((professional) => ({
           personId: professional.personId,
           personName: professional.personName,
@@ -7802,6 +7828,15 @@ function SaleWizardDialogBody({
                         );
                       })}
                     </div>
+                    {/*
+                      #6a6a72 and not #8b8b92: the lighter muted grey measures
+                      3.38:1 on white and fails WCAG AA (see nexo/ROADMAP.md).
+                    */}
+                    {hasUnsavedProfessionalRow ? (
+                      <div className="mt-3 text-[12.5px] leading-5 text-[#6a6a72]">
+                        Profissionais sem pessoa selecionada não são salvos no rascunho.
+                      </div>
+                    ) : null}
                     {showCostErrors && !professionalPeopleValid ? (
                       <div className="mt-3 rounded-[10px] border border-[#f0dcd5] bg-[#fbeee9] px-3 py-2 text-[12.5px] font-semibold text-[#b23a22]">
                         Selecione a pessoa de cada profissional alocado.

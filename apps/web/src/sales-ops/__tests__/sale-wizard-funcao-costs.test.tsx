@@ -1113,6 +1113,29 @@ function professionalRowCount(): number {
   return container.querySelectorAll('button[aria-label^="Remover profissional"]').length;
 }
 
+/** `R$ 1.300` back to 130000. The panel prints whole reais (`maximumFractionDigits: 0`). */
+function moneyTextToCents(text: string): number {
+  return Math.round(Number(text.replaceAll('.', '').replace(',', '.')) * 100);
+}
+
+function panelFigureCents(label: string): number {
+  const match = new RegExp(`${label}\\s*·?\\s*R\\$\\s*(-?[\\d.,]+)`, 'u').exec(
+    container.textContent ?? '',
+  );
+  if (!match?.[1]) throw new Error(`panel figure not found: ${label}`);
+  return moneyTextToCents(match[1]);
+}
+
+/**
+ * What the LAST `onSave` payload actually charges as professional cost - i.e. what
+ * `net_margin_brl` will be computed from server-side.
+ */
+function savedProfessionalCents(): number {
+  const payload = onSave.mock.calls.at(-1)?.[0];
+  if (!payload) throw new Error('onSave was never called');
+  return payload.professionals.reduce((sum, row) => sum + row.costBrl, 0);
+}
+
 describe('produto-seeded profissional rows', () => {
   it('seeds a row per declared funcao on a new proposta, funcao filled and pessoa empty', async () => {
     await renderWizard();
@@ -1272,6 +1295,85 @@ describe('produto-seeded profissional rows', () => {
           },
         ],
       }),
+    );
+  });
+
+  it('shows a custo profissional the save will actually charge, in both directions', async () => {
+    await renderWizard();
+    await goToCosts();
+    expect(professionalRowCount()).toBe(2);
+
+    /*
+      A seeded row carries cents (R$ 1.000 + R$ 300) but no pessoa, so `createPayload`
+      drops it. The panel must drop it too: `Salvar rascunho` sits in this very footer
+      and the operator would otherwise read a Margem líquida R$ 1.300 BELOW the
+      net_margin_brl the API derives from the payload it just sent.
+    */
+    await click(buttonByText('Salvar rascunho'));
+    expect(savedProfessionalCents()).toBe(0);
+    expect(panelFigureCents('Custos profissionais')).toBe(0);
+    const marginWithoutPeople = panelFigureCents('Margem líquida');
+
+    // Positive control 1: one pessoa named, and exactly that row's cents count.
+    // Without this, excluding EVERY row unconditionally would still pass above.
+    await pickOption('Profissional 1', 'Bruno Entrega');
+    await flushReact();
+    await click(buttonByText('Salvar rascunho'));
+    expect(savedProfessionalCents()).toBe(100000);
+    expect(panelFigureCents('Custos profissionais')).toBe(100000);
+
+    // Positive control 2: both named, both count, and the margin has fallen by
+    // exactly the professional cost the payload now carries.
+    await pickOption('Profissional 2', 'Bruno Entrega');
+    await flushReact();
+    await click(buttonByText('Salvar rascunho'));
+    expect(savedProfessionalCents()).toBe(130000);
+    expect(panelFigureCents('Custos profissionais')).toBe(130000);
+    expect(marginWithoutPeople - panelFigureCents('Margem líquida')).toBe(130000);
+  });
+
+  it('warns that a row without a pessoa is not saved in a rascunho, and only then', async () => {
+    await renderWizard();
+    await goToCosts();
+
+    // Two seeded rows, each with a função and no pessoa: exactly what a rascunho
+    // saved now would discard, permanently, since reopening never re-seeds.
+    expect(container.textContent).toContain(
+      'Profissionais sem pessoa selecionada não são salvos no rascunho.',
+    );
+
+    await pickOption('Profissional 1', 'Bruno Entrega');
+    await flushReact();
+    // Still one personless row left, so the line stays.
+    expect(container.textContent).toContain(
+      'Profissionais sem pessoa selecionada não são salvos no rascunho.',
+    );
+
+    await pickOption('Profissional 2', 'Bruno Entrega');
+    await flushReact();
+    expect(container.textContent).not.toContain(
+      'Profissionais sem pessoa selecionada não são salvos no rascunho.',
+    );
+  });
+
+  it('does not warn about a blank row the operator just added, until it names a funcao', async () => {
+    await renderWizard();
+    await goToCosts();
+    await addProfessional();
+
+    // `addProfessional` clears the seeds first, so this is a fresh row with neither
+    // função nor pessoa. Nothing was proposed, so there is nothing to lose.
+    expect(professionalRowCount()).toBe(1);
+    expect(container.textContent).not.toContain(
+      'Profissionais sem pessoa selecionada não são salvos no rascunho.',
+    );
+
+    // Naming its função makes it an allocation a rascunho would drop, so the line
+    // appears - the warning tracks the loss, not the seeding.
+    await pickOption('Função do profissional 1', 'Desenvolvedor');
+    await flushReact();
+    expect(container.textContent).toContain(
+      'Profissionais sem pessoa selecionada não são salvos no rascunho.',
     );
   });
 });

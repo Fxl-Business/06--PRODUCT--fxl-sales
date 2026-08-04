@@ -361,6 +361,27 @@ export function describeProfessionalCostBase(
 }
 
 /**
+ * Whether a wizard professional row will reach the API at all.
+ *
+ * The ONE predicate for "this row is going to be sent". `createPayload` filters the
+ * payload with it, the wizard sums `professionalCents` over it, and step 3's advance
+ * guard requires it of every row - so the `Custos profissionais` and `Margem líquida`
+ * on screen can never count cents a save would drop.
+ *
+ * That is not hypothetical. When the produto started SEEDING rows, every seeded row was
+ * personless by definition, and the payload filter and the on-screen sum each spelled
+ * `personName.trim() !== ''` at their own call site - except the sum did not spell it at
+ * all. A new proposta then showed `Margem líquida R$ 15.500` while `Salvar rascunho`, in
+ * that same footer, persisted `net_margin_brl = R$ 16.800`. One predicate, referenced
+ * twice, is what makes the two unable to drift again.
+ *
+ * A personless row is unsendable because the API declares `personName: z.string().min(1)`.
+ */
+export function professionalRowWillPersist(row: { personName: string }): boolean {
+  return row.personName.trim() !== '';
+}
+
+/**
  * The ONE place a wizard professional row turns into cents. `fix` reads the reais input,
  * `pct` delegates to `resolveFuncaoCostCents` so there is a single percentage-of-basis
  * implementation in the app.

@@ -3,6 +3,7 @@ import {
   buildFuncaoCostBasis,
   funcaoCostSeedKey,
   planFuncaoCostSeeds,
+  professionalRowWillPersist,
   type FuncaoCostBasisItem,
 } from '../calculations';
 import type { SalesOpsProductFuncaoCost } from '../types';
@@ -164,5 +165,19 @@ describe('planFuncaoCostSeeds', () => {
       funcaoCostSeedKey(customProductId, mentorFuncaoId),
     ]);
     expect(reversed.seeds.map((seed) => seed.funcaoId)).toEqual([mentorFuncaoId, testerFuncaoId]);
+  });
+});
+
+describe('professionalRowWillPersist', () => {
+  /*
+    The ONE predicate `createPayload` and the step-3 `Custos profissionais` sum both
+    reference. Its contract is narrow on purpose: only the pessoa decides, because
+    only `personName: z.string().min(1)` is what the API rejects.
+  */
+  it('admits a row with a pessoa and rejects a blank or whitespace-only one', () => {
+    expect(professionalRowWillPersist({ personName: 'Bruno Entrega' })).toBe(true);
+    expect(professionalRowWillPersist({ personName: '' })).toBe(false);
+    // Whitespace is not a pessoa: `personName.trim()` is what the API sees fail.
+    expect(professionalRowWillPersist({ personName: '   ' })).toBe(false);
   });
 });
