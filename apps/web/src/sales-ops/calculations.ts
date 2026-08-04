@@ -240,6 +240,70 @@ export function describeFuncaoCostBasis(entry: FuncaoCostBasisEntry | undefined)
     .join(' + ');
 }
 
+/**
+ * The identity of ONE produto-to-função cost declaration, which is what the wizard
+ * records as "already proposed". Keyed on the pair rather than on the função alone,
+ * so adding a second produto that declares the same função is a new declaration and
+ * removing the first one does not un-propose it.
+ */
+export function funcaoCostSeedKey(productId: string, funcaoId: string): string {
+  return `${productId}::${funcaoId}`;
+}
+
+export type FuncaoCostSeed = { funcaoId: string; costCents: number };
+export type FuncaoCostSeedPlan = { keys: string[]; seeds: FuncaoCostSeed[] };
+
+/**
+ * Which `Profissionais alocados` rows a NEW proposta should propose by itself, given
+ * the produtos on its itens and the cost declarations in the cadastro.
+ *
+ * Two different dedup rules, deliberately:
+ *
+ * - a DECLARATION is seen once, keyed on `(produto, função)`. The key is recorded
+ *   whether or not it produces a row, which is what makes deleting a proposed row
+ *   permanent and re-adding the produto inert.
+ * - a ROW is emitted once per FUNÇÃO. Two produtos declaring `Mentor` must not
+ *   double-charge him; the single row carries the summed `basis` cents, which is
+ *   exactly what the operator would have got by picking `Mentor` by hand.
+ *
+ * Pure and total: no dates, no randomness, no cadastro lookups and no `status`
+ * reasoning. Filtering an archived função out of `costs` is the caller's job,
+ * because only the caller knows what is currently assignable.
+ */
+export function planFuncaoCostSeeds(
+  items: FuncaoCostBasisItem[],
+  costs: SalesOpsProductFuncaoCost[],
+  basis: Map<string, FuncaoCostBasisEntry>,
+  seededKeys: readonly string[],
+  allocatedFuncaoIds: readonly string[],
+): FuncaoCostSeedPlan {
+  const seen = new Set(seededKeys);
+  const allocated = new Set(allocatedFuncaoIds.filter(Boolean));
+
+  const costsByProduct = new Map<string, SalesOpsProductFuncaoCost[]>();
+  for (const cost of costs) {
+    const bucket = costsByProduct.get(cost.productId);
+    if (bucket) bucket.push(cost);
+    else costsByProduct.set(cost.productId, [cost]);
+  }
+
+  const keys: string[] = [];
+  const seeds: FuncaoCostSeed[] = [];
+  for (const item of items) {
+    if (!item.productId) continue;
+    for (const cost of costsByProduct.get(item.productId) ?? []) {
+      const key = funcaoCostSeedKey(cost.productId, cost.funcaoId);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      keys.push(key);
+      if (allocated.has(cost.funcaoId)) continue;
+      allocated.add(cost.funcaoId);
+      seeds.push({ funcaoId: cost.funcaoId, costCents: basis.get(cost.funcaoId)?.cents ?? 0 });
+    }
+  }
+  return { keys, seeds };
+}
+
 export type ProfessionalCostUnit = 'pct' | 'fix';
 
 /**

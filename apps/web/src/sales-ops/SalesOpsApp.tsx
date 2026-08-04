@@ -136,6 +136,7 @@ import {
   maxRemainingInstallments,
   nextProductCodeSuffix,
   parseCurrencyInputToCents,
+  planFuncaoCostSeeds,
   productBaseValueBrl,
   professionalCostBaseCents,
   resolveProfessionalCostCents,
@@ -5531,6 +5532,23 @@ function SaleWizardDialogBody({
         (a, b) => Number(a.isSystem) - Number(b.isSystem) || a.name.localeCompare(b.name, 'pt-BR'),
       );
   }, [bootstrap.funcoes, createdFuncoes]);
+  /**
+   * The cost declarations that may PROPOSE a row, as opposed to the ones that may
+   * price one. Filtering the seed input and not `buildFuncaoCostBasis` is
+   * load-bearing in both directions: a seeded row is a NEW assignment and an
+   * archived função disappears from every assignment picker, while the basis must
+   * keep summing every declaration so a função the operator picks by hand still
+   * prefills its cost. An archived declaration never reaches `planFuncaoCostSeeds`,
+   * so its key is never recorded either, and reactivating a função mid-session
+   * seeds it on the next render with no special case anywhere.
+   */
+  const seedableFuncaoCosts = useMemo(
+    () =>
+      bootstrap.productFuncaoCosts.filter((cost) =>
+        allocatableFuncoes.some((funcao) => funcao.id === cost.funcaoId),
+      ),
+    [bootstrap.productFuncaoCosts, allocatableFuncoes],
+  );
   const firstProduct = bootstrap.products[0];
   const firstClient = bootstrap.clients[0];
   const firstSeller = sellers[0];
@@ -5618,6 +5636,17 @@ function SaleWizardDialogBody({
   const [professionals, setProfessionals] = useState<ProfessionalForm[]>(prefill?.professionals ?? []);
   /** Source key for the per-função cost re-prefill; see the sync block below. */
   const [funcaoCostKey, setFuncaoCostKey] = useState('');
+  /**
+   * Every `(produto, função)` cost declaration this wizard session has already
+   * proposed a row for. Only ever GROWS, which is the whole idempotency story: a
+   * re-render finds nothing new, deleting a proposed row is permanent, and removing
+   * a produto and re-adding it proposes nothing a second time.
+   *
+   * `useState`, never a render-mutated `useRef`: a ref would be marked seeded on
+   * React's discarded StrictMode pass while the `setProfessionals` from that same
+   * pass is thrown away, and the row would silently never appear.
+   */
+  const [seededFuncaoCostKeys, setSeededFuncaoCostKeys] = useState<string[]>([]);
   /**
    * Áreas created from an item row's own create row, kept locally so the new área is
    * selectable and visible on the trigger before the bootstrap refetch lands.
@@ -5854,14 +5883,17 @@ function SaleWizardDialogBody({
     carries a funcaoId. Changing a row's PESSOA never moves its cost: a pessoa is
     not a cost driver, the função is.
   */
-  const funcaoCostBasis = buildFuncaoCostBasis(
-    items.map((item) => ({
-      productId: item.kind === 'product' ? item.productId || undefined : undefined,
-      productName: saleItemDisplayName(item),
-      subtotalBrl: Math.max(1, Number(item.quantity) || 1) * parseCurrencyToCents(item.unitBrl),
-    })),
-    bootstrap.productFuncaoCosts,
-  );
+  /*
+    Hoisted rather than inlined so the seeding guard below reuses the IDENTICAL item
+    projection the basis was built from, instead of rebuilding it and risking a drift
+    between the row that gets proposed and the cents it gets proposed with.
+  */
+  const funcaoCostItems = items.map((item) => ({
+    productId: item.kind === 'product' ? item.productId || undefined : undefined,
+    productName: saleItemDisplayName(item),
+    subtotalBrl: Math.max(1, Number(item.quantity) || 1) * parseCurrencyToCents(item.unitBrl),
+  }));
+  const funcaoCostBasis = buildFuncaoCostBasis(funcaoCostItems, bootstrap.productFuncaoCosts);
   /*
     The fallback base for a wizard `%` whose função no produto declares. PRODUCT items
     only and item subtotals only, so the recorrência exclusion that governs
@@ -5891,6 +5923,69 @@ function SaleWizardDialogBody({
           : { ...row, costBrl: centsToInput(funcaoCostBasis.get(row.funcaoId)?.cents ?? 0) },
       ),
     );
+  }
+
+  /*
+    The fifth render-phase guard, and the only one that APPENDS a row rather than
+    rewriting one. A produto that declares `CUSTOS PADRÃO POR FUNÇÃO` is stating who
+    the project needs; before this the operator had to rediscover that on every
+    proposta by opening the produto cadastro, and the screen simply read
+    `Nenhum profissional alocado` with `Custos profissionais R$ 0,00`.
+
+    CREATE ONLY. `editSale` is the exact discriminator, because it is what decides
+    `prefill`, so `!editSale` means "these rows did not come from
+    `bootstrap.saleProfessionals`". On a saved proposta the stored rows ARE the
+    decision and so is the ABSENCE of one; neither `professionals.length === 0` nor
+    "no row carries this função" can tell a deliberate removal from a fresh start.
+
+    Placement AFTER the `funcaoCostKey` block is required: that guard maps over the
+    EXISTING rows and its key has already advanced for this render, so a row appended
+    here is never also visited by it in the same pass.
+
+    Termination: `seededFuncaoCostKeys` only grows and `planFuncaoCostSeeds` returns
+    only keys it does not already contain, over the finite set
+    `items x productFuncaoCosts`. The next render therefore returns no keys and no
+    setter runs - the same proof as the four guards above.
+  */
+  if (!editSale) {
+    const seedPlan = planFuncaoCostSeeds(
+      funcaoCostItems,
+      seedableFuncaoCosts,
+      funcaoCostBasis,
+      seededFuncaoCostKeys,
+      professionals.map((row) => row.funcaoId),
+    );
+    if (seedPlan.keys.length > 0) {
+      setSeededFuncaoCostKeys([...seededFuncaoCostKeys, ...seedPlan.keys]);
+      if (seedPlan.seeds.length > 0) {
+        setProfessionals((current) => [
+          ...current,
+          ...seedPlan.seeds.map((seed) => ({
+            // The literal request: the função and its cost arrive filled, and the
+            // PESSOA is the one thing left for the operator to choose.
+            personId: '',
+            personName: '',
+            funcaoId: seed.funcaoId,
+            // Non-empty by the `seedableFuncaoCosts` filter; the `?? ''` is the
+            // type-level tail, not a real branch.
+            funcaoName: allocatableFuncoes.find((funcao) => funcao.id === seed.funcaoId)?.name ?? '',
+            costUnit: 'fix' as const,
+            costPct: '0',
+            costBrl: centsToInput(seed.costCents),
+            /*
+              Deliberately NOT pinned. A produto number is a per-proposta DEFAULT, and
+              a Serviço prefills its `Valor negociado` as `"0"`, so the row is seeded
+              at 75% of nothing on the very first render; pinning it would freeze the
+              cost at R$ 0,00 no matter what the operator then negotiates. The guard
+              above cannot clobber the row either way, because it writes byte for byte
+              the expression the seed used. `costManual: true` belongs to
+              `deriveWizardPrefill`, where a persisted cost is a saved decision.
+            */
+            costManual: false,
+          })),
+        ]);
+      }
+    }
   }
 
   const activeAreas = bootstrap.areas.filter((area) => area.status === 'active');
@@ -6553,8 +6648,16 @@ function SaleWizardDialogBody({
         `personName: z.string().min(1)` answers one with a 400. `Avançar` past step 3
         already refuses such a row with a visible message, so the only path that can
         reach this is `Salvar rascunho`, which gates on `draftValid` and deliberately
-        does NOT gate on professionals - a half-filled row carries no person, so the
-        drop loses nothing addressable.
+        does NOT gate on professionals - a rascunho must stay saveable from step 1,
+        before the operator has been anywhere near the profissionais table.
+
+        Since a produto now SEEDS rows, a drop here can discard a suggestion rather
+        than an empty half-typed row. That is accepted and not a silent data loss:
+        the seeded row is the app's own proposal, it carries no operator input by
+        definition (any keystroke fills the pessoa or pins the cost), and it is the
+        same thing the edit path already does by never re-seeding a saved proposta.
+        The row's cost cannot reach a persisted margin the operator approved either,
+        because step 4 is unreachable while any row lacks a pessoa.
       */
       professionals: professionals
         .filter((professional) => professional.personName.trim() !== '')
@@ -7679,6 +7782,12 @@ function SaleWizardDialogBody({
                               ) : null}
                             </div>
                             <button
+                              /*
+                                Icon-only, so without this it had no accessible name
+                                at all - and it is now the affordance an operator uses
+                                to decline a row the produto proposed.
+                              */
+                              aria-label={`Remover profissional ${index + 1}`}
                               className="flex h-8 w-8 items-center justify-center rounded-[8px] border border-[#f0dcd5] bg-[#fbeee9] text-[#b23a22] transition hover:bg-[#f6e0d9]"
                               onClick={() =>
                                 setProfessionals((current) =>
