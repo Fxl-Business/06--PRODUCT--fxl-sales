@@ -132,6 +132,7 @@ describe('sale margin parity - API ledger', () => {
         funcaoNameSnapshot: 'Desenvolvedor',
         role: 'Desenvolvedor',
         costBrl: 100000,
+        costSplitBp: null,
       },
       {
         personId: finderId,
@@ -140,6 +141,7 @@ describe('sale margin parity - API ledger', () => {
         funcaoNameSnapshot: 'Testador',
         role: 'Testador',
         costBrl: 30000,
+        costSplitBp: null,
       },
     ]);
   });
@@ -162,6 +164,7 @@ describe('sale margin parity - API ledger', () => {
         funcaoNameSnapshot: 'Operacional',
         role: 'Operacional',
         costBrl: 50000,
+        costSplitBp: null,
       },
     ]);
   });

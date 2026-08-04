@@ -1,4 +1,9 @@
-import { computeSaleFinancials, pctOfCents } from '@fxl-sales/shared-utils';
+import {
+  computeSaleFinancials,
+  isRecurringReceivableLabel,
+  pctOfCents,
+  resolveProfessionalSplit,
+} from '@fxl-sales/shared-utils';
 import { and, asc, desc, eq, gt, inArray, ne, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { getDb } from '../../db/client.js';
@@ -350,6 +355,14 @@ export const SaleProfessionalSchema = z
     funcaoId: uuid.optional(),
     role: z.string().min(1).optional(),
     costBrl: money,
+    /*
+      The payment schedule, in BASIS POINTS. `null`/absent means the default
+      pro-rata split over the sale's installment receivables; `.min(1)` forbids
+      `[]`, because the empty schedule is spelled `null`. `.max(120)` mirrors the
+      `installments` cap below, since a part can never usefully outnumber the
+      parcelas it binds to.
+    */
+    costSplitBp: z.array(z.number().int().min(0).max(10_000)).min(1).max(120).nullish(),
   })
   .superRefine((row, ctx) => {
     if (!row.funcaoId && !row.role?.trim()) {
@@ -358,6 +371,16 @@ export const SaleProfessionalSchema = z
         path: ['funcaoId'],
         message: 'funcao_or_role_required',
       });
+    }
+    if (row.costSplitBp) {
+      const total = row.costSplitBp.reduce((sum, part) => sum + part, 0);
+      if (total !== 10_000) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['costSplitBp'],
+          message: 'cost_split_sum_mismatch',
+        });
+      }
     }
   });
 
@@ -839,6 +862,13 @@ export function buildSaleLedger(
         funcaoNameSnapshot,
         role: funcaoNameSnapshot,
         costBrl: professional.costBrl,
+        /*
+          NOT a snapshot and NOT server-derived: unlike `personNameSnapshot`,
+          this is the operator's own input, so the body wins. It is also
+          orthogonal to `costBrl` — that says how much, this says when — which
+          is exactly why it is stored in basis points. See CLAUDE.md.
+        */
+        costSplitBp: professional.costSplitBp ?? null,
       };
     }),
     receivables,
@@ -867,6 +897,15 @@ export type ExistingPayableRef = {
   kind: PayableKind;
   receivableId: string | null;
   status: string;
+  /*
+    REQUIRED, not optional, on purpose. `professional_cost` is now one row per
+    professional PER PARCELA, so a beneficiary-blind re-win guard would let one
+    professional's PAID parcela-1 payable suppress a different professional's
+    parcela-1 payable, and that professional would lose money with no error
+    anywhere. Making the field required turns a forgotten call site into a type
+    error rather than a silent money bug.
+  */
+  beneficiaryName: string;
 };
 
 export type MaterializeWonPayablesInput = {
@@ -879,20 +918,43 @@ export type MaterializeWonPayablesInput = {
     taxPct: number;
     otherCostsBrl: number;
   };
-  professionals: Array<{ personName: string; costBrl: number }>;
-  receivables: Array<{ id: string; dueDate: string; amountBrl: number; status: string }>;
+  professionals: Array<{ personName: string; costBrl: number; costSplitBp?: number[] | null }>;
+  /*
+    `label` is OPTIONAL and absent reads as an installment: the DB column is NOT
+    NULL and `buildSaleLedger` always writes one, so only a synthetic test
+    fixture can omit it, and treating those as installments is the conservative
+    reading.
+  */
+  receivables: Array<{
+    id: string;
+    dueDate: string;
+    amountBrl: number;
+    status: string;
+    label?: string;
+  }>;
   existingPayables?: ExistingPayableRef[];
   wonDate: string;
 };
 
 export function materializeWonPayables(input: MaterializeWonPayablesInput): PayableDraft[] {
   const existingPayables = input.existingPayables ?? [];
-  const alreadyExists = (kind: PayableKind, receivableId: string | null) =>
+  /*
+    `beneficiaryName` is opt-in per call: commissions and tax are singletons per
+    kind per receivable, so matching their name too would only be noise. The
+    `professional_cost` call passes it because that kind is no longer a singleton
+    — see the note on `ExistingPayableRef` and 00-OVERVIEW-split.md Decision 4.
+  */
+  const alreadyExists = (
+    kind: PayableKind,
+    receivableId: string | null,
+    beneficiaryName?: string,
+  ) =>
     existingPayables.some(
       (payable) =>
         payable.kind === kind &&
         payable.receivableId === receivableId &&
-        payable.status !== 'void',
+        payable.status !== 'void' &&
+        (beneficiaryName === undefined || payable.beneficiaryName === beneficiaryName),
     );
 
   const drafts: PayableDraft[] = [];
@@ -939,19 +1001,44 @@ export function materializeWonPayables(input: MaterializeWonPayablesInput): Paya
     }
   }
 
+  /*
+    A professional is paid AS THE CLIENT PAYS: `professional_cost` is generated
+    per INSTALLMENT receivable, like the commissions and the tax, split by the
+    stored `costSplitBp` or pro rata by default. Recurring (`M`-prefixed) rows
+    are deliberately excluded — an indefinite recorrência generates no bounded
+    rows at all, and spreading a pay-once cost over 24 cycles would delay a
+    professional's pay years past delivery. With NO eligible row the resolver
+    returns the legacy one-shot part, which is what keeps a pure-recurring sale
+    behaving exactly as before. See CLAUDE.md and 00-OVERVIEW-split.md.
+  */
+  const splitReceivables = input.receivables
+    .filter((row) => row.status !== 'void' && !isRecurringReceivableLabel(row.label))
+    .map((row) => ({ id: row.id, dueDate: row.dueDate, amountBrl: row.amountBrl }));
+
   for (const professional of input.professionals) {
-    if (professional.costBrl > 0 && !alreadyExists('professional_cost', null)) {
+    if (professional.costBrl <= 0) continue;
+    const parts = resolveProfessionalSplit({
+      costBrl: professional.costBrl,
+      costSplitBp: professional.costSplitBp,
+      receivables: splitReceivables,
+      fallbackDueDate: input.wonDate,
+    });
+    for (const part of parts) {
+      if (part.amountBrl <= 0) continue;
+      if (alreadyExists('professional_cost', part.receivableId, professional.personName)) continue;
       drafts.push({
         beneficiaryName: professional.personName,
         kind: 'professional_cost',
-        dueDate: input.wonDate,
-        amountBrl: professional.costBrl,
+        dueDate: part.dueDate,
+        amountBrl: part.amountBrl,
         status: 'open',
-        receivableId: null,
+        receivableId: part.receivableId,
       });
     }
   }
 
+  // `other_cost` stays ONE-SHOT on purpose: it names no beneficiary and has no
+  // wizard row to hang a schedule on. See CLAUDE.md and Decision 5.
   if (input.sale.otherCostsBrl > 0 && !alreadyExists('other_cost', null)) {
     drafts.push({
       beneficiaryName: 'Outros custos',
@@ -1954,6 +2041,7 @@ export async function createSale(
       dueDate: Date;
       amountBrl: number;
       status: string;
+      label: string;
     }> = [];
     if (ledger.receivables.length > 0) {
       insertedReceivables = await tx
@@ -1971,6 +2059,9 @@ export async function createSale(
           dueDate: salesOpsReceivables.dueDate,
           amountBrl: salesOpsReceivables.amountBrl,
           status: salesOpsReceivables.status,
+          // The `M` prefix is what the professional-cost split reads to skip the
+          // recurring rows, so it has to come back from the insert.
+          label: salesOpsReceivables.label,
         });
     }
 
@@ -1989,13 +2080,16 @@ export async function createSale(
         professionals: input.professionals.map((p) => ({
           personName: p.personName,
           costBrl: p.costBrl,
+          costSplitBp: p.costSplitBp ?? null,
         })),
         receivables: insertedReceivables.map((r) => ({
           id: r.id,
           dueDate: asDateOnly(r.dueDate),
           amountBrl: r.amountBrl,
           status: r.status,
+          label: r.label,
         })),
+        // No `existingPayables`: a sale created straight into `won` has none.
         wonDate: asDateOnly(now),
       });
       if (payables.length > 0) {
@@ -2181,17 +2275,23 @@ export async function transitionSale(
         professionals: professionalRows.map((p) => ({
           personName: p.personNameSnapshot,
           costBrl: p.costBrl,
+          // Drizzle types a `jsonb` column as `unknown`. This is the ONE boundary
+          // where the cast happens; zod (`SaleProfessionalSchema`) already
+          // validated the shape on the way in, so do not scatter more casts.
+          costSplitBp: p.costSplitBp as number[] | null,
         })),
         receivables: receivableRows.map((r) => ({
           id: r.id,
           dueDate: asDateOnly(r.dueDate),
           amountBrl: r.amountBrl,
           status: r.status,
+          label: r.label,
         })),
         existingPayables: existingPayableRows.map((p) => ({
           kind: p.kind as PayableKind,
           receivableId: p.receivableId,
           status: p.status,
+          beneficiaryName: p.beneficiaryName,
         })),
         wonDate: asDateOnly(now),
       });

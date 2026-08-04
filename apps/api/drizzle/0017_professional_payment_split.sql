@@ -1,0 +1,29 @@
+-- Profissionais alocados: the per-professional payment schedule.
+--
+-- `professional_cost` payables stop being one-shot at the won date and become one
+-- row per INSTALLMENT receivable, so a professional is paid as the client pays.
+-- This column is the operator's override of the default pro-rata distribution.
+--
+-- Expand only. Nullable, no default, no backfill, and none is needed: NULL IS
+-- the default behaviour (pro rata over the installment receivable amounts), so
+-- every pre-existing row is already correct and a revert is a clean DROP COLUMN.
+--
+-- BASIS POINTS, not cents. `cost_brl` sits one control away in the same wizard
+-- row, so a cents array would be a derived value that went stale on every cost
+-- edit and would need a cross-field refine plus a rewrite inside `Restaurar
+-- padrão` and inside every cost keystroke. In basis points `cost_brl` (how much)
+-- and this column (when) are ORTHOGONAL: editing one never invalidates the
+-- other. See CLAUDE.md, "Propostas domain", and
+-- nexo/plans/batch-20260804-props-costs/00-OVERVIEW-split.md Decision 1.
+--
+-- No CHECK constraint. The `Σ === 10000` rule lives in zod
+-- (`SaleProfessionalSchema`), because summing a jsonb array needs a
+-- `jsonb_array_elements` subquery and Postgres does not allow a subquery inside
+-- a CHECK. The only SQL alternative is a trigger, which would be the sole
+-- trigger in this schema and would not be reachable from a unit test.
+--
+-- No RLS statements: sales_ops_sale_professionals already carries
+-- sales_ops_sale_professionals_tenant_isolation and _admin_context from
+-- 0007_marvelous_valeria_richards.sql, and a new column inherits them.
+
+ALTER TABLE "sales_ops_sale_professionals" ADD COLUMN "cost_split_bp" jsonb;

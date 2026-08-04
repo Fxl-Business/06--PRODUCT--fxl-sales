@@ -369,13 +369,35 @@ describe('sales operations sale ledger', () => {
         status: 'open',
         receivableId: 'r4',
       },
+      /*
+        The professional cost is split pro rata over the three SURVIVING
+        receivables (r2 is void): defaultSplitBp([2000000, 333333, 333333]) is
+        [7500, 1249, 1251], and splitCentsByWeights(240000, …) puts the whole
+        floor remainder on the last part. Σ === 240000 exactly.
+      */
       {
         beneficiaryName: 'Rafael Nunes',
         kind: 'professional_cost',
         dueDate: '2026-07-29',
-        amountBrl: 240000,
+        amountBrl: 180000,
         status: 'open',
-        receivableId: null,
+        receivableId: 'r1',
+      },
+      {
+        beneficiaryName: 'Rafael Nunes',
+        kind: 'professional_cost',
+        dueDate: '2026-09-29',
+        amountBrl: 29976,
+        status: 'open',
+        receivableId: 'r3',
+      },
+      {
+        beneficiaryName: 'Rafael Nunes',
+        kind: 'professional_cost',
+        dueDate: '2026-10-29',
+        amountBrl: 30024,
+        status: 'open',
+        receivableId: 'r4',
       },
       {
         beneficiaryName: 'Outros custos',
