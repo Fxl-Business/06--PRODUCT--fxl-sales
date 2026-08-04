@@ -748,8 +748,10 @@ describe('sale wizard profissionais alocados', () => {
     expect(labeledInput('Valor da mensalidade').value).toBe('5000');
     await click(buttonByText('Avançar'));
 
-    // A professional_cost payable is one-shot at win, so a monthly stream must not
-    // enter its base.
+    // A professional_cost is a PAY-ONCE TOTAL, so a monthly stream must not enter its
+    // base. Splitting it across the parcelas changed only WHEN it is paid - the parts
+    // sum to `cost_brl` exactly - so this exclusion is unchanged, and the split skips
+    // the `M`-labelled recurring rows for the same reason.
     expect(labeledInput('Custo alocado do profissional 1').value).toBe('1000');
     expect(rowFooterText()).toContain('5% de FXL Custom (R$ 20.000,00)');
   });
@@ -874,6 +876,8 @@ describe('sale wizard profissionais alocados', () => {
             funcaoId: devFuncaoId,
             role: 'Desenvolvedor',
             costBrl: 100000,
+            // Nobody opened `Detalhe de pagamento`, so the API applies its default.
+            costSplitBp: null,
           },
         ],
       }),
@@ -1285,6 +1289,8 @@ describe('produto-seeded profissional rows', () => {
             funcaoId: devFuncaoId,
             role: 'Desenvolvedor',
             costBrl: 100000,
+            // A produto seeds WHAT a função costs, never WHEN it is paid.
+            costSplitBp: null,
           },
           {
             personId: deliveryPersonId,
@@ -1292,6 +1298,7 @@ describe('produto-seeded profissional rows', () => {
             funcaoId: testerFuncaoId,
             role: 'Testador',
             costBrl: 30000,
+            costSplitBp: null,
           },
         ],
       }),

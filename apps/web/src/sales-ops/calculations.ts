@@ -1,3 +1,4 @@
+import { SPLIT_BP_TOTAL } from '@fxl-sales/shared-utils/professional-split';
 import type {
   CommissionType,
   CreateSalePayload,
@@ -192,10 +193,15 @@ export type FuncaoCostBasisItem = {
  *
  * The base is the item SUBTOTAL of the proposta items whose product declares a
  * default for that função, summed. Not the proposta total, and deliberately NOT
- * the recurring mensalidade: a `professional_cost` payable is one-shot at win with
- * `receivableId: null`, so pricing it off a monthly stream would charge a
- * pay-once cost against every cycle. Free-form items contribute nothing, because
- * a row with no product has no cadastro defaults to read.
+ * the recurring mensalidade: a `professional_cost` is a PAY-ONCE TOTAL, so pricing
+ * it off a monthly stream would charge a pay-once cost against every cycle. The
+ * per-receivable split did not weaken that - it re-prices nothing, it takes an
+ * already-computed `cost_brl` and decides only WHEN it is paid, under a
+ * `Σ parts === cost_brl` contract, and it skips the `M`-labelled recurring rows
+ * too. So the money this cost is MEASURED against and the money it is PAID out of
+ * are the same non-recurring stream, which is a tighter invariant than before, not
+ * a looser one. Free-form items contribute nothing, because a row with no product
+ * has no cadastro defaults to read.
  */
 export function buildFuncaoCostBasis(
   items: FuncaoCostBasisItem[],
@@ -311,12 +317,16 @@ export type ProfessionalCostUnit = 'pct' | 'fix';
  *
  * INPUT MODE ONLY: nothing here is persisted. `sales_ops_sale_professionals` stores a
  * single integer-cents `cost_brl`, so a `%` is resolved before it ever reaches the wire.
+ * (`cost_split_bp` beside it is the deliberate opposite - a persisted RULE - but it is a
+ * SCHEDULE, not a price, and nothing here reads it.)
  *
  * Primary base: the item subtotals of the proposta items whose produto declares this
  * função, which is exactly what `buildFuncaoCostBasis` already summed. NOT the proposta
- * total, and never the recurring mensalidade - a `professional_cost` payable is one-shot
- * at win, so pricing it off a monthly stream would charge a pay-once cost against every
- * cycle.
+ * total, and never the recurring mensalidade - a `professional_cost` is a PAY-ONCE TOTAL,
+ * so pricing it off a monthly stream would charge a pay-once cost against every cycle.
+ * Paying it out per receivable changed nothing about that: the split re-prices nothing
+ * and holds `Σ parts === cost_brl`, and it skips the `M`-labelled rows just as this base
+ * skips the mensalidade.
  *
  * Fallback, when no produto on this proposta declares the função (the inline-created
  * função case): the sum of every PRODUCT item subtotal. Free-form items contribute
@@ -438,6 +448,43 @@ export function formatMoneyBrl(
   })
     .format(cents / 100)
     .replace(/\u00a0/g, ' ');
+}
+
+/** `2026-07-13` -> `13/07/2026`. Date-only in; a timestamp must be sliced first. */
+export function formatIsoDateBr(isoDate: string): string {
+  const [year, month, day] = isoDate.split('-');
+  if (!year || !month || !day) return isoDate;
+  return `${day}/${month}/${year}`;
+}
+
+/**
+ * `3000` -> `30,00%`. The DISPLAY form of a `cost_split_bp` weight, always two
+ * decimals so a `Soma` line reads as a percentage rather than as a raw integer.
+ */
+export function formatSplitPercent(bp: number): string {
+  return `${(bp / 100).toFixed(2).replace('.', ',')}%`;
+}
+
+/**
+ * `3000` -> `'30'`, `3334` -> `'33.34'`. The EDIT form, for a `type="number"`
+ * input, which is why the separator is a dot and trailing zeros are dropped.
+ */
+export function bpToPercentInput(bp: number): string {
+  return String(Math.round(bp) / 100);
+}
+
+/**
+ * The inverse. Clamped to `[0, SPLIT_BP_TOTAL]` because the API's
+ * `SaleProfessionalSchema` declares each part `int().min(0).max(10_000)`, so a
+ * typo of `1000` percent must not become a payload the server answers with a 400.
+ * The `Σ === 10000` rule is deliberately NOT enforced here: adding or removing a
+ * part must be allowed to break the sum so the operator sees it go red and fixes
+ * it, exactly as step 2's `Soma das parcelas` behaves.
+ */
+export function percentInputToBp(value: string): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.max(0, Math.min(SPLIT_BP_TOTAL, Math.round(parsed * 100)));
 }
 
 /**
@@ -780,6 +827,14 @@ export function buildSalePayload(draft: SaleDraft): CreateSalePayload {
       */
       role: professional.role?.trim() || undefined,
       costBrl: Math.max(0, Math.floor(toNumber(professional.costBrl))),
+      /*
+        Explicit `null` rather than an omitted key: the API declares
+        `costSplitBp: ....nullish()`, and on an UPDATE a missing key and a `null`
+        would both have to mean "no override" - sending the null makes clearing an
+        override on an edit indistinguishable from never having had one, which is
+        what `Usar padrão` means.
+      */
+      costSplitBp: professional.costSplitBp ?? null,
     })),
   };
 }

@@ -158,6 +158,18 @@ Keep the repository folder name unchanged until the editor session can safely mo
   With one row per professional per parcela, a beneficiary-blind guard would let one professional's PAID parcela-1 payable suppress a different professional's parcela-1 payable, and that professional would lose money with no error anywhere.
   `ExistingPayableRef.beneficiaryName` is REQUIRED so a forgotten call site is a type error rather than a silent one.
   Two professionals sharing an identical `person_name_snapshot` on one sale still collide; the real fix is a `payables.sale_professional_id` column and is not in this milestone.
+- `Detalhe de pagamento` is an IN-FLOW disclosure inside the step-3 professionals table, spanning the row with `col-span-full`, and it deliberately does NOT call `useInlineLayer`.
+  That hook guards ABSOLUTELY POSITIONED layers - `Combobox`'s panel, `InfoHint`'s panel - where an Escape aimed at the layer would otherwise close the whole wizard.
+  An expander that pushes content in flow is not such a layer, and the existing precedent is `SaleItemForm.descriptionOpen`, which does the same thing the same way.
+  It lives in its own `apps/web/src/sales-ops/ProfessionalSplitPanel.tsx`, and its trigger sits inside the existing `CUSTO ALOCADO` cell as that cell's last child, so the slice edits no grid template and adds no column.
+- Each part is entered as a PERCENTAGE and prints its resolved reais beside it; there is no `R$` input mode per part and there must not be one.
+  A reais-denominated part would have to be reconverted on every `CUSTO ALOCADO` keystroke, one control away in the same row, and would be stale in between - which is the same reason `cost_split_bp` stores basis points rather than cents.
+  The wizard's preview calls the SAME `defaultSplitBp` / `splitCentsByWeights` the server calls, over `installmentRows` and nothing else, so the parcela amounts on screen are the payables that will be written at win.
+  `ProfessionalForm.costSplitBp` and `.splitOpen` are REQUIRED and non-optional so TypeScript catches every one of the three row constructors; an optional field would let a forgotten seed send `undefined` and silently mean "no override".
+- `canAdvanceStepThree` gates on `professionalSplitsValid` as well as `professionalsValid`: an override must have between 1 and `installmentRows.length` parts and must sum to exactly 10000 bp.
+  Adding or removing a part deliberately does NOT renormalize - the `Soma` line goes red and the operator fixes it, exactly as step 2's `Soma das parcelas` behaves.
+  Only `Distribuir igualmente` and `Personalizar divisão` write a guaranteed-100% vector, and both go through `splitCentsByWeights`, so the editor obeys the same last-part-absorbs-the-remainder rule as everything else.
+  The panel's no-parcela branch is a guard, not a reachable screen: `canSaveBasics` requires `totalCents > 0` and step 2's `planRowsValid` requires every parcela amount `> 0`, so the operator cannot reach step 3 with an empty plan; it is asserted by rendering the panel directly.
 - Leaving `won` (revert, lose, cancel) voids only `open` payables and receivables; `paid` rows are never touched.
 - Payment plans are explicit installments `[{dueDate, amountBrl, method}]` plus an optional recurring block `{monthlyBrl, startDate, cycles|null}` (`cycles: null` means indefinite, no bounded rows generated beyond any setup parcela).
 - Receivable label conventions `"N/M"` (installment N of M) and `"MN/M"` (recurring cycle N of M, `M` prefix) are load-bearing: `deriveWizardPrefill` in `apps/web/src/sales-ops/SalesOpsApp.tsx` parses the `M` prefix to split installment rows from recurring rows when prefilling the edit wizard.

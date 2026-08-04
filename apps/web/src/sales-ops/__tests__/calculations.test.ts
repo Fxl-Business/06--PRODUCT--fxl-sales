@@ -321,6 +321,10 @@ describe('sales operations web calculations', () => {
         funcaoId: 'fc000010-0000-4000-8000-000000000010',
         role: 'Desenvolvedor',
         costBrl: 100000,
+        // A draft that states no schedule sends an explicit null, never an omitted
+        // key: `null` is what asks the API for the default pro-rata split, and on an
+        // UPDATE it is also what CLEARS a stored override.
+        costSplitBp: null,
       },
     ]);
 
@@ -338,6 +342,8 @@ describe('sales operations web calculations', () => {
         funcaoId: undefined,
         role: 'Operacional',
         costBrl: 50000,
+        // A row that predates `cost_split_bp` still sends the key, as an explicit null.
+        costSplitBp: null,
       },
     ]);
 
@@ -535,7 +541,10 @@ describe('professional cost unit resolution', () => {
 
   it('never lets the recurring mensalidade into the percent base', () => {
     // 8. Neither function takes a recurring value at all, so a R$ 50,00 mensalidade
-    // cannot reach the base of a one-shot professional_cost.
+    // cannot reach the base of a professional_cost. Paying that cost out per
+    // receivable did not change this: the split holds `Σ parts === cost_brl`, so the
+    // cost is still a PAY-ONCE TOTAL and pricing it off a monthly stream would still
+    // charge it against every cycle.
     const recurringMonthlyCents = 500000;
     expect(professionalCostBaseCents(singleItemBasis.get(devFuncaoId), 2000000)).toBe(2000000);
     expect(professionalCostBaseCents(singleItemBasis.get(devFuncaoId), 2000000)).not.toBe(

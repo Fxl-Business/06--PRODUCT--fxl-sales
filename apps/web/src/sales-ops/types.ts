@@ -244,6 +244,12 @@ export type SalesOpsSaleProfessional = {
   /** @deprecated derived mirror of `funcaoNameSnapshot`; kept while legacy rows exist. */
   role: string;
   costBrl: number;
+  /**
+   * The professional's payment schedule in BASIS POINTS, summing to exactly 10000.
+   * `null` (or absent, on a row written before migration `0017`) means the default
+   * pro-rata over the sale's installment receivables.
+   */
+  costSplitBp?: number[] | null;
 };
 
 export type SalesOpsPayable = {
@@ -326,6 +332,11 @@ export type SaleDraftProfessional = {
    */
   role?: string;
   costBrl: string | number;
+  /**
+   * The payment schedule in BASIS POINTS, summing to exactly 10000. `null` means
+   * the API applies its default pro-rata split over the installment receivables.
+   */
+  costSplitBp?: number[] | null;
 };
 
 export type SaleDraftInstallment = { dueDate: string; amountBrl: string | number; method: PaymentMethod };
@@ -386,5 +397,7 @@ export type CreateSalePayload = {
     funcaoId?: string;
     role?: string;
     costBrl: number;
+    /** Basis points summing to exactly 10000; `null` asks for the default split. */
+    costSplitBp: number[] | null;
   }>;
 };
