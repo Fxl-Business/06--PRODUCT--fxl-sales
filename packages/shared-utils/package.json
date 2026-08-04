@@ -21,6 +21,10 @@
     "./sale-financials": {
       "types": "./dist/sale-financials.d.ts",
       "import": "./dist/sale-financials.js"
+    },
+    "./professional-split": {
+      "types": "./dist/professional-split.d.ts",
+      "import": "./dist/professional-split.js"
     }
   },
   "scripts": {
