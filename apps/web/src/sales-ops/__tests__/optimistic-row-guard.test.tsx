@@ -399,7 +399,6 @@ describe('an optimistic row is visible but never actionable', () => {
     await click(buttonByText('Nova pessoa'));
     await changeInput(requireInput('form input'), 'Pessoa Optimista');
     await pickOption('Função da pessoa', funcaoVendedor.name);
-    await click(buttonByText('Adicionar função'));
     await submitDialogForm();
 
     expect(vi.mocked(salesOpsApi.savePerson)).toHaveBeenCalledTimes(1);
@@ -629,7 +628,6 @@ describe('an unsaved row is never offered to a picker', () => {
     expect(offered).not.toContain('AAA Função Nova');
 
     await click(rows[0]!);
-    await click(buttonByText('Adicionar função'));
     await submitDialogForm();
 
     expect(vi.mocked(salesOpsApi.savePerson)).toHaveBeenCalledTimes(1);

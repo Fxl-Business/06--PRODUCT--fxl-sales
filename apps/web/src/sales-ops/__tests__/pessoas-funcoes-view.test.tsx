@@ -1,10 +1,22 @@
 // @vitest-environment happy-dom
 
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import * as React from 'react';
 import type { HTMLAttributes } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SalesOpsBootstrap, SalesOpsFuncao, SalesOpsPerson } from '../types';
+
+/*
+  Resolved through `node:path` rather than `new URL('../SalesOpsApp.tsx', import.meta.url)`:
+  this file is `@vitest-environment happy-dom`, so happy-dom's global `URL` resolves against
+  the document origin instead of the module's `file:` base, which would turn the expression
+  into `http://localhost:3000/...`.
+*/
+const sourcePath = join(dirname(fileURLToPath(import.meta.url)), '..', 'SalesOpsApp.tsx');
+const source = readFileSync(sourcePath, 'utf8');
 
 vi.mock('@/components/ui/dialog', () => ({
   Dialog: ({ children }: HTMLAttributes<HTMLDivElement>) => <div>{children}</div>,
@@ -274,11 +286,9 @@ describe('pessoas cadastro', () => {
     await change(requireNameInput(), '  Sig  ');
 
     await pickOption('Função da pessoa', 'Vendedor');
-    await click(buttonByText('Adicionar função'));
     expect(buttonByAriaLabel('Remover função Vendedor')).not.toBeNull();
 
     await pickOption('Função da pessoa', 'Designer');
-    await click(buttonByText('Adicionar função'));
     expect(buttonByAriaLabel('Remover função Designer')).not.toBeNull();
 
     await click(buttonByAriaLabel('Remover função Vendedor')!);
@@ -286,7 +296,7 @@ describe('pessoas cadastro', () => {
     // Positive control: removing one assignment leaves the other alone.
     expect(buttonByAriaLabel('Remover função Designer')).not.toBeNull();
 
-    // `Adicionar função` was clicked twice above; it must never submit the form.
+    // Two funções were picked above; committing a Combobox option must never submit the form.
     expect(onSave).not.toHaveBeenCalled();
 
     await submit();
@@ -299,6 +309,42 @@ describe('pessoas cadastro', () => {
       status: 'active',
       funcaoIds: [designer.id],
     });
+  });
+
+  it('assigns a função the moment it is picked, with no confirm button', async () => {
+    const onSave = vi.fn();
+    await renderPersonDialog({ funcoes: [vendedor, finder, designer], onSave });
+
+    // Button is gone.
+    expect(() => buttonByText('Adicionar função')).toThrow();
+
+    await pickOption('Função da pessoa', 'Designer');
+    expect(buttonByAriaLabel('Remover função Designer')).not.toBeNull();
+
+    // Picker reset to its placeholder, structurally.
+    expect(combobox('Função da pessoa').textContent?.trim()).toBe('Selecione uma função');
+    expect(combobox('Função da pessoa').hasAttribute('data-placeholder')).toBe(true);
+
+    // A pick never submits.
+    expect(onSave).not.toHaveBeenCalled();
+
+    // A second pick appends rather than replaces.
+    await pickOption('Função da pessoa', 'Vendedor');
+    expect(buttonByAriaLabel('Remover função Designer')).not.toBeNull();
+    expect(buttonByAriaLabel('Remover função Vendedor')).not.toBeNull();
+
+    await click(combobox('Função da pessoa'));
+    const offered = optionRows().map((row) => row.textContent?.trim());
+    expect(offered).not.toContain('Designer');
+    expect(offered).not.toContain('Vendedor');
+    // Positive control that the picker still has options at all.
+    expect(offered).toContain('Finder');
+
+    await change(requireNameInput(), 'Sig');
+    await submit();
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({ funcaoIds: [designer.id, vendedor.id] }),
+    );
   });
 
   it('refuses to save a pessoa without a name or without any função', async () => {
@@ -316,7 +362,6 @@ describe('pessoas cadastro', () => {
     expect(text()).toContain('Atribua ao menos uma função.');
 
     await pickOption('Função da pessoa', 'Designer');
-    await click(buttonByText('Adicionar função'));
 
     expect(buttonByText('Salvar').disabled).toBe(false);
     expect(text()).not.toContain('Atribua ao menos uma função.');
@@ -339,7 +384,6 @@ describe('pessoas cadastro', () => {
     expect(offered).toContain('Designer');
     const designerRow = optionRows().find((row) => row.textContent?.trim() === 'Designer');
     await click(designerRow!);
-    await click(buttonByText('Adicionar função'));
 
     await submit();
 
@@ -557,5 +601,23 @@ describe('funções cadastro', () => {
     expect(text()).toContain('Função predefinida do app');
     await submit();
     expect(onSave).not.toHaveBeenCalled();
+  });
+});
+
+describe('pessoa dialog UI contract', () => {
+  it('leaves no `Adicionar função` confirm button behind in the pessoa dialog', () => {
+    // Positive controls, so the negatives below are about markup that was removed
+    // rather than markup that never existed.
+    expect(source).toContain('Função da pessoa');
+    expect(source).toContain('Selecione uma função');
+    expect(source).toContain('Buscar função...');
+
+    expect(source).not.toContain('Adicionar função');
+    // The dead parking state cannot come back.
+    expect(source).not.toContain('pendingFuncaoId');
+
+    // The create row and the active filter survive the button's removal.
+    expect(source).toContain('handleCreateFuncao');
+    expect(source).toContain("funcao.status === 'active' && !assignedIds.includes(funcao.id)");
   });
 });

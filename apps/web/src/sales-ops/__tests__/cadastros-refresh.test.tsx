@@ -398,7 +398,6 @@ describe('cadastros list refresh after a create', () => {
     await click(buttonByText('Nova pessoa'));
     await changeInput(requireInput('form input'), 'Sig');
     await pickOption('Função da pessoa', existingFuncao.name);
-    await click(buttonByText('Adicionar função'));
     await submitDialogForm();
 
     expect(vi.mocked(salesOpsApi.savePerson)).toHaveBeenCalledTimes(1);

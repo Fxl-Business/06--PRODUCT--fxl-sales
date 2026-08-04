@@ -4884,7 +4884,6 @@ function PersonDialogBody({
   const [assignedIds, setAssignedIds] = useState<string[]>(
     () => modal.person?.funcoes.map((funcao) => funcao.id) ?? [],
   );
-  const [pendingFuncaoId, setPendingFuncaoId] = useState('');
   /**
    * Funções created from the picker's own create row. The `funcoes` prop only
    * refreshes once the invalidated bootstrap refetch lands, so without this the row
@@ -4913,7 +4912,6 @@ function PersonDialogBody({
   function assignFuncao(id: string) {
     if (!id) return;
     setAssignedIds((current) => (current.includes(id) ? current : [...current, id]));
-    setPendingFuncaoId('');
   }
 
   /**
@@ -5013,25 +5011,18 @@ function PersonDialogBody({
             ) : (
               <p className="text-[12.5px] text-[#8b8b92]">Atribua ao menos uma função.</p>
             )}
-            <div className="flex items-center gap-2">
-              <div className="flex-1">
-                <Combobox
-                  aria-label="Função da pessoa"
-                  className={formSelectClass}
-                  entityGender="f"
-                  entityLabel="função"
-                  onChange={setPendingFuncaoId}
-                  onCreate={onCreateFuncao ? (query) => void handleCreateFuncao(query) : undefined}
-                  options={selectableFuncoes}
-                  placeholder="Selecione uma função"
-                  searchPlaceholder="Buscar função..."
-                  value={pendingFuncaoId}
-                />
-              </div>
-              <SecondaryButton onClick={() => assignFuncao(pendingFuncaoId)}>
-                Adicionar função
-              </SecondaryButton>
-            </div>
+            <Combobox
+              aria-label="Função da pessoa"
+              className={formSelectClass}
+              entityGender="f"
+              entityLabel="função"
+              onChange={assignFuncao}
+              onCreate={onCreateFuncao ? (query) => void handleCreateFuncao(query) : undefined}
+              options={selectableFuncoes}
+              placeholder="Selecione uma função"
+              searchPlaceholder="Buscar função..."
+              value=""
+            />
           </FieldBlock>
           <div className="flex justify-end gap-3 border-t border-[#e8e8ec] pt-4">
             <SecondaryButton onClick={onClose}>Cancelar</SecondaryButton>
