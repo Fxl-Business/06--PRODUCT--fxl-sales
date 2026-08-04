@@ -459,6 +459,40 @@ describe('sale wizard UI contract', () => {
     expect(source.match(/onCreateFuncao=\{createFuncaoByName\}/g)).toHaveLength(2);
   });
 
+  it('puts FUNÇÃO NO PROJETO ahead of PROFISSIONAL and gates the person picker on it', () => {
+    /*
+      The header order is the load-bearing half of the rule: the função is what
+      partitions the person list, so it cannot sit to the right of what it governs.
+      The second assertion is about markup that really existed before this slice, so
+      neither can pass vacuously.
+    */
+    expect(source).toMatch(/<span>Função no projeto<\/span>\s*<span>Profissional<\/span>/);
+    expect(source).not.toMatch(/<span>Profissional<\/span>\s*<span>Função no projeto<\/span>/);
+
+    expect(source).toContain('Adicionar a esta função');
+    expect(source).toContain('Selecione a função primeiro');
+    expect(source).toContain('Selecione a pessoa de cada profissional alocado.');
+    /*
+      Whitespace-tolerant only because the call is 105 columns on one line and
+      prettier's printWidth is 100, so it cannot exist as a flat substring. The
+      pinned fact is unchanged: the person picker's options come from
+      `professionalPersonOptions` fed by the ROW's funcaoId, never from the shared
+      `personOptions` the vendedor and finder pickers use.
+    */
+    expect(source).toMatch(
+      /options=\{professionalPersonOptions\(\s*allocatablePeople,\s*professional\.funcaoId,?\s*\)\}/,
+    );
+
+    // The grant is the REAL person write, not a bespoke fetch: same idiom as the
+    // onCreateFuncao={createFuncaoByName} count assertion above.
+    expect(source).toContain('onAssignFuncao={assignFuncaoToPerson}');
+    expect(source).toContain('savePerson.mutateAsync');
+
+    // The auto-seeded first pessoa is gone: a fresh row must not allocate whoever
+    // happens to sort first.
+    expect(source).not.toContain("personId: allocatablePeople[0]?.id ?? ''");
+  });
+
   /**
    * The affordance may only ever hide a field that is genuinely optional, which is
    * the Serviço row and nothing else. A free row and an open-price non-Serviço row
