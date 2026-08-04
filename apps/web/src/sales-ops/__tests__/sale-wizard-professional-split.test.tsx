@@ -476,6 +476,19 @@ describe('sale wizard professional payment split', () => {
     expect(text).toContain('R$ 2.000,00');
     expect(text).toContain('R$ 5.000,00');
     expect(text).toContain('R$ 10.000,00');
+
+    // `Personalizar divisão` must seed the editor with the DEFAULT it was just
+    // showing, not with equal weights and not with zeros. Asserting the seeded
+    // VALUES and not only the part count is what makes this a real guard: the
+    // rest of the suite pins how many parts appear, so seeding every part at 0
+    // used to survive the whole file. This plan is deliberately uneven, so
+    // equal weights fail it too.
+    await click(buttonByLabel('Personalizar divisão do profissional 1'));
+    await flushReact();
+    expect(labeledInput('Parte 1 do profissional 1').value).toBe('10');
+    expect(labeledInput('Parte 2 do profissional 1').value).toBe('20');
+    expect(labeledInput('Parte 3 do profissional 1').value).toBe('20');
+    expect(labeledInput('Parte 4 do profissional 1').value).toBe('50');
   });
 
   it('submits costSplitBp null while the split is untouched', async () => {
