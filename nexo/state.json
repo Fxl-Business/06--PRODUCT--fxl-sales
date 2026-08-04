@@ -15,10 +15,10 @@
     }
   },
   "gate1": {
-    "feature": "20260729-propostas-areas",
+    "feature": "batch-20260804-props-costs",
     "decision": "skipped-autopilot",
-    "decided_at": "2026-07-29",
-    "note": "User invoked --autopilot after locking design answers 1-9 in chat."
+    "decided_at": "2026-08-04",
+    "note": "User invoked /nexo with --batch --auto, so autopilot was explicit and the front door asked nothing. Five reported items planned into seven slices; item 2 (the professional payment split) was feature-sized and got a three-slice plan-set. Gate 2 rejected slices 03 and 04 on the first attempt, both for real defects, and both were fixed and re-verified before merge. Gate 3 NOT run - batch never auto-cuts a release."
   },
   "gate3": {
     "release": "v2.3.0",
