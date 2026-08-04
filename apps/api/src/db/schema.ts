@@ -805,6 +805,24 @@ export const salesOpsSaleProfessionals = pgTable(
     /** @deprecated derived mirror of funcaoNameSnapshot; drop in a later contract slice. */
     role: text('role').notNull(),
     costBrl: integer('cost_brl').notNull(),
+    /**
+     * The per-professional payment schedule, in BASIS POINTS: 1..120 non-negative
+     * integers summing to EXACTLY 10000. `NULL` means the default, which is
+     * `cost_brl` distributed pro rata over the sale's installment receivables.
+     *
+     * Basis points and not cents, deliberately: `cost_brl` is edited one control
+     * away in the same wizard row, so a cents array would go stale on every cost
+     * edit, whereas bp keep `cost_brl` (how much) and the schedule (when)
+     * orthogonal. A column and not a child table for the mirror image of the
+     * reason `sales_ops_product_funcao_costs` IS a table: that one holds a
+     * funcao_id that must not dangle inside jsonb, while a split part holds no id
+     * at all, only a number.
+     *
+     * The `Σ === 10000` rule is validated in zod (`SaleProfessionalSchema`), not
+     * in SQL: a jsonb array sum needs a `jsonb_array_elements` subquery, which a
+     * CHECK constraint may not contain.
+     */
+    costSplitBp: jsonb('cost_split_bp'),
   },
   (t) => [
     index('sales_ops_sale_professionals_sale_id_idx').on(t.saleId),

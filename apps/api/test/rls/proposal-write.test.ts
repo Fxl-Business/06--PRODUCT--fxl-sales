@@ -195,8 +195,10 @@ describe('proposal write backend (create v2 + update + payable materialization)'
     expect(byKind.tax?.amount_brl).toBe(30000);
     expect(byKind.tax?.receivable_id).toBe(receivableId);
     expect(byKind.professional_cost?.amount_brl).toBe(100000);
-    expect(byKind.professional_cost?.receivable_id).toBeNull();
+    // One parcela, so the whole cost lands on it — but it IS linked now.
+    expect(byKind.professional_cost?.receivable_id).toBe(receivableId);
     expect(byKind.other_cost?.amount_brl).toBe(20000);
+    // Positive control for Decision 5: `other_cost` alone stays one-shot.
     expect(byKind.other_cost?.receivable_id).toBeNull();
     expect(byKind.finder_commission).toBeUndefined();
   });

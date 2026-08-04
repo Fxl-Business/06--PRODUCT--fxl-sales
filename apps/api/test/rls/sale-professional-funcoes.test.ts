@@ -535,6 +535,12 @@ describe('proposta profissionais: funcao binding, party tenancy and won payables
     const transition = await transitionSale(db, orgA.orgId, created.sale.id, 'won');
     expect(transition.ok).toBe(true);
 
+    const receivables = await adminDb
+      .select()
+      .from(schema.salesOpsReceivables)
+      .where(eq(schema.salesOpsReceivables.saleId, created.sale.id));
+    expect(receivables).toHaveLength(1);
+
     const payables = await adminDb
       .select()
       .from(schema.salesOpsPayables)
@@ -545,12 +551,146 @@ describe('proposta profissionais: funcao binding, party tenancy and won payables
     expect(professionalPayables.map((row) => row.amountBrl).sort((a, b) => a - b)).toEqual([
       30000, 100000,
     ]);
-    // One-shot at the won date, never linked to a receivable.
-    expect(professionalPayables.every((row) => row.receivableId === null)).toBe(true);
+    /*
+      Linked to the parcela that funds them. This fixture has a SINGLE parcela,
+      so each professional's whole cost lands on it and the amounts above are
+      unchanged by the split; what changed is that receivable_id is no longer
+      NULL. Note also that both rows share the same receivable_id, which is
+      exactly the case the beneficiary-keyed re-win guard exists for.
+    */
+    expect(professionalPayables.every((row) => row.receivableId === receivables[0]!.id)).toBe(true);
     expect(professionalPayables.map((row) => row.beneficiaryName).sort()).toEqual([
       'Ana Martins',
       'Carla Souza',
     ]);
+  });
+
+  it('persists cost_split_bp and pays it out at won', async () => {
+    const orgA = await seedOrg('split_persist');
+
+    const created = await createSale(
+      db,
+      orgA.orgId,
+      salePayload(orgA, {
+        professionals: [
+          {
+            personId: orgA.seller.id,
+            personName: 'Ana Martins',
+            funcaoId: orgA.developer.id,
+            costBrl: 100000,
+            costSplitBp: [3000, 7000],
+          },
+        ],
+        installments: [
+          { dueDate: '2026-07-14', amountBrl: 200000, method: 'pix' },
+          { dueDate: '2026-08-14', amountBrl: 200000, method: 'pix' },
+        ],
+      }),
+    );
+
+    const professionalRows = await adminDb
+      .select()
+      .from(schema.salesOpsSaleProfessionals)
+      .where(eq(schema.salesOpsSaleProfessionals.saleId, created.sale.id));
+    expect(professionalRows).toHaveLength(1);
+    // The column round-trips through Postgres jsonb unchanged.
+    expect(professionalRows[0]!.costSplitBp).toEqual([3000, 7000]);
+
+    const transition = await transitionSale(db, orgA.orgId, created.sale.id, 'won');
+    expect(transition.ok).toBe(true);
+
+    const receivables = await adminDb
+      .select()
+      .from(schema.salesOpsReceivables)
+      .where(eq(schema.salesOpsReceivables.saleId, created.sale.id));
+    const orderedReceivableIds = receivables
+      .sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime())
+      .map((row) => row.id);
+
+    const payables = await adminDb
+      .select()
+      .from(schema.salesOpsPayables)
+      .where(eq(schema.salesOpsPayables.saleId, created.sale.id));
+    const professionalPayables = payables.filter((row) => row.kind === 'professional_cost');
+
+    // 30% / 70% of 100000, NOT the 50/50 the two equal parcelas would default to.
+    expect(
+      professionalPayables
+        .sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime())
+        .map((row) => [row.receivableId, row.amountBrl]),
+    ).toEqual([
+      [orderedReceivableIds[0], 30000],
+      [orderedReceivableIds[1], 70000],
+    ]);
+  });
+
+  it('rejects a cost_split_bp that does not sum to 100%', () => {
+    expect(() =>
+      CreateSaleSchema.parse({
+        clientName: 'SegPro',
+        sellerName: 'Ana Martins',
+        status: 'open',
+        baseDate: '2026-07-14',
+        items: [{ productName: 'Avulso', areaId: randomUUID(), quantity: 1, unitBrl: 400000 }],
+        professionals: [
+          { personName: 'Ana Martins', role: 'Dev', costBrl: 100000, costSplitBp: [3000, 6000] },
+        ],
+        installments: [{ dueDate: '2026-07-14', amountBrl: 400000, method: 'pix' }],
+      }),
+    ).toThrow(/cost_split_sum_mismatch/);
+  });
+
+  it('leaves net_margin_brl unchanged by the split', async () => {
+    const orgA = await seedOrg('split_margin');
+
+    const professionals = (costSplitBp: number[] | null) => [
+      {
+        personId: orgA.seller.id,
+        personName: 'Ana Martins',
+        funcaoId: orgA.developer.id,
+        costBrl: 100000,
+        ...(costSplitBp ? { costSplitBp } : {}),
+      },
+    ];
+    const installments = [
+      { dueDate: '2026-07-14', amountBrl: 200000, method: 'pix' },
+      { dueDate: '2026-08-14', amountBrl: 200000, method: 'pix' },
+    ];
+
+    const withoutSplit = await createSale(
+      db,
+      orgA.orgId,
+      salePayload(orgA, { professionals: professionals(null), installments }),
+    );
+    const withSplit = await createSale(
+      db,
+      orgA.orgId,
+      salePayload(orgA, { professionals: professionals([1000, 9000]), installments }),
+    );
+
+    /*
+      computeSaleFinancials takes professionalCostsBrl as a scalar Σ cost_brl and
+      never sees a schedule, so no persisted margin number can move. This is
+      00-OVERVIEW-split.md Decision 6 made executable.
+    */
+    expect(withSplit.sale.professionalCostsBrl).toBe(withoutSplit.sale.professionalCostsBrl);
+    expect(withSplit.sale.netMarginBrl).toBe(withoutSplit.sale.netMarginBrl);
+    expect(withSplit.sale.netMarginPct).toBe(withoutSplit.sale.netMarginPct);
+
+    for (const created of [withoutSplit, withSplit]) {
+      const transition = await transitionSale(db, orgA.orgId, created.sale.id, 'won');
+      expect(transition.ok).toBe(true);
+      const payables = await adminDb
+        .select()
+        .from(schema.salesOpsPayables)
+        .where(eq(schema.salesOpsPayables.saleId, created.sale.id));
+      // Σ parts === Σ cost_brl, under any split, over any number of rows.
+      expect(
+        payables
+          .filter((row) => row.kind === 'professional_cost')
+          .reduce((sum, row) => sum + row.amountBrl, 0),
+      ).toBe(100000);
+    }
   });
 
   it('overridden seller, finder and tax percentages drive the per-receivable payables at won', async () => {

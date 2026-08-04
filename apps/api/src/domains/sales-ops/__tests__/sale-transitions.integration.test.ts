@@ -174,21 +174,30 @@ describe('transitionSale', () => {
       .select()
       .from(salesOpsPayables)
       .where(eq(salesOpsPayables.saleId, sale.id));
-    expect(payables).toHaveLength(8);
+    // 4 per receivable (seller, finder, tax, professional) + the one-shot other_cost.
+    expect(payables).toHaveLength(9);
 
     const byReceivable = (id: string) => payables.filter((p) => p.receivableId === id);
-    expect(byReceivable(r1.id)).toHaveLength(3);
+    expect(byReceivable(r1.id)).toHaveLength(4);
     expect(
       byReceivable(r1.id).every((p) => p.dueDate.toISOString().slice(0, 10) === '2026-08-01'),
     ).toBe(true);
-    expect(byReceivable(r2.id)).toHaveLength(3);
+    expect(byReceivable(r2.id)).toHaveLength(4);
     expect(
       byReceivable(r2.id).every((p) => p.dueDate.toISOString().slice(0, 10) === '2026-09-01'),
     ).toBe(true);
 
+    // The professional's cost is split across the two equal parcelas and the
+    // parts still sum to exactly the stored cost_brl.
+    const professionalPayables = payables.filter((p) => p.kind === 'professional_cost');
+    expect(professionalPayables).toHaveLength(2);
+    expect(professionalPayables.every((p) => p.receivableId !== null)).toBe(true);
+    expect(professionalPayables.reduce((sum, p) => sum + p.amountBrl, 0)).toBe(40000);
+
+    // `other_cost` is the only kind left with a null receivable_id.
     const oneShots = payables.filter((p) => p.receivableId === null);
-    expect(oneShots).toHaveLength(2);
-    expect(oneShots.map((p) => p.kind).sort()).toEqual(['other_cost', 'professional_cost']);
+    expect(oneShots).toHaveLength(1);
+    expect(oneShots.map((p) => p.kind)).toEqual(['other_cost']);
   });
 
   it('reverting a won sale voids open payables, keeps paid ones, and clears won_at', async () => {
@@ -237,6 +246,13 @@ describe('cancelContract', () => {
     const orgId = `org_st_cancel_${crypto.randomUUID()}`;
     seededOrgIds.push(orgId);
 
+    /*
+      Every receivable below is `M`-labelled, i.e. recurring, so the
+      professional-cost split has ZERO eligible rows and falls back to the legacy
+      one-shot payable with receivable_id NULL. That is why `voidedPayables` is
+      still 3 here and why the one-shot assertions at the bottom still hold — do
+      not "fix" those numbers when reading this after slice 06.
+    */
     const sale = await seedSale(orgId, { status: 'open', recurringBrl: 100000 });
     await seedProfessional(orgId, sale.id, { costBrl: 40000 });
     const r1 = await seedReceivable(orgId, sale.id, {
@@ -315,6 +331,60 @@ describe('cancelContract', () => {
     const oneShotPayables = payablesAfter.filter((p) => p.receivableId === null);
     expect(oneShotPayables.length).toBeGreaterThan(0);
     expect(oneShotPayables.every((p) => p.status === 'open')).toBe(true);
+  });
+
+  it('voids the split parts bound to cancelled future parcelas only', async () => {
+    const orgId = `org_st_cancel_split_${crypto.randomUUID()}`;
+    seededOrgIds.push(orgId);
+
+    /*
+      The behavioural change slice 06 buys: before the split, a professional_cost
+      carried receivable_id NULL, matched nothing in cancelContract's
+      inArray(receivableId, futureIds) and SURVIVED a mid-contract cancellation —
+      so the professional stayed owed for work funded by parcelas the client will
+      never pay. Linked, the parts follow their parcela.
+    */
+    const sale = await seedSale(orgId, { status: 'open', recurringBrl: 0 });
+    await seedProfessional(orgId, sale.id, { costBrl: 90000 });
+    const r1 = await seedReceivable(orgId, sale.id, {
+      label: '1/3',
+      dueDate: new Date('2026-08-01T00:00:00.000Z'),
+      amountBrl: 100000,
+    });
+    const r2 = await seedReceivable(orgId, sale.id, {
+      label: '2/3',
+      dueDate: new Date('2026-09-01T00:00:00.000Z'),
+      amountBrl: 100000,
+    });
+    const r3 = await seedReceivable(orgId, sale.id, {
+      label: '3/3',
+      dueDate: new Date('2026-10-01T00:00:00.000Z'),
+      amountBrl: 100000,
+    });
+
+    const winResult = await transitionSale(getDb(), orgId, sale.id, 'won');
+    if (!winResult.ok) throw new Error('expected win to succeed');
+
+    const adminDb = getAdminDb();
+    const professionalBefore = (
+      await adminDb.select().from(salesOpsPayables).where(eq(salesOpsPayables.saleId, sale.id))
+    ).filter((p) => p.kind === 'professional_cost');
+    expect(professionalBefore).toHaveLength(3);
+    expect(professionalBefore.reduce((sum, p) => sum + p.amountBrl, 0)).toBe(90000);
+
+    const result = await cancelContract(getDb(), orgId, sale.id, '2026-08-15');
+    expect(result.ok).toBe(true);
+
+    const professionalAfter = (
+      await adminDb.select().from(salesOpsPayables).where(eq(salesOpsPayables.saleId, sale.id))
+    ).filter((p) => p.kind === 'professional_cost');
+    const statusByReceivable = new Map(
+      professionalAfter.map((p) => [p.receivableId, p.status] as const),
+    );
+
+    expect(statusByReceivable.get(r1.id)).toBe('open');
+    expect(statusByReceivable.get(r2.id)).toBe('void');
+    expect(statusByReceivable.get(r3.id)).toBe('void');
   });
 });
 
