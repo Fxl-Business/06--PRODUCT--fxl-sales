@@ -304,6 +304,17 @@ const editBootstrap: SalesOpsBootstrap = {
 let container: HTMLDivElement;
 let root: Root;
 let onSave: ReturnType<typeof vi.fn<(payload: CreateSalePayload) => void>>;
+/**
+ * Whether this test has already dropped the produto-seeded profissional rows.
+ *
+ * `FXL Custom` declares Desenvolvedor and Testador, so a NEW proposta now opens
+ * step 3 with two rows the wizard proposed by itself. Every test written before
+ * that feature addresses `profissional 1` meaning "the row I just added", so the
+ * seeds are cleared once, on the first `addProfessional()` of each test. Doing it
+ * there rather than in `goToCosts()` is deliberate: the edit-path tests reach step
+ * 3 without adding anything and must keep their STORED row.
+ */
+let seedsCleared = false;
 
 async function renderWizard(
   sale: SalesOpsSale | null = null,
@@ -318,6 +329,7 @@ async function renderWizard(
   document.body.append(container);
   root = createRoot(container);
   onSave = vi.fn<(payload: CreateSalePayload) => void>();
+  seedsCleared = false;
   await act(async () => {
     root.render(
       <SaleWizardDialog
@@ -461,7 +473,22 @@ async function backToProposta() {
   await click(buttonByText('Voltar'));
 }
 
+/**
+ * Removes every produto-seeded row, once per test. A no-op on the second and later
+ * call, so a test that adds two profissionais keeps both, and a test that leaves
+ * step 3 and comes back never loses the row it added.
+ */
+async function clearSeededProfessionals() {
+  if (seedsCleared) return;
+  seedsCleared = true;
+  while (container.querySelector('button[aria-label^="Remover profissional"]')) {
+    await click(buttonByLabel('Remover profissional 1'));
+    await flushReact();
+  }
+}
+
 async function addProfessional() {
+  await clearSeededProfessionals();
   await click(buttonByText('+ profissional'));
   await flushReact();
 }
@@ -1078,5 +1105,275 @@ describe('sale wizard profissionais alocados', () => {
     await click(buttonByText('Avançar'));
 
     expect(container.textContent).toContain('Alocação - Bruno Entrega · Desenvolvedor');
+  });
+});
+
+/** One per rendered profissional row, seeded or hand-added alike. */
+function professionalRowCount(): number {
+  return container.querySelectorAll('button[aria-label^="Remover profissional"]').length;
+}
+
+/** `R$ 1.300` back to 130000. The panel prints whole reais (`maximumFractionDigits: 0`). */
+function moneyTextToCents(text: string): number {
+  return Math.round(Number(text.replaceAll('.', '').replace(',', '.')) * 100);
+}
+
+function panelFigureCents(label: string): number {
+  const match = new RegExp(`${label}\\s*·?\\s*R\\$\\s*(-?[\\d.,]+)`, 'u').exec(
+    container.textContent ?? '',
+  );
+  if (!match?.[1]) throw new Error(`panel figure not found: ${label}`);
+  return moneyTextToCents(match[1]);
+}
+
+/**
+ * What the LAST `onSave` payload actually charges as professional cost - i.e. what
+ * `net_margin_brl` will be computed from server-side.
+ */
+function savedProfessionalCents(): number {
+  const payload = onSave.mock.calls.at(-1)?.[0];
+  if (!payload) throw new Error('onSave was never called');
+  return payload.professionals.reduce((sum, row) => sum + row.costBrl, 0);
+}
+
+describe('produto-seeded profissional rows', () => {
+  it('seeds a row per declared funcao on a new proposta, funcao filled and pessoa empty', async () => {
+    await renderWizard();
+    await goToCosts();
+
+    expect(professionalRowCount()).toBe(2);
+    // FXL Custom declares Desenvolvedor at 5% and Testador at R$ 300,00.
+    expect(comboboxText('Função do profissional 1')).toBe('Desenvolvedor');
+    expect(labeledInput('Custo alocado do profissional 1').value).toBe('1000');
+    expect(comboboxText('Função do profissional 2')).toBe('Testador');
+    expect(labeledInput('Custo alocado do profissional 2').value).toBe('300');
+
+    // Only the PESSOA is left to the operator, and the picker is open for it
+    // because slice 03 unlocks a row the moment it names a função.
+    expect(comboboxText('Profissional 1')).toBe('Buscar ou digitar um nome...');
+    expect(comboboxText('Profissional 2')).toBe('Buscar ou digitar um nome...');
+    expect(comboboxTrigger('Profissional 1').disabled).toBe(false);
+    expect(comboboxTrigger('Profissional 2').disabled).toBe(false);
+
+    expect(container.textContent).not.toContain('Nenhum profissional alocado');
+    // A seeded row is a produto DEFAULT, never a pinned decision, so it explains
+    // its derivation instead of claiming the operator changed it.
+    expect(rowFooterText(1)).toContain('5% de FXL Custom (R$ 20.000,00)');
+    expect(rowFooterText(1)).not.toContain('Alterado manualmente');
+  });
+
+  it('does not duplicate a seeded row when the item value changes', async () => {
+    await renderWizard();
+    await goToCosts();
+    expect(professionalRowCount()).toBe(2);
+
+    await backToProposta();
+    await typeInto(labeledInput('Valor unitário do item 1'), '40000');
+    await flushReact();
+    await goToCosts();
+
+    expect(professionalRowCount()).toBe(2);
+    // Unpinned, so the cents follow the negotiated value rather than freezing.
+    expect(labeledInput('Custo alocado do profissional 1').value).toBe('2000');
+  });
+
+  it('does not resurrect a seeded row the operator deleted', async () => {
+    await renderWizard();
+    await goToCosts();
+    await click(buttonByLabel('Remover profissional 1'));
+    await flushReact();
+    expect(professionalRowCount()).toBe(1);
+
+    await backToProposta();
+    await typeInto(labeledInput('Valor unitário do item 1'), '40000');
+    await flushReact();
+    await goToCosts();
+
+    expect(professionalRowCount()).toBe(1);
+    expect(comboboxText('Função do profissional 1')).toBe('Testador');
+  });
+
+  it('does not seed a second row for a funcao the operator already allocated', async () => {
+    await renderWizard();
+    await goToCosts();
+    // Drops both seeded rows, then allocates Testador by hand.
+    await addProfessional();
+    await pickOption('Função do profissional 1', 'Testador');
+    await flushReact();
+    expect(professionalRowCount()).toBe(1);
+
+    // Landing Page declares Testador too. Its (produto, função) key is genuinely
+    // new, so it IS recorded - but the row is deduped per função, and Testador is
+    // already on the proposta.
+    await backToProposta();
+    await click(buttonByText('+ item'));
+    await flushReact();
+    await pickOptionStartingWith('Produto / serviço do item 2', 'Landing Page');
+    await flushReact();
+    await goToCosts();
+
+    expect(professionalRowCount()).toBe(1);
+    expect(comboboxText('Função do profissional 1')).toBe('Testador');
+  });
+
+  it('seeds nothing when reopening a saved proposta', async () => {
+    await renderWizard(editSale);
+    await goToCosts();
+
+    // The stored row and nothing else: on a saved proposta the ABSENCE of a
+    // Desenvolvedor row is itself a decision.
+    expect(professionalRowCount()).toBe(1);
+    expect(comboboxText('Profissional 1')).toBe('Dev Externo');
+    expect(container.textContent).not.toContain('Desenvolvedor');
+    expect(container.textContent).not.toContain('Testador');
+  });
+
+  it('blocks Avancar until every seeded row has a pessoa', async () => {
+    await renderWizard();
+    await goToCosts();
+    expect(container.textContent).toContain('Passo 3 de 4');
+
+    await click(buttonByText('Avançar'));
+    await flushReact();
+    expect(container.textContent).toContain('Passo 3 de 4');
+    expect(container.textContent).toContain('Selecione a pessoa de cada profissional alocado.');
+
+    await pickOption('Profissional 1', 'Bruno Entrega');
+    await flushReact();
+    await pickOption('Profissional 2', 'Bruno Entrega');
+    await flushReact();
+    expect(container.textContent).not.toContain('Selecione a pessoa de cada profissional alocado.');
+
+    await click(buttonByText('Avançar'));
+    await flushReact();
+    expect(container.textContent).toContain('Passo 4 de 4');
+  });
+
+  it('unblocks Avancar when the operator removes the seeded rows instead', async () => {
+    await renderWizard();
+    await goToCosts();
+    await click(buttonByText('Avançar'));
+    await flushReact();
+    expect(container.textContent).toContain('Passo 3 de 4');
+
+    await click(buttonByLabel('Remover profissional 1'));
+    await flushReact();
+    await click(buttonByLabel('Remover profissional 1'));
+    await flushReact();
+    expect(professionalRowCount()).toBe(0);
+
+    await click(buttonByText('Avançar'));
+    await flushReact();
+    expect(container.textContent).toContain('Passo 4 de 4');
+  });
+
+  it('sends the seeded rows with their funcaoId and resolved cents', async () => {
+    await renderWizard();
+    await goToCosts();
+    await pickOption('Profissional 1', 'Bruno Entrega');
+    await flushReact();
+    await pickOption('Profissional 2', 'Bruno Entrega');
+    await flushReact();
+    await click(buttonByText('Salvar rascunho'));
+
+    expect(onSave).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        professionals: [
+          {
+            personId: deliveryPersonId,
+            personName: 'Bruno Entrega',
+            funcaoId: devFuncaoId,
+            role: 'Desenvolvedor',
+            costBrl: 100000,
+          },
+          {
+            personId: deliveryPersonId,
+            personName: 'Bruno Entrega',
+            funcaoId: testerFuncaoId,
+            role: 'Testador',
+            costBrl: 30000,
+          },
+        ],
+      }),
+    );
+  });
+
+  it('shows a custo profissional the save will actually charge, in both directions', async () => {
+    await renderWizard();
+    await goToCosts();
+    expect(professionalRowCount()).toBe(2);
+
+    /*
+      A seeded row carries cents (R$ 1.000 + R$ 300) but no pessoa, so `createPayload`
+      drops it. The panel must drop it too: `Salvar rascunho` sits in this very footer
+      and the operator would otherwise read a Margem líquida R$ 1.300 BELOW the
+      net_margin_brl the API derives from the payload it just sent.
+    */
+    await click(buttonByText('Salvar rascunho'));
+    expect(savedProfessionalCents()).toBe(0);
+    expect(panelFigureCents('Custos profissionais')).toBe(0);
+    const marginWithoutPeople = panelFigureCents('Margem líquida');
+
+    // Positive control 1: one pessoa named, and exactly that row's cents count.
+    // Without this, excluding EVERY row unconditionally would still pass above.
+    await pickOption('Profissional 1', 'Bruno Entrega');
+    await flushReact();
+    await click(buttonByText('Salvar rascunho'));
+    expect(savedProfessionalCents()).toBe(100000);
+    expect(panelFigureCents('Custos profissionais')).toBe(100000);
+
+    // Positive control 2: both named, both count, and the margin has fallen by
+    // exactly the professional cost the payload now carries.
+    await pickOption('Profissional 2', 'Bruno Entrega');
+    await flushReact();
+    await click(buttonByText('Salvar rascunho'));
+    expect(savedProfessionalCents()).toBe(130000);
+    expect(panelFigureCents('Custos profissionais')).toBe(130000);
+    expect(marginWithoutPeople - panelFigureCents('Margem líquida')).toBe(130000);
+  });
+
+  it('warns that a row without a pessoa is not saved in a rascunho, and only then', async () => {
+    await renderWizard();
+    await goToCosts();
+
+    // Two seeded rows, each with a função and no pessoa: exactly what a rascunho
+    // saved now would discard, permanently, since reopening never re-seeds.
+    expect(container.textContent).toContain(
+      'Profissionais sem pessoa selecionada não são salvos no rascunho.',
+    );
+
+    await pickOption('Profissional 1', 'Bruno Entrega');
+    await flushReact();
+    // Still one personless row left, so the line stays.
+    expect(container.textContent).toContain(
+      'Profissionais sem pessoa selecionada não são salvos no rascunho.',
+    );
+
+    await pickOption('Profissional 2', 'Bruno Entrega');
+    await flushReact();
+    expect(container.textContent).not.toContain(
+      'Profissionais sem pessoa selecionada não são salvos no rascunho.',
+    );
+  });
+
+  it('does not warn about a blank row the operator just added, until it names a funcao', async () => {
+    await renderWizard();
+    await goToCosts();
+    await addProfessional();
+
+    // `addProfessional` clears the seeds first, so this is a fresh row with neither
+    // função nor pessoa. Nothing was proposed, so there is nothing to lose.
+    expect(professionalRowCount()).toBe(1);
+    expect(container.textContent).not.toContain(
+      'Profissionais sem pessoa selecionada não são salvos no rascunho.',
+    );
+
+    // Naming its função makes it an allocation a rascunho would drop, so the line
+    // appears - the warning tracks the loss, not the seeding.
+    await pickOption('Função do profissional 1', 'Desenvolvedor');
+    await flushReact();
+    expect(container.textContent).toContain(
+      'Profissionais sem pessoa selecionada não são salvos no rascunho.',
+    );
   });
 });
