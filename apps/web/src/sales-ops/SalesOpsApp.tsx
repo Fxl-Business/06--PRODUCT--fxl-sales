@@ -1561,6 +1561,13 @@ export function SalesOpsApp() {
       {bootstrapQuery.isSuccess ? (
         <SaleWizardDialog
           bootstrap={persistedBootstrap}
+          /*
+            `isFetching`, not `isLoading`: the dialog is already gated on `isSuccess`,
+            so `isLoading` is false by construction here and would make the guard dead.
+            A background refetch is exactly the window where the snapshot can be
+            mid-flight while the wizard is open.
+          */
+          bootstrapPending={bootstrapQuery.isFetching}
           editSale={saleWizard?.mode === 'edit' ? saleWizard.sale : null}
           onAssignFuncao={assignFuncaoToPerson}
           onClose={() => setSaleWizard(null)}
@@ -5445,6 +5452,13 @@ function deriveWizardPrefill(sale: SalesOpsSale, bootstrap: SalesOpsBootstrap): 
 export function SaleWizardDialog(props: {
   open: boolean;
   bootstrap: SalesOpsBootstrap;
+  /**
+   * Whether the sales-ops snapshot is still in flight. Only `Profissionais alocados`
+   * reads it, and only to tell "this venda declares nobody" apart from "the
+   * declarations have not arrived yet". Optional so a caller that does not know
+   * simply gets today's behaviour.
+   */
+  bootstrapPending?: boolean;
   editSale: SalesOpsSale | null;
   onClose: () => void;
   /**
@@ -5470,6 +5484,7 @@ export function SaleWizardDialog(props: {
       // dialog closes, so re-opening still re-seeds the defaults from fresh data.
       key={props.editSale?.id ?? 'create'}
       bootstrap={props.bootstrap}
+      bootstrapPending={props.bootstrapPending ?? false}
       editSale={props.editSale}
       onAssignFuncao={props.onAssignFuncao}
       onClose={props.onClose}
@@ -5485,6 +5500,7 @@ export function SaleWizardDialog(props: {
 
 function SaleWizardDialogBody({
   bootstrap,
+  bootstrapPending,
   editSale,
   onAssignFuncao,
   onClose,
@@ -5496,6 +5512,7 @@ function SaleWizardDialogBody({
   saving,
 }: {
   bootstrap: SalesOpsBootstrap;
+  bootstrapPending: boolean;
   editSale: SalesOpsSale | null;
   onAssignFuncao?: (payload: SavePersonPayload) => Promise<SalesOpsPerson | null>;
   onClose: () => void;
@@ -7688,7 +7705,24 @@ function SaleWizardDialogBody({
                       <span />
                     </div>
                     <div className="flex flex-col gap-2">
-                      {professionals.length === 0 ? (
+                      {/*
+                        `Nenhum profissional alocado` is a CLAIM about the proposta, not a
+                        placeholder: it says the produtos on this venda declare nobody. While
+                        the snapshot is still in flight that claim is simply not known yet -
+                        the seeding guard reads `bootstrap.productFuncaoCosts` and
+                        `allocatableFuncoes`, so with either still empty it correctly proposes
+                        nothing, and then proposes the rows a moment later when the data lands.
+                        Printing the empty state during that window states something false and
+                        then silently contradicts itself, which is what an operator reads as
+                        "the função did not come".
+                      */}
+                      {professionals.length === 0 && bootstrapPending ? (
+                        <div className="flex items-center justify-center gap-2 rounded-[10px] border border-dashed border-[#dcdce2] px-4 py-5 text-center text-[13px] font-semibold text-[#6a6a72]">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Carregando profissionais padrão
+                        </div>
+                      ) : null}
+                      {professionals.length === 0 && !bootstrapPending ? (
                         <div className="rounded-[10px] border border-dashed border-[#dcdce2] px-4 py-5 text-center text-[13px] font-semibold text-[#9b9ba3]">
                           Nenhum profissional alocado
                         </div>

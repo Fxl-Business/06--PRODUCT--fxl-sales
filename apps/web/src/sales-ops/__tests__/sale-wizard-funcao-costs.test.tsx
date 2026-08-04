@@ -321,6 +321,7 @@ async function renderWizard(
   onCreateFuncao?: (name: string) => Promise<SalesOpsFuncao | null>,
   bootstrapOverride?: SalesOpsBootstrap,
   onAssignFuncao?: (payload: SavePersonPayload) => Promise<SalesOpsPerson | null>,
+  bootstrapPending = false,
 ) {
   (
     globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -334,6 +335,7 @@ async function renderWizard(
     root.render(
       <SaleWizardDialog
         bootstrap={bootstrapOverride ?? (sale ? editBootstrap : bootstrap)}
+        bootstrapPending={bootstrapPending}
         editSale={sale}
         onAssignFuncao={onAssignFuncao}
         onClose={vi.fn()}
@@ -925,6 +927,42 @@ describe('sale wizard profissionais alocados', () => {
     expect(payload.professionals[0]!.funcaoId).toBe(newFuncaoId);
     expect(String(payload.professionals[0]!.funcaoId)).not.toMatch(/^optimistic:/);
     expect(payload.professionals[0]!.role).toBe('Arquiteto');
+  });
+
+  it('says it is still loading rather than claiming nobody is allocated', async () => {
+    // A produto that declares nothing, so the seeding guard correctly proposes no
+    // row. That is indistinguishable, from the panel's point of view, from a
+    // snapshot whose declarations have not arrived - which is the bug: the operator
+    // reads `Nenhum profissional alocado`, and a moment later the row appears.
+    await renderWizard(null, undefined, { ...bootstrap, productFuncaoCosts: [] }, undefined, true);
+    await goToCosts();
+
+    expect(professionalRowCount()).toBe(0);
+    expect(container.textContent).toContain('Carregando profissionais padrão');
+    expect(container.textContent).not.toContain('Nenhum profissional alocado');
+  });
+
+  it('claims nobody is allocated only once the snapshot has settled', async () => {
+    // The positive control for the test above. Same empty declarations, but nothing
+    // is in flight any more, so the empty state is now a true statement and must be
+    // the thing on screen - otherwise the fix would just be a permanent spinner.
+    await renderWizard(null, undefined, { ...bootstrap, productFuncaoCosts: [] }, undefined, false);
+    await goToCosts();
+
+    expect(professionalRowCount()).toBe(0);
+    expect(container.textContent).toContain('Nenhum profissional alocado');
+    expect(container.textContent).not.toContain('Carregando profissionais padrão');
+  });
+
+  it('shows neither message while a seeded row is on screen', async () => {
+    // A refetch while the wizard is open must not put a spinner above rows that are
+    // already correct: the guard is `professionals.length === 0`, not `pending`.
+    await renderWizard(null, undefined, undefined, undefined, true);
+    await goToCosts();
+
+    expect(professionalRowCount()).toBe(2);
+    expect(container.textContent).not.toContain('Carregando profissionais padrão');
+    expect(container.textContent).not.toContain('Nenhum profissional alocado');
   });
 
   it('never offers an optimistic funcao row in the profissional picker', async () => {
