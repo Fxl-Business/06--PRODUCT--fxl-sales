@@ -527,9 +527,14 @@ describe('combobox adoption in the proposta wizard', () => {
 
     await advanceToStep(3);
     await click(buttonByText('+ profissional'));
-    // The picker now offers EVERY active pessoa, sorted by name, so a new row is
-    // seeded with 'Ana Martins' rather than the first `isCollaborator` pessoa.
-    expect(comboboxText('Profissional 1')).toBe('Ana Martins');
+    // A fresh row seeds NO pessoa at all, and its picker is locked until the row
+    // names a função - the função is what partitions the person list.
+    expect(comboboxText('Profissional 1')).toBe('Selecione a função primeiro');
+    expect(comboboxTrigger('Profissional 1').disabled).toBe(true);
+
+    // A função is required now; the old hardcoded `role: 'Operacional'` seed is gone.
+    await click(comboboxTrigger('Função do profissional 1'));
+    await click(optionRows().find((row) => row.textContent?.trim() === 'Prestador')!);
 
     await click(comboboxTrigger('Profissional 1'));
     await typeInPanel('Dev Externo');
@@ -537,10 +542,6 @@ describe('combobox adoption in the proposta wizard', () => {
     await click(createRow()!);
 
     expect(comboboxText('Profissional 1')).toBe('Dev Externo');
-
-    // A função is required now; the old hardcoded `role: 'Operacional'` seed is gone.
-    await click(comboboxTrigger('Função do profissional 1'));
-    await click(optionRows().find((row) => row.textContent?.trim() === 'Prestador')!);
 
     await click(buttonByText('Avançar'));
     await click(buttonByText('Salvar proposta'));

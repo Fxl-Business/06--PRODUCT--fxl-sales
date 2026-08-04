@@ -696,6 +696,41 @@ function personOptions(people: SalesOpsPerson[]): ComboboxOption[] {
   }));
 }
 
+/**
+ * The heading over the pessoas who do NOT yet carry the profissional row's função.
+ * Picking one of them grants it to her, so the heading has to state the
+ * consequence before the click - it is the flag, which is why the flagged rows
+ * keep their e-mail `description` rather than spending that line on a badge.
+ */
+const FUNCAO_GRANT_GROUP_LABEL = 'Adicionar a esta função';
+
+/**
+ * The proposta wizard's `PROFISSIONAL` options, partitioned by the ROW's função.
+ * Carriers land in the headingless bucket and everyone else under one group
+ * heading; `buildComboboxFilter` renders the headingless bucket first and
+ * recomputes the grouping per query, so the partition survives a search.
+ *
+ * Deliberately separate from `personOptions`: the vendedor and finder pickers
+ * share that one and must not grow a grant row, because a pessoa there has to
+ * ALREADY hold the system função. Module-local for the same reason as
+ * `FUNCAO_SLUG_VENDEDOR` - `react-refresh/only-export-components` allows only
+ * component exports from this module.
+ */
+function professionalPersonOptions(
+  people: SalesOpsPerson[],
+  rowFuncaoId: string,
+): ComboboxOption[] {
+  return people.map((person) => ({
+    value: person.id,
+    label: person.displayName,
+    description: person.contactEmail ?? undefined,
+    // No id to partition on (a legacy free-text row) groups nobody.
+    ...(rowFuncaoId !== '' && !person.funcaoIds.includes(rowFuncaoId)
+      ? { group: FUNCAO_GRANT_GROUP_LABEL }
+      : {}),
+  }));
+}
+
 function Toggle({
   checked,
   onChange,
@@ -860,6 +895,25 @@ export function SalesOpsApp() {
     try {
       const { funcao } = await saveFuncao.mutateAsync({ name: name.trim(), status: 'active' });
       return funcao;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * The proposta wizard's função grant, and deliberately the ORDINARY person write:
+   * `useSaveSalesOpsPerson` already carries `invalidates: [queryKeys.salesOps.all]`
+   * and the optimistic bootstrap patch, so the `Adicionar a esta função` flag
+   * disappears the instant the patch lands and the refetch merely confirms it. A
+   * bespoke fetch here would re-implement both and drift from `PersonDialog`.
+   *
+   * The wizard builds the payload rather than this component, because the wizard is
+   * the side that holds `bootstrap.people` and therefore the pessoa's existing set.
+   */
+  async function assignFuncaoToPerson(payload: SavePersonPayload): Promise<SalesOpsPerson | null> {
+    try {
+      const { person } = await savePerson.mutateAsync(payload);
+      return person;
     } catch {
       return null;
     }
@@ -1501,6 +1555,7 @@ export function SalesOpsApp() {
         <SaleWizardDialog
           bootstrap={persistedBootstrap}
           editSale={saleWizard?.mode === 'edit' ? saleWizard.sale : null}
+          onAssignFuncao={assignFuncaoToPerson}
           onClose={() => setSaleWizard(null)}
           onCreateArea={createAreaByName}
           onCreateClient={createClientByName}
@@ -5355,6 +5410,12 @@ export function SaleWizardDialog(props: {
   bootstrap: SalesOpsBootstrap;
   editSale: SalesOpsSale | null;
   onClose: () => void;
+  /**
+   * Grants a função to a pessoa who does not carry it yet, from the `PROFISSIONAL`
+   * picker's grant group. Optional exactly like `onCreateFuncao`, so a caller that
+   * passes neither still type-checks and simply gets no grant.
+   */
+  onAssignFuncao?: (payload: SavePersonPayload) => Promise<SalesOpsPerson | null>;
   onCreateClient?: (name: string) => Promise<SalesOpsClient | null>;
   onCreateArea?: (name: string) => Promise<SalesOpsArea | null>;
   onCreateFuncao?: (name: string) => Promise<SalesOpsFuncao | null>;
@@ -5373,6 +5434,7 @@ export function SaleWizardDialog(props: {
       key={props.editSale?.id ?? 'create'}
       bootstrap={props.bootstrap}
       editSale={props.editSale}
+      onAssignFuncao={props.onAssignFuncao}
       onClose={props.onClose}
       onCreateArea={props.onCreateArea}
       onCreateClient={props.onCreateClient}
@@ -5387,6 +5449,7 @@ export function SaleWizardDialog(props: {
 function SaleWizardDialogBody({
   bootstrap,
   editSale,
+  onAssignFuncao,
   onClose,
   onCreateClient,
   onCreateArea,
@@ -5397,6 +5460,7 @@ function SaleWizardDialogBody({
 }: {
   bootstrap: SalesOpsBootstrap;
   editSale: SalesOpsSale | null;
+  onAssignFuncao?: (payload: SavePersonPayload) => Promise<SalesOpsPerson | null>;
   onClose: () => void;
   onCreateClient?: (name: string) => Promise<SalesOpsClient | null>;
   onCreateArea?: (name: string) => Promise<SalesOpsArea | null>;
@@ -5874,9 +5938,18 @@ function SaleWizardDialogBody({
     snapshot it inherited from a stored proposta; a row with neither would reach
     the API as a `funcao_or_role_required` 400.
   */
-  const professionalsValid = professionals.every(
+  const professionalFuncoesValid = professionals.every(
     (professional) => Boolean(professional.funcaoId) || Boolean(professional.funcaoName.trim()),
   );
+  /*
+    Reachable only since a fresh row stopped seeding `allocatablePeople[0]`. The API
+    rejects a blank `personName` (`z.string().min(1)`), so without this the operator
+    would meet an opaque 400 instead of a sentence naming the empty field.
+  */
+  const professionalPeopleValid = professionals.every((professional) =>
+    Boolean(professional.personName.trim()),
+  );
+  const professionalsValid = professionalFuncoesValid && professionalPeopleValid;
   const canAdvanceStepThree = professionalsValid;
 
   const itemsValid = items.every((item) => {
@@ -6288,6 +6361,59 @@ function SaleWizardDialogBody({
   }
 
   /**
+   * The one place a profissional row's pessoa is written, and the only place a
+   * função grant can fire.
+   *
+   * `rowFuncaoId` is passed in from the render closure rather than read back out of
+   * `professionals`, so the grant is not a side effect inside a `setState` updater -
+   * StrictMode double-invokes those - and cannot read a stale row.
+   */
+  function selectProfessionalPerson(index: number, rowFuncaoId: string, personId: string) {
+    const person = allocatablePeople.find((candidate) => candidate.id === personId);
+    // The cost is deliberately untouched: a pessoa is not a cost driver, the
+    // função is.
+    setProfessionals((current) =>
+      current.map((item, itemIndex) =>
+        itemIndex === index
+          ? { ...item, personId, personName: person?.displayName ?? '' }
+          : item,
+      ),
+    );
+    if (!person || !rowFuncaoId) return;
+    if (person.funcaoIds.includes(rowFuncaoId)) return;
+    /*
+      Fire-and-forget, and the row keeps the pessoa either way: the write above ran
+      unconditionally. A rejected grant resolves to `null` and the optimistic
+      rollback restores her old `funcoes`, so the flag simply reappears - no dialog
+      in this app surfaces API errors today and this is not the slice that changes
+      that.
+    */
+    void grantFuncaoToPerson(person, rowFuncaoId);
+  }
+
+  async function grantFuncaoToPerson(person: SalesOpsPerson, funcaoId: string) {
+    if (!onAssignFuncao) return;
+    await onAssignFuncao({
+      id: person.id,
+      displayName: person.displayName,
+      /*
+        MUST be sent. The API sets `contactEmail: data.contactEmail || null`
+        unconditionally, so a PATCH that omits the key CLEARS her e-mail. `??
+        undefined` re-sends the stored address and omits the key only when it is
+        already null.
+      */
+      contactEmail: person.contactEmail ?? undefined,
+      status: person.status,
+      /*
+        Her FULL EXISTING SET plus the new one. Person writes are a full set
+        replacement - the API deletes and reinserts - so sending `[funcaoId]` alone
+        would silently strip every other função she holds.
+      */
+      funcaoIds: [...person.funcaoIds, funcaoId],
+    });
+  }
+
+  /**
    * Mirrors `createAreaForItem` above and `handleCreateFuncao` in PersonDialogBody:
    * the Combobox `onCreate` is `(query: string) => void`, so the async create is
    * wrapped rather than returned, and a rejected create resolves to null and leaves
@@ -6422,17 +6548,27 @@ function SaleWizardDialogBody({
           unitBrl: parseCurrencyToCents(item.unitBrl),
         };
       }),
-      professionals: professionals.map((professional) => ({
-        personId: professional.personId,
-        personName: professional.personName,
-        funcaoId: professional.funcaoId,
-        // The API derives funcao_name_snapshot from the resolved cadastro row and
-        // ignores this; it is sent so a legacy row with no funcaoId stays a valid
-        // payload rather than tripping funcao_or_role_required.
-        role: professional.funcaoName,
-        // Resolved here, never on the wire: `cost_brl` is a single integer-cents column.
-        costBrl: professionalRowCents(professional),
-      })),
+      /*
+        A personless row is dropped rather than sent: the API's
+        `personName: z.string().min(1)` answers one with a 400. `Avançar` past step 3
+        already refuses such a row with a visible message, so the only path that can
+        reach this is `Salvar rascunho`, which gates on `draftValid` and deliberately
+        does NOT gate on professionals - a half-filled row carries no person, so the
+        drop loses nothing addressable.
+      */
+      professionals: professionals
+        .filter((professional) => professional.personName.trim() !== '')
+        .map((professional) => ({
+          personId: professional.personId,
+          personName: professional.personName,
+          funcaoId: professional.funcaoId,
+          // The API derives funcao_name_snapshot from the resolved cadastro row and
+          // ignores this; it is sent so a legacy row with no funcaoId stays a valid
+          // payload rather than tripping funcao_or_role_required.
+          role: professional.funcaoName,
+          // Resolved here, never on the wire: `cost_brl` is a single integer-cents column.
+          costBrl: professionalRowCents(professional),
+        })),
     };
     return buildSalePayload(draft);
   }
@@ -7301,8 +7437,12 @@ function SaleWizardDialogBody({
                           setProfessionals((current) => [
                             ...current,
                             {
-                              personId: allocatablePeople[0]?.id ?? '',
-                              personName: allocatablePeople[0]?.displayName ?? '',
+                              // No seeded pessoa: the old `allocatablePeople[0]`
+                              // seed silently allocated whoever sorted first, and
+                              // with the picker locked until the row names a função
+                              // it could not be corrected in place anyway.
+                              personId: '',
+                              personName: '',
                               // No seeded função: the old hardcoded 'Operacional'
                               // silently invented a cargo nobody chose.
                               funcaoId: '',
@@ -7326,8 +7466,12 @@ function SaleWizardDialogBody({
                       `% | R$` pair fits beside the number instead of squeezing it.
                     */}
                     <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_212px_36px] gap-[9px] px-0.5 pb-[7px] text-[11px] font-bold uppercase tracking-[0.05em] text-[#9b9ba3]">
-                      <span>Profissional</span>
+                      {/*
+                        Função FIRST: it is what partitions the person list, so it
+                        cannot sit to the right of the column it governs.
+                      */}
                       <span>Função no projeto</span>
+                      <span>Profissional</span>
                       {/* Left-aligned now: the control group starts at this cell's left edge. */}
                       <span>Custo alocado</span>
                       <span />
@@ -7347,50 +7491,25 @@ function SaleWizardDialogBody({
                           showCostErrors &&
                           !professional.funcaoId &&
                           !professional.funcaoName.trim();
+                        /*
+                          The person list is a function of the row's função, so
+                          there is nothing coherent to offer before one is named:
+                          listing everyone unflagged would re-create the unchecked
+                          pick this rule exists to stop, and would leave the grant
+                          with no moment to happen. The primitive's `openPanel`
+                          returns early when disabled, so the lock is real.
+
+                          A LEGACY row carrying a free-text `funcaoName` with no
+                          `funcaoId` stays unlocked: there is no id to partition on
+                          and locking it would make a stored proposta uneditable.
+                        */
+                        const personPickerLocked =
+                          !professional.funcaoId && !professional.funcaoName.trim();
                         return (
                           <div
                             className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_212px_36px] items-start gap-[9px]"
                             key={`${professional.personId}-${index}`}
                           >
-                            <Combobox
-                              aria-label={`Profissional ${index + 1}`}
-                              className={formSelectClass}
-                              emptyMessage="Nenhuma pessoa cadastrada"
-                              entityGender="m"
-                              entityLabel="profissional"
-                              onChange={(value) => {
-                                const person = allocatablePeople.find(
-                                  (candidate) => candidate.id === value,
-                                );
-                                // The cost is deliberately untouched: a pessoa is
-                                // not a cost driver, the função is.
-                                setProfessionals((current) =>
-                                  current.map((item, itemIndex) =>
-                                    itemIndex === index
-                                      ? {
-                                          ...item,
-                                          personId: value,
-                                          personName: person?.displayName ?? '',
-                                        }
-                                      : item,
-                                  ),
-                                );
-                              }}
-                              onCreate={(name) => {
-                                setProfessionals((current) =>
-                                  current.map((item, itemIndex) =>
-                                    itemIndex === index
-                                      ? { ...item, personId: '', personName: name }
-                                      : item,
-                                  ),
-                                );
-                              }}
-                              options={personOptions(allocatablePeople)}
-                              placeholder="Buscar ou digitar um nome..."
-                              searchPlaceholder="Buscar ou digitar um nome..."
-                              value={professional.personId}
-                              valueLabel={professional.personName}
-                            />
                             <div className="flex flex-col gap-1">
                               <Combobox
                                 aria-invalid={funcaoMissing}
@@ -7426,6 +7545,38 @@ function SaleWizardDialogBody({
                                 valueLabel={professional.funcaoName}
                               />
                             </div>
+                            <Combobox
+                              aria-label={`Profissional ${index + 1}`}
+                              className={formSelectClass}
+                              disabled={personPickerLocked}
+                              emptyMessage="Nenhuma pessoa cadastrada"
+                              entityGender="m"
+                              entityLabel="profissional"
+                              onChange={(value) =>
+                                selectProfessionalPerson(index, professional.funcaoId, value)
+                              }
+                              onCreate={(name) => {
+                                setProfessionals((current) =>
+                                  current.map((item, itemIndex) =>
+                                    itemIndex === index
+                                      ? { ...item, personId: '', personName: name }
+                                      : item,
+                                  ),
+                                );
+                              }}
+                              options={professionalPersonOptions(
+                                allocatablePeople,
+                                professional.funcaoId,
+                              )}
+                              placeholder={
+                                personPickerLocked
+                                  ? 'Selecione a função primeiro'
+                                  : 'Buscar ou digitar um nome...'
+                              }
+                              searchPlaceholder="Buscar ou digitar um nome..."
+                              value={professional.personId}
+                              valueLabel={professional.personName}
+                            />
                             <div className="flex flex-col items-end gap-1">
                               <div className="flex w-full gap-2">
                                 <div className="flex flex-none gap-[3px] rounded-[9px] bg-[#f2f2f4] p-[3px]">
@@ -7542,7 +7693,12 @@ function SaleWizardDialogBody({
                         );
                       })}
                     </div>
-                    {showCostErrors && !professionalsValid ? (
+                    {showCostErrors && !professionalPeopleValid ? (
+                      <div className="mt-3 rounded-[10px] border border-[#f0dcd5] bg-[#fbeee9] px-3 py-2 text-[12.5px] font-semibold text-[#b23a22]">
+                        Selecione a pessoa de cada profissional alocado.
+                      </div>
+                    ) : null}
+                    {showCostErrors && !professionalFuncoesValid ? (
                       <div className="mt-3 rounded-[10px] border border-[#f0dcd5] bg-[#fbeee9] px-3 py-2 text-[12.5px] font-semibold text-[#b23a22]">
                         Selecione a função de cada profissional alocado.
                       </div>

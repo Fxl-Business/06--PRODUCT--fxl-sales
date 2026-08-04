@@ -5,10 +5,12 @@ import type { HTMLAttributes } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SaleWizardDialog } from '../SalesOpsApp';
+import type { SavePersonPayload } from '../api';
 import type {
   CreateSalePayload,
   SalesOpsBootstrap,
   SalesOpsFuncao,
+  SalesOpsPerson,
   SalesOpsPersonFuncao,
   SalesOpsProduct,
   SalesOpsProductFuncaoCost,
@@ -139,7 +141,7 @@ const bootstrap: SalesOpsBootstrap = {
       id: sellerId,
       orgId: 'org-test',
       displayName: 'Ana Martins',
-      contactEmail: null,
+      contactEmail: 'ana@exemplo.com',
       status: 'active',
       // Vendedor only: a pessoa the OLD isCollaborator picker would have hidden.
       funcaoIds: [vendedorFuncaoId],
@@ -307,6 +309,7 @@ async function renderWizard(
   sale: SalesOpsSale | null = null,
   onCreateFuncao?: (name: string) => Promise<SalesOpsFuncao | null>,
   bootstrapOverride?: SalesOpsBootstrap,
+  onAssignFuncao?: (payload: SavePersonPayload) => Promise<SalesOpsPerson | null>,
 ) {
   (
     globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -320,6 +323,7 @@ async function renderWizard(
       <SaleWizardDialog
         bootstrap={bootstrapOverride ?? (sale ? editBootstrap : bootstrap)}
         editSale={sale}
+        onAssignFuncao={onAssignFuncao}
         onClose={vi.fn()}
         onCreateFuncao={onCreateFuncao}
         onSave={onSave}
@@ -377,6 +381,34 @@ function optionLabels(): string[] {
   return [...container.querySelectorAll('[role="option"]')].map(
     (row) => row.textContent?.trim() ?? '',
   );
+}
+
+/**
+ * Every open panel's group wrappers, heading text included. `buildComboboxFilter`
+ * renders the headingless bucket as a bare Fragment, so a `[role="group"]` node
+ * exists only when at least one option really carries a `group`.
+ */
+function groupHeadingTexts(): string[] {
+  return [...container.querySelectorAll('[role="group"]')].map(
+    (group) => group.textContent?.trim() ?? '',
+  );
+}
+
+function optionRow(label: string): HTMLElement {
+  const row = [...container.querySelectorAll('[role="option"]')].find(
+    (candidate) => candidate.textContent?.trim() === label,
+  );
+  if (!(row instanceof HTMLElement)) throw new Error(`option not found: ${label}`);
+  return row;
+}
+
+/** For a picker whose rows carry a description, e.g. a pessoa's contactEmail. */
+function optionRowStartingWith(label: string): HTMLElement {
+  const row = [...container.querySelectorAll('[role="option"]')].find((candidate) =>
+    candidate.textContent?.trim().startsWith(label),
+  );
+  if (!(row instanceof HTMLElement)) throw new Error(`option not found: ${label}`);
+  return row;
 }
 
 async function openPicker(ariaLabel: string): Promise<string[]> {
@@ -462,19 +494,148 @@ async function setCostUnit(unit: '%' | 'R$', index = 1) {
 }
 
 describe('sale wizard profissionais alocados', () => {
-  it('offers every active pessoa in the profissional picker and no longer offers Digite manualmente', async () => {
+  it('partitions the profissional picker by the row s funcao and flags the rest', async () => {
+    await renderWizard();
+    await goToCosts();
+    await addProfessional();
+    await pickOption('Função do profissional 1', 'Desenvolvedor');
+    await flushReact();
+
+    const options = await openPicker('Profissional 1');
+    /*
+      Carrier first, in the headingless bucket; the non-carrier lands after the
+      group heading. `buildComboboxFilter` renders the ungrouped bucket first, so
+      this exact order is the partition itself rather than an alphabetical accident
+      (alphabetically Ana Martins sorts BEFORE Bruno Entrega). Ana carries a
+      contactEmail, which the picker renders as a description under her name, so
+      her row's text is asserted with `startsWith` rather than an exact match.
+    */
+    expect(options).toHaveLength(2);
+    expect(options[0]).toBe('Bruno Entrega');
+    expect(options[1]?.startsWith('Ana Martins')).toBe(true);
+    expect(groupHeadingTexts().some((text) => text.startsWith('Adicionar a esta função'))).toBe(
+      true,
+    );
+    expect(optionRowStartingWith('Ana Martins').closest('[role="group"]')).not.toBeNull();
+    expect(optionRow('Bruno Entrega').closest('[role="group"]')).toBeNull();
+    // Inactive stays out, and the old free-text escape hatch is still gone.
+    expect(options).not.toContain('Zulmira Inativa');
+    expect(options).not.toContain('Digite manualmente');
+  });
+
+  it('locks the profissional picker until the row names a funcao', async () => {
     await renderWizard();
     await goToCosts();
     await addProfessional();
 
-    const options = await openPicker('Profissional 1');
-    // A vendedor-only pessoa is offered: allocation is no longer gated on
-    // "carries a non-system função".
-    expect(options).toContain('Ana Martins');
-    expect(options).toContain('Bruno Entrega');
-    // Inactive stays out, and the old free-text escape hatch is gone.
-    expect(options).not.toContain('Zulmira Inativa');
-    expect(options).not.toContain('Digite manualmente');
+    expect(comboboxText('Profissional 1')).toBe('Selecione a função primeiro');
+    expect(comboboxTrigger('Profissional 1').disabled).toBe(true);
+
+    // The lock is real, not decorative: the panel refuses to open.
+    await click(comboboxTrigger('Profissional 1'));
+    expect(container.querySelectorAll('[role="option"]')).toHaveLength(0);
+
+    // Positive control: naming a função unlocks the same trigger.
+    await pickOption('Função do profissional 1', 'Desenvolvedor');
+    await flushReact();
+    expect(comboboxTrigger('Profissional 1').disabled).toBe(false);
+  });
+
+  it('grants the funcao to a flagged pessoa with her FULL existing funcaoIds', async () => {
+    const onAssignFuncao = vi.fn<(payload: SavePersonPayload) => Promise<SalesOpsPerson | null>>(
+      async () => null,
+    );
+    await renderWizard(null, undefined, undefined, onAssignFuncao);
+    await goToCosts();
+    await addProfessional();
+    await pickOption('Função do profissional 1', 'Desenvolvedor');
+    await flushReact();
+    await pickOptionStartingWith('Profissional 1', 'Ana Martins');
+    await flushReact();
+
+    // The row takes her regardless of what the write does.
+    expect(comboboxText('Profissional 1')).toBe('Ana Martins');
+    expect(onAssignFuncao).toHaveBeenCalledTimes(1);
+    /*
+      The WHOLE payload, never `objectContaining`: the API sets
+      `contactEmail: data.contactEmail || null` unconditionally, so a PATCH that
+      drops the key clears her e-mail. Ana's fixture carries a REAL address on
+      purpose: `toHaveBeenCalledWith` uses `toEqual` semantics, under which an
+      expected `contactEmail: undefined` also matches an argument object that
+      OMITS the key entirely, so a null-fixture pessoa could never have caught
+      the key being dropped. Only a non-undefined expected value does.
+    */
+    expect(onAssignFuncao).toHaveBeenCalledWith({
+      id: sellerId,
+      displayName: 'Ana Martins',
+      contactEmail: 'ana@exemplo.com',
+      status: 'active',
+      funcaoIds: [vendedorFuncaoId, devFuncaoId],
+    });
+    /*
+      The anti-regression this test exists for: person writes are a FULL SET
+      replacement, so sending `[devFuncaoId]` alone would silently strip her
+      Vendedor - a system função she is paid through.
+    */
+    expect(onAssignFuncao.mock.calls[0]![0].funcaoIds).toContain(vendedorFuncaoId);
+  });
+
+  it('omits contactEmail from the grant payload for a pessoa with none, rather than sending null', async () => {
+    const onAssignFuncao = vi.fn<(payload: SavePersonPayload) => Promise<SalesOpsPerson | null>>(
+      async () => null,
+    );
+    await renderWizard(null, undefined, undefined, onAssignFuncao);
+    await goToCosts();
+    await addProfessional();
+    // Bruno holds devFuncaoId, not testerFuncaoId, and his contactEmail is genuinely null.
+    await pickOption('Função do profissional 1', 'Testador');
+    await flushReact();
+    await pickOption('Profissional 1', 'Bruno Entrega');
+    await flushReact();
+
+    expect(onAssignFuncao).toHaveBeenCalledTimes(1);
+    const payload = onAssignFuncao.mock.calls[0]![0];
+    /*
+      `payload.contactEmail` really is the JS value `undefined` here, not a
+      missing key - `person.contactEmail ?? undefined` still assigns the key in
+      the object literal. What actually drops it on the wire is
+      `JSON.stringify`, which omits any key whose value is `undefined`, so that
+      is the honest thing to assert: a pessoa with no e-mail must serialize
+      WITHOUT `contactEmail`, never with a `null` that the API would then write
+      over a value that was never there to begin with.
+    */
+    expect(payload.contactEmail).toBeUndefined();
+    expect(JSON.parse(JSON.stringify(payload))).not.toHaveProperty('contactEmail');
+  });
+
+  it('does not write when the pessoa already carries the row s funcao', async () => {
+    const onAssignFuncao = vi.fn<(payload: SavePersonPayload) => Promise<SalesOpsPerson | null>>(
+      async () => null,
+    );
+    await renderWizard(null, undefined, undefined, onAssignFuncao);
+    await goToCosts();
+    await addProfessional();
+    await pickOption('Função do profissional 1', 'Desenvolvedor');
+    await flushReact();
+    await pickOption('Profissional 1', 'Bruno Entrega');
+    await flushReact();
+
+    expect(comboboxText('Profissional 1')).toBe('Bruno Entrega');
+    expect(onAssignFuncao).not.toHaveBeenCalled();
+  });
+
+  it('keeps a legacy free-text funcao row s pessoa picker open and ungrouped', async () => {
+    await renderWizard(editSale);
+    await goToCosts();
+
+    /*
+      The one deliberate hole in the rule: a stored row carrying a free-text
+      `funcaoName` with a null `funcaoId` has no id to partition on, and locking it
+      would make a stored proposta uneditable.
+    */
+    expect(comboboxTrigger('Profissional 1').disabled).toBe(false);
+    await openPicker('Profissional 1');
+    expect(groupHeadingTexts()).toEqual([]);
   });
 
   it('picks a funcao from the registry and lists only active funcoes', async () => {
@@ -652,21 +813,28 @@ describe('sale wizard profissionais alocados', () => {
     expect(container.textContent).toContain('Passo 3 de 4');
     expect(container.textContent).toContain('Selecione a função de cada profissional alocado.');
 
-    // Positive control: picking a função unblocks the same button.
+    // Positive control: picking a função clears its own bar, and the row is then
+    // blocked only by the pessoa, because a fresh row seeds nobody at all.
     await pickOption('Função do profissional 1', 'Desenvolvedor');
+    await flushReact();
+    expect(container.textContent).not.toContain('Selecione a função de cada profissional alocado.');
+    expect(container.textContent).toContain('Selecione a pessoa de cada profissional alocado.');
+
+    await pickOption('Profissional 1', 'Bruno Entrega');
     await flushReact();
     await click(buttonByText('Avançar'));
     await flushReact();
     expect(container.textContent).toContain('Passo 4 de 4');
     expect(container.textContent).not.toContain('Selecione a função de cada profissional alocado.');
+    expect(container.textContent).not.toContain('Selecione a pessoa de cada profissional alocado.');
   });
 
   it('sends funcaoId and the funcao name as role in the save payload', async () => {
     await renderWizard();
     await goToCosts();
     await addProfessional();
-    await pickOption('Profissional 1', 'Bruno Entrega');
     await pickOption('Função do profissional 1', 'Desenvolvedor');
+    await pickOption('Profissional 1', 'Bruno Entrega');
     await flushReact();
     await click(buttonByText('Salvar rascunho'));
 
@@ -759,20 +927,32 @@ describe('sale wizard profissionais alocados', () => {
     await renderWizard(null, onCreateFuncao);
     await goToCosts();
     await addProfessional();
+    /*
+      The row is filled FIRST, because the refused create leaves it with no funcaoId
+      and its pessoa picker would then be locked. That also buys a stronger positive
+      control than the old shape had: the row must still read `Desenvolvedor`
+      afterwards, so the refusal is proven to leave the previous selection alone
+      rather than merely proven not to adopt the placeholder.
+    */
+    await pickOption('Função do profissional 1', 'Desenvolvedor');
+    await flushReact();
+    await pickOption('Profissional 1', 'Bruno Entrega');
+    await flushReact();
+
     await click(comboboxTrigger('Função do profissional 1'));
     await typeInto(panelSearch('Buscar função...'), 'Arquiteto');
     await click(createRow()!);
     await flushReact();
 
     expect(onCreateFuncao).toHaveBeenCalledWith('Arquiteto');
-    // The row keeps its unset state rather than adopting the placeholder.
+    // The row keeps its previous selection rather than adopting the placeholder.
     expect(comboboxText('Função do profissional 1')).not.toBe('Arquiteto');
+    expect(comboboxText('Função do profissional 1')).toBe('Desenvolvedor');
 
-    await pickOption('Profissional 1', 'Bruno Entrega');
-    await flushReact();
     await click(buttonByText('Salvar rascunho'));
 
     const payload = onSave.mock.calls.at(-1)![0];
+    expect(payload.professionals[0]!.funcaoId).toBe(devFuncaoId);
     expect(String(payload.professionals[0]?.funcaoId ?? '')).not.toMatch(/^optimistic:/);
   });
 
@@ -780,8 +960,8 @@ describe('sale wizard profissionais alocados', () => {
     await renderWizard();
     await goToCosts();
     await addProfessional();
-    await pickOption('Profissional 1', 'Bruno Entrega');
     await pickOption('Função do profissional 1', 'Desenvolvedor');
+    await pickOption('Profissional 1', 'Bruno Entrega');
     await flushReact();
 
     await setCostUnit('%');
@@ -814,8 +994,8 @@ describe('sale wizard profissionais alocados', () => {
 
     await goToCosts();
     await addProfessional();
-    await pickOption('Profissional 1', 'Bruno Entrega');
     await pickOption('Função do profissional 1', 'Desenvolvedor');
+    await pickOption('Profissional 1', 'Bruno Entrega');
     await flushReact();
     await setCostUnit('%');
     await typeInto(labeledInput('Custo alocado do profissional 1'), '10');
@@ -830,8 +1010,8 @@ describe('sale wizard profissionais alocados', () => {
     await renderWizard();
     await goToCosts();
     await addProfessional();
-    await pickOption('Profissional 1', 'Bruno Entrega');
     await pickOption('Função do profissional 1', 'Desenvolvedor');
+    await pickOption('Profissional 1', 'Bruno Entrega');
     await flushReact();
 
     await setCostUnit('%');
@@ -892,8 +1072,8 @@ describe('sale wizard profissionais alocados', () => {
     await renderWizard();
     await goToCosts();
     await addProfessional();
-    await pickOption('Profissional 1', 'Bruno Entrega');
     await pickOption('Função do profissional 1', 'Desenvolvedor');
+    await pickOption('Profissional 1', 'Bruno Entrega');
     await flushReact();
     await click(buttonByText('Avançar'));
 
