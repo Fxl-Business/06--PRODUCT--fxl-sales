@@ -22,7 +22,15 @@ import {
   UserRound,
   X,
 } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+} from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { useAuthProfile, useLogout } from '@/auth/react';
 import {
@@ -3626,6 +3634,29 @@ function ProductDialogBody({
     setWizardStep((current) => (current > 1 ? ((current - 1) as 1 | 2 | 3) : current));
   }
 
+  /*
+    Enter means `Avançar`, never `salvar`, until the last step. All four steps share ONE
+    <form>, and steps 2 and 3 each mount exactly one control that blocks implicit
+    submission (`Setup (R$)`, `Parcelas restantes`), so with no submit button on the
+    create path the browser submits the form FROM THE FORM ELEMENT ITSELF the moment the
+    operator hits Enter in one - and on the edit path `Salvar alterações` is the form's
+    default button, so Enter from any field activates it. Both persisted a produto whose
+    comissões and custos padrão the operator had never seen.
+
+    Scoped to an <input> on purpose: a focused <button> keeps its own Enter, so Voltar,
+    Cancelar, the stepper, the X and every toggle still do what they say. The
+    `defaultPrevented` check is what keeps `Combobox` - which already swallows Enter to
+    commit a row (components/ui/combobox.tsx:223) and does NOT stopPropagation - from
+    advancing the wizard behind the operator's back.
+  */
+  function handleWizardKeyDown(event: ReactKeyboardEvent<HTMLFormElement>) {
+    if (event.key !== 'Enter' || event.defaultPrevented) return;
+    if (!(event.target instanceof HTMLInputElement)) return;
+    if (wizardStep === 4) return;
+    event.preventDefault();
+    advanceProductWizard();
+  }
+
   function submit(event: FormEvent) {
     event.preventDefault();
     /*
@@ -3789,7 +3820,11 @@ function ProductDialogBody({
           ordinary React state rather than lost DOM, so a submit from any step emits the
           complete payload and no step needs to be visited for its fields to be sent.
         */}
-        <form className="flex min-h-0 flex-1 flex-col" onSubmit={submit}>
+        <form
+          className="flex min-h-0 flex-1 flex-col"
+          onKeyDown={handleWizardKeyDown}
+          onSubmit={submit}
+        >
           <WizardStepper
             current={wizardStep}
             /*

@@ -240,6 +240,22 @@ async function submit() {
   );
 }
 
+/**
+ * A browser's implicit submission, in two halves: Enter runs the keydown handlers
+ * first, and the form is submitted only if nothing cancelled the default action.
+ * happy-dom implements the first half and not the second (it only calls
+ * `form.requestSubmit` from a real submit-button click), so this helper does the
+ * second half itself - which is what makes these tests a regression guard for the
+ * browser behaviour and not only for the keydown handler.
+ */
+async function pressEnter(input: HTMLInputElement) {
+  const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+  await act(async () => {
+    input.dispatchEvent(event);
+  });
+  if (!event.defaultPrevented) await submit();
+}
+
 function comboboxTrigger(ariaLabel: string): HTMLButtonElement {
   const match = container.querySelector(`button[role="combobox"][aria-label="${ariaLabel}"]`);
   if (!(match instanceof HTMLButtonElement)) throw new Error(`combobox not found: ${ariaLabel}`);
@@ -1297,6 +1313,82 @@ describe('the produto wizard shell', () => {
     expect(maybeButton('Salvar alterações')).toBeUndefined();
     await goToStep(3);
     expect(maybeButton('Salvar alterações')).toBeUndefined();
+  });
+
+  it('advances instead of saving when Enter is pressed on the pagamento step', async () => {
+    const onSave = await renderDialog({ productKind: 'product' });
+    await fillIdentity();
+    await goToStep(3);
+
+    await pressEnter(labeledInput('Parcelas restantes'));
+
+    expect(onSave).not.toHaveBeenCalled();
+    expect(text()).toContain('Passo 4 de 4');
+    expect(text()).toContain('Comissionamento padrão');
+  });
+
+  it('advances instead of saving when Enter is pressed on the valores step', async () => {
+    const onSave = await renderDialog({ productKind: 'product' });
+    await fillIdentity();
+    await goToStep(2);
+
+    await pressEnter(moneyInput('Setup (R$)'));
+
+    expect(onSave).not.toHaveBeenCalled();
+    expect(text()).toContain('Passo 3 de 4');
+    expect(text()).toContain('Plano de pagamento padrão');
+  });
+
+  it('advances instead of saving when Enter is pressed on an existing produto', async () => {
+    const existing = product({ name: 'FXL Finance' });
+    const onSave = await renderDialog({ existing });
+    await goToStep(3);
+
+    await pressEnter(labeledInput('Parcelas restantes'));
+
+    expect(onSave).not.toHaveBeenCalled();
+    expect(text()).toContain('Passo 4 de 4');
+  });
+
+  it('leaves Enter inside the tipo de entrada picker to the picker', async () => {
+    const onSave = await renderDialog({ productKind: 'product' });
+    await fillIdentity();
+    await goToStep(3);
+    await click(comboboxTrigger('Tipo de entrada'));
+
+    const pickerInput = container.querySelector(
+      'input[placeholder="Buscar tipo de entrada..."]',
+    );
+    if (!(pickerInput instanceof HTMLInputElement)) {
+      throw new Error('tipo de entrada search input not found');
+    }
+    await pressEnter(pickerInput);
+
+    expect(onSave).not.toHaveBeenCalled();
+    expect(text()).toContain('Passo 3 de 4');
+  });
+
+  it('does not hijack Enter on a footer button', async () => {
+    const onSave = await renderDialog({ productKind: 'product' });
+    await fillIdentity();
+    await goToStep(3);
+
+    /*
+      A real browser's default action for Enter on a focused <button> is to click that
+      button, not to submit the form - so unlike `pressEnter`'s <input> fallback, no
+      `submit()` call belongs here. What this guards is `handleWizardKeyDown`'s
+      `instanceof HTMLInputElement` check: without it, this same keydown would advance
+      the wizard from step 3 to step 4, which is exactly what the assertion below rules
+      out.
+    */
+    await act(async () => {
+      button('Voltar').dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }),
+      );
+    });
+
+    expect(onSave).not.toHaveBeenCalled();
+    expect(text()).toContain('Passo 3 de 4');
   });
 });
 
