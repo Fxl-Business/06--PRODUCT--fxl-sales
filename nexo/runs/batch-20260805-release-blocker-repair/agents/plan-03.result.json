@@ -1,0 +1,1 @@
+{"agent":"plan","slice":"03-dependency-audit-remediation","status":"PASS","report":"nexo/runs/batch-20260805-release-blocker-repair/plan-03.md","summary":"Recovered executor-ready plan pins the six-high Red audit and a narrow compatible tooling refresh with full Green gates.","done":true,"started":"2026-08-05T13:30:00Z","ended":"2026-08-05T13:53:23Z","ts":"2026-08-05T13:53:23Z"}

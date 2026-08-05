@@ -1,0 +1,1 @@
+{"agent":"plan-check","slice":"release-blocker-repair","status":"FAIL","report":"nexo/runs/batch-20260805-release-blocker-repair/plan-check.md","summary":"Slice 03 omits a known required workspace override file and slice 02 contains placeholder test bodies.","done":true,"started":"2026-08-05T13:50:00Z","ended":"2026-08-05T13:59:54Z","ts":"2026-08-05T13:59:54Z"}

@@ -1,0 +1,1 @@
+{"agent":"plan","slice":"01-session-refresh-serialization","status":"PASS","report":"nexo/runs/batch-20260805-release-blocker-repair/plan-01.md","summary":"Executor-ready TDD plan locks the real Postgres stale-delete race and preserves hydrate, handler, and flush semantics.","done":true,"started":"2026-08-05T13:33:30Z","ended":"2026-08-05T13:44:08Z","ts":"2026-08-05T13:44:08Z"}

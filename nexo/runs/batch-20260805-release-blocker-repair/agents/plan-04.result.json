@@ -1,0 +1,1 @@
+{"agent":"plan","slice":"04-generated-diff-hygiene","status":"PASS","report":"nexo/runs/batch-20260805-release-blocker-repair/plan-04.md","summary":"Recovered executor-ready plan uses a path-specific unset whitespace attribute and an ordinary-file negative control.","done":true,"started":"2026-08-05T13:34:00Z","ended":"2026-08-05T13:53:23Z","ts":"2026-08-05T13:53:23Z"}
