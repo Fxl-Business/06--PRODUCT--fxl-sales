@@ -122,6 +122,27 @@ describe('request transaction phases', () => {
       errorLog.mockRestore();
     }
   });
+
+  it('logs and swallows a transaction commit failure after returning the handler value', async () => {
+    const commitError = new Error('commit failed');
+    const store = storeWithDb({
+      transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
+        await fn({});
+        throw commitError;
+      },
+    });
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      const result = await store.withRequest({ consumeLoginTx: false }, async () =>
+        'formed-response',
+      );
+      expect(result).toBe('formed-response');
+      expect(errorLog).toHaveBeenCalledWith('[hub-session-store] flush failed', commitError);
+    } finally {
+      errorLog.mockRestore();
+    }
+  });
 });
 
 describe('cookie names', () => {

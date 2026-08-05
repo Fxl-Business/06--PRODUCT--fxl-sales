@@ -162,8 +162,8 @@ describe('durable Hub BFF session store', () => {
       createHubSessionScopeMiddleware(storeA, { secureCookies: false }),
     );
     rotatingApp.post('/auth/refresh', async (c) => {
-      expect(storeA.get(sessionId)).toEqual({ hubRefreshToken: 'token-old' });
       rotationEntered.resolve();
+      expect(storeA.get(sessionId)).toEqual({ hubRefreshToken: 'token-old' });
       await releaseRotation.promise;
       storeA.update(sessionId, 'token-new');
       return c.json({ ok: true });
