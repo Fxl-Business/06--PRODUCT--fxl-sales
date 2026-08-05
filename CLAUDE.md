@@ -154,10 +154,15 @@ Keep the repository folder name unchanged until the editor session can safely mo
   The rule is total for every stored value against every plan, which matters because step 2 can be revisited after step 3.
 - `splitCentsByWeights` in `packages/shared-utils/src/professional-split.ts` is the ONE distribution primitive, following the `computeSaleFinancials` precedent of a single shared implementation rather than two copies: every part but the last is `floor(total × w / Σw)` and the LAST absorbs the whole remainder, so `Σ parts === total` exactly for every input, and for equal weights the output is byte-identical to `splitInstallmentsEqually`'s amounts - pinned by a direct test so the two rounding rules cannot drift.
   Every caller normalizes to basis points through `defaultSplitBp` first, which is also what keeps `total × w` inside `Number.MAX_SAFE_INTEGER` given that both `cost_brl` and a receivable amount are Postgres `integer`s.
-- The `professional_cost` re-win guard keys on `(kind, receivable_id, beneficiary_name)` and not on `(kind, receivable_id)`.
-  With one row per professional per parcela, a beneficiary-blind guard would let one professional's PAID parcela-1 payable suppress a different professional's parcela-1 payable, and that professional would lose money with no error anywhere.
-  `ExistingPayableRef.beneficiaryName` is REQUIRED so a forgotten call site is a type error rather than a silent one.
-  Two professionals sharing an identical `person_name_snapshot` on one sale still collide; the real fix is a `payables.sale_professional_id` column and is not in this milestone.
+- Newly materialized `professional_cost` payables persist `sale_professional_id` from the originating `sales_ops_sale_professionals` row.
+  Current split-row idempotency matches durable professional ID plus receivable ID, never display name.
+  Migration `0018_professional_payable_identity` backfills only one unambiguous same-organization, same-sale, same-beneficiary match and leaves ambiguous identities null.
+  Null-ID split rows use a consumable `(beneficiary_name, receivable_id, amount_brl)` multiset, so one historical row suppresses at most one candidate.
+  A surviving v2.3.1 full-cost one-shot has a null receivable and covers exactly one professional before per-receivable parts are considered.
+  An identified full-cost one-shot covers its durable professional ID, while an ambiguous null-ID one-shot is consumed once by beneficiary snapshot plus full cost.
+- Migration `0018_professional_payable_identity` is applied in phases by the shared repository migration runner.
+  Its indexes are built concurrently, its foreign key is added as not valid and then validated, and its conservative backfill runs in bounded transactions.
+  Production and integration startup must use the shared runner instead of the stock all-migrations Drizzle transaction.
 - `Detalhe de pagamento` is an IN-FLOW disclosure inside the step-3 professionals table, spanning the row with `col-span-full`, and it deliberately does NOT call `useInlineLayer`.
   That hook guards ABSOLUTELY POSITIONED layers - `Combobox`'s panel, `InfoHint`'s panel - where an Escape aimed at the layer would otherwise close the whole wizard.
   An expander that pushes content in flow is not such a layer, and the existing precedent is `SaleItemForm.descriptionOpen`, which does the same thing the same way.

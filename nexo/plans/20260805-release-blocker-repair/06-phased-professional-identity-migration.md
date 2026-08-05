@@ -1,7 +1,7 @@
 ---
 id: 06-phased-professional-identity-migration
 milestone: v2.4.0
-status: ready
+status: done
 depends_on: []
 files_modified:
   - apps/api/drizzle/0018_professional_payable_identity.sql

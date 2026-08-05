@@ -1,7 +1,7 @@
 ---
 id: 05-legacy-professional-one-shot-reconciliation
 milestone: v2.4.0
-status: ready
+status: done
 depends_on: [06-phased-professional-identity-migration]
 files_modified:
   - apps/api/src/domains/sales-ops/service.ts

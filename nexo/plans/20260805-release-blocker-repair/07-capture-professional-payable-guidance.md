@@ -1,7 +1,7 @@
 ---
 id: 07-capture-professional-payable-guidance
 milestone: v2.4.0
-status: ready
+status: done
 depends_on: [05-legacy-professional-one-shot-reconciliation, 06-phased-professional-identity-migration]
 files_modified:
   - CLAUDE.md
