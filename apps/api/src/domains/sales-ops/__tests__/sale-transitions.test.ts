@@ -362,6 +362,75 @@ describe('materializeWonPayables: professional cost split (slice 06)', () => {
     ]);
   });
 
+  it('treats an identified full-cost one-shot as complete coverage across new split receivables', () => {
+    const drafts = materializeWonPayables({
+      sale: { ...NO_COMMISSIONS },
+      professionals: [
+        { id: 'professional-a', personName: 'Profissional Legado', costBrl: 100000 },
+      ],
+      receivables: [
+        { id: 'r1', label: '1/2', dueDate: '2026-08-01', amountBrl: 50000, status: 'open' },
+        { id: 'r2', label: '2/2', dueDate: '2026-09-01', amountBrl: 50000, status: 'open' },
+      ],
+      existingPayables: [
+        {
+          kind: 'professional_cost',
+          receivableId: null,
+          status: 'paid',
+          beneficiaryName: 'Profissional Legado',
+          amountBrl: 100000,
+          saleProfessionalId: 'professional-a',
+        },
+      ],
+      wonDate: '2026-07-29',
+    });
+
+    expect(drafts.filter((draft) => draft.kind === 'professional_cost')).toEqual([]);
+  });
+
+  it('consumes each null-id full-cost one-shot for only one same-name professional', () => {
+    const baseInput = {
+      sale: { ...NO_COMMISSIONS },
+      professionals: [
+        { id: 'professional-a', personName: 'Profissional Homonimo', costBrl: 100000 },
+        { id: 'professional-b', personName: 'Profissional Homonimo', costBrl: 100000 },
+      ],
+      receivables: [
+        { id: 'r1', label: '1/1', dueDate: '2026-08-01', amountBrl: 200000, status: 'open' },
+      ],
+      wonDate: '2026-07-29',
+    };
+    const legacyOneShot = {
+      kind: 'professional_cost' as const,
+      receivableId: null,
+      status: 'paid',
+      beneficiaryName: 'Profissional Homonimo',
+      amountBrl: 100000,
+      saleProfessionalId: null,
+    };
+
+    const oneSurvivor = materializeWonPayables({
+      ...baseInput,
+      existingPayables: [legacyOneShot],
+    });
+    expect(oneSurvivor).toHaveLength(1);
+    expect(oneSurvivor[0]?.amountBrl).toBe(100000);
+    expect(['professional-a', 'professional-b']).toContain(oneSurvivor[0]?.saleProfessionalId);
+
+    const bothCovered = materializeWonPayables({
+      ...baseInput,
+      existingPayables: [legacyOneShot, { ...legacyOneShot }],
+    });
+    expect(bothCovered).toEqual([]);
+
+    const amountMismatch = materializeWonPayables({
+      ...baseInput,
+      existingPayables: [{ ...legacyOneShot, amountBrl: 99999 }],
+    });
+    expect(amountMismatch).toHaveLength(2);
+    expect(amountMismatch.map((draft) => draft.amountBrl)).toEqual([100000, 100000]);
+  });
+
   it('consumes each null-id legacy payable at most once', () => {
     const baseInput = {
       sale: { ...NO_COMMISSIONS },
@@ -382,6 +451,7 @@ describe('materializeWonPayables: professional cost split (slice 06)', () => {
       amountBrl: 100000,
       saleProfessionalId: null,
     };
+    expect(legacyPayable.receivableId).toBe('r1');
 
     const drafts = materializeWonPayables({
       ...baseInput,

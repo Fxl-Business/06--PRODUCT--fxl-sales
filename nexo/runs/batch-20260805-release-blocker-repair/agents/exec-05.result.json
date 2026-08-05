@@ -1,0 +1,32 @@
+{
+  "status": "PASS",
+  "agent": "execute",
+  "slice": "05-legacy-professional-one-shot-reconciliation",
+  "report": "nexo/runs/batch-20260805-release-blocker-repair/exec-05.md",
+  "tested_commit": "93950c6da8e6c4e9680f65b33bf795ad51c443c4",
+  "commit": "93950c6da8e6c4e9680f65b33bf795ad51c443c4",
+  "red": {
+    "unit": "The identified one-shot emitted two unexpected split drafts, and one unidentified one-shot left two drafts instead of one.",
+    "postgres_identified": "The v2.3.1 upgrade path completed the exact backfill and both real transitions, then produced 200000 instead of 100000.",
+    "postgres_ambiguous": "The v2.3.1 upgrade path completed the exact backfill and both real transitions, then produced 300000 instead of 200000."
+  },
+  "green": {
+    "focused_unit": "14 tests passed",
+    "focused_postgres": "2 tests passed",
+    "sale_transition_postgres": "11 tests passed",
+    "api_unit": "35 files and 342 tests passed",
+    "role_split_integration": "21 files and 130 tests passed",
+    "eslint": "passed",
+    "api_type_check": "passed",
+    "root_build": "passed",
+    "diff_checks": "passed"
+  },
+  "cleanup": {
+    "processes_stopped": true,
+    "watchers_remaining": false,
+    "implementation_worktree_clean_after_commit": true,
+    "evidence_files_uncommitted": true
+  },
+  "concerns": [],
+  "done": true
+}
