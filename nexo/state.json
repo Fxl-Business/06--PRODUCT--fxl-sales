@@ -43,5 +43,13 @@
     "decision": "approved-staging",
     "decided_at": "2026-08-05",
     "note": "Gate 3a was approved explicitly. Tag v2.4.0 was pushed and staging fast-forwarded to the exact verified candidate. Production remains at v2.3.1 pending in-environment staging validation and a separate Gate 3b approval."
+  },
+  "gate3_production": {
+    "release": "v2.4.0",
+    "commit": "a32b1a04fabbc63b5bb67ad411e23e90615e744d",
+    "flow": "ship",
+    "decision": "approved-production",
+    "decided_at": "2026-08-05",
+    "note": "Gate 3b was approved explicitly after staging schema validation. Production fast-forwarded to v2.4.0, staging and production match the release tag, and the Vercel production deployment completed successfully."
   }
 }
