@@ -1,0 +1,35 @@
+{
+  "slice": "03-dependency-audit-remediation",
+  "role": "verify",
+  "commit": "127cd40747d6b48cd08c52ab60b5279aa5cda33b",
+  "status": "PASS",
+  "verdict": "PASS",
+  "done": true,
+  "evidence": {
+    "scope": {
+      "changed_files": [
+        "apps/api/package.json",
+        "apps/web/package.json",
+        "pnpm-lock.yaml",
+        "pnpm-workspace.yaml"
+      ],
+      "diff_check_exit": 0
+    },
+    "lockfile": {
+      "frozen_install_exit": 0,
+      "postcss": "8.5.25",
+      "brace_expansion_1x": "1.1.18",
+      "brace_expansion_5x": "5.0.9",
+      "override": "brace-expansion@<1.1.18: 1.1.18",
+      "has_5x_override": false
+    },
+    "commands": [
+      { "command": "pnpm audit --prod --audit-level high", "exit": 0, "summary": "8 moderate findings; no high or critical findings" },
+      { "command": "pnpm audit --audit-level high", "exit": 0, "summary": "8 moderate findings; no high or critical findings" },
+      { "command": "CI=true pnpm run lint", "exit": 0 },
+      { "command": "CI=true pnpm run type-check", "exit": 0 },
+      { "command": "CI=true pnpm test", "exit": 0, "summary": "942 tests passed across shared utils, API, and web" },
+      { "command": "CI=true pnpm run build", "exit": 0 }
+    ]
+  }
+}
