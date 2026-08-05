@@ -320,11 +320,18 @@ describe('transitionSale', () => {
     const ambiguousOrgId = `org_st_backfill_ambiguous_${crypto.randomUUID()}`;
     const otherOrgId = `org_st_backfill_other_${crypto.randomUUID()}`;
     const adminDb = getAdminDb();
-    const backfill = readFileSync(professionalPayableMigrationPath, 'utf8')
+    const markedBackfills = readFileSync(professionalPayableMigrationPath, 'utf8')
       .split('--> statement-breakpoint')
-      .map((statement) => statement.trim())
-      .find((statement) => statement.startsWith('WITH "unambiguous_professional_matches"'));
+      .filter((statement) =>
+        statement.split(/\r?\n/).some((line) => line === '-- fxl-phase: backfill-repeat'),
+      );
+    expect(markedBackfills).toHaveLength(1);
+    const backfill = markedBackfills[0]?.replace(
+      /^\s*-- fxl-phase: backfill-repeat\r?\n/,
+      '',
+    );
     if (!backfill) throw new Error('professional payable identity backfill not found');
+    expect(backfill).toMatch(/^WITH "unambiguous_professional_matches"/);
 
     await expect(
       adminDb.transaction(async (tx) => {
