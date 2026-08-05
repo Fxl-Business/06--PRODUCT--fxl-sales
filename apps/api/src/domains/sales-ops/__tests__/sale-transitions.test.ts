@@ -71,7 +71,7 @@ describe('materializeWonPayables (slice 04 standalone contract pin)', () => {
         taxPct: 6,
         otherCostsBrl: 25000,
       },
-      professionals: [{ personName: 'Rafael Nunes', costBrl: 40000 }],
+      professionals: [{ id: 'professional-rafael', personName: 'Rafael Nunes', costBrl: 40000 }],
       receivables: [],
       wonDate: '2026-07-29',
     });
@@ -84,6 +84,7 @@ describe('materializeWonPayables (slice 04 standalone contract pin)', () => {
         amountBrl: 40000,
         status: 'open',
         receivableId: null,
+        saleProfessionalId: 'professional-rafael',
       },
       {
         beneficiaryName: 'Outros custos',
@@ -92,6 +93,7 @@ describe('materializeWonPayables (slice 04 standalone contract pin)', () => {
         amountBrl: 25000,
         status: 'open',
         receivableId: null,
+        saleProfessionalId: null,
       },
     ]);
   });
@@ -120,6 +122,7 @@ describe('materializeWonPayables (slice 04 standalone contract pin)', () => {
         amountBrl: 50000,
         status: 'open',
         receivableId: 'r1',
+        saleProfessionalId: null,
       },
     ]);
   });
@@ -146,14 +149,25 @@ describe('materializeWonPayables (slice 04 standalone contract pin)', () => {
           receivableId: 'r1',
           status: 'paid',
           beneficiaryName: 'Ana Martins',
+          amountBrl: 50000,
+          saleProfessionalId: null,
         },
         {
           kind: 'seller_commission',
           receivableId: 'r2',
           status: 'void',
           beneficiaryName: 'Ana Martins',
+          amountBrl: 50000,
+          saleProfessionalId: null,
         },
-        { kind: 'other_cost', receivableId: null, status: 'paid', beneficiaryName: 'Outros custos' },
+        {
+          kind: 'other_cost',
+          receivableId: null,
+          status: 'paid',
+          beneficiaryName: 'Outros custos',
+          amountBrl: 20000,
+          saleProfessionalId: null,
+        },
       ],
       wonDate: '2026-07-29',
     });
@@ -166,6 +180,7 @@ describe('materializeWonPayables (slice 04 standalone contract pin)', () => {
         amountBrl: 50000,
         status: 'open',
         receivableId: 'r2',
+        saleProfessionalId: null,
       },
     ]);
   });
@@ -204,7 +219,7 @@ describe('materializeWonPayables: professional cost split (slice 06)', () => {
   it('splits a professional cost across the installment receivables pro rata', () => {
     const drafts = materializeWonPayables({
       sale: { ...NO_COMMISSIONS },
-      professionals: [{ personName: 'Rafael Nunes', costBrl: 500000 }],
+      professionals: [{ id: 'professional-rafael', personName: 'Rafael Nunes', costBrl: 500000 }],
       receivables: [
         { id: 'r1', label: '1/3', dueDate: '2026-08-01', amountBrl: 1000000, status: 'open' },
         { id: 'r2', label: '2/3', dueDate: '2026-09-01', amountBrl: 2000000, status: 'open' },
@@ -221,6 +236,7 @@ describe('materializeWonPayables: professional cost split (slice 06)', () => {
         amountBrl: 100000,
         status: 'open',
         receivableId: 'r1',
+        saleProfessionalId: 'professional-rafael',
       },
       {
         beneficiaryName: 'Rafael Nunes',
@@ -229,6 +245,7 @@ describe('materializeWonPayables: professional cost split (slice 06)', () => {
         amountBrl: 200000,
         status: 'open',
         receivableId: 'r2',
+        saleProfessionalId: 'professional-rafael',
       },
       {
         beneficiaryName: 'Rafael Nunes',
@@ -237,6 +254,7 @@ describe('materializeWonPayables: professional cost split (slice 06)', () => {
         amountBrl: 200000,
         status: 'open',
         receivableId: 'r3',
+        saleProfessionalId: 'professional-rafael',
       },
     ]);
     expect(drafts.reduce((sum, d) => sum + d.amountBrl, 0)).toBe(500000);
@@ -246,7 +264,12 @@ describe('materializeWonPayables: professional cost split (slice 06)', () => {
     const drafts = materializeWonPayables({
       sale: { ...NO_COMMISSIONS },
       professionals: [
-        { personName: 'Rafael Nunes', costBrl: 500000, costSplitBp: [3000, 7000] },
+        {
+          id: 'professional-rafael',
+          personName: 'Rafael Nunes',
+          costBrl: 500000,
+          costSplitBp: [3000, 7000],
+        },
       ],
       receivables: [
         { id: 'r1', label: '1/3', dueDate: '2026-08-01', amountBrl: 1000000, status: 'open' },
@@ -265,6 +288,7 @@ describe('materializeWonPayables: professional cost split (slice 06)', () => {
         amountBrl: 150000,
         status: 'open',
         receivableId: 'r1',
+        saleProfessionalId: 'professional-rafael',
       },
       {
         beneficiaryName: 'Rafael Nunes',
@@ -273,6 +297,7 @@ describe('materializeWonPayables: professional cost split (slice 06)', () => {
         amountBrl: 350000,
         status: 'open',
         receivableId: 'r2',
+        saleProfessionalId: 'professional-rafael',
       },
     ]);
   });
@@ -280,7 +305,7 @@ describe('materializeWonPayables: professional cost split (slice 06)', () => {
   it('leaves professional_cost one-shot when every receivable is recurring', () => {
     const drafts = materializeWonPayables({
       sale: { ...NO_COMMISSIONS },
-      professionals: [{ personName: 'Rafael Nunes', costBrl: 40000 }],
+      professionals: [{ id: 'professional-rafael', personName: 'Rafael Nunes', costBrl: 40000 }],
       receivables: [
         { id: 'r1', label: 'M1/3', dueDate: '2026-08-01', amountBrl: 100000, status: 'open' },
         { id: 'r2', label: 'M2/3', dueDate: '2026-09-01', amountBrl: 100000, status: 'open' },
@@ -296,40 +321,86 @@ describe('materializeWonPayables: professional cost split (slice 06)', () => {
         amountBrl: 40000,
         status: 'open',
         receivableId: null,
+        saleProfessionalId: 'professional-rafael',
       },
     ]);
   });
 
-  it('does not let one professional paid parcela suppress another professional', () => {
+  it('matches current professional payables by durable id instead of display name', () => {
     const drafts = materializeWonPayables({
       sale: { ...NO_COMMISSIONS },
       professionals: [
-        { personName: 'Ana Martins', costBrl: 100000 },
-        { personName: 'Carla Souza', costBrl: 60000 },
+        { id: 'professional-a', personName: 'Profissional Homonimo', costBrl: 100000 },
+        { id: 'professional-b', personName: 'Profissional Homonimo', costBrl: 100000 },
       ],
       receivables: [
-        { id: 'r1', label: '1/2', dueDate: '2026-08-01', amountBrl: 500000, status: 'open' },
-        { id: 'r2', label: '2/2', dueDate: '2026-09-01', amountBrl: 500000, status: 'open' },
+        { id: 'r1', label: '1/1', dueDate: '2026-08-01', amountBrl: 500000, status: 'open' },
       ],
       existingPayables: [
         {
           kind: 'professional_cost',
           receivableId: 'r1',
           status: 'paid',
-          beneficiaryName: 'Ana Martins',
+          beneficiaryName: 'Profissional Homonimo',
+          amountBrl: 100000,
+          saleProfessionalId: 'professional-a',
         },
       ],
       wonDate: '2026-07-29',
     });
 
-    const ana = drafts.filter((d) => d.beneficiaryName === 'Ana Martins');
-    const carla = drafts.filter((d) => d.beneficiaryName === 'Carla Souza');
+    expect(drafts).toEqual([
+      {
+        beneficiaryName: 'Profissional Homonimo',
+        kind: 'professional_cost',
+        dueDate: '2026-08-01',
+        amountBrl: 100000,
+        status: 'open',
+        receivableId: 'r1',
+        saleProfessionalId: 'professional-b',
+      },
+    ]);
+  });
 
-    // Ana's paid parcela-1 row is not duplicated...
-    expect(ana.map((d) => d.receivableId)).toEqual(['r2']);
-    // ...and it does NOT suppress Carla's own parcela-1 row.
-    expect(carla.map((d) => d.receivableId)).toEqual(['r1', 'r2']);
-    expect(carla.map((d) => d.amountBrl)).toEqual([30000, 30000]);
+  it('consumes each null-id legacy payable at most once', () => {
+    const baseInput = {
+      sale: { ...NO_COMMISSIONS },
+      professionals: [
+        { id: 'professional-a', personName: 'Profissional Homonimo', costBrl: 100000 },
+        { id: 'professional-b', personName: 'Profissional Homonimo', costBrl: 100000 },
+      ],
+      receivables: [
+        { id: 'r1', label: '1/1', dueDate: '2026-08-01', amountBrl: 500000, status: 'open' },
+      ],
+      wonDate: '2026-07-29',
+    };
+    const legacyPayable = {
+      kind: 'professional_cost' as const,
+      receivableId: 'r1',
+      status: 'paid',
+      beneficiaryName: 'Profissional Homonimo',
+      amountBrl: 100000,
+      saleProfessionalId: null,
+    };
+
+    const drafts = materializeWonPayables({
+      ...baseInput,
+      existingPayables: [legacyPayable],
+    });
+
+    expect(drafts).toHaveLength(1);
+    expect(drafts[0]?.amountBrl).toBe(100000);
+    expect(['professional-a', 'professional-b']).toContain(drafts[0]?.saleProfessionalId);
+
+    const amountMismatch = materializeWonPayables({
+      ...baseInput,
+      existingPayables: [{ ...legacyPayable, amountBrl: 99999 }],
+    });
+    expect(amountMismatch).toHaveLength(2);
+    expect(amountMismatch.map((draft) => draft.saleProfessionalId)).toEqual([
+      'professional-a',
+      'professional-b',
+    ]);
   });
 
   it('keeps other_cost one-shot', () => {
@@ -353,6 +424,7 @@ describe('materializeWonPayables: professional cost split (slice 06)', () => {
         amountBrl: 25000,
         status: 'open',
         receivableId: null,
+        saleProfessionalId: null,
       },
     ]);
   });

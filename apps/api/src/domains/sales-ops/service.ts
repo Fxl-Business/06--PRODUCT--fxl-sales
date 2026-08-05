@@ -891,21 +891,16 @@ export type PayableDraft = {
   amountBrl: number;
   status: 'open';
   receivableId: string | null;
+  saleProfessionalId: string | null;
 };
 
 export type ExistingPayableRef = {
   kind: PayableKind;
   receivableId: string | null;
   status: string;
-  /*
-    REQUIRED, not optional, on purpose. `professional_cost` is now one row per
-    professional PER PARCELA, so a beneficiary-blind re-win guard would let one
-    professional's PAID parcela-1 payable suppress a different professional's
-    parcela-1 payable, and that professional would lose money with no error
-    anywhere. Making the field required turns a forgotten call site into a type
-    error rather than a silent money bug.
-  */
   beneficiaryName: string;
+  amountBrl: number;
+  saleProfessionalId: string | null;
 };
 
 export type MaterializeWonPayablesInput = {
@@ -918,7 +913,12 @@ export type MaterializeWonPayablesInput = {
     taxPct: number;
     otherCostsBrl: number;
   };
-  professionals: Array<{ personName: string; costBrl: number; costSplitBp?: number[] | null }>;
+  professionals: Array<{
+    id: string;
+    personName: string;
+    costBrl: number;
+    costSplitBp?: number[] | null;
+  }>;
   /*
     `label` is OPTIONAL and absent reads as an installment: the DB column is NOT
     NULL and `buildSaleLedger` always writes one, so only a synthetic test
@@ -938,24 +938,42 @@ export type MaterializeWonPayablesInput = {
 
 export function materializeWonPayables(input: MaterializeWonPayablesInput): PayableDraft[] {
   const existingPayables = input.existingPayables ?? [];
-  /*
-    `beneficiaryName` is opt-in per call: commissions and tax are singletons per
-    kind per receivable, so matching their name too would only be noise. The
-    `professional_cost` call passes it because that kind is no longer a singleton
-    — see the note on `ExistingPayableRef` and 00-OVERVIEW-split.md Decision 4.
-  */
-  const alreadyExists = (
-    kind: PayableKind,
-    receivableId: string | null,
-    beneficiaryName?: string,
-  ) =>
+  const alreadyExists = (kind: PayableKind, receivableId: string | null) =>
     existingPayables.some(
       (payable) =>
         payable.kind === kind &&
         payable.receivableId === receivableId &&
-        payable.status !== 'void' &&
-        (beneficiaryName === undefined || payable.beneficiaryName === beneficiaryName),
+        payable.status !== 'void',
     );
+  const legacyProfessionalKey = (candidate: {
+    beneficiaryName: string;
+    receivableId: string | null;
+    amountBrl: number;
+  }): string => JSON.stringify([candidate.beneficiaryName, candidate.receivableId, candidate.amountBrl]);
+  const legacyProfessionalCounts = new Map<string, number>();
+  for (const payable of existingPayables) {
+    if (
+      payable.kind !== 'professional_cost' ||
+      payable.status === 'void' ||
+      payable.saleProfessionalId !== null
+    ) {
+      continue;
+    }
+    const key = legacyProfessionalKey(payable);
+    legacyProfessionalCounts.set(key, (legacyProfessionalCounts.get(key) ?? 0) + 1);
+  }
+  const consumeLegacyProfessional = (candidate: {
+    beneficiaryName: string;
+    receivableId: string | null;
+    amountBrl: number;
+  }): boolean => {
+    const key = legacyProfessionalKey(candidate);
+    const remaining = legacyProfessionalCounts.get(key) ?? 0;
+    if (remaining === 0) return false;
+    if (remaining === 1) legacyProfessionalCounts.delete(key);
+    else legacyProfessionalCounts.set(key, remaining - 1);
+    return true;
+  };
 
   const drafts: PayableDraft[] = [];
 
@@ -971,6 +989,7 @@ export function materializeWonPayables(input: MaterializeWonPayablesInput): Paya
         amountBrl: sellerAmountBrl,
         status: 'open',
         receivableId: row.id,
+        saleProfessionalId: null,
       });
     }
 
@@ -984,6 +1003,7 @@ export function materializeWonPayables(input: MaterializeWonPayablesInput): Paya
           amountBrl: finderAmountBrl,
           status: 'open',
           receivableId: row.id,
+          saleProfessionalId: null,
         });
       }
     }
@@ -997,6 +1017,7 @@ export function materializeWonPayables(input: MaterializeWonPayablesInput): Paya
         amountBrl: taxAmountBrl,
         status: 'open',
         receivableId: row.id,
+        saleProfessionalId: null,
       });
     }
   }
@@ -1025,14 +1046,26 @@ export function materializeWonPayables(input: MaterializeWonPayablesInput): Paya
     });
     for (const part of parts) {
       if (part.amountBrl <= 0) continue;
-      if (alreadyExists('professional_cost', part.receivableId, professional.personName)) continue;
-      drafts.push({
+      const candidate = {
         beneficiaryName: professional.personName,
+        receivableId: part.receivableId,
+        amountBrl: part.amountBrl,
+      };
+      const identifiedPayableExists = existingPayables.some(
+        (payable) =>
+          payable.kind === 'professional_cost' &&
+          payable.status !== 'void' &&
+          payable.saleProfessionalId === professional.id &&
+          payable.receivableId === part.receivableId,
+      );
+      if (identifiedPayableExists) continue;
+      if (consumeLegacyProfessional(candidate)) continue;
+      drafts.push({
+        ...candidate,
         kind: 'professional_cost',
         dueDate: part.dueDate,
-        amountBrl: part.amountBrl,
         status: 'open',
-        receivableId: part.receivableId,
+        saleProfessionalId: professional.id,
       });
     }
   }
@@ -1047,6 +1080,7 @@ export function materializeWonPayables(input: MaterializeWonPayablesInput): Paya
       amountBrl: input.sale.otherCostsBrl,
       status: 'open',
       receivableId: null,
+      saleProfessionalId: null,
     });
   }
 
@@ -2025,15 +2059,19 @@ export async function createSale(
         })),
       );
     }
+    let insertedProfessionalRows: Array<typeof salesOpsSaleProfessionals.$inferSelect> = [];
     if (ledger.professionals.length > 0) {
-      await tx.insert(salesOpsSaleProfessionals).values(
-        ledger.professionals.map((professional) => ({
-          ...professional,
-          orgId,
-          saleId: sale.id,
-          personId: professional.personId ?? null,
-        })),
-      );
+      insertedProfessionalRows = await tx
+        .insert(salesOpsSaleProfessionals)
+        .values(
+          ledger.professionals.map((professional) => ({
+            ...professional,
+            orgId,
+            saleId: sale.id,
+            personId: professional.personId ?? null,
+          })),
+        )
+        .returning();
     }
 
     let insertedReceivables: Array<{
@@ -2077,10 +2115,11 @@ export async function createSale(
           taxPct: input.taxPct,
           otherCostsBrl: input.otherCostsBrl,
         },
-        professionals: input.professionals.map((p) => ({
-          personName: p.personName,
+        professionals: insertedProfessionalRows.map((p) => ({
+          id: p.id,
+          personName: p.personNameSnapshot,
           costBrl: p.costBrl,
-          costSplitBp: p.costSplitBp ?? null,
+          costSplitBp: p.costSplitBp as number[] | null,
         })),
         receivables: insertedReceivables.map((r) => ({
           id: r.id,
@@ -2273,6 +2312,7 @@ export async function transitionSale(
           otherCostsBrl: sale.otherCostsBrl,
         },
         professionals: professionalRows.map((p) => ({
+          id: p.id,
           personName: p.personNameSnapshot,
           costBrl: p.costBrl,
           // Drizzle types a `jsonb` column as `unknown`. This is the ONE boundary
@@ -2292,6 +2332,8 @@ export async function transitionSale(
           receivableId: p.receivableId,
           status: p.status,
           beneficiaryName: p.beneficiaryName,
+          amountBrl: p.amountBrl,
+          saleProfessionalId: p.saleProfessionalId,
         })),
         wonDate: asDateOnly(now),
       });

@@ -1,0 +1,80 @@
+{
+  "status": "PASS",
+  "agent": "verify",
+  "slice": "02-professional-payable-identity",
+  "report": "nexo/runs/batch-20260805-release-blocker-repair/verify-02.md",
+  "tested_head": "8ac14bc522c3ffce465b00a5dba668b5313f44ec",
+  "base": "95f746492e0780bd4aec4bba80a9a2a309990300",
+  "commands": [
+    {
+      "command": "pnpm run build:packages",
+      "status": "PASS"
+    },
+    {
+      "command": "pnpm --filter @fxl-sales/api exec vitest run src/domains/sales-ops/__tests__/professional-payable-identity.test.ts src/domains/sales-ops/__tests__/sale-transitions.test.ts src/domains/sales-ops/__tests__/service.test.ts",
+      "status": "PASS",
+      "evidence": "3 files, 29 tests passed"
+    },
+    {
+      "command": "VITEST_INTEGRATION=1 vitest run src/domains/sales-ops/__tests__/sale-transitions.integration.test.ts",
+      "status": "PASS",
+      "evidence": "9 PostgreSQL tests passed"
+    },
+    {
+      "command": "VITEST_INTEGRATION=1 vitest run test/rls/proposal-write.test.ts",
+      "status": "PASS",
+      "evidence": "7 PostgreSQL tests passed"
+    },
+    {
+      "command": "pnpm --filter @fxl-sales/api test",
+      "status": "PASS",
+      "evidence": "34 files, 336 tests passed"
+    },
+    {
+      "command": "VITEST_INTEGRATION=1 vitest run",
+      "status": "PASS",
+      "evidence": "20 files, 119 PostgreSQL tests passed"
+    },
+    {
+      "command": "pnpm --filter @fxl-sales/api exec eslint <changed TypeScript files>",
+      "status": "PASS"
+    },
+    {
+      "command": "pnpm --filter @fxl-sales/api type-check",
+      "status": "PASS"
+    },
+    {
+      "command": "isolated drizzle-kit generate against copied journal and snapshots",
+      "status": "PASS",
+      "evidence": "No schema changes, nothing to migrate; repository outputs unchanged"
+    },
+    {
+      "command": "fresh scratch database full migration apply and catalog inspection",
+      "status": "PASS",
+      "evidence": "0018 applied with nullable UUID column, target unique index, source index, and composite FK"
+    },
+    {
+      "command": "snapshot and journal structural inspection",
+      "status": "PASS",
+      "evidence": "0018 snapshot chains to 0017 and journal ordering is monotonic"
+    },
+    {
+      "command": "git diff --check 95f7464..HEAD",
+      "status": "PASS"
+    }
+  ],
+  "evidence": {
+    "database_roles": "fxl_sales_test is non-superuser and non-BYPASSRLS; migration/admin role is separate local postgres",
+    "migration_sql_sha256": "801792146696d52b7d0f434c52cdd30c883b10bd8f35b967c082b629d2ba04dc",
+    "source_identity_nullable": true,
+    "backfill_unambiguous_only": true,
+    "backfill_replay_safe": true,
+    "backfill_test_rolls_back": true,
+    "new_payables_persist_professional_ids": true,
+    "legacy_null_id_multiset_verified": true,
+    "same_name_rewin_verified": true,
+    "admin_identity_reads_org_scoped": true,
+    "failed_required_commands": []
+  },
+  "done": true
+}
