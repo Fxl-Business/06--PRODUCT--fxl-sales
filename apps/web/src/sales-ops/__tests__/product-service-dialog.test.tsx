@@ -1437,3 +1437,63 @@ describe('the código da venda suffix suggestion', () => {
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ codeSuffix: '8' }));
   });
 });
+
+/*
+  The step 3 -> 4 autosave, and why the guard is shaped the way it is.
+
+  The dialog's primary button used to pick its own `type` from the step
+  (`type={wizardStep < 4 ? 'button' : 'submit'}`). Step 3 is the one click that
+  flips that value. A click runs in two phases - the event dispatch, then the
+  browser's ACTIVATION BEHAVIOUR for the element - and React 18 flushes a discrete
+  event's state update synchronously, so the re-render lands between them. By the
+  time the browser asked "is this a submit button?", React had already rewritten
+  the attribute to `submit`, so the form submitted and the produto was persisted
+  with comissões and custos the operator had never seen.
+
+  Instrumented in a real Chrome against the real component:
+    type at CAPTURE: button
+    type at BUBBLE (after React's onClick ran): button
+    SUBMIT FIRED  ->  "Passo 4 de 4", saves: 1
+
+  happy-dom does NOT model activation behaviour running after a React flush, so
+  the DOM-level click test below passes even with the bug fully present - it was
+  measured doing exactly that before the fix. It is kept as a companion, never as
+  the oracle. The ORACLE is `keeps one activation behaviour on every step`: an
+  invariant that is checkable here and that makes the race impossible by
+  construction, which is also why the proposta wizard (always `type="button"`,
+  everything through `onClick`) was never vulnerable.
+*/
+describe('produto wizard step 3 -> 4', () => {
+  function primaryButton(): HTMLButtonElement {
+    const labels = ['Avançar', 'Adicionar', 'Salvar alterações', 'Salvando'];
+    const footer = [...container.querySelectorAll('button')].filter((candidate) =>
+      labels.includes(candidate.textContent?.trim() ?? ''),
+    );
+    const match = footer.at(-1);
+    if (!(match instanceof HTMLButtonElement)) throw new Error('primary button not found');
+    return match;
+  }
+
+  it('keeps one activation behaviour on every step', async () => {
+    await renderDialog({ existing: product() });
+    for (const step of [1, 2, 3, 4] as const) {
+      await goToStep(step);
+      expect(`step ${step}: ${primaryButton().type}`).toBe(`step ${step}: button`);
+    }
+  });
+
+  it('advances from step 3 to step 4 without saving', async () => {
+    const onSave = await renderDialog({ existing: product() });
+    await goToStep(3);
+    await click(primaryButton());
+    expect(onSave).not.toHaveBeenCalled();
+    expect(container.textContent).toContain('Passo 4 de 4');
+  });
+
+  it('still saves from the last step', async () => {
+    const onSave = await renderDialog({ existing: product() });
+    await goToStep(4);
+    await click(primaryButton());
+    expect(onSave).toHaveBeenCalledTimes(1);
+  });
+});
