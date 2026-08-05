@@ -1,0 +1,41 @@
+{
+  "status": "FAIL",
+  "agent": "final-review",
+  "slice": "release-blocker-repair",
+  "report": "nexo/runs/batch-20260805-release-blocker-repair/final-review.md",
+  "reviewed_commit": "c2c480dc0f7c17258fd0ab20f33be12efdf3c092",
+  "standards_verdict": "FAIL",
+  "spec_verdict": "FAIL",
+  "findings": [
+    {
+      "severity": "Critical",
+      "axis": "Standards and Spec",
+      "summary": "Backfilled pre-v2.4 paid one-shot professional payables do not suppress new per-receivable split drafts on re-win, allowing the full professional cost to be materialized twice.",
+      "locations": [
+        "apps/api/drizzle/0018_professional_payable_identity.sql:9",
+        "apps/api/src/domains/sales-ops/service.ts:953",
+        "apps/api/src/domains/sales-ops/service.ts:1054",
+        "apps/api/src/domains/sales-ops/service.ts:2347"
+      ]
+    },
+    {
+      "severity": "Important",
+      "axis": "Standards",
+      "summary": "Migration 0018 retains an access-exclusive payables lock through non-concurrent index creation, foreign-key validation, and the full backfill.",
+      "locations": [
+        "apps/api/drizzle/0018_professional_payable_identity.sql:4"
+      ]
+    },
+    {
+      "severity": "Important",
+      "axis": "Standards",
+      "summary": "Capture leaves CLAUDE.md and ROADMAP.md stating that payable identity is still absent and unfixed.",
+      "locations": [
+        "AGENTS.md:19",
+        "CLAUDE.md:157",
+        "nexo/ROADMAP.md:19"
+      ]
+    }
+  ],
+  "done": true
+}

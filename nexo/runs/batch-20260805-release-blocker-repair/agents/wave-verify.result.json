@@ -1,0 +1,101 @@
+{
+  "status": "PASS",
+  "agent": "wave-verify",
+  "slice": "release-blocker-repair",
+  "report": "nexo/runs/batch-20260805-release-blocker-repair/wave-verify.md",
+  "tested_commit": "c2c480dc0f7c17258fd0ab20f33be12efdf3c092",
+  "preflight": {
+    "branch": "master",
+    "head_matches": true,
+    "tracked_worktree_clean": true,
+    "ignored_untracked": [
+      ".vscode/settings.json"
+    ],
+    "database_roles": {
+      "application": "fxl_sales_test: NOSUPERUSER, NOBYPASSRLS",
+      "migration_admin": "postgres: SUPERUSER",
+      "split_confirmed": true
+    }
+  },
+  "commands": [
+    {
+      "command": "CI=true pnpm run lint",
+      "exit": 0,
+      "counts": {
+        "workspace_projects": 4,
+        "errors": 0
+      }
+    },
+    {
+      "command": "CI=true pnpm run type-check",
+      "exit": 0,
+      "counts": {
+        "workspace_projects": 4,
+        "errors": 0
+      }
+    },
+    {
+      "command": "CI=true pnpm test",
+      "exit": 0,
+      "counts": {
+        "test_files_passed": 83,
+        "tests_passed": 950,
+        "test_failures": 0
+      }
+    },
+    {
+      "command": "CI=true pnpm --filter @fxl-sales/api test:integration",
+      "exit": 0,
+      "counts": {
+        "test_files_passed": 20,
+        "tests_passed": 119,
+        "test_failures": 0
+      }
+    },
+    {
+      "command": "CI=true pnpm run build",
+      "exit": 0,
+      "counts": {
+        "build_failures": 0
+      }
+    },
+    {
+      "command": "pnpm audit --prod --audit-level high",
+      "exit": 0,
+      "counts": {
+        "moderate": 8,
+        "high": 0,
+        "critical": 0
+      }
+    },
+    {
+      "command": "pnpm audit --audit-level high",
+      "exit": 0,
+      "counts": {
+        "moderate": 8,
+        "high": 0,
+        "critical": 0
+      }
+    },
+    {
+      "command": "git diff --check v2.3.1..HEAD",
+      "exit": 0,
+      "counts": {
+        "whitespace_errors": 0
+      }
+    }
+  ],
+  "risk_review": {
+    "status": "PASS",
+    "session_row_lock_scope_and_error_semantics": "PASS: one transaction spans hydrate, handler, and flush; only the matching live session row is locked; hydrate, handler, and post-handler failures preserve specified behavior",
+    "migration_0018_ordering_backfill_composite_fk": "PASS: journal and snapshot chain are ordered; expand-only SQL uses transaction-local admin context, conservative same-org same-sale backfill, and the exact three-column restrictive foreign key",
+    "payable_tenant_isolation_and_legacy_behavior": "PASS: persisted professional IDs, org-and-sale scoped queries, database-enforced tenant isolation, and one-use null-ID legacy multiset behavior are intact",
+    "dependency_override_scope": "PASS: the only added override targets brace-expansion below 1.1.18; direct changes remain development tooling only; no high or critical audit findings remain",
+    "generated_context_pack_whitespace_exemption": "PASS: only nexo/runs/**/context-pack.md has whitespace checks unset; ordinary files remain unspecified and historical snapshots are unchanged",
+    "migration_and_generated_snapshot_drift": "PASS: migration 0018 journal ordering, 0017-to-0018 snapshot linkage, schema, SQL, indexes, nullable column, and composite foreign key agree; migration-backed integration and static contracts pass"
+  },
+  "process_cleanup": {
+    "started_processes_remaining": 0
+  },
+  "done": true
+}
