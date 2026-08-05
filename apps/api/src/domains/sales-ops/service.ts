@@ -945,12 +945,18 @@ export function materializeWonPayables(input: MaterializeWonPayablesInput): Paya
         payable.receivableId === receivableId &&
         payable.status !== 'void',
     );
-  const legacyProfessionalKey = (candidate: {
+  const legacyProfessionalPartKey = (candidate: {
     beneficiaryName: string;
-    receivableId: string | null;
+    receivableId: string;
     amountBrl: number;
-  }): string => JSON.stringify([candidate.beneficiaryName, candidate.receivableId, candidate.amountBrl]);
-  const legacyProfessionalCounts = new Map<string, number>();
+  }): string =>
+    JSON.stringify([candidate.beneficiaryName, candidate.receivableId, candidate.amountBrl]);
+  const legacyProfessionalOneShotKey = (candidate: {
+    beneficiaryName: string;
+    amountBrl: number;
+  }): string => JSON.stringify([candidate.beneficiaryName, candidate.amountBrl]);
+  const legacyProfessionalPartCounts = new Map<string, number>();
+  const legacyProfessionalOneShotCounts = new Map<string, number>();
   for (const payable of existingPayables) {
     if (
       payable.kind !== 'professional_cost' ||
@@ -959,20 +965,43 @@ export function materializeWonPayables(input: MaterializeWonPayablesInput): Paya
     ) {
       continue;
     }
-    const key = legacyProfessionalKey(payable);
-    legacyProfessionalCounts.set(key, (legacyProfessionalCounts.get(key) ?? 0) + 1);
+    if (payable.receivableId === null) {
+      const key = legacyProfessionalOneShotKey(payable);
+      legacyProfessionalOneShotCounts.set(
+        key,
+        (legacyProfessionalOneShotCounts.get(key) ?? 0) + 1,
+      );
+      continue;
+    }
+    const key = legacyProfessionalPartKey({
+      beneficiaryName: payable.beneficiaryName,
+      receivableId: payable.receivableId,
+      amountBrl: payable.amountBrl,
+    });
+    legacyProfessionalPartCounts.set(key, (legacyProfessionalPartCounts.get(key) ?? 0) + 1);
   }
-  const consumeLegacyProfessional = (candidate: {
+  const consumeCount = (counts: Map<string, number>, key: string): boolean => {
+    const remaining = counts.get(key) ?? 0;
+    if (remaining === 0) return false;
+    if (remaining === 1) counts.delete(key);
+    else counts.set(key, remaining - 1);
+    return true;
+  };
+  const consumeLegacyProfessionalPart = (candidate: {
     beneficiaryName: string;
-    receivableId: string | null;
+    receivableId: string;
     amountBrl: number;
   }): boolean => {
-    const key = legacyProfessionalKey(candidate);
-    const remaining = legacyProfessionalCounts.get(key) ?? 0;
-    if (remaining === 0) return false;
-    if (remaining === 1) legacyProfessionalCounts.delete(key);
-    else legacyProfessionalCounts.set(key, remaining - 1);
-    return true;
+    return consumeCount(legacyProfessionalPartCounts, legacyProfessionalPartKey(candidate));
+  };
+  const consumeLegacyProfessionalOneShot = (candidate: {
+    beneficiaryName: string;
+    amountBrl: number;
+  }): boolean => {
+    return consumeCount(
+      legacyProfessionalOneShotCounts,
+      legacyProfessionalOneShotKey(candidate),
+    );
   };
 
   const drafts: PayableDraft[] = [];
@@ -1038,6 +1067,23 @@ export function materializeWonPayables(input: MaterializeWonPayablesInput): Paya
 
   for (const professional of input.professionals) {
     if (professional.costBrl <= 0) continue;
+    const identifiedOneShotExists = existingPayables.some(
+      (payable) =>
+        payable.kind === 'professional_cost' &&
+        payable.status !== 'void' &&
+        payable.saleProfessionalId === professional.id &&
+        payable.receivableId === null &&
+        payable.amountBrl === professional.costBrl,
+    );
+    if (identifiedOneShotExists) continue;
+    if (
+      consumeLegacyProfessionalOneShot({
+        beneficiaryName: professional.personName,
+        amountBrl: professional.costBrl,
+      })
+    ) {
+      continue;
+    }
     const parts = resolveProfessionalSplit({
       costBrl: professional.costBrl,
       costSplitBp: professional.costSplitBp,
@@ -1059,7 +1105,15 @@ export function materializeWonPayables(input: MaterializeWonPayablesInput): Paya
           payable.receivableId === part.receivableId,
       );
       if (identifiedPayableExists) continue;
-      if (consumeLegacyProfessional(candidate)) continue;
+      if (
+        candidate.receivableId !== null &&
+        consumeLegacyProfessionalPart({
+          ...candidate,
+          receivableId: candidate.receivableId,
+        })
+      ) {
+        continue;
+      }
       drafts.push({
         ...candidate,
         kind: 'professional_cost',

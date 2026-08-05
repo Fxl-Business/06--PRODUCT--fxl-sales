@@ -42,6 +42,26 @@ function nextSequence(orgId: string): number {
   return next;
 }
 
+function loadProfessionalPayableIdentityBackfill(): string {
+  const markedBackfills = readFileSync(professionalPayableMigrationPath, 'utf8')
+    .split('--> statement-breakpoint')
+    .filter((statement) =>
+      statement.split(/\r?\n/).some((line) => line === '-- fxl-phase: backfill-repeat'),
+    );
+  expect(markedBackfills).toHaveLength(1);
+  const backfill = markedBackfills[0]?.replace(
+    /^\s*-- fxl-phase: backfill-repeat\r?\n/,
+    '',
+  );
+  if (!backfill) throw new Error('professional payable identity backfill not found');
+  expect(backfill).toMatch(/^WITH "unambiguous_professional_matches"/);
+  return backfill;
+}
+
+async function executeProfessionalPayableIdentityBackfill(): Promise<void> {
+  await getAdminDb().execute(sql.raw(loadProfessionalPayableIdentityBackfill()));
+}
+
 async function seedFinderPerson(orgId: string, displayName: string) {
   const adminDb = getAdminDb();
   const [person] = await adminDb
@@ -315,23 +335,166 @@ describe('transitionSale', () => {
     expect(newlyActiveRows[0]?.status).toBe('open');
   });
 
+  it('v2.3.1 paid one-shot remains the complete identified professional cost after upgrade and re-win', async () => {
+    const orgId = `org_st_legacy_identified_${crypto.randomUUID()}`;
+    seededOrgIds.push(orgId);
+
+    const sale = await seedSale(orgId, {
+      status: 'won',
+      wonAt: new Date('2026-08-05T00:00:00.000Z'),
+      sellerCommissionPct: '0.00',
+      finderCommissionPct: '0.00',
+      taxPct: '0.00',
+      otherCostsBrl: 0,
+    });
+    await seedReceivable(orgId, sale.id, { amountBrl: 100000 });
+    const professional = await seedProfessional(orgId, sale.id, {
+      personNameSnapshot: 'Profissional Legado',
+      costBrl: 100000,
+    });
+    const adminDb = getAdminDb();
+    const [historicalPayable] = await adminDb
+      .insert(salesOpsPayables)
+      .values({
+        orgId,
+        saleId: sale.id,
+        beneficiaryName: 'Profissional Legado',
+        kind: 'professional_cost',
+        receivableId: null,
+        saleProfessionalId: null,
+        dueDate: new Date('2026-08-05T00:00:00.000Z'),
+        amountBrl: 100000,
+        status: 'paid',
+      })
+      .returning();
+
+    await executeProfessionalPayableIdentityBackfill();
+    const [backfilledPayable] = await adminDb
+      .select()
+      .from(salesOpsPayables)
+      .where(
+        and(
+          eq(salesOpsPayables.orgId, orgId),
+          eq(salesOpsPayables.id, must(historicalPayable).id),
+        ),
+      );
+    expect(must(backfilledPayable).saleProfessionalId).toBe(professional.id);
+
+    const reopened = await transitionSale(getDb(), orgId, sale.id, 'open');
+    expect(reopened.ok).toBe(true);
+    const rewinned = await transitionSale(getDb(), orgId, sale.id, 'won');
+    expect(rewinned.ok).toBe(true);
+
+    const professionalPayables = (
+      await adminDb
+        .select()
+        .from(salesOpsPayables)
+        .where(and(eq(salesOpsPayables.orgId, orgId), eq(salesOpsPayables.saleId, sale.id)))
+    ).filter((row) => row.kind === 'professional_cost');
+    const activeRows = professionalPayables.filter((row) => row.status !== 'void');
+
+    expect(activeRows.reduce((sum, row) => sum + row.amountBrl, 0)).toBe(100000);
+    expect(activeRows).toHaveLength(1);
+    expect(activeRows[0]).toMatchObject({
+      id: must(historicalPayable).id,
+      status: 'paid',
+      receivableId: null,
+      saleProfessionalId: professional.id,
+      amountBrl: 100000,
+    });
+  });
+
+  it('v2.3.1 ambiguous paid one-shot covers one same-name professional after upgrade and re-win', async () => {
+    const orgId = `org_st_legacy_ambiguous_${crypto.randomUUID()}`;
+    seededOrgIds.push(orgId);
+
+    const sale = await seedSale(orgId, {
+      status: 'won',
+      wonAt: new Date('2026-08-05T00:00:00.000Z'),
+      sellerCommissionPct: '0.00',
+      finderCommissionPct: '0.00',
+      taxPct: '0.00',
+      otherCostsBrl: 0,
+    });
+    const receivable = await seedReceivable(orgId, sale.id, { amountBrl: 200000 });
+    const professionalA = await seedProfessional(orgId, sale.id, {
+      personNameSnapshot: 'Profissional Homonimo',
+      costBrl: 100000,
+    });
+    const professionalB = await seedProfessional(orgId, sale.id, {
+      personNameSnapshot: 'Profissional Homonimo',
+      costBrl: 100000,
+    });
+    const adminDb = getAdminDb();
+    const [historicalPayable] = await adminDb
+      .insert(salesOpsPayables)
+      .values({
+        orgId,
+        saleId: sale.id,
+        beneficiaryName: 'Profissional Homonimo',
+        kind: 'professional_cost',
+        receivableId: null,
+        saleProfessionalId: null,
+        dueDate: new Date('2026-08-05T00:00:00.000Z'),
+        amountBrl: 100000,
+        status: 'paid',
+      })
+      .returning();
+
+    await executeProfessionalPayableIdentityBackfill();
+    const [ambiguousPayable] = await adminDb
+      .select()
+      .from(salesOpsPayables)
+      .where(
+        and(
+          eq(salesOpsPayables.orgId, orgId),
+          eq(salesOpsPayables.id, must(historicalPayable).id),
+        ),
+      );
+    expect(must(ambiguousPayable).saleProfessionalId).toBeNull();
+
+    const reopened = await transitionSale(getDb(), orgId, sale.id, 'open');
+    expect(reopened.ok).toBe(true);
+    const rewinned = await transitionSale(getDb(), orgId, sale.id, 'won');
+    expect(rewinned.ok).toBe(true);
+
+    const professionalPayables = (
+      await adminDb
+        .select()
+        .from(salesOpsPayables)
+        .where(and(eq(salesOpsPayables.orgId, orgId), eq(salesOpsPayables.saleId, sale.id)))
+    ).filter((row) => row.kind === 'professional_cost');
+    const activeRows = professionalPayables.filter((row) => row.status !== 'void');
+    const newlyActiveRows = activeRows.filter((row) => row.id !== must(historicalPayable).id);
+
+    expect(activeRows.reduce((sum, row) => sum + row.amountBrl, 0)).toBe(200000);
+    expect(activeRows).toHaveLength(2);
+    expect(activeRows).toContainEqual(
+      expect.objectContaining({
+        id: must(historicalPayable).id,
+        status: 'paid',
+        receivableId: null,
+        saleProfessionalId: null,
+        amountBrl: 100000,
+      }),
+    );
+    expect(newlyActiveRows).toHaveLength(1);
+    expect(newlyActiveRows[0]).toMatchObject({
+      status: 'open',
+      receivableId: receivable.id,
+      amountBrl: 100000,
+    });
+    expect([professionalA.id, professionalB.id]).toContain(
+      newlyActiveRows[0]?.saleProfessionalId,
+    );
+  });
+
   it('migration backfill links only one org-sale-snapshot match and leaves ambiguous rows null', async () => {
     const uniqueOrgId = `org_st_backfill_unique_${crypto.randomUUID()}`;
     const ambiguousOrgId = `org_st_backfill_ambiguous_${crypto.randomUUID()}`;
     const otherOrgId = `org_st_backfill_other_${crypto.randomUUID()}`;
     const adminDb = getAdminDb();
-    const markedBackfills = readFileSync(professionalPayableMigrationPath, 'utf8')
-      .split('--> statement-breakpoint')
-      .filter((statement) =>
-        statement.split(/\r?\n/).some((line) => line === '-- fxl-phase: backfill-repeat'),
-      );
-    expect(markedBackfills).toHaveLength(1);
-    const backfill = markedBackfills[0]?.replace(
-      /^\s*-- fxl-phase: backfill-repeat\r?\n/,
-      '',
-    );
-    if (!backfill) throw new Error('professional payable identity backfill not found');
-    expect(backfill).toMatch(/^WITH "unambiguous_professional_matches"/);
+    const backfill = loadProfessionalPayableIdentityBackfill();
 
     await expect(
       adminDb.transaction(async (tx) => {
