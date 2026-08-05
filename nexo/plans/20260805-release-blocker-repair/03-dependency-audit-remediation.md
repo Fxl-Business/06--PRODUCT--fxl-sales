@@ -1,7 +1,7 @@
 ---
 id: 03-dependency-audit-remediation
 milestone: v2.4.0
-status: todo
+status: done
 depends_on: []
 files_modified: [apps/api/package.json, apps/web/package.json, pnpm-workspace.yaml, pnpm-lock.yaml]
 acceptance: "given the complete workspace dependency graph, when production and full audits run at high severity, then both exit zero with no high or critical findings and the repository quality gates remain green"

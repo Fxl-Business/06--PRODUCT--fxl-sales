@@ -1,7 +1,7 @@
 ---
 id: 02-professional-payable-identity
 milestone: v2.4.0
-status: todo
+status: done
 depends_on: []
 files_modified:
   - apps/api/drizzle/0018_professional_payable_identity.sql

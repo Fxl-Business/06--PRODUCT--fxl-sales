@@ -1,7 +1,7 @@
 ---
 id: 20260805-release-blocker-repair
 milestone: v2.4.0
-status: approved
+status: done
 mode: autopilot
 approved_at: 2026-08-05
 ---

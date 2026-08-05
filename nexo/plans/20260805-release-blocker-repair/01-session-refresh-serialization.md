@@ -1,7 +1,7 @@
 ---
 id: 01-session-refresh-serialization
 milestone: v2.4.0
-status: todo
+status: done
 depends_on: []
 files_modified: [apps/api/src/auth/hub-session-store.ts, apps/api/src/auth/__tests__/hub-session-store.test.ts, apps/api/test/rls/hub-bff-session-store.test.ts]
 acceptance: "given two concurrent refresh requests for one durable Hub session through independent store instances backed by the real Postgres integration database, when the first request rotates and commits the refresh token, then the second request waits for that session, reads the committed token, does not delete the row or clear the browser cookie, and requests for a different session remain independent"

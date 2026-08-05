@@ -1,7 +1,7 @@
 ---
 id: 04-generated-diff-hygiene
 milestone: v2.4.0
-status: todo
+status: done
 depends_on: []
 files_modified: [.gitattributes]
 acceptance: "given historical generated Nexo context packs and an ordinary tracked file, when Git checks the release diff for whitespace errors, then context-pack snapshots are exempt while the ordinary file still fails the check"
