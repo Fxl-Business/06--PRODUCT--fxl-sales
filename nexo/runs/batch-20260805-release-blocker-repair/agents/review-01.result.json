@@ -1,0 +1,16 @@
+{
+  "status": "PASS",
+  "agent": "review",
+  "slice": "01-session-refresh-serialization",
+  "report": "nexo/runs/batch-20260805-release-blocker-repair/review-01.md",
+  "spec_verdict": "PASS",
+  "quality_verdict": "PASS",
+  "findings": [],
+  "reviewed_head": "69b355c0995c4675c947f0735e6012f39e3fb25b",
+  "reviewed_commit": "69b355c0995c4675c947f0735e6012f39e3fb25b",
+  "reviewed_commits": [
+    "448a4bab42228f964deb54dd97024a1f50502c7a",
+    "69b355c0995c4675c947f0735e6012f39e3fb25b"
+  ],
+  "done": true
+}
