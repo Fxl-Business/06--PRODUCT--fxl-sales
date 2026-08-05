@@ -3726,8 +3726,14 @@ function ProductDialogBody({
     advanceProductWizard();
   }
 
-  function submit(event: FormEvent) {
-    event.preventDefault();
+  /*
+    The event is OPTIONAL because the last step's primary button calls this directly
+    instead of being a submit button - see the footer, and the comment there for why.
+    `Salvar alterações` and the Enter path still arrive through `onSubmit`, and both
+    still need the `preventDefault`.
+  */
+  function submit(event?: FormEvent) {
+    event?.preventDefault();
     /*
       Symmetric guards, and the `name` half is new: the `required` attribute that used
       to be the only thing standing between an empty Nome and a nameless produto is
@@ -4490,11 +4496,30 @@ function ProductDialogBody({
                   Salvar alterações
                 </button>
               ) : null}
+              {/*
+                `type="button"` on EVERY step, and the save goes through `onClick`.
+                This button used to read `type={wizardStep < 4 ? 'button' : 'submit'}`,
+                which made the step 3 -> 4 click the one click that changes the
+                element's own activation behaviour. A click runs in two phases - the
+                event dispatch, then the browser's activation behaviour for the element
+                - and React 18 flushes a discrete event's state update synchronously, so
+                the re-render landed BETWEEN them. The browser then asked "is this a
+                submit button?" of an element React had already rewritten to `submit`,
+                submitted the form, and persisted the produto with comissões and custos
+                the operator had never seen.
+
+                This is the shape the proposta wizard already has, which is exactly why
+                it was never vulnerable. Do not reintroduce a step-dependent `type`:
+                happy-dom does not model activation behaviour after a React flush, so a
+                DOM-level click test CANNOT catch the regression. The guard is
+                `keeps one activation behaviour on every step` in
+                product-service-dialog.test.tsx.
+              */}
               <button
                 className={wizardPrimaryButtonClass}
                 disabled={saving || (wizardStep === 1 && !canAdvanceStepOne)}
-                onClick={wizardStep < 4 ? advanceProductWizard : undefined}
-                type={wizardStep < 4 ? 'button' : 'submit'}
+                onClick={wizardStep < 4 ? advanceProductWizard : () => submit()}
+                type="button"
               >
                 {wizardStep < 4
                   ? 'Avançar'

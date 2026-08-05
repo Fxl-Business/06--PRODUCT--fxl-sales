@@ -83,6 +83,14 @@ Keep the repository folder name unchanged until the editor session can safely mo
   The `Custos padrão por função` picker inside `ProductDialog` gets no create row, because creating a função is admin-gated and belongs to `cadastros/funcoes`; its empty state points there.
   The vendedor and finder pickers get no create row, because a pessoa is invalid without a função; the função picker inside the Pessoa dialog does have one, because a função needs only a name.
   The proposta wizard's `FUNÇÃO NO PROJETO` picker has one too, for the same reason as the Pessoa dialog's; the two deliberate exclusions above are unchanged.
+- A wizard's primary button carries `type="button"` on EVERY step, and the final step saves through `onClick`.
+  Never derive that attribute from the step (`type={step < 4 ? 'button' : 'submit'}`), because the click that advances the step would then also be the click that changes the element's own activation behaviour.
+  A click runs in two phases - the event dispatch, then the browser's activation behaviour for the element - and React 18 flushes a discrete event's state update synchronously, so the re-render lands BETWEEN them.
+  The browser then asks "is this a submit button?" of an element React has already rewritten to `submit`, submits the form, and persists a record the operator never reviewed.
+  That was the produto dialog's step 3 to 4 autosave; the proposta wizard never had it because its primary button was always `type="button"`.
+- A DOM-level click test CANNOT catch that regression: happy-dom's `dispatchEvent` never runs activation behaviour, so `advances from step 3 to step 4 without saving` passes with the bug fully present.
+  The oracle is the invariant `keeps one activation behaviour on every step` in `apps/web/src/sales-ops/__tests__/product-service-dialog.test.tsx`, which was the only one of 537 web tests to go red on the mutation.
+  Anything of this class has to be proven in a real browser; assert the invariant that makes the race impossible rather than trying to observe the race in jsdom or happy-dom.
 
 ## Sales Ops Routing
 
