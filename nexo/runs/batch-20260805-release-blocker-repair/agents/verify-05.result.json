@@ -1,0 +1,1 @@
+{"agent":"verify","slice":"05-legacy-professional-one-shot-reconciliation","status":"PASS","report":"nexo/runs/batch-20260805-release-blocker-repair/verify-05.md","tested_commit":"93950c6da8e6c4e9680f65b33bf795ad51c443c4","evidence":{"focused_unit_tests":14,"postgres_integration_tests":11,"eslint":"PASS","type_check":"PASS","diff_check":"PASS","cleanup":"PASS"},"done":true}
