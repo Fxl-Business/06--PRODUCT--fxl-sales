@@ -11,6 +11,14 @@ import {
   updateFuncao,
 } from '../../src/domains/sales-ops/service.js';
 
+/**
+ * The actor threaded through every sales-ops cadastro write. Only the
+ * archive/restore lifecycle is audited, so most calls here produce no ledger row
+ * at all - but the parameter is required, and passing it is what keeps these
+ * suites exercising the real route-to-service signature.
+ */
+const TEST_ACTOR = { userId: 'acct_rls_test', displayName: 'RLS Test Actor' } as const;
+
 const APP_DB_URL =
   process.env.TEST_DATABASE_URL ??
   process.env.DATABASE_URL ??
@@ -128,7 +136,7 @@ describe('sales operations funções write concurrency', () => {
     const settled = await Promise.all(
       seeded.flatMap(({ orgId, ids }) =>
         ids.map((id) =>
-          updateFuncao(db, orgId, id, { name: 'Product Owner' }).then(
+          updateFuncao(db, orgId, id, { name: 'Product Owner' }, TEST_ACTOR).then(
             (value) => ({ ok: true as const, value }),
             (error: unknown) => ({ ok: false as const, error }),
           ),
@@ -282,11 +290,7 @@ describe('sales operations funções write concurrency', () => {
     }
     for (const orgId of orgs) {
       const rows = await listFuncoes(db, orgId);
-      expect(rows.map((funcao) => funcao.slug).sort()).toEqual([
-        'finder',
-        'prestador',
-        'vendedor',
-      ]);
+      expect(rows.map((funcao) => funcao.slug).sort()).toEqual(['finder', 'prestador', 'vendedor']);
       expect(await listPeople(db, orgId)).toHaveLength(ATTEMPTS);
     }
   });

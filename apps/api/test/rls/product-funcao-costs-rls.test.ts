@@ -32,6 +32,14 @@ import {
   updateProduct,
 } from '../../src/domains/sales-ops/service.js';
 
+/**
+ * The actor threaded through every sales-ops cadastro write. Only the
+ * archive/restore lifecycle is audited, so most calls here produce no ledger row
+ * at all - but the parameter is required, and passing it is what keeps these
+ * suites exercising the real route-to-service signature.
+ */
+const TEST_ACTOR = { userId: 'acct_rls_test', displayName: 'RLS Test Actor' } as const;
+
 const APP_DB_URL =
   process.env.TEST_DATABASE_URL ??
   process.env.DATABASE_URL ??
@@ -170,33 +178,57 @@ describe('produtos & serviços defaults, função costs and tenancy', () => {
     );
 
     // A PATCH that omits the key leaves the set untouched.
-    const renamed = await updateProduct(db, orgA, created.product.id, { name: 'Custom v2' });
+    const renamed = await updateProduct(
+      db,
+      orgA,
+      created.product.id,
+      { name: 'Custom v2' },
+      TEST_ACTOR,
+    );
     if (typeof renamed === 'string' || !renamed) throw new Error('unexpected patch outcome');
     expect(renamed.product.name).toBe('Custom v2');
     expect(renamed.productFuncaoCosts).toHaveLength(2);
 
     // A PATCH that sends the key is a full replace.
-    const replaced = await updateProduct(db, orgA, created.product.id, {
-      productFuncaoCosts: [{ funcaoId: tester.id, mode: 'pct', valuePct: 12.5 }],
-    });
+    const replaced = await updateProduct(
+      db,
+      orgA,
+      created.product.id,
+      {
+        productFuncaoCosts: [{ funcaoId: tester.id, mode: 'pct', valuePct: 12.5 }],
+      },
+      TEST_ACTOR,
+    );
     if (typeof replaced === 'string' || !replaced) throw new Error('unexpected patch outcome');
     expect(replaced.productFuncaoCosts).toEqual([
       expect.objectContaining({ funcaoId: tester.id, mode: 'pct', valuePct: '12.50' }),
     ]);
 
     // An empty list clears the set.
-    const cleared = await updateProduct(db, orgA, created.product.id, { productFuncaoCosts: [] });
+    const cleared = await updateProduct(
+      db,
+      orgA,
+      created.product.id,
+      { productFuncaoCosts: [] },
+      TEST_ACTOR,
+    );
     if (typeof cleared === 'string' || !cleared) throw new Error('unexpected patch outcome');
     expect(cleared.productFuncaoCosts).toEqual([]);
     expect(await listProductFuncaoCosts(db, orgA, created.product.id)).toEqual([]);
 
     // Re-populate so the snapshot assertions below have something to see.
-    const repopulated = await updateProduct(db, orgA, created.product.id, {
-      productFuncaoCosts: [
-        { funcaoId: developer.id, mode: 'pct', valuePct: 5 },
-        { funcaoId: tester.id, mode: 'fix', valueBrl: 30000 },
-      ],
-    });
+    const repopulated = await updateProduct(
+      db,
+      orgA,
+      created.product.id,
+      {
+        productFuncaoCosts: [
+          { funcaoId: developer.id, mode: 'pct', valuePct: 5 },
+          { funcaoId: tester.id, mode: 'fix', valueBrl: 30000 },
+        ],
+      },
+      TEST_ACTOR,
+    );
     if (typeof repopulated === 'string' || !repopulated) throw new Error('unexpected outcome');
 
     const snapshotA = await getSalesOpsSnapshot(db, orgA);
@@ -233,10 +265,18 @@ describe('produtos & serviços defaults, função costs and tenancy', () => {
     expect(await listProductFuncaoCosts(adminDb, orgB)).toEqual([]);
     expect(await listProducts(adminDb, orgB)).toEqual([]);
     expect((await getSalesOpsSnapshot(adminDb, orgB)).productFuncaoCosts).toEqual([]);
-    expect(await updateProduct(adminDb, orgB, created.product.id, { name: 'hijack' })).toBeNull();
+    expect(
+      await updateProduct(adminDb, orgB, created.product.id, { name: 'hijack' }, TEST_ACTOR),
+    ).toBeNull();
     // Positive control: the owning org still sees and can still write its own row.
     expect(await listProductFuncaoCosts(adminDb, orgA)).toHaveLength(1);
-    const own = await updateProduct(adminDb, orgA, created.product.id, { name: 'Serviço A v2' });
+    const own = await updateProduct(
+      adminDb,
+      orgA,
+      created.product.id,
+      { name: 'Serviço A v2' },
+      TEST_ACTOR,
+    );
     if (typeof own === 'string' || !own) throw new Error('unexpected patch outcome');
     expect(own.product.name).toBe('Serviço A v2');
   });
@@ -300,12 +340,22 @@ describe('produtos & serviços defaults, função costs and tenancy', () => {
     const serviceA = await createProduct(
       db,
       orgA,
-      ProductSchema.parse({ name: 'Serviço A', codeSuffix: '74', areaId: area.id, kind: 'service' }),
+      ProductSchema.parse({
+        name: 'Serviço A',
+        codeSuffix: '74',
+        areaId: area.id,
+        kind: 'service',
+      }),
     );
     const serviceB = await createProduct(
       db,
       orgA,
-      ProductSchema.parse({ name: 'Serviço B', codeSuffix: '77', areaId: area.id, kind: 'service' }),
+      ProductSchema.parse({
+        name: 'Serviço B',
+        codeSuffix: '77',
+        areaId: area.id,
+        kind: 'service',
+      }),
     );
     const product = await createProduct(
       db,
@@ -313,17 +363,29 @@ describe('produtos & serviços defaults, função costs and tenancy', () => {
       ProductSchema.parse({ name: 'Produto', codeSuffix: '75', areaId: area.id, kind: 'product' }),
     );
 
-    const priced = await updateProduct(db, orgA, serviceA.product.id, { setupBrl: 500000 });
+    const priced = await updateProduct(
+      db,
+      orgA,
+      serviceA.product.id,
+      { setupBrl: 500000 },
+      TEST_ACTOR,
+    );
     if (typeof priced === 'string' || !priced) throw new Error('unexpected patch outcome');
     expect(priced.product.setupBrl).toBe(500000);
     expect(priced.product.kind).toBe('service');
     // The projection is untouched by the base value: a Serviço with one is still a Serviço.
     expect(priced.product.openPrice).toBe(true);
 
-    const recurring = await updateProduct(db, orgA, serviceA.product.id, {
-      hasMonthly: true,
-      monthlyBrl: 20000,
-    });
+    const recurring = await updateProduct(
+      db,
+      orgA,
+      serviceA.product.id,
+      {
+        hasMonthly: true,
+        monthlyBrl: 20000,
+      },
+      TEST_ACTOR,
+    );
     if (typeof recurring === 'string' || !recurring) throw new Error('unexpected patch outcome');
     expect(recurring.product.monthlyBrl).toBe(20000);
 
@@ -341,12 +403,24 @@ describe('produtos & serviços defaults, função costs and tenancy', () => {
     expect(storedB?.kind).toBe('service');
 
     // Behavior flip: reclassifying a priced Produto used to be INVALID_PRODUCT_KIND_VALUE.
-    const pricedProduct = await updateProduct(db, orgA, product.product.id, { setupBrl: 5000 });
+    const pricedProduct = await updateProduct(
+      db,
+      orgA,
+      product.product.id,
+      { setupBrl: 5000 },
+      TEST_ACTOR,
+    );
     if (typeof pricedProduct === 'string' || !pricedProduct) {
       throw new Error('unexpected patch outcome');
     }
     expect(pricedProduct.product.setupBrl).toBe(5000);
-    const reclassified = await updateProduct(db, orgA, product.product.id, { kind: 'service' });
+    const reclassified = await updateProduct(
+      db,
+      orgA,
+      product.product.id,
+      { kind: 'service' },
+      TEST_ACTOR,
+    );
     if (typeof reclassified === 'string' || !reclassified) {
       throw new Error('unexpected patch outcome');
     }
@@ -376,26 +450,38 @@ describe('produtos & serviços defaults, função costs and tenancy', () => {
     expect(created.product.defaultEntradaMode).toBe('none');
 
     // A pct value against a stored mode of 'none' is only visible once merged.
-    expect(await updateProduct(db, orgA, created.product.id, { defaultEntradaPct: 50 })).toBe(
-      INVALID_PRODUCT_ENTRADA_VALUE,
-    );
+    expect(
+      await updateProduct(db, orgA, created.product.id, { defaultEntradaPct: 50 }, TEST_ACTOR),
+    ).toBe(INVALID_PRODUCT_ENTRADA_VALUE);
 
     // Positive control: sending the mode alongside the value succeeds.
-    const ok = await updateProduct(db, orgA, created.product.id, {
-      defaultEntradaMode: 'pct',
-      defaultEntradaPct: 50,
-    });
+    const ok = await updateProduct(
+      db,
+      orgA,
+      created.product.id,
+      {
+        defaultEntradaMode: 'pct',
+        defaultEntradaPct: 50,
+      },
+      TEST_ACTOR,
+    );
     if (typeof ok === 'string' || !ok) throw new Error('unexpected patch outcome');
     expect(ok.product.defaultEntradaPct).toBe('50.00');
 
     // And clearing back to 'none' has to clear the value too.
-    expect(await updateProduct(db, orgA, created.product.id, { defaultEntradaMode: 'none' })).toBe(
-      INVALID_PRODUCT_ENTRADA_VALUE,
+    expect(
+      await updateProduct(db, orgA, created.product.id, { defaultEntradaMode: 'none' }, TEST_ACTOR),
+    ).toBe(INVALID_PRODUCT_ENTRADA_VALUE);
+    const reset = await updateProduct(
+      db,
+      orgA,
+      created.product.id,
+      {
+        defaultEntradaMode: 'none',
+        defaultEntradaPct: null,
+      },
+      TEST_ACTOR,
     );
-    const reset = await updateProduct(db, orgA, created.product.id, {
-      defaultEntradaMode: 'none',
-      defaultEntradaPct: null,
-    });
     if (typeof reset === 'string' || !reset) throw new Error('unexpected patch outcome');
     expect(reset.product.defaultEntradaPct).toBeNull();
   });
@@ -450,9 +536,15 @@ describe('produtos & serviços defaults, função costs and tenancy', () => {
     expect(viaAlias.product.kind).toBe('service');
     expect(viaAlias.product.openPrice).toBe(true);
 
-    const patchedViaAlias = await updateProduct(db, orgA, viaAlias.product.id, {
-      openPrice: false,
-    });
+    const patchedViaAlias = await updateProduct(
+      db,
+      orgA,
+      viaAlias.product.id,
+      {
+        openPrice: false,
+      },
+      TEST_ACTOR,
+    );
     if (typeof patchedViaAlias === 'string' || !patchedViaAlias) {
       throw new Error('unexpected patch outcome');
     }
@@ -600,14 +692,21 @@ describe('produtos & serviços defaults, função costs and tenancy', () => {
         status: 'draft',
         baseDate: '2026-07-29',
         items: [
-          { productId: service.product.id, productName: 'Consultoria', quantity: 1, unitBrl: 60000 },
+          {
+            productId: service.product.id,
+            productName: 'Consultoria',
+            quantity: 1,
+            unitBrl: 60000,
+          },
           { productId: product.product.id, productName: 'Licença', quantity: 1, unitBrl: 40000 },
         ],
         installments: [{ dueDate: '2026-07-29', amountBrl: 100000, method: 'pix' }],
       }),
     );
 
-    const rows = await adminClient<{ product_name_snapshot: string; product_type_snapshot: string }[]>`
+    const rows = await adminClient<
+      { product_name_snapshot: string; product_type_snapshot: string }[]
+    >`
       SELECT product_name_snapshot, product_type_snapshot
       FROM sales_ops_sale_items WHERE sale_id = ${sale.sale.id}
       ORDER BY product_name_snapshot

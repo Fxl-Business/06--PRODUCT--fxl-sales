@@ -11,6 +11,14 @@ import {
   updateProduct,
 } from '../../src/domains/sales-ops/service.js';
 
+/**
+ * The actor threaded through every sales-ops cadastro write. Only the
+ * archive/restore lifecycle is audited, so most calls here produce no ledger row
+ * at all - but the parameter is required, and passing it is what keeps these
+ * suites exercising the real route-to-service signature.
+ */
+const TEST_ACTOR = { userId: 'acct_rls_test', displayName: 'RLS Test Actor' } as const;
+
 const APP_DB_URL =
   process.env.TEST_DATABASE_URL ??
   process.env.DATABASE_URL ??
@@ -64,18 +72,30 @@ describe('sales operations product commission persistence', () => {
     expect(created.sellerWithFinderCommissionValue).toBe('7.00');
     expect(created.finderCommissionValue).toBe('3.00');
 
-    const sellerOnlyUpdate = await updateProduct(db, orgId, created.id, {
-      sellerCommissionValue: 11,
-    });
+    const sellerOnlyUpdate = await updateProduct(
+      db,
+      orgId,
+      created.id,
+      {
+        sellerCommissionValue: 11,
+      },
+      TEST_ACTOR,
+    );
     if (typeof sellerOnlyUpdate === 'string' || !sellerOnlyUpdate) {
       throw new Error(`unexpected update outcome: ${String(sellerOnlyUpdate)}`);
     }
     expect(sellerOnlyUpdate.product.sellerCommissionValue).toBe('11.00');
     expect(sellerOnlyUpdate.product.sellerWithFinderCommissionValue).toBe('7.00');
 
-    const splitUpdate = await updateProduct(db, orgId, created.id, {
-      sellerWithFinderCommissionValue: 8,
-    });
+    const splitUpdate = await updateProduct(
+      db,
+      orgId,
+      created.id,
+      {
+        sellerWithFinderCommissionValue: 8,
+      },
+      TEST_ACTOR,
+    );
     if (typeof splitUpdate === 'string' || !splitUpdate) {
       throw new Error(`unexpected update outcome: ${String(splitUpdate)}`);
     }

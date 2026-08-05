@@ -16,6 +16,14 @@ import {
   updatePerson,
 } from '../../src/domains/sales-ops/service.js';
 
+/**
+ * The actor threaded through every sales-ops cadastro write. Only the
+ * archive/restore lifecycle is audited, so most calls here produce no ledger row
+ * at all - but the parameter is required, and passing it is what keeps these
+ * suites exercising the real route-to-service signature.
+ */
+const TEST_ACTOR = { userId: 'acct_rls_test', displayName: 'RLS Test Actor' } as const;
+
 const APP_DB_URL =
   process.env.TEST_DATABASE_URL ??
   process.env.DATABASE_URL ??
@@ -68,7 +76,16 @@ describe('sales operations funções persistence and RLS', () => {
   });
 
   afterAll(async () => {
+    // This file archives funções, so it now appends to the hash-chained audit_log
+    // and must clean up after itself or it breaks conversion-ingest.test.ts's
+    // genesis-anchored chain assertion. The delete is only safe because
+    // apps/api/vitest.config.ts sets `fileParallelism: false` for the integration
+    // project: this afterAll runs before the next file's first statement, so the
+    // rows written here are still the ledger TAIL and a tail delete leaves the
+    // remaining chain contiguous. With file parallelism on it would punch a hole
+    // mid-chain and verifyChain would fail everywhere.
     for (const orgId of orgIds) {
+      await adminClient`DELETE FROM audit_log WHERE actor_org_id = ${orgId}`;
       await adminClient`DELETE FROM sales_ops_person_funcoes WHERE org_id = ${orgId}`;
       await adminClient`DELETE FROM sales_ops_funcoes WHERE org_id = ${orgId}`;
       await adminClient`DELETE FROM sales_ops_people WHERE org_id = ${orgId}`;
@@ -96,14 +113,14 @@ describe('sales operations funções persistence and RLS', () => {
     // Negative: org B sees nothing and cannot hijack the row.
     expect(await listFuncoes(db, orgB)).toEqual([]);
     expect(await getFuncao(db, orgB, funcaoA.id)).toBeNull();
-    expect(await updateFuncao(db, orgB, funcaoA.id, { name: 'hijack' })).toBeNull();
+    expect(await updateFuncao(db, orgB, funcaoA.id, { name: 'hijack' }, TEST_ACTOR)).toBeNull();
 
     const [unchanged] = await adminClient<
       { name: string }[]
     >`SELECT name FROM sales_ops_funcoes WHERE id = ${funcaoA.id}`;
     expect(unchanged.name).toBe('Desenvolvedor');
 
-    const archived = await updateFuncao(db, orgA, funcaoA.id, { status: 'archived' });
+    const archived = await updateFuncao(db, orgA, funcaoA.id, { status: 'archived' }, TEST_ACTOR);
     if (typeof archived === 'string') throw new Error(`unexpected sentinel: ${archived}`);
     expect(archived?.status).toBe('archived');
     expect(archived?.updatedAt).not.toBeNull();
@@ -161,8 +178,12 @@ describe('sales operations funções persistence and RLS', () => {
       RETURNING id
     `;
 
-    expect(await updateFuncao(db, orgA, seeded.id, { name: 'Outro' })).toBe('is_system');
-    expect(await updateFuncao(db, orgA, seeded.id, { status: 'archived' })).toBe('is_system');
+    expect(await updateFuncao(db, orgA, seeded.id, { name: 'Outro' }, TEST_ACTOR)).toBe(
+      'is_system',
+    );
+    expect(await updateFuncao(db, orgA, seeded.id, { status: 'archived' }, TEST_ACTOR)).toBe(
+      'is_system',
+    );
 
     const [row] = await adminClient<{ name: string; status: string; updated_at: Date | null }[]>`
       SELECT name, status, updated_at FROM sales_ops_funcoes WHERE id = ${seeded.id}
@@ -175,10 +196,16 @@ describe('sales operations funções persistence and RLS', () => {
     // archivable, so the guard keys on is_system and not on something incidental.
     const dynamic = await createFuncao(db, orgA, { name: 'Tester', status: 'active' });
     if (typeof dynamic === 'string') throw new Error(`unexpected sentinel: ${dynamic}`);
-    const renamed = await updateFuncao(db, orgA, dynamic.id, {
-      name: 'QA',
-      status: 'archived',
-    });
+    const renamed = await updateFuncao(
+      db,
+      orgA,
+      dynamic.id,
+      {
+        name: 'QA',
+        status: 'archived',
+      },
+      TEST_ACTOR,
+    );
     if (typeof renamed === 'string') throw new Error(`unexpected sentinel: ${renamed}`);
     expect(renamed?.name).toBe('QA');
     expect(renamed?.status).toBe('archived');
@@ -277,21 +304,23 @@ describe('sales operations funções persistence and RLS', () => {
 
     expect(await getFuncao(adminDb, orgA, devB.id)).toBeNull();
     expect(await getFuncao(adminDb, orgA, devA.id)).not.toBeNull();
-    expect(await updateFuncao(adminDb, orgA, devB.id, { name: 'hijack' })).toBeNull();
+    expect(await updateFuncao(adminDb, orgA, devB.id, { name: 'hijack' }, TEST_ACTOR)).toBeNull();
 
     const peopleA = await listPeople(adminDb, orgA);
     expect(peopleA.map((person) => person.id)).toEqual([personA.id]);
     // The attached função set must be org-scoped too, not just the person rows.
     expect(peopleA[0].funcoes.map((funcao) => funcao.slug)).toEqual(['vendedor']);
-    expect(await updatePerson(adminDb, orgA, personB.id, { displayName: 'hijack' })).toBeNull();
+    expect(
+      await updatePerson(adminDb, orgA, personB.id, { displayName: 'hijack' }, TEST_ACTOR),
+    ).toBeNull();
 
     // A cross-org funcaoId is still refused when the database would have allowed
     // the read, so the guard is the service filter and not the policy.
     expect(
-      await updatePerson(adminDb, orgA, personA.id, { funcaoIds: [devB.id] }),
+      await updatePerson(adminDb, orgA, personA.id, { funcaoIds: [devB.id] }, TEST_ACTOR),
     ).toBe('unknown_funcao');
     expect(
-      await updatePerson(adminDb, orgA, personA.id, { funcaoIds: [devA.id] }),
+      await updatePerson(adminDb, orgA, personA.id, { funcaoIds: [devA.id] }, TEST_ACTOR),
     ).not.toBe('unknown_funcao');
 
     const snapshotA = await getSalesOpsSnapshot(adminDb, orgA);
@@ -313,11 +342,13 @@ describe('sales operations funções persistence and RLS', () => {
         funcaoIds: [funcaoB.id],
       }),
     ).toBe('unknown_funcao');
-    expect(await createPerson(db, orgA, {
-      displayName: 'Kayke',
-      status: 'active',
-      funcaoIds: [randomUUID()],
-    })).toBe('unknown_funcao');
+    expect(
+      await createPerson(db, orgA, {
+        displayName: 'Kayke',
+        status: 'active',
+        funcaoIds: [randomUUID()],
+      }),
+    ).toBe('unknown_funcao');
 
     expect(await listPeople(db, orgA)).toEqual([]);
     const assignments = await adminClient<{ count: string }[]>`
@@ -374,9 +405,15 @@ describe('sales operations funções persistence and RLS', () => {
     const dev = await createFuncao(db, orgA, { name: 'Desenvolvedor', status: 'active' });
     if (typeof dev === 'string') throw new Error(`unexpected sentinel: ${dev}`);
 
-    const updated = await updatePerson(db, orgA, seeded.id, {
-      funcaoIds: [dev.id, vendedor!.id],
-    });
+    const updated = await updatePerson(
+      db,
+      orgA,
+      seeded.id,
+      {
+        funcaoIds: [dev.id, vendedor!.id],
+      },
+      TEST_ACTOR,
+    );
     if (typeof updated === 'string') throw new Error(`unexpected sentinel: ${updated}`);
 
     const [listed] = await listPeople(db, orgA);
@@ -389,7 +426,7 @@ describe('sales operations funções persistence and RLS', () => {
     expect(listed.isCollaborator).toBe(true);
 
     // The mirrors are recomputed, not merged: dropping vendedor clears isSeller.
-    const narrowed = await updatePerson(db, orgA, seeded.id, { funcaoIds: [dev.id] });
+    const narrowed = await updatePerson(db, orgA, seeded.id, { funcaoIds: [dev.id] }, TEST_ACTOR);
     if (typeof narrowed === 'string') throw new Error(`unexpected sentinel: ${narrowed}`);
     expect(narrowed?.isSeller).toBe(false);
     expect(narrowed?.isCollaborator).toBe(true);
@@ -415,7 +452,13 @@ describe('sales operations funções persistence and RLS', () => {
     if (typeof person === 'string') throw new Error(`unexpected sentinel: ${person}`);
     expect(person.funcoes.map((funcao) => funcao.slug).sort()).toEqual(['finder', 'vendedor']);
 
-    const renamed = await updatePerson(db, orgA, person.id, { displayName: 'Cauet Pinciara' });
+    const renamed = await updatePerson(
+      db,
+      orgA,
+      person.id,
+      { displayName: 'Cauet Pinciara' },
+      TEST_ACTOR,
+    );
     if (typeof renamed === 'string') throw new Error(`unexpected sentinel: ${renamed}`);
     expect(renamed?.displayName).toBe('Cauet Pinciara');
     expect(renamed?.funcaoIds.sort()).toEqual(person.funcaoIds.sort());
@@ -423,13 +466,17 @@ describe('sales operations funções persistence and RLS', () => {
     expect(renamed?.isFinder).toBe(true);
 
     // Negative control: an explicitly empty set is a rejection, not a no-op.
-    expect(await updatePerson(db, orgA, person.id, { funcaoIds: [] })).toBe('funcao_required');
+    expect(await updatePerson(db, orgA, person.id, { funcaoIds: [] }, TEST_ACTOR)).toBe(
+      'funcao_required',
+    );
     const stillThere = await listPeople(db, orgA);
     expect(stillThere[0].funcaoIds).toHaveLength(2);
 
     // A patch against another org still cannot resolve the row.
     const [, orgB] = newOrgPair('untouched_other');
-    expect(await updatePerson(db, orgB, person.id, { displayName: 'hijack' })).toBeNull();
+    expect(
+      await updatePerson(db, orgB, person.id, { displayName: 'hijack' }, TEST_ACTOR),
+    ).toBeNull();
   });
 
   it('clears contactEmail when the Pessoa dialog omits the key, and keeps it when a value is sent', async () => {
@@ -464,7 +511,13 @@ describe('sales operations funções persistence and RLS', () => {
     ) as Partial<Parameters<typeof updatePerson>[3]>;
     expect('contactEmail' in blankedWire).toBe(false);
 
-    const cleared = await updatePerson(db, orgA, person.id, UpdatePersonSchema.parse(blankedWire));
+    const cleared = await updatePerson(
+      db,
+      orgA,
+      person.id,
+      UpdatePersonSchema.parse(blankedWire),
+      TEST_ACTOR,
+    );
     if (typeof cleared === 'string') throw new Error(`unexpected sentinel: ${cleared}`);
     expect(cleared?.contactEmail).toBeNull();
     const [stored] = await adminClient<{ contact_email: string | null }[]>`
@@ -474,10 +527,16 @@ describe('sales operations funções persistence and RLS', () => {
 
     // Positive control: a real address still round-trips, and an explicit empty
     // string clears just as an absent key does.
-    const reset = await updatePerson(db, orgA, person.id, { contactEmail: 'sig@fxl.example' });
+    const reset = await updatePerson(
+      db,
+      orgA,
+      person.id,
+      { contactEmail: 'sig@fxl.example' },
+      TEST_ACTOR,
+    );
     if (typeof reset === 'string') throw new Error(`unexpected sentinel: ${reset}`);
     expect(reset?.contactEmail).toBe('sig@fxl.example');
-    const emptied = await updatePerson(db, orgA, person.id, { contactEmail: '' });
+    const emptied = await updatePerson(db, orgA, person.id, { contactEmail: '' }, TEST_ACTOR);
     if (typeof emptied === 'string') throw new Error(`unexpected sentinel: ${emptied}`);
     expect(emptied?.contactEmail).toBeNull();
 
