@@ -1,0 +1,30 @@
+{
+  "status": "PASS",
+  "tested_commit": "5edc0868bbc8f1a61a1fb19a4942a096a1f40bea",
+  "done": true,
+  "evidence": {
+    "release_diff_check": {
+      "command": "git diff --check v2.3.1..HEAD",
+      "exit_code": 0
+    },
+    "historical_context_packs_unchanged_from_parent": {
+      "command": "git diff --exit-code 5edc0868bbc8f1a61a1fb19a4942a096a1f40bea^ 5edc0868bbc8f1a61a1fb19a4942a096a1f40bea -- nexo/runs/batch-20260803-auth-session/context-pack.md nexo/runs/batch-20260804-props-costs/context-pack.md",
+      "exit_code": 0
+    },
+    "context_pack_whitespace_attributes": {
+      "batch-20260803-auth-session": "unset",
+      "batch-20260804-props-costs": "unset"
+    },
+    "ordinary_file_negative_control": {
+      "created_with": "apply_patch",
+      "diff_check_exit_code": 2,
+      "reported": "trailing whitespace on line 1",
+      "cleaned_with": "apply_patch and git reset -q --",
+      "file_absent": true,
+      "index_entry_absent": true
+    },
+    "committed_scope": [
+      ".gitattributes"
+    ]
+  }
+}
