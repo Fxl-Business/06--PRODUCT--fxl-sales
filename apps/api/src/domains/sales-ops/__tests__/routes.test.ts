@@ -73,6 +73,24 @@ const personResult = {
 };
 
 let currentRole: TestRole;
+/**
+ * Stands in for the VERIFIED Hub token. `name`/`email` are what
+ * getHubActorDisplayName snapshots into the cadastro audit entry; setting it to
+ * a claims object with neither is how the "no display name" case is exercised.
+ */
+let currentHubClaims: { name?: string; email?: string } = {};
+
+function hubAuthContext() {
+  return {
+    accountId: 'verified-account',
+    workspaceId: 'verified-org',
+    claims: {
+      entitlements: { modules: ['sales.core'] },
+      roles: { workspace: 'admin' },
+      ...currentHubClaims,
+    },
+  };
+}
 
 function createTestApp() {
   const app = new Hono();
@@ -81,11 +99,20 @@ function createTestApp() {
     c.set('orgId', 'verified-org');
     c.set('userRole', currentRole);
     c.set('userRoles', currentRole ? [currentRole] : []);
+    c.set('hubAuth', hubAuthContext());
     await next();
   });
   app.route('/', salesOpsRouter);
   return app;
 }
+
+/**
+ * The actor every cadastro PATCH must thread through. Kept as a literal rather
+ * than expect.anything(): it is what proves the route takes the account id and
+ * the display name from the VERIFIED context and never from the request body -
+ * the same class of assertion this file already makes about orgId.
+ */
+const VERIFIED_ACTOR = { userId: 'verified-account', displayName: 'Ana Verificada' };
 
 const app = createTestApp();
 
@@ -187,6 +214,7 @@ const saleResult = {
 
 beforeEach(() => {
   currentRole = undefined;
+  currentHubClaims = { name: 'Ana Verificada' };
   vi.clearAllMocks();
   serviceMocks.listPeople.mockResolvedValue([personResult]);
   serviceMocks.createPerson.mockResolvedValue(personResult);
@@ -278,6 +306,43 @@ describe('Sales Ops people routes', () => {
       'verified-org',
       '11111111-1111-4111-8111-111111111111',
       expect.not.objectContaining({ orgId: expect.anything(), workspaceId: expect.anything() }),
+      VERIFIED_ACTOR,
+    );
+  });
+
+  it('snapshots a null display name when the verified token carries no name or email', async () => {
+    currentRole = 'admin';
+    currentHubClaims = {};
+
+    const response = await jsonRequest(
+      'PATCH',
+      '/people/11111111-1111-4111-8111-111111111111',
+    );
+
+    expect(response.status).toBe(200);
+    // null, never the account id: a raw Hub account id must never reach the field
+    // the history renders as a person's name.
+    expect(serviceMocks.updatePerson).toHaveBeenCalledWith(
+      mockedDb,
+      'verified-org',
+      '11111111-1111-4111-8111-111111111111',
+      expect.anything(),
+      { userId: 'verified-account', displayName: null },
+    );
+  });
+
+  it('falls back to the verified token e-mail when it carries no name', async () => {
+    currentRole = 'admin';
+    currentHubClaims = { email: 'ana@fxl.example' };
+
+    await jsonRequest('PATCH', '/people/11111111-1111-4111-8111-111111111111');
+
+    expect(serviceMocks.updatePerson).toHaveBeenCalledWith(
+      mockedDb,
+      'verified-org',
+      '11111111-1111-4111-8111-111111111111',
+      expect.anything(),
+      { userId: 'verified-account', displayName: 'ana@fxl.example' },
     );
   });
 });
@@ -321,6 +386,23 @@ describe('Sales Ops area routes', () => {
     );
 
     expect(response.status).toBe(404);
+  });
+
+  it('archives an area through PATCH with the verified actor', async () => {
+    const areaId = '22222222-2222-4222-8222-222222222222';
+
+    const response = await jsonRequestWithBody('PATCH', `/areas/${areaId}`, {
+      status: 'archived',
+    });
+
+    expect(response.status).toBe(200);
+    expect(serviceMocks.updateArea).toHaveBeenCalledWith(
+      mockedDb,
+      'verified-org',
+      areaId,
+      { status: 'archived' },
+      VERIFIED_ACTOR,
+    );
   });
 
   it('rejects a blank area name before service execution', async () => {
@@ -460,6 +542,7 @@ describe('Sales Ops funções routes', () => {
       'verified-org',
       funcaoId,
       { name: 'Designer' },
+      VERIFIED_ACTOR,
     );
   });
 
@@ -521,6 +604,7 @@ describe('Sales Ops pessoa função assignment', () => {
       'verified-org',
       personId,
       { funcaoIds },
+      VERIFIED_ACTOR,
     );
 
     serviceMocks.updatePerson.mockResolvedValueOnce('funcao_required');

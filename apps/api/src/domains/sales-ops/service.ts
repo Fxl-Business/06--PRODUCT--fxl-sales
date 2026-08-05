@@ -23,9 +23,95 @@ import {
   salesOpsSettings,
 } from '../../db/schema.js';
 import { setTenantContext } from '../../middleware/auth.js';
+import { writeAuditEntry, type CadastroEntityType } from '../audit/service.js';
 
 type Db = ReturnType<typeof getDb>;
 type Tx = { execute: (query: SQL) => Promise<unknown> };
+
+/**
+ * Who is performing a cadastro write. An OBJECT, not a bare string, on purpose:
+ * `orgId`, `id` and the actor id are all strings, and a fifth positional string
+ * parameter would let a transposition compile silently on the one field the
+ * audit ledger exists to record.
+ *
+ * `displayName` is the actor's name from the VERIFIED token, snapshotted into the
+ * ledger entry. It is the ONLY moment that name is knowable: there is no Hub
+ * account directory and no join from an account id to a pessoa, so a reader who
+ * does not find it here can never recover it. `null` is legitimate.
+ */
+export type CadastroActor = { userId: string; displayName: string | null };
+
+/**
+ * The archived spelling per cadastro: pessoas use 'inactive', everything else
+ * uses 'archived'. Read by cadastroLifecycleEvent and by nothing else.
+ */
+type ArchivedStatus = 'archived' | 'inactive';
+
+/**
+ * Classifies a status write as a lifecycle event, or as nothing at all.
+ *
+ * `null` for "no transition" is load-bearing, not defensive: the produto dialog
+ * and the pessoa dialog both submit their FULL row on every save, `status`
+ * included, so an ordinary rename arrives as a PATCH carrying status:'active'
+ * on an already-active row. Without this guard every save would append a
+ * spurious 'restored' entry and the history would be unreadable.
+ */
+function cadastroLifecycleEvent(
+  before: string,
+  after: string,
+  archived: ArchivedStatus,
+): 'cadastro.archived' | 'cadastro.restored' | null {
+  if (before === after) return null;
+  if (after === archived) return 'cadastro.archived';
+  if (after === 'active') return 'cadastro.restored';
+  return null;
+}
+
+/**
+ * Appends the archive/restore ledger entry for one cadastro write.
+ *
+ * MUST be handed the `tx` from withTenant, never `db`: writeAuditEntry takes
+ * FOR UPDATE on the ledger's tail row and the entry has to be atomic with the
+ * status change that produced it. Both parameters are typed `Db`, so passing
+ * `db` compiles - it just silently commits the entry outside the status write's
+ * transaction. See cadastro-archive-audit.test.ts for the rollback oracle.
+ *
+ * Call it LAST in the transaction body. The tail lock is global (audit_log has
+ * no org_id and no RLS), so it is held from here until COMMIT, and the cadastro
+ * row must already be locked before it - locking in that order is what makes a
+ * cycle between two concurrent archives impossible.
+ */
+async function auditCadastroLifecycle(
+  tx: Db,
+  input: {
+    actor: CadastroActor;
+    orgId: string;
+    entityType: CadastroEntityType;
+    entityId: string;
+    label: string;
+    before: string;
+    after: string;
+    archived: ArchivedStatus;
+  },
+): Promise<void> {
+  const action = cadastroLifecycleEvent(input.before, input.after, input.archived);
+  if (!action) return;
+  await writeAuditEntry(tx, {
+    actorUserId: input.actor.userId,
+    // Never null for a cadastro entry: the org-scoped history read is filtered by
+    // actor_org_id, so a null here would hide the row from its own tenant forever.
+    actorOrgId: input.orgId,
+    action,
+    entityType: input.entityType,
+    entityId: input.entityId,
+    beforeJsonb: { status: input.before },
+    // `actorLabel` is snapshotted here because this is the only place it is
+    // knowable: there is no Hub account directory, so a reader can never resolve
+    // actor_user_id to a name. The history read projects it with
+    // `after_jsonb ->> 'actorLabel'`, so it stays one scalar and never a blob.
+    afterJsonb: { status: input.after, label: input.label, actorLabel: input.actor.displayName },
+  });
+}
 
 const uuid = z.string().uuid();
 const money = z.number().int().nonnegative();
@@ -1416,16 +1502,21 @@ export async function updatePerson(
   orgId: string,
   id: string,
   data: Partial<PersonInput>,
+  actor: CadastroActor,
 ): Promise<PersonWithFuncoes | null | 'unknown_funcao' | 'funcao_required'> {
   return withTenant(db, orgId, async (tx) => {
     const plan = planPersonFuncoes(data, 'update');
     if (plan === 'funcao_required') return 'funcao_required';
 
+    // FOR UPDATE, not a plain read: without the row lock two concurrent archives
+    // of the same pessoa can each read 'active' and each append an entry. Same
+    // reason lockCommission takes it in the commissions service.
     const [current] = await tx
       .select()
       .from(salesOpsPeople)
       .where(and(eq(salesOpsPeople.orgId, orgId), eq(salesOpsPeople.id, id)))
-      .limit(1);
+      .limit(1)
+      .for('update');
     if (!current) return null;
 
     let resolved: FuncaoRow[] | null = null;
@@ -1456,13 +1547,29 @@ export async function updatePerson(
       .returning();
     if (!person) return null;
 
+    // Both return paths converge into one local so the audit call happens exactly
+    // once, as the LAST statement in the transaction - after the child-table write.
+    let updated: PersonWithFuncoes;
     if (resolved) {
       await replacePersonFuncoes(tx, orgId, id, resolved.map((funcao) => funcao.id));
       const funcoes = toAttached(resolved);
-      return { ...person, funcoes, funcaoIds: funcoes.map((funcao) => funcao.id) };
+      updated = { ...person, funcoes, funcaoIds: funcoes.map((funcao) => funcao.id) };
+    } else {
+      const [attached] = await attachPersonFuncoes(tx, orgId, [person]);
+      updated = attached!;
     }
-    const [attached] = await attachPersonFuncoes(tx, orgId, [person]);
-    return attached!;
+
+    await auditCadastroLifecycle(tx, {
+      actor,
+      orgId,
+      entityType: 'pessoa',
+      entityId: id,
+      label: updated.displayName,
+      before: current.status,
+      after: person.status,
+      archived: 'inactive',
+    });
+    return updated;
   });
 }
 
@@ -1520,13 +1627,17 @@ export async function updateFuncao(
   orgId: string,
   id: string,
   data: Partial<FuncaoInput>,
+  actor: CadastroActor,
 ) {
   return withTenant(db, orgId, async (tx) => {
+    // FOR UPDATE: the row lock is what makes two concurrent archives of the same
+    // função collapse into one ledger entry rather than two.
     const [current] = await tx
       .select()
       .from(salesOpsFuncoes)
       .where(and(eq(salesOpsFuncoes.orgId, orgId), eq(salesOpsFuncoes.id, id)))
-      .limit(1);
+      .limit(1)
+      .for('update');
     if (!current) return null;
     // The two predefined app roles are fully immutable through the API: no
     // rename, no archive, no delete.
@@ -1550,8 +1661,9 @@ export async function updateFuncao(
     // 409 reasons. The write runs inside a SAVEPOINT (a nested drizzle
     // transaction) so a rejected rename leaves the surrounding transaction usable
     // rather than poisoned.
+    let funcao: FuncaoRow | null;
     try {
-      const funcao = await tx.transaction(async (nested) => {
+      funcao = await tx.transaction(async (nested) => {
         const [row] = await nested
           .update(salesOpsFuncoes)
           .set({ ...data, ...(slug !== undefined ? { slug } : {}), updatedAt: new Date() })
@@ -1559,12 +1671,29 @@ export async function updateFuncao(
           .returning();
         return row ?? null;
       });
-      return funcao;
     } catch (error) {
       const violated = mapFuncaoUniqueViolation(error);
       if (violated) return violated;
       throw error;
     }
+    if (!funcao) return null;
+
+    // OUTSIDE the savepoint, and outside the catch, deliberately. Inside the
+    // savepoint a rolled-back rename would take the ledger row with it while the
+    // outer transaction committed, and the global tail lock would be taken inside
+    // a subtransaction that may vanish. Inside the catch, an unrelated ledger
+    // failure could be misread as a função unique violation.
+    await auditCadastroLifecycle(tx, {
+      actor,
+      orgId,
+      entityType: 'funcao',
+      entityId: id,
+      label: funcao.name,
+      before: current.status,
+      after: funcao.status,
+      archived: 'archived',
+    });
+    return funcao;
   });
 }
 
@@ -1862,13 +1991,17 @@ export async function updateProduct(
   orgId: string,
   id: string,
   data: Partial<ProductInput>,
+  actor: CadastroActor,
 ): Promise<ProductWithCosts | typeof INVALID_PRODUCT_ENTRADA_VALUE | null> {
   return withTenant(db, orgId, async (tx) => {
+    // FOR UPDATE: the row lock is what makes two concurrent archives of the same
+    // produto collapse into one ledger entry rather than two.
     const [current] = await tx
       .select()
       .from(salesOpsProducts)
       .where(and(eq(salesOpsProducts.orgId, orgId), eq(salesOpsProducts.id, id)))
-      .limit(1);
+      .limit(1)
+      .for('update');
     if (!current) return null;
 
     const kind = resolveProductKind(data, current.kind as ProductKind);
@@ -1903,10 +2036,21 @@ export async function updateProduct(
     if (data.productFuncaoCosts !== undefined) {
       await replaceProductFuncaoCosts(tx, orgId, id, data.productFuncaoCosts);
     }
-    return {
+    const result = {
       product,
       productFuncaoCosts: await selectProductFuncaoCosts(tx, orgId, id),
     };
+    await auditCadastroLifecycle(tx, {
+      actor,
+      orgId,
+      entityType: 'produto',
+      entityId: id,
+      label: product.name,
+      before: current.status,
+      after: product.status,
+      archived: 'archived',
+    });
+    return result;
   });
 }
 
@@ -1998,8 +2142,26 @@ export async function createArea(db: Db, orgId: string, data: AreaInput) {
   });
 }
 
-export async function updateArea(db: Db, orgId: string, id: string, data: Partial<AreaInput>) {
+export async function updateArea(
+  db: Db,
+  orgId: string,
+  id: string,
+  data: Partial<AreaInput>,
+  actor: CadastroActor,
+) {
   return withTenant(db, orgId, async (tx) => {
+    // FOR UPDATE: the row lock is what makes two concurrent archives of the same
+    // área collapse into one ledger entry rather than two. Returning null when the
+    // row is absent preserves today's behaviour exactly - the UPDATE below would
+    // have matched nothing and returned null for an unknown or cross-org id.
+    const [current] = await tx
+      .select()
+      .from(salesOpsAreas)
+      .where(and(eq(salesOpsAreas.orgId, orgId), eq(salesOpsAreas.id, id)))
+      .limit(1)
+      .for('update');
+    if (!current) return null;
+
     if (data.name !== undefined) {
       const [existing] = await tx
         .select({ id: salesOpsAreas.id })
@@ -2019,7 +2181,18 @@ export async function updateArea(db: Db, orgId: string, id: string, data: Partia
       .set({ ...data, updatedAt: new Date() })
       .where(and(eq(salesOpsAreas.orgId, orgId), eq(salesOpsAreas.id, id)))
       .returning();
-    return area ?? null;
+    if (!area) return null;
+    await auditCadastroLifecycle(tx, {
+      actor,
+      orgId,
+      entityType: 'area',
+      entityId: id,
+      label: area.name,
+      before: current.status,
+      after: area.status,
+      archived: 'archived',
+    });
+    return area;
   });
 }
 

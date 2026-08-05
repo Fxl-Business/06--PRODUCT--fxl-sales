@@ -33,8 +33,30 @@ export const AuditActionSchema = z.enum([
   'commission.approve',
   'commission.reverse',
   'payout.mark_paid',
+  'cadastro.archived',
+  'cadastro.restored',
 ]);
 export type AuditAction = z.infer<typeof AuditActionSchema>;
+
+/**
+ * The four sales-ops cadastros whose archive/restore lifecycle is audited.
+ *
+ * These four strings, together with the two action names in
+ * CADASTRO_LIFECYCLE_ACTIONS, are a WIRE CONTRACT and not an internal detail: the
+ * org-scoped history read returns `entityType` and `action` verbatim as free
+ * text, and the web panel matches on exactly these eight literals. Nothing
+ * type-checks the pair across the API/web boundary, so renaming any of them
+ * silently turns every history row read-only in the UI.
+ *
+ * The values are pt-BR without diacritics because that is what the routes, the
+ * error sentinels (`funcao_is_system`, `area_name_taken`) and the UI already call
+ * these four things, and because the value lands in a URL query string.
+ */
+export const CadastroEntityTypeSchema = z.enum(['produto', 'pessoa', 'funcao', 'area']);
+export type CadastroEntityType = z.infer<typeof CadastroEntityTypeSchema>;
+
+/** The two lifecycle actions the cadastro history reads back. */
+export const CADASTRO_LIFECYCLE_ACTIONS = ['cadastro.archived', 'cadastro.restored'] as const;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Pure helpers (unit-tested in __tests__/service.test.ts)

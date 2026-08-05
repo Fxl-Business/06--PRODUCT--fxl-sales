@@ -1,6 +1,7 @@
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import { getDb } from '../../db/client.js';
+import { getHubActorDisplayName } from '../../middleware/app-auth.js';
 import { requireAdmin } from '../../middleware/require-admin.js';
 import {
   AreaSchema,
@@ -51,6 +52,18 @@ const saleIdSchema = z.string().uuid();
 
 export const salesOpsRouter = new Hono();
 
+/**
+ * Who is performing this cadastro write, taken from the VERIFIED context and
+ * never from the request body. `c.get('userId')` is the Hub account id
+ * appAuthMiddleware set from the verified token; the display name is snapshotted
+ * into the ledger entry because there is no Hub account directory to resolve it
+ * from later. `/api/v1/sales-ops/*` is behind appAuthMiddleware, so both are
+ * always populated.
+ */
+function cadastroActor(c: Context): { userId: string; displayName: string | null } {
+  return { userId: c.get('userId'), displayName: getHubActorDisplayName(c.get('hubAuth')) };
+}
+
 salesOpsRouter.get('/bootstrap', async (c) => {
   const snapshot = await getSalesOpsSnapshot(getDb(), c.get('orgId'));
   return c.json(snapshot);
@@ -93,7 +106,13 @@ salesOpsRouter.patch('/people/:id', requireAdmin, async (c) => {
   if (!parsed.success) {
     return c.json({ error: 'validation_error', issues: parsed.error.flatten() }, 400);
   }
-  const person = await updatePerson(getDb(), c.get('orgId'), c.req.param('id'), parsed.data);
+  const person = await updatePerson(
+    getDb(),
+    c.get('orgId'),
+    c.req.param('id'),
+    parsed.data,
+    cadastroActor(c),
+  );
   if (isPersonFuncaoError(person)) {
     return c.json({ error: 'validation_error', reason: person }, 400);
   }
@@ -142,7 +161,13 @@ salesOpsRouter.patch('/products/:id', async (c) => {
       400,
     );
   }
-  const updated = await updateProduct(getDb(), c.get('orgId'), c.req.param('id'), parsed.data);
+  const updated = await updateProduct(
+    getDb(),
+    c.get('orgId'),
+    c.req.param('id'),
+    parsed.data,
+    cadastroActor(c),
+  );
   if (updated === INVALID_PRODUCT_ENTRADA_VALUE) {
     return c.json({ error: 'validation_error', reason: 'entrada_mode_value_mismatch' }, 400);
   }
@@ -194,7 +219,13 @@ salesOpsRouter.patch('/areas/:id', async (c) => {
   if (!parsed.success) {
     return c.json({ error: 'validation_error', issues: parsed.error.flatten() }, 400);
   }
-  const area = await updateArea(getDb(), c.get('orgId'), c.req.param('id'), parsed.data);
+  const area = await updateArea(
+    getDb(),
+    c.get('orgId'),
+    c.req.param('id'),
+    parsed.data,
+    cadastroActor(c),
+  );
   if (area === 'duplicate') return c.json({ error: 'conflict', reason: 'area_name_taken' }, 409);
   if (!area) return c.json({ error: 'not_found' }, 404);
   return c.json({ area });
@@ -231,7 +262,13 @@ salesOpsRouter.patch('/funcoes/:id', requireAdmin, async (c) => {
   if (!parsed.success) {
     return c.json({ error: 'validation_error', issues: parsed.error.flatten() }, 400);
   }
-  const funcao = await updateFuncao(getDb(), c.get('orgId'), c.req.param('id'), parsed.data);
+  const funcao = await updateFuncao(
+    getDb(),
+    c.get('orgId'),
+    c.req.param('id'),
+    parsed.data,
+    cadastroActor(c),
+  );
   if (funcao === 'reserved_slug') {
     return c.json({ error: 'validation_error', reason: 'reserved_funcao_slug' }, 400);
   }

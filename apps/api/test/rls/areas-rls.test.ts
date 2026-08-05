@@ -12,6 +12,14 @@ import {
   updateArea,
 } from '../../src/domains/sales-ops/service.js';
 
+/**
+ * The actor threaded through every sales-ops cadastro write. Only the
+ * archive/restore lifecycle is audited, so most calls here produce no ledger row
+ * at all - but the parameter is required, and passing it is what keeps these
+ * suites exercising the real route-to-service signature.
+ */
+const TEST_ACTOR = { userId: 'acct_rls_test', displayName: 'RLS Test Actor' } as const;
+
 const APP_DB_URL =
   process.env.TEST_DATABASE_URL ??
   process.env.DATABASE_URL ??
@@ -45,7 +53,16 @@ describe('sales operations areas persistence and RLS', () => {
   });
 
   afterAll(async () => {
+    // This file archives an área, so it now appends to the hash-chained audit_log
+    // and must clean up after itself or it breaks conversion-ingest.test.ts's
+    // genesis-anchored chain assertion. The delete is only safe because
+    // apps/api/vitest.config.ts sets `fileParallelism: false` for the integration
+    // project: this afterAll runs before the next file's first statement, so the
+    // rows written here are still the ledger TAIL and a tail delete leaves the
+    // remaining chain contiguous. With file parallelism on it would punch a hole
+    // mid-chain and verifyChain would fail everywhere.
     for (const orgId of orgIds) {
+      await adminClient`DELETE FROM audit_log WHERE actor_org_id = ${orgId}`;
       await adminClient`DELETE FROM sales_ops_products WHERE org_id = ${orgId}`;
       await adminClient`DELETE FROM sales_ops_areas WHERE org_id = ${orgId}`;
     }
@@ -67,9 +84,9 @@ describe('sales operations areas persistence and RLS', () => {
 
     expect(await listAreas(db, orgB)).toEqual([]);
     expect(await getArea(db, orgB, areaA.id)).toBeNull();
-    expect(await updateArea(db, orgB, areaA.id, { name: 'hijack' })).toBeNull();
+    expect(await updateArea(db, orgB, areaA.id, { name: 'hijack' }, TEST_ACTOR)).toBeNull();
 
-    const archived = await updateArea(db, orgA, areaA.id, { status: 'archived' });
+    const archived = await updateArea(db, orgA, areaA.id, { status: 'archived' }, TEST_ACTOR);
     if (archived === 'duplicate') throw new Error('unexpected duplicate');
     expect(archived?.status).toBe('archived');
     expect(archived?.updatedAt).not.toBeNull();

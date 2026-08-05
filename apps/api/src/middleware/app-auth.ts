@@ -20,8 +20,27 @@ export type MinimalHubAuthContext = {
       workspace: string;
     };
     isSuperAdmin?: boolean;
+    /** Present on the Hub access token; the web reads the same two claims. */
+    name?: string;
+    email?: string;
   };
 };
+
+/**
+ * The caller's own display name from the VERIFIED token. Returns null rather
+ * than falling back to the account id - a raw account id is never a label.
+ *
+ * This is the ONLY moment that name is knowable inside this product: there is no
+ * Hub account directory and no join from an account id to a pessoa, so anything
+ * that wants to name a third-party actor later has to snapshot it here.
+ */
+export function getHubActorDisplayName(auth: MinimalHubAuthContext | undefined): string | null {
+  const name = auth?.claims?.name;
+  if (typeof name === 'string' && name.trim() !== '') return name;
+  const email = auth?.claims?.email;
+  if (typeof email === 'string' && email.trim() !== '') return email;
+  return null;
+}
 
 type AppRole = 'admin' | 'seller' | 'finder';
 
