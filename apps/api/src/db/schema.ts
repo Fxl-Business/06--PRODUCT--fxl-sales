@@ -827,6 +827,7 @@ export const salesOpsSaleProfessionals = pgTable(
   (t) => [
     index('sales_ops_sale_professionals_sale_id_idx').on(t.saleId),
     index('sales_ops_sale_professionals_org_funcao_idx').on(t.orgId, t.funcaoId),
+    uniqueIndex('sales_ops_sale_professionals_org_sale_id_id_idx').on(t.orgId, t.saleId, t.id),
     // Composite, mirroring sales_ops_person_funcoes_org_funcao_fk and
     // sales_ops_product_funcao_costs_org_funcao_fk. A single-column FK on
     // funcao_id does NOT consult the RLS predicate, so org A could pin org B's
@@ -872,6 +873,7 @@ export const salesOpsPayables = pgTable(
     receivableId: uuid('receivable_id').references(() => salesOpsReceivables.id, {
       onDelete: 'set null',
     }),
+    saleProfessionalId: uuid('sale_professional_id'),
     dueDate: timestamp('due_date', { withTimezone: true }).notNull(),
     amountBrl: integer('amount_brl').notNull(),
     status: text('status').notNull().default('open'), // 'open' | 'paid' | 'void'
@@ -879,6 +881,16 @@ export const salesOpsPayables = pgTable(
   (t) => [
     index('sales_ops_payables_org_status_idx').on(t.orgId, t.status),
     index('sales_ops_payables_sale_id_idx').on(t.saleId),
+    index('sales_ops_payables_sale_professional_id_idx').on(t.saleProfessionalId),
+    foreignKey({
+      columns: [t.orgId, t.saleId, t.saleProfessionalId],
+      foreignColumns: [
+        salesOpsSaleProfessionals.orgId,
+        salesOpsSaleProfessionals.saleId,
+        salesOpsSaleProfessionals.id,
+      ],
+      name: 'sales_ops_payables_org_sale_professional_fk',
+    }).onDelete('restrict'),
   ],
 );
 

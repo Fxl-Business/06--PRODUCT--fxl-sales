@@ -286,7 +286,7 @@ describe('sales operations sale ledger', () => {
         taxPct: 6,
         otherCostsBrl: 60000,
       },
-      professionals: [{ personName: 'Rafael Nunes', costBrl: 240000 }],
+      professionals: [{ id: 'professional-rafael', personName: 'Rafael Nunes', costBrl: 240000 }],
       receivables: [
         { id: 'r1', dueDate: '2026-07-29', amountBrl: 2000000, status: 'open' },
         { id: 'r2', dueDate: '2026-08-29', amountBrl: 333333, status: 'void' },
@@ -304,6 +304,7 @@ describe('sales operations sale ledger', () => {
         amountBrl: 200000,
         status: 'open',
         receivableId: 'r1',
+        saleProfessionalId: null,
       },
       {
         beneficiaryName: 'Carlinhos',
@@ -312,6 +313,7 @@ describe('sales operations sale ledger', () => {
         amountBrl: 60000,
         status: 'open',
         receivableId: 'r1',
+        saleProfessionalId: null,
       },
       {
         beneficiaryName: 'Impostos',
@@ -320,6 +322,7 @@ describe('sales operations sale ledger', () => {
         amountBrl: 120000,
         status: 'open',
         receivableId: 'r1',
+        saleProfessionalId: null,
       },
       {
         beneficiaryName: 'Ana Martins',
@@ -328,6 +331,7 @@ describe('sales operations sale ledger', () => {
         amountBrl: 33333,
         status: 'open',
         receivableId: 'r3',
+        saleProfessionalId: null,
       },
       {
         beneficiaryName: 'Carlinhos',
@@ -336,6 +340,7 @@ describe('sales operations sale ledger', () => {
         amountBrl: 9999,
         status: 'open',
         receivableId: 'r3',
+        saleProfessionalId: null,
       },
       {
         beneficiaryName: 'Impostos',
@@ -344,6 +349,7 @@ describe('sales operations sale ledger', () => {
         amountBrl: 19999,
         status: 'open',
         receivableId: 'r3',
+        saleProfessionalId: null,
       },
       {
         beneficiaryName: 'Ana Martins',
@@ -352,6 +358,7 @@ describe('sales operations sale ledger', () => {
         amountBrl: 33333,
         status: 'open',
         receivableId: 'r4',
+        saleProfessionalId: null,
       },
       {
         beneficiaryName: 'Carlinhos',
@@ -360,6 +367,7 @@ describe('sales operations sale ledger', () => {
         amountBrl: 9999,
         status: 'open',
         receivableId: 'r4',
+        saleProfessionalId: null,
       },
       {
         beneficiaryName: 'Impostos',
@@ -368,6 +376,7 @@ describe('sales operations sale ledger', () => {
         amountBrl: 19999,
         status: 'open',
         receivableId: 'r4',
+        saleProfessionalId: null,
       },
       /*
         The professional cost is split pro rata over the three SURVIVING
@@ -382,6 +391,7 @@ describe('sales operations sale ledger', () => {
         amountBrl: 180000,
         status: 'open',
         receivableId: 'r1',
+        saleProfessionalId: 'professional-rafael',
       },
       {
         beneficiaryName: 'Rafael Nunes',
@@ -390,6 +400,7 @@ describe('sales operations sale ledger', () => {
         amountBrl: 29976,
         status: 'open',
         receivableId: 'r3',
+        saleProfessionalId: 'professional-rafael',
       },
       {
         beneficiaryName: 'Rafael Nunes',
@@ -398,6 +409,7 @@ describe('sales operations sale ledger', () => {
         amountBrl: 30024,
         status: 'open',
         receivableId: 'r4',
+        saleProfessionalId: 'professional-rafael',
       },
       {
         beneficiaryName: 'Outros custos',
@@ -406,6 +418,7 @@ describe('sales operations sale ledger', () => {
         amountBrl: 60000,
         status: 'open',
         receivableId: null,
+        saleProfessionalId: null,
       },
     ]);
   });

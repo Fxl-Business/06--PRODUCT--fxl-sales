@@ -9,7 +9,9 @@
  *
  * Run: pnpm --filter @fxl-sales/api test:integration
  */
-import { and, eq } from 'drizzle-orm';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { and, eq, sql } from 'drizzle-orm';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { closeDb, getAdminDb, getDb } from '../../../db/client.js';
 import {
@@ -23,6 +25,10 @@ import { cancelContract, transitionSale } from '../service.js';
 
 const seededOrgIds: string[] = [];
 const sequenceCounters = new Map<string, number>();
+const professionalPayableMigrationPath = resolve(
+  process.cwd(),
+  'drizzle/0018_professional_payable_identity.sql',
+);
 
 function must<T>(v: T | undefined): T {
   if (v === undefined) throw new Error('expected a row, got undefined');
@@ -160,7 +166,7 @@ describe('transitionSale', () => {
       dueDate: new Date('2026-09-01T00:00:00.000Z'),
       amountBrl: 500000,
     });
-    await seedProfessional(orgId, sale.id, { costBrl: 40000 });
+    const professional = await seedProfessional(orgId, sale.id, { costBrl: 40000 });
 
     const result = await transitionSale(getDb(), orgId, sale.id, 'won');
 
@@ -192,7 +198,13 @@ describe('transitionSale', () => {
     const professionalPayables = payables.filter((p) => p.kind === 'professional_cost');
     expect(professionalPayables).toHaveLength(2);
     expect(professionalPayables.every((p) => p.receivableId !== null)).toBe(true);
+    expect(professionalPayables.every((p) => p.saleProfessionalId === professional.id)).toBe(true);
     expect(professionalPayables.reduce((sum, p) => sum + p.amountBrl, 0)).toBe(40000);
+    expect(
+      payables
+        .filter((p) => p.kind !== 'professional_cost')
+        .every((p) => p.saleProfessionalId === null),
+    ).toBe(true);
 
     // `other_cost` is the only kind left with a null receivable_id.
     const oneShots = payables.filter((p) => p.receivableId === null);
@@ -238,6 +250,179 @@ describe('transitionSale', () => {
     const others = payablesAfter.filter((p) => p.id !== must(firstPayable).id);
     expect(others.length).toBeGreaterThan(0);
     expect(others.every((p) => p.status === 'void')).toBe(true);
+  });
+
+  it('re-win creates exactly one missing payable for same-name professionals', async () => {
+    const orgId = `org_st_same_name_${crypto.randomUUID()}`;
+    seededOrgIds.push(orgId);
+
+    const sale = await seedSale(orgId, {
+      status: 'open',
+      sellerCommissionPct: '0.00',
+      finderCommissionPct: '0.00',
+      taxPct: '0.00',
+      otherCostsBrl: 0,
+    });
+    await seedReceivable(orgId, sale.id, { amountBrl: 200000 });
+    await seedProfessional(orgId, sale.id, {
+      personNameSnapshot: 'Profissional Homonimo',
+      costBrl: 100000,
+    });
+    await seedProfessional(orgId, sale.id, {
+      personNameSnapshot: 'Profissional Homonimo',
+      costBrl: 100000,
+    });
+
+    const firstWin = await transitionSale(getDb(), orgId, sale.id, 'won');
+    expect(firstWin.ok).toBe(true);
+
+    const adminDb = getAdminDb();
+    const firstRows = (
+      await adminDb.select().from(salesOpsPayables).where(eq(salesOpsPayables.saleId, sale.id))
+    ).filter((row) => row.kind === 'professional_cost');
+    expect(firstRows).toHaveLength(2);
+    const paid = must(firstRows[0]);
+    await adminDb
+      .update(salesOpsPayables)
+      .set({ status: 'paid' })
+      .where(eq(salesOpsPayables.id, paid.id));
+
+    const reopened = await transitionSale(getDb(), orgId, sale.id, 'open');
+    expect(reopened.ok).toBe(true);
+    const secondWin = await transitionSale(getDb(), orgId, sale.id, 'won');
+    expect(secondWin.ok).toBe(true);
+
+    const allRows = (
+      await adminDb.select().from(salesOpsPayables).where(eq(salesOpsPayables.saleId, sale.id))
+    ).filter((row) => row.kind === 'professional_cost');
+    const activeRows = allRows.filter((row) => row.status !== 'void');
+    const newlyActiveRows = activeRows.filter((row) => row.id !== paid.id);
+
+    expect(activeRows).toHaveLength(2);
+    expect(activeRows.reduce((sum, row) => sum + row.amountBrl, 0)).toBe(200000);
+    expect(newlyActiveRows).toHaveLength(1);
+    expect(newlyActiveRows[0]?.status).toBe('open');
+  });
+
+  it('migration backfill links only one org-sale-snapshot match and leaves ambiguous rows null', async () => {
+    const uniqueOrgId = `org_st_backfill_unique_${crypto.randomUUID()}`;
+    const ambiguousOrgId = `org_st_backfill_ambiguous_${crypto.randomUUID()}`;
+    const otherOrgId = `org_st_backfill_other_${crypto.randomUUID()}`;
+    seededOrgIds.push(uniqueOrgId, ambiguousOrgId, otherOrgId);
+
+    const uniqueSale = await seedSale(uniqueOrgId);
+    const uniqueProfessional = await seedProfessional(uniqueOrgId, uniqueSale.id, {
+      personNameSnapshot: 'Snapshot Unico',
+    });
+    const ambiguousSale = await seedSale(ambiguousOrgId);
+    await seedProfessional(ambiguousOrgId, ambiguousSale.id, {
+      personNameSnapshot: 'Snapshot Ambiguo',
+    });
+    await seedProfessional(ambiguousOrgId, ambiguousSale.id, {
+      personNameSnapshot: 'Snapshot Ambiguo',
+    });
+    const otherSale = await seedSale(otherOrgId);
+    await seedProfessional(otherOrgId, otherSale.id, {
+      personNameSnapshot: 'Snapshot Unico',
+    });
+
+    const adminDb = getAdminDb();
+    const [uniquePayable] = await adminDb
+      .insert(salesOpsPayables)
+      .values({
+        orgId: uniqueOrgId,
+        saleId: uniqueSale.id,
+        beneficiaryName: 'Snapshot Unico',
+        kind: 'professional_cost',
+        dueDate: new Date('2026-08-01T00:00:00.000Z'),
+        amountBrl: 40000,
+        status: 'paid',
+      })
+      .returning();
+    const [ambiguousPayable] = await adminDb
+      .insert(salesOpsPayables)
+      .values({
+        orgId: ambiguousOrgId,
+        saleId: ambiguousSale.id,
+        beneficiaryName: 'Snapshot Ambiguo',
+        kind: 'professional_cost',
+        dueDate: new Date('2026-08-01T00:00:00.000Z'),
+        amountBrl: 40000,
+        status: 'paid',
+      })
+      .returning();
+
+    const backfill = readFileSync(professionalPayableMigrationPath, 'utf8')
+      .split('--> statement-breakpoint')
+      .map((statement) => statement.trim())
+      .find((statement) => statement.startsWith('WITH "unambiguous_professional_matches"'));
+    if (!backfill) throw new Error('professional payable identity backfill not found');
+
+    await adminDb.execute(sql.raw(backfill));
+
+    const readIdentity = async (id: string) => {
+      const [row] = await adminDb
+        .select({ saleProfessionalId: salesOpsPayables.saleProfessionalId })
+        .from(salesOpsPayables)
+        .where(eq(salesOpsPayables.id, id));
+      return must(row).saleProfessionalId;
+    };
+    expect(await readIdentity(must(uniquePayable).id)).toBe(uniqueProfessional.id);
+    expect(await readIdentity(must(ambiguousPayable).id)).toBeNull();
+
+    await adminDb.execute(sql.raw(backfill));
+    expect(await readIdentity(must(uniquePayable).id)).toBe(uniqueProfessional.id);
+    expect(await readIdentity(must(ambiguousPayable).id)).toBeNull();
+  });
+
+  it('payable professional identity rejects another organization and another sale', async () => {
+    const orgA = `org_st_fk_a_${crypto.randomUUID()}`;
+    const orgB = `org_st_fk_b_${crypto.randomUUID()}`;
+    seededOrgIds.push(orgA, orgB);
+
+    const saleA = await seedSale(orgA);
+    const otherSaleA = await seedSale(orgA);
+    const saleB = await seedSale(orgB);
+    const matchingProfessional = await seedProfessional(orgA, saleA.id);
+    const otherSaleProfessional = await seedProfessional(orgA, otherSaleA.id);
+    const otherOrgProfessional = await seedProfessional(orgB, saleB.id);
+    const adminDb = getAdminDb();
+    const payableValues = {
+      orgId: orgA,
+      saleId: saleA.id,
+      beneficiaryName: 'Rafael Nunes',
+      kind: 'professional_cost',
+      dueDate: new Date('2026-08-01T00:00:00.000Z'),
+      amountBrl: 40000,
+      status: 'open',
+    } as const;
+    const expectForeignKeyViolation = async (query: Promise<unknown>) => {
+      try {
+        await query;
+        throw new Error('expected composite foreign key violation');
+      } catch (error) {
+        expect((error as { cause?: { code?: string } }).cause?.code).toBe('23503');
+      }
+    };
+
+    await expectForeignKeyViolation(
+      adminDb.insert(salesOpsPayables).values({
+        ...payableValues,
+        saleProfessionalId: otherOrgProfessional.id,
+      }),
+    );
+    await expectForeignKeyViolation(
+      adminDb.insert(salesOpsPayables).values({
+        ...payableValues,
+        saleProfessionalId: otherSaleProfessional.id,
+      }),
+    );
+
+    const [inserted] = await adminDb
+      .insert(salesOpsPayables)
+      .values({ ...payableValues, saleProfessionalId: matchingProfessional.id })
+      .returning();
+    expect(must(inserted).saleProfessionalId).toBe(matchingProfessional.id);
   });
 });
 

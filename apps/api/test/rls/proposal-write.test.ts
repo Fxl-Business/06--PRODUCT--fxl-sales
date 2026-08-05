@@ -179,14 +179,24 @@ describe('proposal write backend (create v2 + update + payable materialization)'
       SELECT id, amount_brl FROM sales_ops_receivables WHERE sale_id = ${result.sale.id}`;
     expect(receivable).toHaveLength(1);
     const receivableId = (receivable[0] as { id: string }).id;
+    const professionals = await adminClient`
+      SELECT id FROM sales_ops_sale_professionals WHERE sale_id = ${result.sale.id}`;
+    expect(professionals).toHaveLength(1);
+    const professionalId = (professionals[0] as { id: string }).id;
 
     const payables = await adminClient`
-      SELECT kind, amount_brl, receivable_id, beneficiary_name FROM sales_ops_payables
+      SELECT kind, amount_brl, receivable_id, beneficiary_name, sale_professional_id
+      FROM sales_ops_payables
       WHERE sale_id = ${result.sale.id} ORDER BY kind ASC, amount_brl DESC`;
     const byKind = Object.fromEntries(
       payables.map((row) => [
         (row as { kind: string }).kind,
-        row as { amount_brl: number; receivable_id: string | null; beneficiary_name: string },
+        row as {
+          amount_brl: number;
+          receivable_id: string | null;
+          beneficiary_name: string;
+          sale_professional_id: string | null;
+        },
       ]),
     );
 
@@ -197,9 +207,13 @@ describe('proposal write backend (create v2 + update + payable materialization)'
     expect(byKind.professional_cost?.amount_brl).toBe(100000);
     // One parcela, so the whole cost lands on it — but it IS linked now.
     expect(byKind.professional_cost?.receivable_id).toBe(receivableId);
+    expect(byKind.professional_cost?.sale_professional_id).toBe(professionalId);
     expect(byKind.other_cost?.amount_brl).toBe(20000);
     // Positive control for Decision 5: `other_cost` alone stays one-shot.
     expect(byKind.other_cost?.receivable_id).toBeNull();
+    expect(byKind.seller_commission?.sale_professional_id).toBeNull();
+    expect(byKind.tax?.sale_professional_id).toBeNull();
+    expect(byKind.other_cost?.sale_professional_id).toBeNull();
     expect(byKind.finder_commission).toBeUndefined();
   });
 
