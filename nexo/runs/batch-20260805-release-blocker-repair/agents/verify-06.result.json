@@ -1,0 +1,93 @@
+{
+  "status": "PASS",
+  "agent": "verify",
+  "slice": "06-phased-professional-identity-migration",
+  "report": "nexo/runs/batch-20260805-release-blocker-repair/verify-06.md",
+  "tested_head": "00d83854a01bd9e6da2b133b972c80faf6536c6b",
+  "base": "deaf757",
+  "commands": [
+    {
+      "command": "pnpm run build:packages",
+      "status": "PASS",
+      "evidence": "shared types and shared utils builds exited 0"
+    },
+    {
+      "command": "pnpm --filter @fxl-sales/api exec vitest run src/domains/sales-ops/__tests__/professional-payable-identity.test.ts src/config/__tests__/docker-migration-contract.test.ts src/db/__tests__/migration-runner.test.ts",
+      "status": "PASS",
+      "evidence": "3 files and 8 tests passed"
+    },
+    {
+      "command": "VITEST_INTEGRATION=1 pnpm --filter @fxl-sales/api exec vitest run test/rls/professional-payable-migration.integration.test.ts",
+      "status": "PASS",
+      "evidence": "1 file and 9 PostgreSQL tests passed"
+    },
+    {
+      "command": "pnpm --filter @fxl-sales/api test",
+      "status": "PASS",
+      "evidence": "35 files and 340 tests passed"
+    },
+    {
+      "command": "CI=true TEST_DATABASE_URL=<fxl_sales_test local URL> TEST_MIGRATE_DATABASE_URL=<postgres local URL> ADMIN_DATABASE_URL=<postgres local URL> pnpm --filter @fxl-sales/api test:integration",
+      "status": "PASS",
+      "evidence": "documented app/admin role split; 21 files and 128 tests passed"
+    },
+    {
+      "command": "changed-file ESLint over all eight changed TypeScript files",
+      "status": "PASS",
+      "evidence": "exit 0 with no findings"
+    },
+    {
+      "command": "pnpm --filter @fxl-sales/api type-check",
+      "status": "PASS",
+      "evidence": "exit 0"
+    },
+    {
+      "command": "pnpm run build",
+      "status": "PASS",
+      "evidence": "shared packages, API, and web production builds exited 0"
+    },
+    {
+      "command": "pnpm --filter @fxl-sales/api exec drizzle-kit check --config drizzle.config.ts",
+      "status": "PASS",
+      "evidence": "Everything's fine"
+    },
+    {
+      "command": "git diff --exit-code deaf757..HEAD -- apps/api/drizzle/meta/0018_snapshot.json apps/api/drizzle/meta/_journal.json",
+      "status": "PASS",
+      "evidence": "snapshot and journal metadata unchanged"
+    },
+    {
+      "command": "git diff --check deaf757..HEAD",
+      "status": "PASS",
+      "evidence": "exit 0 with no whitespace errors"
+    }
+  ],
+  "evidence": {
+    "reserved_backend": "one max-1 reserved handle carries advisory lock, explicit transactions, statements, and catalog queries; stable PID proven by PostgreSQL oracle",
+    "lock_contention": "real try-lock polling and release pass; three-attempt timeout leaves contender mutation absent",
+    "rollback": "ordinary migration PostgreSQL 22012 rolls back row, table, and journal entry",
+    "journal": "Drizzle full-source SHA-256 and greatest-created_at prefix semantics match installed Drizzle 0.45.2",
+    "indexes": "CREATE INDEX CONCURRENTLY runs outside transactions; invalid interrupted index recovery finishes with both indexes valid",
+    "foreign_key": "NOT VALID foreign key rejects invalid new writes and finishes validated with restrictive delete behavior",
+    "rls": "backfill, remaining-candidate, and final pre-journal reads use transaction-local app.fxl_admin on the non-superuser owner path",
+    "skip_locked": "only-candidate scenario emits [0,1,0] and resumes after unlock",
+    "retry_exhaustion": "exactly 50 empty batches leave the candidate null and journal count zero",
+    "markers": "exact header, marker vocabulary, ordering, chunk placement, and malformed marker rejection confirmed",
+    "entrypoints": "production and integration entrypoints import and await the shared runner; compiled production entrypoint retains it",
+    "catalog": "drizzle-kit check passes; live indexes are valid and foreign key is validated",
+    "metadata": "0018 snapshot and _journal.json are unchanged from deaf757"
+  },
+  "cleanup": {
+    "scratch_databases": 0,
+    "scratch_roles": 0,
+    "scratch_clients": 0,
+    "owned_processes": 0,
+    "owned_timers": 0,
+    "watchers_started": 0,
+    "test_role": "fxl_sales_test is NOSUPERUSER and NOBYPASSRLS"
+  },
+  "notes": [
+    "A no-env full-suite diagnostic was setup-invalid because the linked worktree lacks apps/api/.env and fell back to postgres; the authoritative explicitly configured role-split run passed."
+  ],
+  "done": true
+}

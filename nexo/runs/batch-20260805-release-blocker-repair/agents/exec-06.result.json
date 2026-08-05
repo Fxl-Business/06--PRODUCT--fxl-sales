@@ -1,0 +1,86 @@
+{
+  "status": "PASS",
+  "agent": "execute",
+  "slice": "06-phased-professional-identity-migration",
+  "report": "nexo/runs/batch-20260805-release-blocker-repair/exec-06.md",
+  "tested_commit": "00d83854a01bd9e6da2b133b972c80faf6536c6b",
+  "red": {
+    "static_contract": "Expected failure: 4 failed and 1 passed because 0018 was non-phased and startup used the stock migrator.",
+    "postgres_oracle": "Expected failure: shared migration runner module did not exist."
+  },
+  "evidence": [
+    {
+      "command": "pnpm run build:packages",
+      "result": "PASS"
+    },
+    {
+      "command": "pnpm --filter @fxl-sales/api exec vitest run src/db/__tests__/migration-runner.test.ts src/domains/sales-ops/__tests__/professional-payable-identity.test.ts src/config/__tests__/docker-migration-contract.test.ts",
+      "result": "PASS, 3 files and 8 tests"
+    },
+    {
+      "command": "VITEST_INTEGRATION=1 pnpm --filter @fxl-sales/api exec vitest run test/rls/professional-payable-migration.integration.test.ts",
+      "result": "PASS, 1 file and 9 tests"
+    },
+    {
+      "command": "CI=true TEST_DATABASE_URL=<local-non-superuser> TEST_MIGRATE_DATABASE_URL=<local-admin> ADMIN_DATABASE_URL=<local-admin> pnpm --filter @fxl-sales/api test:integration",
+      "result": "PASS, 21 files and 128 tests"
+    },
+    {
+      "command": "pnpm --filter @fxl-sales/api test",
+      "result": "PASS, 35 files and 340 tests"
+    },
+    {
+      "command": "pnpm --filter @fxl-sales/api exec eslint src/db/migration-runner.ts src/db/migrate.ts src/db/__tests__/migration-runner.test.ts test/rls/global-setup.ts src/config/__tests__/docker-migration-contract.test.ts src/domains/sales-ops/__tests__/professional-payable-identity.test.ts src/domains/sales-ops/__tests__/sale-transitions.integration.test.ts test/rls/professional-payable-migration.integration.test.ts",
+      "result": "PASS"
+    },
+    {
+      "command": "pnpm --filter @fxl-sales/api type-check",
+      "result": "PASS"
+    },
+    {
+      "command": "pnpm --filter @fxl-sales/api build",
+      "result": "PASS"
+    },
+    {
+      "command": "git diff --check",
+      "result": "PASS"
+    }
+  ],
+  "postgres_oracle": {
+    "owner_role": "NOSUPERUSER and NOBYPASSRLS",
+    "ordinary_transactions": "Commit and rollback proven on one stable backend PID",
+    "populated_rows": 10000,
+    "traffic": "Tenant reads and writes continued between column and journal phases",
+    "forced_rls_negative_control": "No admin context returned zero candidates; transaction-local admin context returned 10000",
+    "row_lock": "A single locked candidate caused one empty batch, then resumed after release and updated before journaling",
+    "row_lock_exhaustion": "Exactly 50 empty batches terminated without linking the candidate or writing the 0018 journal row",
+    "invalid_index": "Exact backend observed at Lock/virtualxid, cancelled with 57014, invalid index recovered",
+    "concurrent_runners": "A deterministic rendezvous proved one runner polled while the other owned the lock, then both resolved with two expected journal rows",
+    "advisory_lock_timeout": "Three unsuccessful completed lock polls terminated without applying or journaling the contender migration",
+    "catalog": "Both indexes valid and composite foreign key validated"
+  },
+  "scratch_cleanup": {
+    "databases_remaining": 0,
+    "roles_remaining": 0,
+    "started_processes_remaining": 0
+  },
+  "generated_files": {
+    "snapshot_modified": false,
+    "journal_modified": false
+  },
+  "review_findings": {
+    "bounded_advisory_lock": "CLOSED",
+    "skip_locked_retry_oracles": "CLOSED",
+    "scratch_setup_cleanup": "CLOSED",
+    "strict_phase_marker_grammar": "CLOSED"
+  },
+  "commits": [
+    "d8574f6 fix(db): phase professional identity migration",
+    "00d8385 fix(db): bound migration retry paths"
+  ],
+  "concerns": [
+    "A bare worktree integration run defaults to the local postgres superuser when ignored .env files are absent; the documented role-split invocation passed all tests.",
+    "Session lock acquisition intentionally uses bounded pg_try_advisory_lock polling to avoid a concurrent-index deadlock caused by a waiting lock query retaining an old snapshot."
+  ],
+  "done": true
+}
