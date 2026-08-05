@@ -12,8 +12,11 @@
 import { randomUUID } from 'node:crypto';
 import { InMemoryHubSessionStore } from '@fxl-business/hub-sdk';
 import { drizzle } from 'drizzle-orm/postgres-js';
+import { Hono } from 'hono';
+import { deleteCookie } from 'hono/cookie';
 import postgres from 'postgres';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { createHubSessionScopeMiddleware } from '../../src/auth/hub-session-scope.js';
 import {
   type DurableHubSessionStore,
   createDurableHubSessionStore,
@@ -31,6 +34,18 @@ const ADMIN_CONNECTION_OPTIONS = { connection: { 'app.fxl_admin': 'true' } } as 
 
 const IKM = 'hub-bff-session-store-test-ikm-0123456789';
 const OTHER_IKM = 'a-completely-different-key-0123456789abcd';
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 describe('durable Hub BFF session store', () => {
   let appClient: postgres.Sql;
@@ -119,6 +134,174 @@ describe('durable Hub BFF session store', () => {
       storeC.get(sid),
     );
     expect(resolved).toEqual({ hubRefreshToken: 'refresh-token-beta' });
+  });
+
+  it('serializes a stale refresh rejection behind a committed token rotation across replicas', async () => {
+    const storeA = newStore();
+    const storeB = newStore();
+    const finalStore = newStore();
+    const sessionId = trackSession(
+      await storeA.withRequest({ consumeLoginTx: false }, async () =>
+        storeA.create({ hubRefreshToken: 'token-old' }),
+      ),
+    );
+    const otherSessionId = trackSession(
+      await storeA.withRequest({ consumeLoginTx: false }, async () =>
+        storeA.create({ hubRefreshToken: 'token-other' }),
+      ),
+    );
+
+    const rotationEntered = deferred<void>();
+    const releaseRotation = deferred<void>();
+    const staleTokenObserved = deferred<void>();
+    const releaseStaleDelete = deferred<void>();
+
+    const rotatingApp = new Hono();
+    rotatingApp.use(
+      '/auth/*',
+      createHubSessionScopeMiddleware(storeA, { secureCookies: false }),
+    );
+    rotatingApp.post('/auth/refresh', async (c) => {
+      rotationEntered.resolve();
+      expect(storeA.get(sessionId)).toEqual({ hubRefreshToken: 'token-old' });
+      await releaseRotation.promise;
+      storeA.update(sessionId, 'token-new');
+      return c.json({ ok: true });
+    });
+
+    const competingApp = new Hono();
+    competingApp.use(
+      '/auth/*',
+      createHubSessionScopeMiddleware(storeB, { secureCookies: false }),
+    );
+    competingApp.post('/auth/refresh', async (c) => {
+      const session = storeB.get(sessionId);
+      if (session?.hubRefreshToken === 'token-old') {
+        staleTokenObserved.resolve();
+        await releaseStaleDelete.promise;
+        storeB.delete(sessionId);
+        deleteCookie(c, 'fxl_hub_session', { path: '/' });
+        return c.json({ error: 'session_expired' }, 401);
+      }
+      expect(session).toEqual({ hubRefreshToken: 'token-new' });
+      return c.json({ ok: true });
+    });
+
+    const startedRequests: Promise<unknown>[] = [];
+    try {
+      const firstResponsePromise = rotatingApp.request('http://localhost/auth/refresh', {
+        method: 'POST',
+        headers: { cookie: `fxl_hub_session=${sessionId}` },
+      });
+      startedRequests.push(firstResponsePromise);
+      await rotationEntered.promise;
+
+      const secondResponsePromise = competingApp.request('http://localhost/auth/refresh', {
+        method: 'POST',
+        headers: { cookie: `fxl_hub_session=${sessionId}` },
+      });
+      startedRequests.push(secondResponsePromise);
+      const otherSessionPromise = storeB.withRequest(
+        { sessionId: otherSessionId, consumeLoginTx: false },
+        async () => storeB.get(otherSessionId),
+      );
+      startedRequests.push(otherSessionPromise);
+
+      const otherWhileLocked = await Promise.race([
+        otherSessionPromise,
+        delay(1_000).then(() => 'blocked' as const),
+      ]);
+      const staleBeforeRelease = await Promise.race([
+        staleTokenObserved.promise.then(() => true),
+        delay(1_000).then(() => false),
+      ]);
+
+      releaseRotation.resolve();
+      const firstResponse = await firstResponsePromise;
+      releaseStaleDelete.resolve();
+      const secondResponse = await secondResponsePromise;
+      const finalSession = await finalStore.withRequest(
+        { sessionId, consumeLoginTx: false },
+        async () => finalStore.get(sessionId),
+      );
+
+      expect({
+        firstStatus: firstResponse.status,
+        secondStatus: secondResponse.status,
+        secondClearedCookie: secondResponse.headers.get('set-cookie') !== null,
+        staleBeforeRelease,
+        otherWhileLocked,
+        finalSession,
+      }).toEqual({
+        firstStatus: 200,
+        secondStatus: 200,
+        secondClearedCookie: false,
+        staleBeforeRelease: false,
+        otherWhileLocked: { hubRefreshToken: 'token-other' },
+        finalSession: { hubRefreshToken: 'token-new' },
+      });
+    } finally {
+      releaseRotation.resolve();
+      releaseStaleDelete.resolve();
+      await Promise.allSettled(startedRequests);
+    }
+  });
+
+  it('rolls back every buffered mutation when persistence fails after the handler returns', async () => {
+    const store = newStore();
+    let createdSessionId = '';
+    let conflictingLoginId = '';
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      const result = await store.withRequest({ consumeLoginTx: false }, async () => {
+        createdSessionId = trackSession(store.create({ hubRefreshToken: 'token-rollback' }));
+        conflictingLoginId = trackLogin(
+          store.createLogin({ codeVerifier: 'verifier-rollback', state: 'state-rollback' }),
+        );
+        await adminClient`
+          INSERT INTO hub_bff_login_txns (id, code_verifier_enc, state, expires_at)
+          VALUES (${conflictingLoginId}, 'v1.a.b.c', 'conflict', now() + interval '10 minutes')
+        `;
+        return 'formed-response';
+      });
+
+      expect(result).toBe('formed-response');
+      expect(errorLog).toHaveBeenCalledWith('[hub-session-store] flush failed', expect.anything());
+      expect(
+        await adminClient`SELECT id FROM hub_bff_sessions WHERE id = ${createdSessionId}`,
+      ).toHaveLength(0);
+      expect(
+        await adminClient`SELECT id FROM hub_bff_login_txns WHERE id = ${conflictingLoginId}`,
+      ).toHaveLength(1);
+    } finally {
+      errorLog.mockRestore();
+    }
+  });
+
+  it('propagates handler failure and leaves the durable token unchanged', async () => {
+    const creator = newStore();
+    const failingStore = newStore();
+    const finalStore = newStore();
+    const sessionId = trackSession(
+      await creator.withRequest({ consumeLoginTx: false }, async () =>
+        creator.create({ hubRefreshToken: 'token-old' }),
+      ),
+    );
+    const handlerError = new Error('handler failed');
+
+    await expect(
+      failingStore.withRequest({ sessionId, consumeLoginTx: false }, async () => {
+        failingStore.update(sessionId, 'token-never-committed');
+        throw handlerError;
+      }),
+    ).rejects.toBe(handlerError);
+
+    const finalSession = await finalStore.withRequest(
+      { sessionId, consumeLoginTx: false },
+      async () => finalStore.get(sessionId),
+    );
+    expect(finalSession).toEqual({ hubRefreshToken: 'token-old' });
   });
 
   it('never stores the Hub refresh token in plaintext', async () => {

@@ -23,6 +23,13 @@ function storeWithoutDb() {
   });
 }
 
+function storeWithDb(db: unknown) {
+  return createDurableHubSessionStore({
+    db: db as never,
+    sealer: createSessionSealer(IKM),
+  });
+}
+
 describe('createHubSessionStore', () => {
   it('falls back to the in-process store outside production', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -63,6 +70,78 @@ describe('request scope guard', () => {
       HubSessionScopeError,
     );
     expect(() => store.consumeLogin('any')).toThrow(HubSessionScopeError);
+  });
+});
+
+describe('request transaction phases', () => {
+  it('wraps transaction acquisition failure as hydrate unavailable and skips the handler', async () => {
+    const cause = new Error('database unavailable');
+    const handler = vi.fn();
+    const store = storeWithDb({ transaction: vi.fn().mockRejectedValue(cause) });
+
+    await expect(
+      store.withRequest({ sessionId: 'session-alpha', consumeLoginTx: false }, handler),
+    ).rejects.toMatchObject({
+      name: 'HubSessionStoreUnavailableError',
+      message: 'hub session hydrate failed',
+      cause,
+    });
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('propagates the handler error object unchanged', async () => {
+    const handlerError = new Error('handler failed');
+    const store = storeWithDb({
+      transaction: async (fn: (tx: unknown) => Promise<unknown>) => fn({}),
+    });
+
+    await expect(
+      store.withRequest({ consumeLoginTx: false }, async () => {
+        throw handlerError;
+      }),
+    ).rejects.toBe(handlerError);
+  });
+
+  it('logs and swallows a flush failure after returning the handler value', async () => {
+    const flushError = new Error('flush failed');
+    const values = vi.fn().mockRejectedValue(flushError);
+    const store = storeWithDb({
+      transaction: async (fn: (tx: unknown) => Promise<unknown>) =>
+        fn({ insert: vi.fn(() => ({ values })) }),
+    });
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      const result = await store.withRequest({ consumeLoginTx: false }, async () => {
+        store.create({ hubRefreshToken: 'token-alpha' });
+        return 'formed-response';
+      });
+      expect(result).toBe('formed-response');
+      expect(errorLog).toHaveBeenCalledWith('[hub-session-store] flush failed', flushError);
+    } finally {
+      errorLog.mockRestore();
+    }
+  });
+
+  it('logs and swallows a transaction commit failure after returning the handler value', async () => {
+    const commitError = new Error('commit failed');
+    const store = storeWithDb({
+      transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
+        await fn({});
+        throw commitError;
+      },
+    });
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      const result = await store.withRequest({ consumeLoginTx: false }, async () =>
+        'formed-response',
+      );
+      expect(result).toBe('formed-response');
+      expect(errorLog).toHaveBeenCalledWith('[hub-session-store] flush failed', commitError);
+    } finally {
+      errorLog.mockRestore();
+    }
   });
 });
 

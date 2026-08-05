@@ -37,6 +37,8 @@ import { hubBffLoginTxns, hubBffSessions } from '../db/schema.js';
 import { createSessionSealer, type SessionSealer } from './session-crypto.js';
 
 type NodeDb = ReturnType<typeof getAdminDb>;
+type RequestDb = Parameters<Parameters<NodeDb['transaction']>[0]>[0];
+type RequestPhase = 'hydrate' | 'handler' | 'flush';
 
 /** Sliding: rewritten to now + 30 days on every refresh-token rotation. */
 export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -189,116 +191,126 @@ class PostgresHubSessionStore implements DurableHubSessionStore {
     return entry.tx;
   }
 
-  async #hydrate(uow: UnitOfWork, input: HubSessionHydrateInput): Promise<void> {
+  async #hydrate(
+    db: RequestDb,
+    uow: UnitOfWork,
+    input: HubSessionHydrateInput,
+  ): Promise<void> {
     const now = this.#now();
-    try {
-      if (input.sessionId) {
-        const rows = await this.#db
-          .select()
-          .from(hubBffSessions)
-          .where(and(eq(hubBffSessions.id, input.sessionId), gt(hubBffSessions.expiresAt, now)))
-          .limit(1);
-        const row = rows[0];
-        if (row) {
-          const token = this.#sealer.open(row.hubRefreshTokenEnc, row.id);
-          // A null open leaves the working set empty for that id, which reads
-          // downstream as an unknown session.
-          if (token !== null) {
-            uow.sessions.set(row.id, {
-              record: row.accountId
-                ? { hubRefreshToken: token, accountId: row.accountId }
-                : { hubRefreshToken: token },
-              expiresAt: row.expiresAt,
-            });
-          }
+    if (input.sessionId) {
+      const rows = await db
+        .select()
+        .from(hubBffSessions)
+        .where(and(eq(hubBffSessions.id, input.sessionId), gt(hubBffSessions.expiresAt, now)))
+        .for('update')
+        .limit(1);
+      const row = rows[0];
+      if (row) {
+        const token = this.#sealer.open(row.hubRefreshTokenEnc, row.id);
+        // A null open leaves the working set empty for that id, which reads
+        // downstream as an unknown session.
+        if (token !== null) {
+          uow.sessions.set(row.id, {
+            record: row.accountId
+              ? { hubRefreshToken: token, accountId: row.accountId }
+              : { hubRefreshToken: token },
+            expiresAt: row.expiresAt,
+          });
         }
       }
+    }
 
-      if (input.loginTxId && input.consumeLoginTx) {
-        // Consume-on-hydrate: only one replica's DELETE can return the row, so
-        // the PKCE verifier is single-use at the DATABASE level rather than
-        // single-use per process.
-        const rows = await this.#db
-          .delete(hubBffLoginTxns)
-          .where(and(eq(hubBffLoginTxns.id, input.loginTxId), gt(hubBffLoginTxns.expiresAt, now)))
-          .returning();
-        const row = rows[0];
-        if (row) {
-          const verifier = this.#sealer.open(row.codeVerifierEnc, row.id);
-          if (verifier !== null) {
-            uow.logins.set(row.id, {
-              tx: { codeVerifier: verifier, state: row.state },
-              durablyRemoved: true,
-            });
-          }
+    if (input.loginTxId && input.consumeLoginTx) {
+      // Consume-on-hydrate: only one replica's DELETE can return the row, so
+      // the PKCE verifier is single-use at the DATABASE level rather than
+      // single-use per process.
+      const rows = await db
+        .delete(hubBffLoginTxns)
+        .where(and(eq(hubBffLoginTxns.id, input.loginTxId), gt(hubBffLoginTxns.expiresAt, now)))
+        .returning();
+      const row = rows[0];
+      if (row) {
+        const verifier = this.#sealer.open(row.codeVerifierEnc, row.id);
+        if (verifier !== null) {
+          uow.logins.set(row.id, {
+            tx: { codeVerifier: verifier, state: row.state },
+            durablyRemoved: true,
+          });
         }
       }
-    } catch (err) {
-      throw new HubSessionStoreUnavailableError('hub session hydrate failed', { cause: err });
     }
   }
 
-  async #flush(uow: UnitOfWork): Promise<void> {
+  async #flush(db: RequestDb, uow: UnitOfWork): Promise<void> {
     if (uow.ops.length === 0) {
       return;
     }
-    try {
-      await this.#db.transaction(async (tx) => {
-        for (const op of uow.ops) {
-          switch (op.kind) {
-            case 'session.create':
-              await tx.insert(hubBffSessions).values({
-                id: op.id,
-                hubRefreshTokenEnc: op.tokenEnc,
-                accountId: op.accountId,
-                expiresAt: op.expiresAt,
-              });
-              break;
-            case 'session.update':
-              await tx
-                .update(hubBffSessions)
-                .set({
-                  hubRefreshTokenEnc: op.tokenEnc,
-                  expiresAt: op.expiresAt,
-                  updatedAt: new Date(),
-                })
-                .where(eq(hubBffSessions.id, op.id));
-              break;
-            case 'session.delete':
-              await tx.delete(hubBffSessions).where(eq(hubBffSessions.id, op.id));
-              break;
-            case 'login.create':
-              await tx.insert(hubBffLoginTxns).values({
-                id: op.id,
-                codeVerifierEnc: op.verifierEnc,
-                state: op.state,
-                expiresAt: op.expiresAt,
-              });
-              break;
-            case 'login.delete':
-              await tx.delete(hubBffLoginTxns).where(eq(hubBffLoginTxns.id, op.id));
-              break;
-          }
-        }
-      });
-    } catch (err) {
-      // Never rethrow: the response has already been formed, and turning a
-      // successful login into a 500 is worse than the bounded cost of a lost
-      // flush (one extra re-login).
-      console.error('[hub-session-store] flush failed', err);
+    for (const op of uow.ops) {
+      switch (op.kind) {
+        case 'session.create':
+          await db.insert(hubBffSessions).values({
+            id: op.id,
+            hubRefreshTokenEnc: op.tokenEnc,
+            accountId: op.accountId,
+            expiresAt: op.expiresAt,
+          });
+          break;
+        case 'session.update':
+          await db
+            .update(hubBffSessions)
+            .set({
+              hubRefreshTokenEnc: op.tokenEnc,
+              expiresAt: op.expiresAt,
+              updatedAt: new Date(),
+            })
+            .where(eq(hubBffSessions.id, op.id));
+          break;
+        case 'session.delete':
+          await db.delete(hubBffSessions).where(eq(hubBffSessions.id, op.id));
+          break;
+        case 'login.create':
+          await db.insert(hubBffLoginTxns).values({
+            id: op.id,
+            codeVerifierEnc: op.verifierEnc,
+            state: op.state,
+            expiresAt: op.expiresAt,
+          });
+          break;
+        case 'login.delete':
+          await db.delete(hubBffLoginTxns).where(eq(hubBffLoginTxns.id, op.id));
+          break;
+      }
     }
   }
 
   async withRequest<T>(input: HubSessionHydrateInput, fn: () => Promise<T>): Promise<T> {
     const uow: UnitOfWork = { sessions: new Map(), logins: new Map(), ops: [] };
+    let phase: RequestPhase = 'hydrate';
+    let handlerResult: { value: T } | undefined;
+
     return this.#als.run(uow, async () => {
-      // Hydrate sits BEFORE the try, so a hydrate failure skips both the
-      // handler and the flush.
-      await this.#hydrate(uow, input);
       try {
-        return await fn();
-      } finally {
-        await this.#flush(uow);
+        return await this.#db.transaction(async (tx) => {
+          await this.#hydrate(tx, uow, input);
+          phase = 'handler';
+          const value = await fn();
+          handlerResult = { value };
+          phase = 'flush';
+          await this.#flush(tx, uow);
+          return value;
+        });
+      } catch (err) {
+        if (phase === 'hydrate') {
+          if (err instanceof HubSessionStoreUnavailableError) {
+            throw err;
+          }
+          throw new HubSessionStoreUnavailableError('hub session hydrate failed', { cause: err });
+        }
+        if (phase === 'handler') {
+          throw err;
+        }
+        console.error('[hub-session-store] flush failed', err);
+        return handlerResult!.value;
       }
     });
   }

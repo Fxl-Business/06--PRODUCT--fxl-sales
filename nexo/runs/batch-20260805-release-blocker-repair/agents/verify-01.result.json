@@ -1,0 +1,48 @@
+{
+  "status": "PASS",
+  "agent": "verify",
+  "slice": "01-session-refresh-serialization",
+  "report_path": "nexo/runs/batch-20260805-release-blocker-repair/verify-01.md",
+  "exact_tested_head": "69b355c0995c4675c947f0735e6012f39e3fb25b",
+  "base": "980540f881b990736c86e7a82e326c704ec1787c",
+  "commands": [
+    {
+      "command": "pnpm --filter @fxl-sales/api test -- src/auth/__tests__/hub-session-store.test.ts src/auth/__tests__/hub-session-scope.test.ts",
+      "exit_code": 0,
+      "evidence": "33 unit files and 332 tests passed, including both requested auth files"
+    },
+    {
+      "command": "pnpm --filter @fxl-sales/api exec vitest run src/auth/__tests__/hub-session-store.test.ts src/auth/__tests__/hub-session-scope.test.ts",
+      "exit_code": 0,
+      "evidence": "Focused run passed 2 files and 14 tests"
+    },
+    {
+      "command": "TEST_DATABASE_URL=<local-non-superuser> TEST_MIGRATE_DATABASE_URL=<local-admin> ADMIN_DATABASE_URL=<local-admin> pnpm --filter @fxl-sales/api test:integration -- test/rls/hub-bff-session-store.test.ts",
+      "exit_code": 0,
+      "evidence": "20 integration files and 116 tests passed, including all 11 durable-store tests and the 1040 ms concurrency oracle"
+    },
+    {
+      "command": "pnpm --filter @fxl-sales/api exec eslint src/auth/hub-session-store.ts src/auth/__tests__/hub-session-store.test.ts test/rls/hub-bff-session-store.test.ts",
+      "exit_code": 0,
+      "evidence": "No diagnostics"
+    },
+    {
+      "command": "pnpm --filter @fxl-sales/api type-check",
+      "exit_code": 0,
+      "evidence": "tsc --noEmit passed"
+    },
+    {
+      "command": "git diff --check 980540f..HEAD",
+      "exit_code": 0,
+      "evidence": "No whitespace errors"
+    }
+  ],
+  "evidence": {
+    "rls_role": "fxl_sales_test confirmed NOSUPERUSER and NOBYPASSRLS",
+    "concurrency_oracle": "Two independent stores prove same-session blocking, different-session independence, token-new persistence, no cookie clear, and cleanup",
+    "failure_semantics": "Hydrate wrapping, identical handler-error propagation, flush rollback, and flush or commit logging plus formed-response preservation are covered",
+    "changed_files": "Only the three plan-declared TypeScript files differ from the base",
+    "cleanup": "No process started by verification remained running"
+  },
+  "done": true
+}
