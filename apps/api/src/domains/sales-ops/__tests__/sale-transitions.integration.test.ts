@@ -12,6 +12,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { and, eq, sql } from 'drizzle-orm';
+import { TransactionRollbackError } from 'drizzle-orm/errors';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { closeDb, getAdminDb, getDb } from '../../../db/client.js';
 import {
@@ -278,14 +279,19 @@ describe('transitionSale', () => {
 
     const adminDb = getAdminDb();
     const firstRows = (
-      await adminDb.select().from(salesOpsPayables).where(eq(salesOpsPayables.saleId, sale.id))
+      await adminDb
+        .select()
+        .from(salesOpsPayables)
+        .where(
+          and(eq(salesOpsPayables.orgId, orgId), eq(salesOpsPayables.saleId, sale.id)),
+        )
     ).filter((row) => row.kind === 'professional_cost');
     expect(firstRows).toHaveLength(2);
     const paid = must(firstRows[0]);
     await adminDb
       .update(salesOpsPayables)
       .set({ status: 'paid' })
-      .where(eq(salesOpsPayables.id, paid.id));
+      .where(and(eq(salesOpsPayables.orgId, orgId), eq(salesOpsPayables.id, paid.id)));
 
     const reopened = await transitionSale(getDb(), orgId, sale.id, 'open');
     expect(reopened.ok).toBe(true);
@@ -293,7 +299,12 @@ describe('transitionSale', () => {
     expect(secondWin.ok).toBe(true);
 
     const allRows = (
-      await adminDb.select().from(salesOpsPayables).where(eq(salesOpsPayables.saleId, sale.id))
+      await adminDb
+        .select()
+        .from(salesOpsPayables)
+        .where(
+          and(eq(salesOpsPayables.orgId, orgId), eq(salesOpsPayables.saleId, sale.id)),
+        )
     ).filter((row) => row.kind === 'professional_cost');
     const activeRows = allRows.filter((row) => row.status !== 'void');
     const newlyActiveRows = activeRows.filter((row) => row.id !== paid.id);
@@ -308,71 +319,126 @@ describe('transitionSale', () => {
     const uniqueOrgId = `org_st_backfill_unique_${crypto.randomUUID()}`;
     const ambiguousOrgId = `org_st_backfill_ambiguous_${crypto.randomUUID()}`;
     const otherOrgId = `org_st_backfill_other_${crypto.randomUUID()}`;
-    seededOrgIds.push(uniqueOrgId, ambiguousOrgId, otherOrgId);
-
-    const uniqueSale = await seedSale(uniqueOrgId);
-    const uniqueProfessional = await seedProfessional(uniqueOrgId, uniqueSale.id, {
-      personNameSnapshot: 'Snapshot Unico',
-    });
-    const ambiguousSale = await seedSale(ambiguousOrgId);
-    await seedProfessional(ambiguousOrgId, ambiguousSale.id, {
-      personNameSnapshot: 'Snapshot Ambiguo',
-    });
-    await seedProfessional(ambiguousOrgId, ambiguousSale.id, {
-      personNameSnapshot: 'Snapshot Ambiguo',
-    });
-    const otherSale = await seedSale(otherOrgId);
-    await seedProfessional(otherOrgId, otherSale.id, {
-      personNameSnapshot: 'Snapshot Unico',
-    });
-
     const adminDb = getAdminDb();
-    const [uniquePayable] = await adminDb
-      .insert(salesOpsPayables)
-      .values({
-        orgId: uniqueOrgId,
-        saleId: uniqueSale.id,
-        beneficiaryName: 'Snapshot Unico',
-        kind: 'professional_cost',
-        dueDate: new Date('2026-08-01T00:00:00.000Z'),
-        amountBrl: 40000,
-        status: 'paid',
-      })
-      .returning();
-    const [ambiguousPayable] = await adminDb
-      .insert(salesOpsPayables)
-      .values({
-        orgId: ambiguousOrgId,
-        saleId: ambiguousSale.id,
-        beneficiaryName: 'Snapshot Ambiguo',
-        kind: 'professional_cost',
-        dueDate: new Date('2026-08-01T00:00:00.000Z'),
-        amountBrl: 40000,
-        status: 'paid',
-      })
-      .returning();
-
     const backfill = readFileSync(professionalPayableMigrationPath, 'utf8')
       .split('--> statement-breakpoint')
       .map((statement) => statement.trim())
       .find((statement) => statement.startsWith('WITH "unambiguous_professional_matches"'));
     if (!backfill) throw new Error('professional payable identity backfill not found');
 
-    await adminDb.execute(sql.raw(backfill));
+    await expect(
+      adminDb.transaction(async (tx) => {
+        const insertSale = async (orgId: string) => {
+          const [sale] = await tx
+            .insert(salesOpsSales)
+            .values({
+              orgId,
+              sequence: 1,
+              code: '0001-0',
+              clientNameSnapshot: 'Cliente Teste',
+              sellerNameSnapshot: 'Ana Martins',
+              status: 'open',
+              paymentMethod: 'pix',
+              condition: 'installments',
+              installments: 1,
+              baseDate: new Date('2026-07-29T00:00:00.000Z'),
+              totalBrl: 1000000,
+              recurringBrl: 0,
+              sellerCommissionPct: '10.00',
+              finderCommissionPct: '3.00',
+              taxPct: '6.00',
+              otherCostsBrl: 0,
+              netMarginPct: '0.00',
+            })
+            .returning();
+          return must(sale);
+        };
+        const insertProfessional = async (
+          orgId: string,
+          saleId: string,
+          personNameSnapshot: string,
+        ) => {
+          const [professional] = await tx
+            .insert(salesOpsSaleProfessionals)
+            .values({
+              orgId,
+              saleId,
+              personNameSnapshot,
+              role: 'Desenvolvimento',
+              costBrl: 40000,
+            })
+            .returning();
+          return must(professional);
+        };
 
-    const readIdentity = async (id: string) => {
-      const [row] = await adminDb
-        .select({ saleProfessionalId: salesOpsPayables.saleProfessionalId })
-        .from(salesOpsPayables)
-        .where(eq(salesOpsPayables.id, id));
-      return must(row).saleProfessionalId;
-    };
-    expect(await readIdentity(must(uniquePayable).id)).toBe(uniqueProfessional.id);
-    expect(await readIdentity(must(ambiguousPayable).id)).toBeNull();
+        const uniqueSale = await insertSale(uniqueOrgId);
+        const uniqueProfessional = await insertProfessional(
+          uniqueOrgId,
+          uniqueSale.id,
+          'Snapshot Unico',
+        );
+        const ambiguousSale = await insertSale(ambiguousOrgId);
+        await insertProfessional(ambiguousOrgId, ambiguousSale.id, 'Snapshot Ambiguo');
+        await insertProfessional(ambiguousOrgId, ambiguousSale.id, 'Snapshot Ambiguo');
+        const otherSale = await insertSale(otherOrgId);
+        await insertProfessional(otherOrgId, otherSale.id, 'Snapshot Unico');
 
-    await adminDb.execute(sql.raw(backfill));
-    expect(await readIdentity(must(uniquePayable).id)).toBe(uniqueProfessional.id);
-    expect(await readIdentity(must(ambiguousPayable).id)).toBeNull();
+        const [uniquePayable] = await tx
+          .insert(salesOpsPayables)
+          .values({
+            orgId: uniqueOrgId,
+            saleId: uniqueSale.id,
+            beneficiaryName: 'Snapshot Unico',
+            kind: 'professional_cost',
+            dueDate: new Date('2026-08-01T00:00:00.000Z'),
+            amountBrl: 40000,
+            status: 'paid',
+          })
+          .returning();
+        const [ambiguousPayable] = await tx
+          .insert(salesOpsPayables)
+          .values({
+            orgId: ambiguousOrgId,
+            saleId: ambiguousSale.id,
+            beneficiaryName: 'Snapshot Ambiguo',
+            kind: 'professional_cost',
+            dueDate: new Date('2026-08-01T00:00:00.000Z'),
+            amountBrl: 40000,
+            status: 'paid',
+          })
+          .returning();
+
+        const readIdentity = async (orgId: string, id: string) => {
+          const [row] = await tx
+            .select({ saleProfessionalId: salesOpsPayables.saleProfessionalId })
+            .from(salesOpsPayables)
+            .where(and(eq(salesOpsPayables.orgId, orgId), eq(salesOpsPayables.id, id)));
+          return must(row).saleProfessionalId;
+        };
+
+        await tx.execute(sql.raw(backfill));
+        expect(await readIdentity(uniqueOrgId, must(uniquePayable).id)).toBe(
+          uniqueProfessional.id,
+        );
+        expect(await readIdentity(ambiguousOrgId, must(ambiguousPayable).id)).toBeNull();
+
+        await tx.execute(sql.raw(backfill));
+        expect(await readIdentity(uniqueOrgId, must(uniquePayable).id)).toBe(
+          uniqueProfessional.id,
+        );
+        expect(await readIdentity(ambiguousOrgId, must(ambiguousPayable).id)).toBeNull();
+
+        tx.rollback();
+      }),
+    ).rejects.toBeInstanceOf(TransactionRollbackError);
+
+    for (const orgId of [uniqueOrgId, ambiguousOrgId, otherOrgId]) {
+      const rows = await adminDb
+        .select({ id: salesOpsSales.id })
+        .from(salesOpsSales)
+        .where(eq(salesOpsSales.orgId, orgId));
+      expect(rows).toHaveLength(0);
+    }
   });
 
   it('payable professional identity rejects another organization and another sale', async () => {

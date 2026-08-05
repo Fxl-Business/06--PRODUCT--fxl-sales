@@ -176,18 +176,21 @@ describe('proposal write backend (create v2 + update + payable materialization)'
     expect(result.sale.wonAt).not.toBeNull();
 
     const receivable = await adminClient`
-      SELECT id, amount_brl FROM sales_ops_receivables WHERE sale_id = ${result.sale.id}`;
+      SELECT id, amount_brl FROM sales_ops_receivables
+      WHERE org_id = ${orgId} AND sale_id = ${result.sale.id}`;
     expect(receivable).toHaveLength(1);
     const receivableId = (receivable[0] as { id: string }).id;
     const professionals = await adminClient`
-      SELECT id FROM sales_ops_sale_professionals WHERE sale_id = ${result.sale.id}`;
+      SELECT id FROM sales_ops_sale_professionals
+      WHERE org_id = ${orgId} AND sale_id = ${result.sale.id}`;
     expect(professionals).toHaveLength(1);
     const professionalId = (professionals[0] as { id: string }).id;
 
     const payables = await adminClient`
       SELECT kind, amount_brl, receivable_id, beneficiary_name, sale_professional_id
       FROM sales_ops_payables
-      WHERE sale_id = ${result.sale.id} ORDER BY kind ASC, amount_brl DESC`;
+      WHERE org_id = ${orgId} AND sale_id = ${result.sale.id}
+      ORDER BY kind ASC, amount_brl DESC`;
     const byKind = Object.fromEntries(
       payables.map((row) => [
         (row as { kind: string }).kind,
