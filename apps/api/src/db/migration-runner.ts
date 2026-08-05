@@ -29,6 +29,16 @@ export type RunDatabaseMigrationsOptions = {
   migrationsFolder: string;
   throughTag?: string;
   onPhaseComplete?: (event: MigrationPhaseEvent) => void | Promise<void>;
+  testControls?: {
+    advisoryLockMaxAttempts?: number;
+    advisoryLockRetryMs?: number;
+    backfillMaxEmptyBatches?: number;
+    backfillRetryMs?: number;
+    onAdvisoryLockPoll?: (event: {
+      attempt: number;
+      backendPid: number;
+    }) => void | Promise<void>;
+  };
 };
 
 type PostgresClient = ReturnType<typeof postgres>;
@@ -70,6 +80,10 @@ const phasedMarkers: PhasedMarker[] = [
   'validate',
 ];
 const transactionOpen = new WeakSet<object>();
+const defaultAdvisoryLockMaxAttempts = 3000;
+const defaultAdvisoryLockRetryMs = 100;
+const defaultBackfillMaxEmptyBatches = 50;
+const defaultBackfillRetryMs = 100;
 
 const remainingCandidateSql = `
 SELECT count(*)::integer AS count
@@ -115,22 +129,59 @@ async function withReservedTransaction<T>(
   }
 }
 
-function phaseMarker(statement: string): string | undefined {
-  return statement.match(/^\s*-- fxl-phase: ([a-z-]+)$/m)?.[1];
+function scanPhaseMarkers(source: string): string[] {
+  const markerLines = source
+    .split(/\r?\n/)
+    .filter((line) => line.includes('-- fxl-phase:'));
+  return markerLines.map((line) => {
+    const trimmed = line.trim();
+    const marker = trimmed.match(/^-- fxl-phase: ([a-z-]+)$/)?.[1];
+    if (!marker) {
+      const malformedName = trimmed.split('-- fxl-phase:')[1]?.trim() ?? trimmed;
+      throw new Error(`unknown or malformed migration phase marker: ${malformedName}`);
+    }
+    if (!phasedMarkers.includes(marker as PhasedMarker)) {
+      throw new Error(`unknown or malformed migration phase marker: ${marker}`);
+    }
+    return marker;
+  });
 }
 
 function parsePhasedMigration(source: string, statements: string[]): Map<PhasedMarker, string> {
   if (!source.startsWith(`${phasedHeader}\n`)) {
     throw new Error(`${phasedTag} must start with ${phasedHeader}`);
   }
-  const observedMarkers = statements.map(phaseMarker);
-  if (
-    observedMarkers.length !== phasedMarkers.length ||
-    observedMarkers.some((marker, index) => marker !== phasedMarkers[index])
-  ) {
-    throw new Error(
-      `${phasedTag} must contain the exact ordered phase markers: ${phasedMarkers.join(', ')}`,
-    );
+  if (source.split(phasedHeader).length !== 2) {
+    throw new Error(`${phasedTag} must contain exactly one phased header`);
+  }
+  if (statements.length !== phasedMarkers.length) {
+    throw new Error(`${phasedTag} must contain exactly ${phasedMarkers.length} statements`);
+  }
+
+  for (const [index, expectedMarker] of phasedMarkers.entries()) {
+    const statement = statements[index] as string;
+    const lines = statement.trimStart().split(/\r?\n/);
+    const markerLines = lines.filter((line) => line.includes('-- fxl-phase:'));
+    if (markerLines.length !== 1) {
+      throw new Error(
+        `breakpoint chunk must contain exactly one phase marker: ${expectedMarker}`,
+      );
+    }
+    const markerLineIndex = lines.findIndex((line) => line.includes('-- fxl-phase:'));
+    const requiredMarkerIndex = index === 0 ? 1 : 0;
+    if (markerLineIndex !== requiredMarkerIndex) {
+      throw new Error(`phase marker must start its breakpoint chunk: ${expectedMarker}`);
+    }
+    const expectedMarkerLine = `-- fxl-phase: ${expectedMarker}`;
+    if (lines[markerLineIndex]?.trim() !== expectedMarkerLine) {
+      throw new Error(
+        `${phasedTag} must contain the exact ordered phase markers: ${phasedMarkers.join(', ')}`,
+      );
+    }
+    const sqlLine = lines[markerLineIndex + 1];
+    if (!sqlLine || sqlLine.trim().length === 0 || sqlLine.trimStart().startsWith('--')) {
+      throw new Error(`phase marker must immediately precede SQL: ${expectedMarker}`);
+    }
   }
   return new Map(
     phasedMarkers.map((marker, index) => [marker, statements[index] as string]),
@@ -173,13 +224,7 @@ async function loadMigrations(folder: string): Promise<LoadedMigration[]> {
         throw new Error(`No file ${migrationPath} found in ${folder} folder`);
       }
       const statements = source.split('--> statement-breakpoint');
-      const allMarkers = [...source.matchAll(/^\s*-- fxl-phase: ([a-z-]+)$/gm)].map(
-        (match) => match[1],
-      );
-      const unknownMarker = allMarkers.find(
-        (marker) => !phasedMarkers.includes(marker as PhasedMarker),
-      );
-      if (unknownMarker) throw new Error(`unknown migration phase marker ${unknownMarker}`);
+      const allMarkers = scanPhaseMarkers(source);
 
       const declaresPhased = source.startsWith(`${phasedHeader}\n`);
       if (declaresPhased && entry.tag !== phasedTag) {
@@ -210,14 +255,31 @@ async function assertBackendPid(reserved: ReservedSql, expectedPid: number): Pro
 async function acquireMigrationLock(
   reserved: ReservedSql,
   backendPid: number,
+  options: RunDatabaseMigrationsOptions,
 ): Promise<void> {
-  while (true) {
+  const maxAttempts =
+    options.testControls?.advisoryLockMaxAttempts ?? defaultAdvisoryLockMaxAttempts;
+  const retryMs = options.testControls?.advisoryLockRetryMs ?? defaultAdvisoryLockRetryMs;
+  if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
+    throw new Error('advisory lock max attempts must be a positive integer');
+  }
+  if (!Number.isInteger(retryMs) || retryMs < 0) {
+    throw new Error('advisory lock retry interval must be a non-negative integer');
+  }
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     const [lock] = await reserved<Array<{ acquired: boolean }>>`
       SELECT pg_try_advisory_lock(hashtext('fxl-sales:database-migrations')) AS acquired
     `;
     if (lock?.acquired) return;
     await assertBackendPid(reserved, backendPid);
-    await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
+    await options.testControls?.onAdvisoryLockPoll?.({ attempt, backendPid });
+    if (attempt === maxAttempts) {
+      throw new Error(`migration advisory lock was not acquired after ${maxAttempts} attempts`);
+    }
+    if (retryMs > 0) {
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, retryMs));
+    }
   }
 }
 
@@ -357,6 +419,16 @@ async function runPhasedMigration(
     phase,
     tag: migration.tag,
   });
+  const maxEmptyBatches =
+    options.testControls?.backfillMaxEmptyBatches ?? defaultBackfillMaxEmptyBatches;
+  const backfillRetryMs =
+    options.testControls?.backfillRetryMs ?? defaultBackfillRetryMs;
+  if (!Number.isInteger(maxEmptyBatches) || maxEmptyBatches < 1) {
+    throw new Error('backfill max empty batches must be a positive integer');
+  }
+  if (!Number.isInteger(backfillRetryMs) || backfillRetryMs < 0) {
+    throw new Error('backfill retry interval must be a non-negative integer');
+  }
 
   await runLockBoundedPhase(reserved, backendPid, phaseStatement('column'));
   await emitPhase(options, event('column'));
@@ -401,10 +473,14 @@ async function runPhasedMigration(
     }
     if (batch.remaining === 0) break;
     consecutiveEmptyBatches += 1;
-    if (consecutiveEmptyBatches > 50) {
-      throw new Error('professional payable backfill remained blocked after 50 retries');
+    if (consecutiveEmptyBatches >= maxEmptyBatches) {
+      throw new Error(
+        `professional payable backfill remained blocked after ${maxEmptyBatches} empty batches`,
+      );
     }
-    await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
+    if (backfillRetryMs > 0) {
+      await new Promise((resolveDelay) => setTimeout(resolveDelay, backfillRetryMs));
+    }
   }
 
   await runAutocommitPhase(reserved, backendPid, phaseStatement('validate'));
@@ -496,7 +572,7 @@ export async function runDatabaseMigrations(
     const [backend] = await reserved<Array<{ pid: number }>>`SELECT pg_backend_pid() AS pid`;
     if (!backend) throw new Error('migration backend PID was not returned');
     backendPid = backend.pid;
-    await acquireMigrationLock(reserved, backendPid);
+    await acquireMigrationLock(reserved, backendPid, options);
     advisoryLocked = true;
     await assertBackendPid(reserved, backendPid);
 

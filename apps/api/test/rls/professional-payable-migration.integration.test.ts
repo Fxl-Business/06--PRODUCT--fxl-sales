@@ -15,13 +15,16 @@ type ScratchDatabase = {
   admin: SqlClient;
   adminScratch: SqlClient;
   clients: Set<SqlClient>;
+  databaseCreated: boolean;
   databaseName: string;
   ownerUrl: string;
+  roleCreated: boolean;
   roleName: string;
 };
 
 type BaselineFixture = {
   ambiguousPayableId: string;
+  candidateCount: number;
   orgId: string;
   payableId: string;
   professionalId: string;
@@ -31,6 +34,16 @@ type BaselineFixture = {
 const identifierPattern = /^[a-z0-9_]+$/;
 const migrationsFolder = resolve(process.cwd(), 'drizzle');
 const scratches: ScratchDatabase[] = [];
+
+type ScratchSetupTestControls = {
+  failAfterDatabaseCreate?: Error;
+  onIdentityCreated?: (identity: { databaseName: string; roleName: string }) => void;
+};
+
+type Deferred = {
+  promise: Promise<void>;
+  resolve: () => void;
+};
 
 const remainingCandidateSql = `
 SELECT count(*)::integer AS count
@@ -81,57 +94,77 @@ function migrationAdminUrl(): string {
   );
 }
 
-async function endClient(client: SqlClient): Promise<void> {
+async function attemptCleanup(
+  errors: unknown[],
+  cleanup: () => Promise<unknown>,
+): Promise<void> {
   try {
-    await client.end({ timeout: 1 });
-  } catch {
-    // Cleanup must continue so the exact scratch database and role are removed.
+    await cleanup();
+  } catch (error) {
+    errors.push(error);
   }
 }
 
-async function createScratchDatabase(): Promise<ScratchDatabase> {
+function deferred(): Deferred {
+  let resolvePromise: (() => void) | undefined;
+  const promise = new Promise<void>((resolveValue) => {
+    resolvePromise = resolveValue;
+  });
+  return {
+    promise,
+    resolve: () => resolvePromise?.(),
+  };
+}
+
+async function createScratchDatabase(
+  testControls: ScratchSetupTestControls = {},
+): Promise<ScratchDatabase> {
   const suffix = randomUUID().replaceAll('-', '');
   const databaseName = `fxl_sales_migration_${suffix}`;
   const roleName = `fxl_sales_migrator_${suffix}`;
   const password = randomUUID().replaceAll('-', '');
   const sourceUrl = migrationAdminUrl();
   const admin = postgres(databaseUrl(sourceUrl, 'postgres'), { max: 1 });
-  let roleCreated = false;
+  const ownerUrl = databaseUrl(sourceUrl, databaseName, {
+    password,
+    username: roleName,
+  });
+  const scratch: ScratchDatabase = {
+    admin,
+    adminScratch: postgres(databaseUrl(sourceUrl, databaseName), { max: 2 }),
+    clients: new Set<SqlClient>(),
+    databaseCreated: false,
+    databaseName,
+    ownerUrl,
+    roleCreated: false,
+    roleName,
+  };
+  scratches.push(scratch);
+  testControls.onIdentityCreated?.({ databaseName, roleName });
 
   try {
     await admin.unsafe(
       `CREATE ROLE ${exactIdentifier(roleName)} LOGIN PASSWORD '${password}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`,
     );
-    roleCreated = true;
+    scratch.roleCreated = true;
     await admin.unsafe(
       `CREATE DATABASE ${exactIdentifier(databaseName)} OWNER ${exactIdentifier(roleName)}`,
     );
+    scratch.databaseCreated = true;
+    if (testControls.failAfterDatabaseCreate) {
+      throw testControls.failAfterDatabaseCreate;
+    }
 
-    const ownerUrl = databaseUrl(sourceUrl, databaseName, {
-      password,
-      username: roleName,
-    });
-    const adminScratch = postgres(databaseUrl(sourceUrl, databaseName), { max: 2 });
     const [role] = await admin<
       Array<{ rolbypassrls: boolean; rolsuper: boolean }>
     >`SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = ${roleName}`;
     expect(role).toEqual({ rolbypassrls: false, rolsuper: false });
 
-    const scratch = {
-      admin,
-      adminScratch,
-      clients: new Set<SqlClient>(),
-      databaseName,
-      ownerUrl,
-      roleName,
-    };
-    scratches.push(scratch);
     return scratch;
   } catch (error) {
-    if (roleCreated) {
-      await admin.unsafe(`DROP ROLE IF EXISTS ${exactIdentifier(roleName)}`);
-    }
-    await endClient(admin);
+    const scratchIndex = scratches.indexOf(scratch);
+    if (scratchIndex >= 0) scratches.splice(scratchIndex, 1);
+    await cleanupScratch(scratch);
     throw error;
   }
 }
@@ -142,22 +175,32 @@ function scratchClient(scratch: ScratchDatabase, max = 1): SqlClient {
   return client;
 }
 
-async function cleanupScratch(scratch: ScratchDatabase): Promise<void> {
+async function cleanupScratch(scratch: ScratchDatabase): Promise<unknown[]> {
+  const errors: unknown[] = [];
   for (const client of scratch.clients) {
-    await endClient(client);
+    await attemptCleanup(errors, () => client.end({ timeout: 1 }));
   }
-  await endClient(scratch.adminScratch);
-  await scratch.admin`
-    SELECT pg_terminate_backend(pid)
-    FROM pg_stat_activity
-    WHERE datname = ${scratch.databaseName}
-      AND pid <> pg_backend_pid()
-  `;
-  await scratch.admin.unsafe(
-    `DROP DATABASE IF EXISTS ${exactIdentifier(scratch.databaseName)}`,
-  );
-  await scratch.admin.unsafe(`DROP ROLE IF EXISTS ${exactIdentifier(scratch.roleName)}`);
-  await endClient(scratch.admin);
+  await attemptCleanup(errors, () => scratch.adminScratch.end({ timeout: 1 }));
+  if (scratch.databaseCreated) {
+    await attemptCleanup(errors, () => scratch.admin`
+      SELECT pg_terminate_backend(pid)
+      FROM pg_stat_activity
+      WHERE datname = ${scratch.databaseName}
+        AND pid <> pg_backend_pid()
+    `);
+    await attemptCleanup(errors, () =>
+      scratch.admin.unsafe(
+        `DROP DATABASE IF EXISTS ${exactIdentifier(scratch.databaseName)}`,
+      ),
+    );
+  }
+  if (scratch.roleCreated) {
+    await attemptCleanup(errors, () =>
+      scratch.admin.unsafe(`DROP ROLE IF EXISTS ${exactIdentifier(scratch.roleName)}`),
+    );
+  }
+  await attemptCleanup(errors, () => scratch.admin.end({ timeout: 1 }));
+  return errors;
 }
 
 async function candidateCount(client: SqlClient, withAdminContext: boolean): Promise<number> {
@@ -173,7 +216,10 @@ async function candidateCount(client: SqlClient, withAdminContext: boolean): Pro
   });
 }
 
-async function populateBaseline(scratch: ScratchDatabase): Promise<BaselineFixture> {
+async function populateBaseline(
+  scratch: ScratchDatabase,
+  candidateTotal = 10000,
+): Promise<BaselineFixture> {
   await runDatabaseMigrations({
     databaseUrl: scratch.ownerUrl,
     migrationsFolder,
@@ -214,7 +260,7 @@ async function populateBaseline(scratch: ScratchDatabase): Promise<BaselineFixtu
       SELECT
         ${orgId}, ${sale.id}, 'Profissional Único', 'professional_cost',
         now() + make_interval(days => generated.day_number), 40000, 'open'
-      FROM generate_series(1, 10000) AS generated(day_number)
+      FROM generate_series(1, ${candidateTotal}) AS generated(day_number)
       RETURNING id
     `;
     if (!payable) throw new Error('failed to create populated migration payables');
@@ -254,12 +300,42 @@ async function populateBaseline(scratch: ScratchDatabase): Promise<BaselineFixtu
 
     return {
       ambiguousPayableId: ambiguousPayable.id,
+      candidateCount: candidateTotal,
       orgId,
       payableId: payable.id,
       professionalId: professional.id,
       saleId: sale.id,
     };
   });
+}
+
+async function createLockProbeMigrationFolder(): Promise<string> {
+  const folder = await mkdtemp(join(tmpdir(), 'fxl-sales-lock-migrations-'));
+  await mkdir(join(folder, 'meta'));
+  await writeFile(
+    join(folder, 'meta/_journal.json'),
+    JSON.stringify({
+      dialect: 'postgresql',
+      entries: [
+        { breakpoints: true, idx: 0, tag: '0000_lock_owner', version: '7', when: 1 },
+        { breakpoints: true, idx: 1, tag: '0001_lock_contender', version: '7', when: 2 },
+      ],
+      version: '7',
+    }),
+  );
+  await writeFile(
+    join(folder, '0000_lock_owner.sql'),
+    [
+      'CREATE TABLE migration_lock_probe(marker text);',
+      '--> statement-breakpoint',
+      "INSERT INTO migration_lock_probe VALUES ('owner');",
+    ].join('\n'),
+  );
+  await writeFile(
+    join(folder, '0001_lock_contender.sql'),
+    "INSERT INTO migration_lock_probe VALUES ('contender');",
+  );
+  return folder;
 }
 
 async function waitFor(
@@ -274,12 +350,160 @@ async function waitFor(
 }
 
 afterEach(async () => {
+  const cleanupErrors: unknown[] = [];
   for (const scratch of scratches.splice(0)) {
-    await cleanupScratch(scratch);
+    cleanupErrors.push(...(await cleanupScratch(scratch)));
+  }
+  if (cleanupErrors.length > 0) {
+    throw new AggregateError(cleanupErrors, 'scratch database cleanup failed');
   }
 });
 
 describe('phased professional payable identity migration', () => {
+  it('removes the database, role, and admin connection after scratch setup fails', async () => {
+    const sentinel = new Error('injected scratch setup failure');
+    let identity: { databaseName: string; roleName: string } | undefined;
+
+    await expect(
+      createScratchDatabase({
+        failAfterDatabaseCreate: sentinel,
+        onIdentityCreated: (createdIdentity) => {
+          identity = createdIdentity;
+        },
+      }),
+    ).rejects.toBe(sentinel);
+    if (!identity) throw new Error('scratch identity was not reported before setup failure');
+
+    const verifier = postgres(databaseUrl(migrationAdminUrl(), 'postgres'), { max: 1 });
+    try {
+      const databases = await verifier`
+        SELECT datname FROM pg_database WHERE datname = ${identity.databaseName}
+      `;
+      const roles = await verifier`
+        SELECT rolname FROM pg_roles WHERE rolname = ${identity.roleName}
+      `;
+      expect(databases).toHaveLength(0);
+      expect(roles).toHaveLength(0);
+    } finally {
+      await verifier.end();
+    }
+  });
+
+  it('polls under real advisory-lock contention, then acquires after release', async () => {
+    const scratch = await createScratchDatabase();
+    const folder = await createLockProbeMigrationFolder();
+    const ownerReady = deferred();
+    const releaseOwner = deferred();
+    const contenderPolled = deferred();
+    let pollAttempts = 0;
+    let ownerRun: Promise<unknown> | undefined;
+    let contenderRun: Promise<unknown> | undefined;
+
+    try {
+      ownerRun = runDatabaseMigrations({
+        databaseUrl: scratch.ownerUrl,
+        migrationsFolder: folder,
+        onPhaseComplete: async (event) => {
+          if (event.tag !== '0000_lock_owner') return;
+          ownerReady.resolve();
+          await releaseOwner.promise;
+        },
+        throughTag: '0000_lock_owner',
+      });
+      await ownerReady.promise;
+
+      contenderRun = runDatabaseMigrations({
+        databaseUrl: scratch.ownerUrl,
+        migrationsFolder: folder,
+        testControls: {
+          advisoryLockMaxAttempts: 100,
+          advisoryLockRetryMs: 1,
+          onAdvisoryLockPoll: () => {
+            pollAttempts += 1;
+            contenderPolled.resolve();
+          },
+        },
+      });
+      await Promise.race([
+        contenderPolled.promise,
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('contender never completed a lock poll')), 1_000),
+        ),
+      ]);
+      expect(pollAttempts).toBeGreaterThan(0);
+      releaseOwner.resolve();
+      await Promise.all([ownerRun, contenderRun]);
+
+      const owner = scratchClient(scratch);
+      const rows = await owner<Array<{ marker: string }>>`
+        SELECT marker FROM migration_lock_probe ORDER BY marker
+      `;
+      const [journal] = await owner<Array<{ count: number }>>`
+        SELECT count(*)::integer AS count FROM drizzle.__drizzle_migrations
+      `;
+      expect(rows).toEqual([{ marker: 'contender' }, { marker: 'owner' }]);
+      expect(journal?.count).toBe(2);
+    } finally {
+      releaseOwner.resolve();
+      await Promise.allSettled([ownerRun, contenderRun].filter(Boolean));
+      await rm(folder, { force: true, recursive: true });
+    }
+  });
+
+  it('terminates lock acquisition after the configured attempt budget without mutation', async () => {
+    const scratch = await createScratchDatabase();
+    const folder = await createLockProbeMigrationFolder();
+    const ownerReady = deferred();
+    const releaseOwner = deferred();
+    let ownerRun: Promise<unknown> | undefined;
+    let contenderRun: Promise<unknown> | undefined;
+
+    try {
+      ownerRun = runDatabaseMigrations({
+        databaseUrl: scratch.ownerUrl,
+        migrationsFolder: folder,
+        onPhaseComplete: async (event) => {
+          if (event.tag !== '0000_lock_owner') return;
+          ownerReady.resolve();
+          await releaseOwner.promise;
+        },
+        throughTag: '0000_lock_owner',
+      });
+      await ownerReady.promise;
+
+      contenderRun = runDatabaseMigrations({
+        databaseUrl: scratch.ownerUrl,
+        migrationsFolder: folder,
+        testControls: {
+          advisoryLockMaxAttempts: 3,
+          advisoryLockRetryMs: 1,
+        },
+      });
+      await expect(
+        Promise.race([
+          contenderRun,
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('lock acquisition did not terminate')), 1_000),
+          ),
+        ]),
+      ).rejects.toThrow('migration advisory lock was not acquired after 3 attempts');
+
+      const owner = scratchClient(scratch);
+      const rows = await owner<Array<{ marker: string }>>`
+        SELECT marker FROM migration_lock_probe ORDER BY marker
+      `;
+      const [journal] = await owner<Array<{ count: number }>>`
+        SELECT count(*)::integer AS count FROM drizzle.__drizzle_migrations
+      `;
+      expect(rows).toEqual([{ marker: 'owner' }]);
+      expect(journal?.count).toBe(1);
+    } finally {
+      releaseOwner.resolve();
+      await Promise.allSettled([ownerRun, contenderRun].filter(Boolean));
+      await rm(folder, { force: true, recursive: true });
+    }
+  });
+
   it('commits and rolls back ordinary migrations on one stable reserved backend', async () => {
     const scratch = await createScratchDatabase();
     const folder = await mkdtemp(join(tmpdir(), 'fxl-sales-migrations-'));
@@ -421,7 +645,7 @@ describe('phased professional payable identity migration', () => {
           if (event.phase === 'column') {
             columnCommitted = true;
             expect(await candidateCount(owner, false)).toBe(0);
-            expect(await candidateCount(owner, true)).toBe(10000);
+            expect(await candidateCount(owner, true)).toBe(fixture.candidateCount);
             await waitFor(
               () => readsDuringMigration > 0 && writesDuringMigration > 0,
               5_000,
@@ -564,7 +788,7 @@ describe('phased professional payable identity migration', () => {
       `;
       return { ambiguous: ambiguous?.sale_professional_id, linked: linked?.count };
     });
-    expect(completion).toEqual({ ambiguous: null, linked: 10000 });
+    expect(completion).toEqual({ ambiguous: null, linked: fixture.candidateCount });
     const [journal] = await owner<Array<{ count: number }>>`
       SELECT count(*)::integer AS count
       FROM drizzle.__drizzle_migrations
@@ -572,6 +796,127 @@ describe('phased professional payable identity migration', () => {
     `;
     expect(journal?.count).toBe(1);
   }, 120_000);
+
+  it('retries an empty SKIP LOCKED batch and resumes after the only candidate unlocks', async () => {
+    const scratch = await createScratchDatabase();
+    const fixture = await populateBaseline(scratch, 1);
+    const owner = scratchClient(scratch);
+    const batchSizes: number[] = [];
+    let blocker: SqlClient | undefined;
+    let blockerOpen = false;
+
+    try {
+      await runDatabaseMigrations({
+        databaseUrl: scratch.ownerUrl,
+        migrationsFolder,
+        onPhaseComplete: async (event) => {
+          if (event.phase === 'column') {
+            expect(await candidateCount(owner, false)).toBe(0);
+            expect(await candidateCount(owner, true)).toBe(1);
+          }
+          if (event.phase === 'post-constraint') {
+            blocker = scratchClient(scratch);
+            await blocker.unsafe('BEGIN');
+            blockerOpen = true;
+            await blocker`SELECT set_config('app.fxl_admin', 'true', true)`;
+            await blocker`
+              SELECT id FROM sales_ops_payables
+              WHERE id = ${fixture.payableId}
+              FOR UPDATE
+            `;
+          }
+          if (event.phase === 'backfill-batch') {
+            batchSizes.push(event.batchUpdated ?? -1);
+            if (event.batchUpdated === 0 && blockerOpen && blocker) {
+              await blocker.unsafe('COMMIT');
+              blockerOpen = false;
+            }
+          }
+        },
+        testControls: { backfillRetryMs: 1 },
+      });
+    } finally {
+      if (blockerOpen && blocker) await blocker.unsafe('ROLLBACK');
+    }
+
+    expect(batchSizes).toEqual([0, 1, 0]);
+    const completion = await owner.begin(async (transaction) => {
+      await transaction`SELECT set_config('app.fxl_admin', 'true', true)`;
+      const [payable] = await transaction<Array<{ sale_professional_id: string | null }>>`
+        SELECT sale_professional_id FROM sales_ops_payables WHERE id = ${fixture.payableId}
+      `;
+      const [journal] = await transaction<Array<{ count: number }>>`
+        SELECT count(*)::integer AS count
+        FROM drizzle.__drizzle_migrations
+        WHERE created_at = 1785941449505
+      `;
+      return { journalCount: journal?.count, professionalId: payable?.sale_professional_id };
+    });
+    expect(completion).toEqual({ journalCount: 1, professionalId: fixture.professionalId });
+  }, 30_000);
+
+  it('stops after 50 empty SKIP LOCKED batches and never journals incomplete work', async () => {
+    const scratch = await createScratchDatabase();
+    const fixture = await populateBaseline(scratch, 1);
+    const owner = scratchClient(scratch);
+    const batchSizes: number[] = [];
+    let blocker: SqlClient | undefined;
+    let blockerOpen = false;
+
+    try {
+      await expect(
+        runDatabaseMigrations({
+          databaseUrl: scratch.ownerUrl,
+          migrationsFolder,
+          onPhaseComplete: async (event) => {
+            if (event.phase === 'column') {
+              expect(await candidateCount(owner, false)).toBe(0);
+              expect(await candidateCount(owner, true)).toBe(1);
+            }
+            if (event.phase === 'post-constraint') {
+              blocker = scratchClient(scratch);
+              await blocker.unsafe('BEGIN');
+              blockerOpen = true;
+              await blocker`SELECT set_config('app.fxl_admin', 'true', true)`;
+              await blocker`
+                SELECT id FROM sales_ops_payables
+                WHERE id = ${fixture.payableId}
+                FOR UPDATE
+              `;
+            }
+            if (event.phase === 'backfill-batch') {
+              batchSizes.push(event.batchUpdated ?? -1);
+            }
+          },
+          testControls: {
+            backfillMaxEmptyBatches: 50,
+            backfillRetryMs: 0,
+          },
+        }),
+      ).rejects.toThrow('professional payable backfill remained blocked after 50 empty batches');
+    } finally {
+      if (blockerOpen && blocker) {
+        await blocker.unsafe('ROLLBACK');
+        blockerOpen = false;
+      }
+    }
+
+    expect(batchSizes).toHaveLength(50);
+    expect(batchSizes.every((size) => size === 0)).toBe(true);
+    const state = await owner.begin(async (transaction) => {
+      await transaction`SELECT set_config('app.fxl_admin', 'true', true)`;
+      const [payable] = await transaction<Array<{ sale_professional_id: string | null }>>`
+        SELECT sale_professional_id FROM sales_ops_payables WHERE id = ${fixture.payableId}
+      `;
+      const [journal] = await transaction<Array<{ count: number }>>`
+        SELECT count(*)::integer AS count
+        FROM drizzle.__drizzle_migrations
+        WHERE created_at = 1785941449505
+      `;
+      return { journalCount: journal?.count, professionalId: payable?.sale_professional_id };
+    });
+    expect(state).toEqual({ journalCount: 0, professionalId: null });
+  }, 30_000);
 
   it('recovers an interrupted invalid concurrent index and serializes two runners', async () => {
     const scratch = await createScratchDatabase();
