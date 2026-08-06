@@ -11,8 +11,12 @@
  *      `['sales-ops']` prefix, so the history itself refetches;
  *   C. `Restaurar` is offered ONLY on an archive event whose entity is still archived
  *      and still restorable - never on a restore event, never on an already-active
- *      entity, never on a system função;
+ *      entity, never on a system função, and (v2.6.0) never on a PURGED one;
  *   D. the pure module's wire vocabulary matches slice 01/02 exactly.
+ *
+ * Block E is v2.6.0's `cadastro.purged`: the nightly purge's terminal event. After the
+ * DELETE there is no row left to name, so the label can only come from the ledger
+ * snapshot, and a PATCH back to `active` would 404.
  */
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -87,6 +91,7 @@ import {
   normalizeCadastroHistory,
   normalizeHistoryEntityKind,
   normalizeHistoryVerb,
+  purgedEntityIds,
   restoreStateFor,
   type CadastroHistoryEntryWire,
   type CadastroHistoryRow,
@@ -420,7 +425,7 @@ describe('cadastro history restore write', () => {
     // The action set is actually sent - the contract with slice 02.
     expect(vi.mocked(salesOpsApi.cadastroHistory).mock.calls[0]).toEqual([
       50,
-      ['cadastro.archived', 'cadastro.restored'],
+      ['cadastro.archived', 'cadastro.restored', 'cadastro.purged'],
       expect.any(String),
     ]);
 
@@ -508,11 +513,13 @@ describe('cadastro-history pure functions', () => {
   it('recognizes exactly slice 01 lifecycle actions', () => {
     expect(normalizeHistoryVerb('cadastro.archived')).toBe('archive');
     expect(normalizeHistoryVerb('cadastro.restored')).toBe('restore');
+    expect(normalizeHistoryVerb('cadastro.purged')).toBe('purge');
 
     expect(normalizeHistoryVerb('commission.approve')).toBeNull();
     expect(normalizeHistoryVerb('payout.mark_paid')).toBeNull();
     expect(normalizeHistoryVerb('produto.archived')).toBeNull();
     expect(normalizeHistoryVerb('cadastro.archive')).toBeNull();
+    expect(normalizeHistoryVerb('cadastro.purge')).toBeNull();
   });
 
   it('reads hasMore from nextCursor and never from the page length', () => {
@@ -596,8 +603,93 @@ describe('cadastro-history pure functions', () => {
     ).toEqual({ state: 'none' });
   });
 
-  it('exports the two actions the panel asks slice 02 for', () => {
-    expect([...CADASTRO_HISTORY_ACTIONS]).toEqual(['cadastro.archived', 'cadastro.restored']);
+  it('exports the three actions the panel asks slice 02 for', () => {
+    expect([...CADASTRO_HISTORY_ACTIONS]).toEqual([
+      'cadastro.archived',
+      'cadastro.restored',
+      'cadastro.purged',
+    ]);
     expect(CADASTRO_HISTORY_LIMIT).toBe(50);
+  });
+});
+
+// ──────────────────── Block E - the purged entity (v2.6.0) ──────────────────────
+
+describe('cadastro history and a purged entity', () => {
+  /** Exactly what `purgeCandidate` writes: the system actor and the label snapshot. */
+  const purgeWire = (patch: Partial<CadastroHistoryEntryWire> = {}) =>
+    wire({
+      id: '1180',
+      action: 'cadastro.purged',
+      actorUserId: 'system',
+      actorDisplayName: 'Sistema',
+      ...patch,
+    });
+
+  it('names a purged produto from the ledger snapshot, with no live row anywhere', async () => {
+    // The whole point: `bootstrap` has NO produto, because the row was deleted.
+    await renderPanel(rowsOf(purgeWire()), bootstrap());
+
+    expect(text()).toContain('FXL Finance');
+    expect(text()).toContain('Produto');
+    expect(text()).toContain('Excluiu definitivamente');
+    expect(text()).toContain('Sistema');
+    // The uuid is never promoted to a label just because the row is gone.
+    expect(text()).not.toContain(PRODUCT_ID);
+  });
+
+  it('offers no restore on the purge event, and says why in words', async () => {
+    await renderPanel(rowsOf(purgeWire()), bootstrap());
+
+    expect(restoreButtons()).toHaveLength(0);
+    expect(text()).toContain('Excluído definitivamente');
+    // The vaguer "gone from the cache" copy must not be what a purge shows.
+    expect(text()).not.toContain('Registro não encontrado');
+  });
+
+  it('withdraws restore from the earlier archive event of the same entity', async () => {
+    // Server order is id DESC, so the purge is the newer row and comes first.
+    await renderPanel(rowsOf(purgeWire(), wire()), bootstrap());
+
+    expect(restoreButtons()).toHaveLength(0);
+    expect(text()).toContain('Arquivou');
+    expect(text()).toContain('Excluiu definitivamente');
+    expect(text()).not.toContain('Registro não encontrado');
+  });
+
+  it('leaves an untouched entity restorable when another one was purged', async () => {
+    const OTHER_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+    await renderPanel(
+      rowsOf(
+        purgeWire(),
+        wire({ id: '1176', entityId: OTHER_ID, entityLabel: 'FXL Vivo' }),
+      ),
+      bootstrap({ products: [product({ id: OTHER_ID, name: 'FXL Vivo' })], areas: [area()] }),
+    );
+
+    // Exactly one: the purged produto's own archive event is not in this page, and
+    // the purge row itself never offers one.
+    expect(restoreButtons()).toHaveLength(1);
+    expect(text()).toContain('Excluído definitivamente');
+  });
+
+  it('is a pure decision: restoreStateFor refuses a purged entity id', () => {
+    const purgedRow = rowOf({ action: 'cadastro.purged', actorUserId: 'system' });
+    const archiveRow = rowOf();
+    const purged = purgedEntityIds([purgedRow, archiveRow]);
+
+    expect([...purged]).toEqual([PRODUCT_ID]);
+    expect(restoreStateFor(purgedRow, bootstrap(), purged)).toEqual({ state: 'purged' });
+    // Even with the live row still in a stale cache, the purge wins.
+    expect(
+      restoreStateFor(archiveRow, bootstrap({ products: [product()], areas: [area()] }), purged),
+    ).toEqual({ state: 'purged' });
+    // And without the purge, that same archive row is restorable as before.
+    expect(
+      restoreStateFor(archiveRow, bootstrap({ products: [product()], areas: [area()] })),
+    ).toEqual({
+      state: 'available',
+      target: { resource: 'products', id: PRODUCT_ID, status: 'active' },
+    });
   });
 });

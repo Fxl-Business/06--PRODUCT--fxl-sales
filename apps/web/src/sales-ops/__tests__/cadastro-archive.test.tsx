@@ -13,6 +13,10 @@
  *      reactivate an archived row;
  *   E. an archived produto leaves the proposta wizard picker but keeps naming the item
  *      that already references it.
+ *
+ * Block B additionally carries the v2.6.0 slice-01 inversion: an archived row is not
+ * listed AT ALL in any of the four cadastros, and the row-level `Restaurar` that used
+ * to sit on it is gone, because restore now lives only in `Histórico de arquivamentos`.
  */
 
 import * as React from 'react';
@@ -540,28 +544,95 @@ describe('cadastro archive confirmation', () => {
     expect(text()).not.toContain('Arquivar o produto "FXL Finance"?');
   });
 
-  it('restores without any confirmation, and never offers both controls', async () => {
-    await renderAreas([archivedArea]);
-
-    expect(buttonByAriaLabel('Arquivar área FXL Visual')).toBeNull();
-    await click(requireButtonByAriaLabel('Restaurar área FXL Visual'));
-
-    expect(onArchive).toHaveBeenCalledWith({
-      cadastro: 'area',
-      id: AREA_ARCHIVED_ID,
-      name: 'FXL Visual',
-      status: 'active',
-    });
-    expect(text()).not.toContain('Arquivar a área');
-  });
-
-  it('both row controls are type="button"', async () => {
+  it('the archive control is type="button"', async () => {
     // happy-dom's dispatchEvent never runs a click's activation behaviour, so a
     // click test cannot see a button whose type makes it submit. Assert the attribute.
-    await renderAreas([area(), archivedArea]);
+    await renderAreas([area()]);
 
     expect(requireButtonByAriaLabel('Arquivar área FXL Tech').type).toBe('button');
-    expect(requireButtonByAriaLabel('Restaurar área FXL Visual').type).toBe('button');
+  });
+
+  /*
+    Slice 01 - archived rows leave the four cadastro lists entirely. The inverse of
+    what this file used to assert: an archived row no longer renders a badge, it does
+    not render at all, and the row-level `Restaurar` that slice 03 put on it is gone
+    with it. Restore now exists in exactly one place, `Histórico de arquivamentos`.
+  */
+  it('does not list an archived área, and offers no row-level restore', async () => {
+    await renderAreas([area(), archivedArea]);
+
+    expect(text()).toContain('FXL Tech');
+    expect(text()).not.toContain('FXL Visual');
+    expect(text()).not.toContain('Arquivada');
+    expect(buttonByAriaLabel('Restaurar área FXL Visual')).toBeNull();
+    expect(container.querySelectorAll('tbody tr')).toHaveLength(1);
+  });
+
+  it('does not list an archived produto, and offers no row-level restore', async () => {
+    const archivedProduct = product({
+      id: '77777777-7777-4777-8777-777777777777',
+      name: 'FXL Legado',
+      codeSuffix: '3',
+      status: 'archived',
+    });
+    await renderProducts([product(), archivedProduct], 'product');
+
+    expect(text()).toContain('FXL Finance');
+    expect(text()).not.toContain('FXL Legado');
+    expect(text()).not.toContain('Arquivado');
+    expect(buttonByAriaLabel('Restaurar produto FXL Legado')).toBeNull();
+    expect(container.querySelectorAll('tbody tr')).toHaveLength(1);
+  });
+
+  it('does not list an archived função, and offers no row-level restore', async () => {
+    const archivedFuncao = funcao({
+      id: 'fc000007-0000-4000-8000-000000000007',
+      name: 'Tester',
+      slug: 'tester',
+      isSystem: false,
+      status: 'archived',
+    });
+    await renderFuncoes([designer, archivedFuncao]);
+
+    expect(text()).toContain('Designer');
+    expect(text()).not.toContain('Tester');
+    expect(text()).not.toContain('Arquivada');
+    expect(buttonByAriaLabel('Restaurar função Tester')).toBeNull();
+    expect(container.querySelectorAll('tbody tr')).toHaveLength(1);
+  });
+
+  it('does not list an inactive pessoa, and offers no row-level reactivation', async () => {
+    const inactive = pessoa({
+      id: '88888888-8888-4888-8888-888888888888',
+      displayName: 'Joao Boldo',
+      status: 'inactive',
+    });
+    await renderPessoas([pessoa(), inactive]);
+
+    expect(text()).toContain('Alex Silva');
+    expect(text()).not.toContain('Joao Boldo');
+    expect(text()).not.toContain('Inativo');
+    expect(buttonByAriaLabel('Reativar pessoa Joao Boldo')).toBeNull();
+    expect(container.querySelectorAll('tbody tr')).toHaveLength(1);
+  });
+
+  it('renders no restore affordance at all in any of the four lists', async () => {
+    const restoreControls = () =>
+      [...container.querySelectorAll('button')].filter((candidate) =>
+        /^(Restaurar|Reativar) /.test(candidate.getAttribute('aria-label') ?? ''),
+      );
+
+    await renderProducts([product(), product({ id: '99999999-9999-4999-8999-999999999999', name: 'FXL Legado', status: 'archived' })], 'product');
+    expect(restoreControls()).toHaveLength(0);
+
+    await renderAreas([area(), archivedArea]);
+    expect(restoreControls()).toHaveLength(0);
+
+    await renderFuncoes([designer, funcao({ id: 'fc000006-0000-4000-8000-000000000006', name: 'Tester', slug: 'tester', isSystem: false, status: 'archived' })]);
+    expect(restoreControls()).toHaveLength(0);
+
+    await renderPessoas([pessoa(), pessoa({ id: 'aaaaaaa1-aaaa-4aaa-8aaa-aaaaaaaaaaa1', displayName: 'Joao Boldo', status: 'inactive' })]);
+    expect(restoreControls()).toHaveLength(0);
   });
 });
 

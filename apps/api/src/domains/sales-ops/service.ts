@@ -68,6 +68,35 @@ function cadastroLifecycleEvent(
 }
 
 /**
+ * The `archived_at` write a status transition implies, or `{}` when it implies none.
+ *
+ * Derived from cadastroLifecycleEvent - the SAME classification the ledger entry
+ * uses, deliberately not a second one - so the stamp and the `cadastro.archived`
+ * entry can never disagree about what happened. The consequences of that reuse are
+ * exactly the ones documented there: a rename that resubmits the current status is
+ * not a transition and leaves the stamp alone, so re-saving an archived cadastro
+ * cannot silently restart its 30-day purge window.
+ *
+ * A restore clears it to NULL, so restoring and re-archiving restarts the window
+ * from scratch rather than resuming an older one. That is the safe direction: the
+ * alternative purges a row shortly after an operator deliberately brought it back.
+ *
+ * `new Date()` and not `now()`: every timestamp column in this service is written
+ * from the app clock (see `updatedAt` on the same rows), and skew between the app
+ * and the database is many orders of magnitude below a 30-day window.
+ */
+function archivedAtPatch(
+  before: string,
+  after: string,
+  archived: ArchivedStatus,
+): { archivedAt?: Date | null } {
+  const event = cadastroLifecycleEvent(before, after, archived);
+  if (event === 'cadastro.archived') return { archivedAt: new Date() };
+  if (event === 'cadastro.restored') return { archivedAt: null };
+  return {};
+}
+
+/**
  * Appends the archive/restore ledger entry for one cadastro write.
  *
  * MUST be handed the `tx` from withTenant, never `db`: writeAuditEntry takes
@@ -1541,6 +1570,7 @@ export async function updatePerson(
         // it, so a caller sending funcaoIds must send contactEmail alongside.
         contactEmail: data.contactEmail || null,
         ...(resolved ? deriveBooleanMirrors(resolved) : {}),
+        ...archivedAtPatch(current.status, data.status ?? current.status, 'inactive'),
         updatedAt: new Date(),
       })
       .where(and(eq(salesOpsPeople.orgId, orgId), eq(salesOpsPeople.id, id)))
@@ -1666,7 +1696,12 @@ export async function updateFuncao(
       funcao = await tx.transaction(async (nested) => {
         const [row] = await nested
           .update(salesOpsFuncoes)
-          .set({ ...data, ...(slug !== undefined ? { slug } : {}), updatedAt: new Date() })
+          .set({
+            ...data,
+            ...(slug !== undefined ? { slug } : {}),
+            ...archivedAtPatch(current.status, data.status ?? current.status, 'archived'),
+            updatedAt: new Date(),
+          })
           .where(and(eq(salesOpsFuncoes.orgId, orgId), eq(salesOpsFuncoes.id, id)))
           .returning();
         return row ?? null;
@@ -2024,6 +2059,7 @@ export async function updateProduct(
       kind,
       openPrice: kind === 'service',
       ...productNumericPatch(data),
+      ...archivedAtPatch(current.status, data.status ?? current.status, 'archived'),
       updatedAt: new Date(),
     };
     const [product] = await tx
@@ -2178,7 +2214,11 @@ export async function updateArea(
     }
     const [area] = await tx
       .update(salesOpsAreas)
-      .set({ ...data, updatedAt: new Date() })
+      .set({
+        ...data,
+        ...archivedAtPatch(current.status, data.status ?? current.status, 'archived'),
+        updatedAt: new Date(),
+      })
       .where(and(eq(salesOpsAreas.orgId, orgId), eq(salesOpsAreas.id, id)))
       .returning();
     if (!area) return null;

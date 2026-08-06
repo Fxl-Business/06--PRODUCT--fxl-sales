@@ -448,6 +448,8 @@ export const salesOpsPeople = pgTable(
     displayName: text('display_name').notNull(),
     contactEmail: text('contact_email'),
     status: text('status').notNull().default('active'), // 'active' | 'inactive'
+    /** @see archivedAt on sales_ops_areas - identical contract, 'inactive' spelling. */
+    archivedAt: timestamp('archived_at', { withTimezone: true }),
     /**
      * @deprecated derived mirror of sales_ops_person_funcoes (slug 'vendedor');
      * drop after slice 09 flips the web readers to funções.
@@ -480,6 +482,19 @@ export const salesOpsAreas = pgTable(
     orgId: text('org_id').notNull(),
     name: text('name').notNull(),
     status: text('status').notNull().default('active'), // 'active' | 'archived'
+    /**
+     * When this row entered its archived state; NULL whenever it is active.
+     *
+     * Written by the SAME transition classification the ledger entry uses
+     * (`cadastroLifecycleEvent` in the sales-ops service), so the stamp and the
+     * `cadastro.archived` entry can never disagree about what happened. Read by
+     * exactly one consumer: the nightly purge, which hard-deletes an archived row
+     * that nothing references once this instant is more than 30 days old.
+     *
+     * A restore sets it back to NULL, so restoring and re-archiving deliberately
+     * restarts the 30-day window rather than resuming an old one.
+     */
+    archivedAt: timestamp('archived_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }),
   },
@@ -505,6 +520,12 @@ export const salesOpsFuncoes = pgTable(
     // true ONLY for the two predefined app roles. Guards rename and archive.
     isSystem: boolean('is_system').notNull().default(false),
     status: text('status').notNull().default('active'), // 'active' | 'archived'
+    /**
+     * @see archivedAt on sales_ops_areas - identical contract. A system função can
+     * never carry one: the API refuses to archive it at all, and the purge filters
+     * `is_system` out a second time rather than trusting that.
+     */
+    archivedAt: timestamp('archived_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }),
   },
@@ -616,6 +637,8 @@ export const salesOpsProducts = pgTable(
     /** @deprecated superseded by sales_ops_product_funcao_costs; drop after slice 10 lands. */
     providers: jsonb('providers').notNull().default(sql`'[]'::jsonb`),
     status: text('status').notNull().default('active'), // 'active' | 'archived'
+    /** @see archivedAt on sales_ops_areas - identical contract. */
+    archivedAt: timestamp('archived_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }),
   },

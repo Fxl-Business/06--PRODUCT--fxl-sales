@@ -18,13 +18,17 @@ import type { SalesOpsBootstrap } from './types';
 export const CADASTRO_HISTORY_LIMIT = 50;
 
 /**
- * The two ledger actions this panel shows, sent to the history endpoint as a
+ * The ledger actions this panel shows, sent to the history endpoint as a
  * comma-separated `action` set. These MUST stay identical to
  * `CADASTRO_LIFECYCLE_ACTIONS` in `apps/api/src/domains/audit/service.ts` -
- * nothing type-checks the pair, and a third action added there is invisible here
+ * nothing type-checks the pair, and a fourth action added there is invisible here
  * until it is added here too.
  */
-export const CADASTRO_HISTORY_ACTIONS = ['cadastro.archived', 'cadastro.restored'] as const;
+export const CADASTRO_HISTORY_ACTIONS = [
+  'cadastro.archived',
+  'cadastro.restored',
+  'cadastro.purged',
+] as const;
 
 /** The wire shape of one `GET /api/v1/sales-ops/history` entry. */
 export type CadastroHistoryEntryWire = {
@@ -53,7 +57,7 @@ export type CadastroHistoryResponse = {
  */
 export type HistoryEntityKind = 'produto' | 'pessoa' | 'funcao' | 'area';
 
-export type CadastroHistoryVerb = 'archive' | 'restore';
+export type CadastroHistoryVerb = 'archive' | 'restore' | 'purge';
 
 export type CadastroHistoryRow = {
   id: string;
@@ -70,6 +74,8 @@ export type CadastroHistoryRow = {
 export type RestoreState =
   | { state: 'available'; target: SetCadastroStatusPayload }
   | { state: 'already-active' }
+  /** The nightly purge hard-deleted the row. Terminal: nothing can bring it back. */
+  | { state: 'purged' }
   | { state: 'missing' }
   | { state: 'none' };
 
@@ -122,7 +128,7 @@ export function normalizeHistoryEntityKind(
 }
 
 /**
- * Matches the two action literals exactly. Deliberately NOT a split on `.` with
+ * Matches the three action literals exactly. Deliberately NOT a split on `.` with
  * a look at the last segment: the action never encodes the entity (that is what
  * `entityType` is for), and `commission.approve` must resolve to `null` rather
  * than to a verb.
@@ -130,6 +136,7 @@ export function normalizeHistoryEntityKind(
 export function normalizeHistoryVerb(action: string): CadastroHistoryVerb | null {
   if (action === 'cadastro.archived') return 'archive';
   if (action === 'cadastro.restored') return 'restore';
+  if (action === 'cadastro.purged') return 'purge';
   return null;
 }
 
@@ -244,6 +251,24 @@ function findLiveCadastro(
     : null;
 }
 
+const NO_PURGES: ReadonlySet<string> = new Set();
+
+/**
+ * The entity ids the page reports as hard-deleted by the nightly purge.
+ *
+ * Derived from the rendered page rather than from a separate read, because the
+ * purge entry is the only surviving evidence the row ever existed: the row is
+ * gone from `bootstrap`, and `missing` alone cannot tell "purged" apart from
+ * "not in this cache". One pass, so the panel computes it once for the table.
+ */
+export function purgedEntityIds(rows: readonly CadastroHistoryRow[]): ReadonlySet<string> {
+  const ids = new Set<string>();
+  for (const row of rows) {
+    if (row.verb === 'purge' && row.entityId) ids.add(row.entityId);
+  }
+  return ids;
+}
+
 /**
  * Restore is offered ONLY where it can actually succeed: an archive event whose
  * entity is still archived and still restorable. Everything else says so in
@@ -253,7 +278,15 @@ function findLiveCadastro(
 export function restoreStateFor(
   row: CadastroHistoryRow,
   bootstrap: SalesOpsBootstrap,
+  purged: ReadonlySet<string> = NO_PURGES,
 ): RestoreState {
+  // 0. The purge is terminal and outranks every other reading, including a live
+  //    row still sitting in a stale bootstrap cache: the PATCH would 404. It
+  //    applies to the purge entry itself AND to the earlier archive entry for the
+  //    same entity, which is the row an operator would actually click.
+  if (row.verb === 'purge' || (row.entityId && purged.has(row.entityId))) {
+    return { state: 'purged' };
+  }
   // 1. A restore entry never offers a restore.
   if (row.verb !== 'archive') return { state: 'none' };
   // 2. An entity kind this build does not recognize renders read-only.
@@ -290,7 +323,13 @@ export function restoreStateFor(
 export function resolveHistoryRow(
   row: CadastroHistoryRow,
   bootstrap: SalesOpsBootstrap,
+  purged: ReadonlySet<string> = NO_PURGES,
 ): ResolvedHistoryRow {
+  /*
+    After a purge there is no live row by construction, so `entityLabel` below falls
+    through to `snapshotLabel` - the `label` the purge wrote into `after_jsonb`,
+    which is the only thing left that can name the deleted cadastro.
+  */
   const live = row.kind ? findLiveCadastro(row.kind, row.entityId, bootstrap) : null;
 
   const entityLabel = live?.name ?? row.snapshotLabel ?? row.entityId;
@@ -305,7 +344,15 @@ export function resolveHistoryRow(
     : 'Cadastro';
 
   const eventLabel =
-    row.verb === 'archive' ? 'Arquivou' : row.verb === 'restore' ? 'Restaurou' : row.rawAction;
+    row.verb === 'archive'
+      ? 'Arquivou'
+      : row.verb === 'restore'
+        ? 'Restaurou'
+        : // Spelled out rather than a bare `Excluiu`: this is the one irreversible
+          // event in the ledger, and the actor beside it is `Sistema`.
+          row.verb === 'purge'
+          ? 'Excluiu definitivamente'
+          : row.rawAction;
 
   return {
     ...row,
@@ -319,6 +366,6 @@ export function resolveHistoryRow(
     // even then it is secondary text under a pt-BR primary label.
     actorLabel: row.actorDisplayName ? '' : row.actorUserId,
     actorLabelIsId: !row.actorDisplayName,
-    restore: restoreStateFor(row, bootstrap),
+    restore: restoreStateFor(row, bootstrap, purged),
   };
 }

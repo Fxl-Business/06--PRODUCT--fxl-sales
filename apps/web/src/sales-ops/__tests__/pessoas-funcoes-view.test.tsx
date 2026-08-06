@@ -258,8 +258,15 @@ describe('pessoas cadastro', () => {
     expect(text()).toContain('Sig');
     expect(text()).toContain('Vendedor');
     expect(text()).toContain('Designer');
-    expect(text()).toContain('Ativo');
-    expect(text()).toContain('Inativo');
+    /*
+      v2.6.0 slice 01: an inactive pessoa is not listed, so the `Status` column would
+      read `Ativo` on every row and is gone with her. `Inativo` survives only in
+      `Histórico de arquivamentos`.
+    */
+    expect(text()).not.toContain('Joao Boldo');
+    expect(text()).not.toContain('Inativo');
+    expect(text()).not.toContain('Ativo');
+    expect(container.querySelectorAll('tbody tr')).toHaveLength(2);
 
     const dashCell = [...container.querySelectorAll('td')].find(
       (cell) => cell.textContent?.trim() === '-',
@@ -280,6 +287,54 @@ describe('pessoas cadastro', () => {
     });
 
     expect(text()).toContain('Nenhuma pessoa cadastrada');
+  });
+
+  it('shows the empty panel when every pessoa is inactive', async () => {
+    await act(async () => {
+      root.render(
+        <PessoasView
+          bootstrap={bootstrap({ people: [pessoa({ status: 'inactive' })] })}
+          onArchive={vi.fn()}
+          onEdit={vi.fn()}
+        />,
+      );
+    });
+
+    expect(text()).toContain('Nenhuma pessoa cadastrada');
+    expect(container.querySelector('table')).toBeNull();
+  });
+
+  /*
+    The non-regression that matters most for slice 01: hiding archived rows from the
+    LISTS must never hide one from a record that REFERENCES it. CLAUDE.md is explicit
+    that an archived função stays visible on the people who already carry it.
+  */
+  it('still renders the chip of an archived função a listed pessoa carries', async () => {
+    const arquivada = funcao({
+      id: 'fc000005-0000-4000-8000-000000000005',
+      name: 'Tester',
+      slug: 'tester',
+      isSystem: false,
+      status: 'archived',
+    });
+    const carrier = withFuncoes(
+      { id: '77777777-7777-4777-8777-777777777777', displayName: 'Sig' },
+      [designer, arquivada],
+    );
+
+    await act(async () => {
+      root.render(
+        <PessoasView
+          bootstrap={bootstrap({ funcoes: [designer, arquivada], people: [carrier] })}
+          onArchive={vi.fn()}
+          onEdit={vi.fn()}
+        />,
+      );
+    });
+
+    expect(text()).toContain('Sig');
+    expect(text()).toContain('Designer');
+    expect(text()).toContain('Tester');
   });
 
   it('assigns and removes funções before saving a pessoa', async () => {
@@ -490,7 +545,9 @@ describe('funções cadastro', () => {
 
     expect(text()).toContain('Predefinida');
     expect(text()).toContain('Personalizada');
-    expect(text()).toContain('Ativa');
+    // v2.6.0 slice 01: no `Status` column - an archived função is not listed, so the
+    // column could only ever read `Ativa`.
+    expect(text()).not.toContain('Ativa');
 
     const rowFor = (name: string) =>
       [...container.querySelectorAll('tbody tr')].find((row) =>
@@ -499,9 +556,9 @@ describe('funções cadastro', () => {
     const cells = (name: string) =>
       [...(rowFor(name)?.querySelectorAll('td') ?? [])].map((cell) => cell.textContent?.trim());
 
-    expect(cells('Vendedor')?.[3]).toBe('2');
-    expect(cells('Finder')?.[3]).toBe('0');
-    expect(cells('Designer')?.[3]).toBe('1');
+    expect(cells('Vendedor')?.[2]).toBe('2');
+    expect(cells('Finder')?.[2]).toBe('0');
+    expect(cells('Designer')?.[2]).toBe('1');
 
     // CLAUDE.md, UI Identifiers: no raw workspace or função id is rendered.
     expect(text()).not.toContain(orgId);
@@ -517,6 +574,23 @@ describe('funções cadastro', () => {
     });
 
     expect(text()).toContain('Nenhuma função cadastrada');
+  });
+
+  it('shows the empty panel when every função is archived', async () => {
+    await act(async () => {
+      root.render(
+        <FuncoesView
+          bootstrap={bootstrap({
+            funcoes: [funcao({ name: 'Tester', slug: 'tester', isSystem: false, status: 'archived' })],
+          })}
+          onArchive={vi.fn()}
+          onEdit={vi.fn()}
+        />,
+      );
+    });
+
+    expect(text()).toContain('Nenhuma função cadastrada');
+    expect(container.querySelector('table')).toBeNull();
   });
 
   it('offers no edit affordance for a system função', async () => {

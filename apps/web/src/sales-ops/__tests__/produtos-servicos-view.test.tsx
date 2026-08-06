@@ -326,6 +326,49 @@ describe('produtos e serviços view', () => {
     expect(segment('Filtrar por serviços').textContent).toContain('1');
   });
 
+  /*
+    v2.6.0 slice 01. The counts have to drop the archived rows along with the table:
+    a segment reading `Produtos 2` above a one-row table would read as a lost row.
+  */
+  it('leaves an archived row out of the table AND out of the segment counts', async () => {
+    await renderView({
+      products: [
+        product(),
+        product({
+          id: '66666666-6666-4666-8666-666666666666',
+          name: 'FXL Legado',
+          status: 'archived',
+        }),
+        servico(),
+        servico({
+          id: '77777777-7777-4777-8777-777777777777',
+          name: 'Consultoria Legada',
+          status: 'archived',
+        }),
+      ],
+      kind: 'product',
+    });
+
+    expect(text()).toContain('FXL Finance');
+    expect(text()).not.toContain('FXL Legado');
+    expect(text()).not.toContain('Arquivado');
+    expect(container.querySelectorAll('tbody tr')).toHaveLength(1);
+    expect(segment('Filtrar por produtos').textContent).toContain('1');
+    expect(segment('Filtrar por serviços').textContent).toContain('1');
+  });
+
+  it('shows the empty bucket when every produto in it is archived', async () => {
+    await renderView({
+      products: [product({ status: 'archived' }), servico()],
+      kind: 'product',
+    });
+
+    expect(text()).toContain('Nenhum produto cadastrado');
+    expect(container.querySelector('tbody')).toBeNull();
+    // The other bucket is still reachable, and still counts its one active row.
+    expect(segment('Filtrar por serviços').textContent).toContain('1');
+  });
+
   it('treats a product without an explicit kind as a produto', async () => {
     const unclassified = product({ kind: undefined, name: 'FXL Sem Classe' });
 
