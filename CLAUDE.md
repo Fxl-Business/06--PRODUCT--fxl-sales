@@ -107,6 +107,22 @@ Keep the repository folder name unchanged until the editor session can safely mo
 - Open-price sale item labels use the existing `items[].productName` to `productNameSnapshot` path while preserving the original `productId`, so do not add a parallel description field or migration.
 - Keep the static legacy route trees `/admin/*`, `/finder/*`, `/seller/*`, and `/no-role` unchanged.
 
+## Arquivamento e histórico
+
+- There is still NO delete and no DELETE verb. "Arquivar" is a status-only PATCH on the endpoint that already exists, and it is reversible from `cadastros/geral`.
+  The PATCH body carries `status` and nothing else, so a stale cached `name` or `funcaoIds` can never be written back as a side effect of archiving or restoring.
+  Produto, área and função archive to `archived`; a pessoa goes to `inactive`.
+- A **cliente cannot be archived**: `sales_ops_clients` has no `status` column, `ClientSchema` declares no such key, and zod strips unknown keys, so `PATCH /clients/:id {"status":"archived"}` answers `200` with an unchanged row - a silent no-op that reads as success. Do not add the control before the column; the six-step recipe is in `nexo/runs/feature-20260805-cadastro-archive-history/00-OVERVIEW.md`.
+- Archiving and restoring append a hash-chained `audit_log` entry from INSIDE the same `withTenant` transaction as the status write, so a status change can never land without its ledger row.
+  Only the archive/restore lifecycle is audited; an ordinary rename or price edit writes nothing, because the ledger cannot be purged and every audited write queues behind a global tail lock.
+  Handing `writeAuditEntry` the pooled `db` instead of the transaction's `tx` compiles cleanly and silently breaks that guarantee - the only assertion that catches it is a `DEFERRABLE INITIALLY DEFERRED` constraint trigger firing at COMMIT, because both ordinary rollback probes throw before the entry exists and pass either way.
+- The actor's display name is SNAPSHOTTED at write time from the verified token (`name`, then `email`, then `null` - never the account id), because `sales_ops_people` has no account-id column and the Hub SDK exposes no directory. There is no join path from a Hub account id to a pessoa, so without the snapshot the history could only ever name the reader themselves.
+- `GET /api/v1/sales-ops/history` is org-scoped and is NOT the same thing as `/api/v1/admin/audit`.
+  That admin router reads through `getAdminDb()`, documents `audit_log` as cross-tenant, and applies no org filter at all, while `requireAdmin` here is synthesized from a Hub WORKSPACE owner/admin flag rather than a platform superuser - pointing an operator at it would hand one tenant every other tenant's audit trail.
+  `audit_log` carries no RLS, so `eq(auditLog.actorOrgId, orgId)` is the ONLY control enforcing isolation. It is deliberately the conditions array's first literal element, the query schema declares no org key so a smuggled `?orgId=` is never read, and the history service must never import `getAdminDb`.
+- `audit_log.id` is a `bigserial` that arrives as a JS `BigInt`, which `JSON.stringify` throws on. Project `String(row.id)`. `/api/v1/admin/audit` still does not, and 500s on any non-empty ledger - see `nexo/ROADMAP.md`.
+- A restore is a NEW ledger entry, never an undo: the chain is append-only and hash-verified, so no UI may imply the history was rewritten. `Restaurar` is offered only where it can succeed - an archive event whose entity is still archived, non-optimistic and not a system função - and an already-active entity reads `Já restaurado` rather than showing a button that would 200 and do nothing.
+
 ## Pessoas e Funções
 
 - A Pessoa is the single people cadastro; a Função is an org-scoped role assigned to a pessoa. They are separate entities with separate Cadastros screens.
