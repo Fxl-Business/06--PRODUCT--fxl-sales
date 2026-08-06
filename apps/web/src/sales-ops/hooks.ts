@@ -15,6 +15,11 @@ import {
   type TransitionSalePayload,
 } from './api';
 import {
+  CADASTRO_HISTORY_ACTIONS,
+  CADASTRO_HISTORY_LIMIT,
+  normalizeCadastroHistory,
+} from './cadastro-history';
+import {
   optimisticArea,
   optimisticClient,
   optimisticFuncao,
@@ -279,5 +284,30 @@ export function useSaveSalesOpsSettings() {
     mutationFn: async (payload: SaveSettingsPayload) =>
       salesOpsApi.saveSettings(payload, await requireToken(getToken)),
     invalidates: [queryKeys.salesOps.all],
+  });
+}
+
+/**
+ * `Histórico de arquivamentos` - the org-scoped ledger read behind Configurações.
+ *
+ * `select` is the hoisted, module-level `normalizeCadastroHistory` for the same
+ * reason `selectSalesOpsBootstrap` is: an inline arrow defeats TanStack's
+ * per-selector memo and hands every render a brand new page object.
+ *
+ * `CADASTRO_HISTORY_ACTIONS` is deliberately NOT part of the query key - it is a
+ * build-time constant, so keying on it would add a dimension that can never vary
+ * and would churn the key on any future edit to the list.
+ */
+export function useCadastroHistory() {
+  const { getToken } = useAccessToken();
+  return useQuery({
+    queryKey: queryKeys.salesOps.cadastroHistory(CADASTRO_HISTORY_LIMIT),
+    queryFn: async () =>
+      salesOpsApi.cadastroHistory(
+        CADASTRO_HISTORY_LIMIT,
+        CADASTRO_HISTORY_ACTIONS,
+        await requireToken(getToken),
+      ),
+    select: normalizeCadastroHistory,
   });
 }

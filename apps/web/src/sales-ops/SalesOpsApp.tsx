@@ -125,6 +125,7 @@ import { computeSaleFinancials } from '@fxl-sales/shared-utils/sale-financials';
   above: the root re-exports the Node-only hmac module and will not bundle.
 */
 import { SPLIT_BP_TOTAL } from '@fxl-sales/shared-utils/professional-split';
+import { CadastroHistorySection } from './CadastroHistoryPanel';
 import { ProfessionalSplitPanel } from './ProfessionalSplitPanel';
 import {
   addMonthsToIsoDate,
@@ -1726,12 +1727,24 @@ export function SalesOpsApp() {
                   />
                 ) : null}
                 {view === 'geral' ? (
-                  <SettingsView
-                    key={bootstrap.settings?.updatedAt ?? bootstrap.settings?.createdAt ?? 'new'}
-                    isSaving={saveSettings.isPending}
-                    onSave={(payload) => saveSettings.mutate(payload)}
-                    settings={bootstrap.settings}
-                  />
+                  /*
+                    The history is a SIBLING of `SettingsView`, never nested inside it:
+                    `SettingsView` is keyed on the persisted settings timestamp, so every
+                    settings save remounts it and would restart the history query and blank
+                    the table. It also returns a single `<form>`, and a confirmation dialog
+                    inside a form is a trap nobody should have to remember.
+                    `persistedBootstrap` and not `bootstrap`: a restore must never target an
+                    `optimistic:` id.
+                  */
+                  <div className="flex flex-col gap-[14px]">
+                    <SettingsView
+                      key={bootstrap.settings?.updatedAt ?? bootstrap.settings?.createdAt ?? 'new'}
+                      isSaving={saveSettings.isPending}
+                      onSave={(payload) => saveSettings.mutate(payload)}
+                      settings={bootstrap.settings}
+                    />
+                    <CadastroHistorySection bootstrap={persistedBootstrap} />
+                  </div>
                 ) : null}
               </>
             ) : null}
