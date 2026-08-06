@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "current_milestone_id": "v2.4.0",
+  "current_milestone_id": "v2.6.0",
   "delivery": {
     "mode": "promotion",
     "trunk": "master",
@@ -24,9 +24,9 @@
     "release": "v2.5.0",
     "commit": "71ddfbd3fbdb21288511982000dfe3ee1a051138",
     "flow": "ship",
-    "decision": "approved-cut-and-staging",
+    "decision": "approved-full-promotion",
     "decided_at": "2026-08-06",
-    "note": "User chose ship-via-staging at Gate 3a. Release-verify PASS on 281bc5b (1017 unit + 150 integration, clean-state build reproducing Vercel's fresh clone). Tag v2.5.0 pushed, staging fast-forwarded. PRODUCTION IS NOT APPROVED YET - Gate 3b awaits the user validating staging in-env. Two non-blocking notes carried: 0019's CREATE INDEX is not CONCURRENTLY and takes ACCESS EXCLUSIVE on audit_log against a still-writing old container during a rolling deploy; and after_jsonb.actorLabel persists the actor e-mail when the Hub token carries no name."
+    "note": "Gate 3a approved as ship-via-staging; Gate 3b approved explicitly after staging. Release-verify PASS on 281bc5b. production == staging == 71ddfbd; invariant production subset-of staging subset-of master holds."
   },
   "gate3_hotfix": {
     "release": "v2.3.1",
