@@ -119,6 +119,7 @@ async function renderView(options: RenderOptions) {
         funcaoCosts={options.funcaoCosts ?? []}
         funcoes={options.funcoes ?? [funcao()]}
         kind={options.kind ?? 'product'}
+        onArchive={vi.fn()}
         onEdit={vi.fn()}
         onKindChange={onKindChange}
         products={options.products}

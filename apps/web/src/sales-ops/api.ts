@@ -76,6 +76,24 @@ export type SaveAreaPayload = Omit<
  */
 export type SaveFuncaoPayload = { id?: string; name: string; status?: 'active' | 'archived' };
 
+/**
+ * The four cadastros that carry a status column. `clients` is deliberately absent:
+ * `sales_ops_clients` has no status column and `ClientSchema` declares none, so a
+ * status key would be stripped by zod and answered 200 with an unchanged row - a
+ * silent no-op that reads as success. See the deferral note in
+ * `nexo/runs/feature-20260805-cadastro-archive-history/00-OVERVIEW.md`.
+ */
+export type CadastroResource = 'products' | 'people' | 'funcoes' | 'areas';
+
+/** A pessoa stores `inactive`; every other cadastro stores `archived`. */
+export type CadastroStatus = 'active' | 'archived' | 'inactive';
+
+export type SetCadastroStatusPayload = {
+  resource: CadastroResource;
+  id: string;
+  status: CadastroStatus;
+};
+
 export type SaveSettingsPayload = Partial<
   Omit<
     SalesOpsSettings,
@@ -130,6 +148,19 @@ export const salesOpsApi = {
       { method: id ? 'PATCH' : 'POST', token, body: JSON.stringify(body) },
     );
   },
+  /**
+   * Archive and restore. Deliberately a status-only PATCH on the endpoint that
+   * already exists: `salesOpsRouter` has no DELETE verb and must not gain one, and
+   * every one of the four PATCH schemas is `.partial()`, so an omitted key is left
+   * untouched server-side. Sending only `status` also means a stale cached name or
+   * função set can never be written back as a side effect of archiving.
+   */
+  setCadastroStatus: ({ resource, id, status }: SetCadastroStatusPayload, token: Token) =>
+    apiFetch<unknown>(`/api/v1/sales-ops/${resource}/${id}`, {
+      method: 'PATCH',
+      token,
+      body: JSON.stringify({ status }),
+    }),
   createSale: (payload: CreateSalePayload, token: Token) =>
     apiFetch<{ sale: unknown; ledger: unknown }>('/api/v1/sales-ops/sales', {
       method: 'POST',

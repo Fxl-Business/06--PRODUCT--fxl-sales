@@ -302,6 +302,7 @@ describe('product commission editor', () => {
           funcaoCosts={[]}
           funcoes={[]}
           kind="product"
+          onArchive={vi.fn()}
           onEdit={vi.fn()}
           onKindChange={vi.fn()}
           products={[

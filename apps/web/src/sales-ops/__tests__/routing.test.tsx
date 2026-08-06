@@ -121,6 +121,7 @@ vi.mock('../hooks', () => ({
   useSaveSalesOpsPerson: () => mutation,
   useSaveSalesOpsProduct: () => mutation,
   useSaveSalesOpsSettings: () => mutation,
+  useSetSalesOpsCadastroStatus: () => mutation,
 }));
 
 vi.mock('@/components/ui/dialog', () => ({

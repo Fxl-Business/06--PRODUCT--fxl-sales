@@ -11,6 +11,7 @@ import {
   type SavePersonPayload,
   type SaveProductPayload,
   type SaveSettingsPayload,
+  type SetCadastroStatusPayload,
   type TransitionSalePayload,
 } from './api';
 import {
@@ -201,6 +202,28 @@ export function useSaveSalesOpsFuncao() {
     mutationFn: async (payload) => salesOpsApi.saveFuncao(payload, await requireToken(getToken)),
     invalidates: [queryKeys.salesOps.all],
     ...optimistic,
+  });
+}
+
+/**
+ * Archive and restore for every cadastro that carries a status column. One hook for
+ * all four, because the only thing that varies is the resource segment and the
+ * archived literal; `status` is a full union rather than an `archive()` verb so a
+ * restore is the same write with `'active'` and there is exactly one door.
+ */
+export function useSetSalesOpsCadastroStatus() {
+  const { getToken } = useAccessToken();
+  /*
+    No optimistic write on purpose. `useOptimisticBootstrapWrite` covers areas,
+    clients, funções and pessoas only - produtos are server-derived and excluded -
+    so an optimistic archive would make one gesture feel instant on four screens
+    and slow on the fifth. The header's `Atualizando` indicator already discloses
+    the round trip, and the write is idempotent.
+  */
+  return useAppMutation({
+    mutationFn: async (payload: SetCadastroStatusPayload) =>
+      salesOpsApi.setCadastroStatus(payload, await requireToken(getToken)),
+    invalidates: [queryKeys.salesOps.all],
   });
 }
 
