@@ -21,12 +21,12 @@
     "note": "User explicitly approved the v2.4.0 release-blocker repair design and selected --auto. Four verified release blockers are planned as independent slices. Gate 2 remains mandatory for every slice and the integrated release. Gate 3a remains human-gated before the staging cut."
   },
   "gate3": {
-    "release": "v2.3.0",
-    "commit": "b34c964ba80540a319e3ef19f73db2ef13fd4d3c",
-    "flow": "ship-prod-ready",
-    "decision": "approved-full-promotion",
-    "decided_at": "2026-07-30",
-    "note": "--auto carried Gate 1 only, so production approval was asked once and granted explicitly. Promoted master -> staging -> production with no validation pause. Three migration hazards in 0012/0013/0015 were surfaced and accepted; see nexo/milestones/v2.3.0/SUMMARY.md."
+    "release": "v2.5.0",
+    "commit": "71ddfbd3fbdb21288511982000dfe3ee1a051138",
+    "flow": "ship",
+    "decision": "approved-cut-and-staging",
+    "decided_at": "2026-08-06",
+    "note": "User chose ship-via-staging at Gate 3a. Release-verify PASS on 281bc5b (1017 unit + 150 integration, clean-state build reproducing Vercel's fresh clone). Tag v2.5.0 pushed, staging fast-forwarded. PRODUCTION IS NOT APPROVED YET - Gate 3b awaits the user validating staging in-env. Two non-blocking notes carried: 0019's CREATE INDEX is not CONCURRENTLY and takes ACCESS EXCLUSIVE on audit_log against a still-writing old container during a rolling deploy; and after_jsonb.actorLabel persists the actor e-mail when the Hub token carries no name."
   },
   "gate3_hotfix": {
     "release": "v2.3.1",
