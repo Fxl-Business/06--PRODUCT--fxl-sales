@@ -19,6 +19,13 @@ export const queryKeys = {
   salesOps: {
     all: ['sales-ops'] as const,
     bootstrap: () => ['sales-ops', 'bootstrap'] as const,
+    /*
+      Nested under the `sales-ops` prefix on purpose: every sales-ops write already
+      declares `invalidates: [queryKeys.salesOps.all]`, TanStack invalidates by
+      prefix match, and so an archive performed on a list view refreshes the
+      Configurações history without that mutation knowing the panel exists.
+    */
+    cadastroHistory: (limit: number) => ['sales-ops', 'cadastro-history', limit] as const,
   },
   adminApps: {
     all: ['admin', 'apps'] as const,

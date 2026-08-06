@@ -1,4 +1,5 @@
 import { apiFetch } from '@/lib/api-client';
+import type { CadastroHistoryResponse } from './cadastro-history';
 import type {
   CreateSalePayload,
   SalesOpsArea,
@@ -110,6 +111,14 @@ export type SaveSettingsPayload = Partial<
   defaultTaxPct?: number;
 };
 
+/**
+ * The TENANT-scoped ledger read. Org-scoped by `c.get('orgId')` inside
+ * `salesOpsRouter`. It is deliberately NOT `/api/v1/admin/audit`, which reads
+ * through `getAdminDb()` with no org filter and would hand one tenant every other
+ * tenant's audit trail. The segment is `history`, not `audit`, for that reason.
+ */
+export const SALES_OPS_HISTORY_PATH = '/api/v1/sales-ops/history';
+
 export const salesOpsApi = {
   bootstrap: (token: Token) =>
     apiFetch<SalesOpsBootstrap>('/api/v1/sales-ops/bootstrap', { method: 'GET', token }),
@@ -161,6 +170,18 @@ export const salesOpsApi = {
       token,
       body: JSON.stringify({ status }),
     }),
+  /**
+   * The `action` set is MANDATORY: this endpoint returns every ledger row for the
+   * org, commissions and payouts included, so without it a busy org's page would
+   * be mostly rows the `Histórico de arquivamentos` panel does not render and the
+   * panel could come back empty. The endpoint accepts up to 10 comma-separated
+   * values precisely so both cadastro actions arrive in one keyset stream.
+   */
+  cadastroHistory: (limit: number, actions: readonly string[], token: Token) =>
+    apiFetch<CadastroHistoryResponse>(
+      `${SALES_OPS_HISTORY_PATH}?limit=${limit}&action=${encodeURIComponent(actions.join(','))}`,
+      { method: 'GET', token },
+    ),
   createSale: (payload: CreateSalePayload, token: Token) =>
     apiFetch<{ sale: unknown; ledger: unknown }>('/api/v1/sales-ops/sales', {
       method: 'POST',
