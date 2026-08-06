@@ -175,20 +175,30 @@ export const commissionRules = pgTable('commission_rules', {
 // ─────────────────────────────────────────────────────────────────────────────
 // audit_log - append-only, hash-chained. bigserial PK (chain ordering). No org_id.
 // ─────────────────────────────────────────────────────────────────────────────
-export const auditLog = pgTable('audit_log', {
-  id: bigserial('id', { mode: 'bigint' }).primaryKey(),
-  ts: timestamp('ts', { withTimezone: true }).defaultNow().notNull(),
-  actorUserId: text('actor_user_id').notNull(),
-  actorOrgId: text('actor_org_id'),
-  action: text('action').notNull(),
-  entityType: text('entity_type').notNull(),
-  entityId: text('entity_id').notNull(),
-  beforeJsonb: jsonb('before_jsonb'),
-  afterJsonb: jsonb('after_jsonb'),
-  requestId: text('request_id'),
-  prevHash: text('prev_hash').notNull(), // sha256 of prior row, '0'*64 for row 1
-  entryHash: text('entry_hash').notNull(), // sha256(prevHash || canonical_json(row))
-});
+export const auditLog = pgTable(
+  'audit_log',
+  {
+    id: bigserial('id', { mode: 'bigint' }).primaryKey(),
+    ts: timestamp('ts', { withTimezone: true }).defaultNow().notNull(),
+    actorUserId: text('actor_user_id').notNull(),
+    actorOrgId: text('actor_org_id'),
+    action: text('action').notNull(),
+    entityType: text('entity_type').notNull(),
+    entityId: text('entity_id').notNull(),
+    beforeJsonb: jsonb('before_jsonb'),
+    afterJsonb: jsonb('after_jsonb'),
+    requestId: text('request_id'),
+    prevHash: text('prev_hash').notNull(), // sha256 of prior row, '0'*64 for row 1
+    entryHash: text('entry_hash').notNull(), // sha256(prevHash || canonical_json(row))
+  },
+  (t) => [
+    // Serves the tenant history read: WHERE actor_org_id = $1 ORDER BY id DESC.
+    // Partial, because a NULL-org (system) row is invisible to every tenant read.
+    index('audit_log_actor_org_id_id_idx')
+      .on(t.actorOrgId, t.id.desc())
+      .where(sql`${t.actorOrgId} IS NOT NULL`),
+  ],
+);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // webhook_events - idempotency + replay defense. Global, no org_id.

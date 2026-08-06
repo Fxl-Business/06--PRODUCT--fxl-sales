@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { getDb } from '../../db/client.js';
 import { getHubActorDisplayName } from '../../middleware/app-auth.js';
 import { requireAdmin } from '../../middleware/require-admin.js';
+import { HISTORY_MAX_LIMIT, listOrgAuditHistory } from '../audit/history-service.js';
 import {
   AreaSchema,
   CancelContractSchema,
@@ -372,4 +373,58 @@ salesOpsRouter.put('/settings', async (c) => {
   }
   const settings = await upsertSettings(getDb(), c.get('orgId'), parsed.data);
   return c.json({ settings });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Configurações > Histórico. This is the TENANT-SCOPED counterpart to the
+// cross-tenant `/api/v1/admin/audit` router, and must NEVER be replaced by it:
+// that router reads through getAdminDb() and applies no org predicate at all, so
+// exposing it to a workspace admin would hand one tenant every other tenant's
+// ledger. The org here comes only from `c.get('orgId')` - the verified Hub token
+// - and the query schema below declares no org key, so a smuggled `?orgId=` is
+// simply never read.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const HISTORY_MAX_ACTIONS = 10;
+
+const HistoryQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(HISTORY_MAX_LIMIT).optional(),
+  cursor: z.string().regex(/^\d+$/).optional(),
+  entityType: z.string().trim().min(1).max(120).optional(),
+  /**
+   * A comma-separated SET. Every part must be non-empty; a trailing comma or a
+   * bare `?action=` is a 400, never a silently-dropped filter. `.optional()`
+   * comes AFTER the transform/refine, or an absent parameter would be
+   * transformed and then fail the refine.
+   */
+  action: z
+    .string()
+    .transform((raw) => raw.split(',').map((part) => part.trim()))
+    .refine(
+      (parts) =>
+        parts.length >= 1 &&
+        parts.length <= HISTORY_MAX_ACTIONS &&
+        parts.every((part) => part.length >= 1 && part.length <= 120),
+      { message: 'action must be 1..10 non-empty values of at most 120 characters' },
+    )
+    .optional(),
+});
+
+salesOpsRouter.get('/history', requireAdmin, async (c) => {
+  const parsed = HistoryQuerySchema.safeParse({
+    limit: c.req.query('limit'),
+    cursor: c.req.query('cursor'),
+    entityType: c.req.query('entityType'),
+    action: c.req.query('action'),
+  });
+  if (!parsed.success) {
+    return c.json({ error: 'validation_error', issues: parsed.error.flatten() }, 400);
+  }
+  const { action, ...rest } = parsed.data;
+  const page = await listOrgAuditHistory(getDb(), c.get('orgId'), {
+    ...rest,
+    actions: action,
+    selfActor: cadastroActor(c),
+  });
+  return c.json(page);
 });

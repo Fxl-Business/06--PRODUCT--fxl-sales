@@ -1,0 +1,1 @@
+CREATE INDEX "audit_log_actor_org_id_id_idx" ON "audit_log" USING btree ("actor_org_id","id" DESC NULLS LAST) WHERE "audit_log"."actor_org_id" IS NOT NULL;
