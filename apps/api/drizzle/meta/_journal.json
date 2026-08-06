@@ -134,6 +134,13 @@
       "when": 1785941449505,
       "tag": "0018_professional_payable_identity",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1785987120113,
+      "tag": "0019_audit_log_org_history_idx",
+      "breakpoints": true
     }
   ]
 }
