@@ -1,6 +1,5 @@
 import {
   Archive,
-  ArchiveRestore,
   CalendarDays,
   Check,
   ChevronDown,
@@ -436,9 +435,6 @@ function payableTypeMeta(kind: string) {
   return { label: 'Custo', className: 'bg-[#eeeef1] text-[#57575f]' };
 }
 
-/** One visual language for an archived row across all four cadastro tables. */
-const archivedRowClass = 'opacity-55';
-
 /**
  * Which cadastro a row belongs to, for copy purposes. `produto` and `servico` are
  * one API resource and two words: the operator picked a bucket in the segmented
@@ -459,13 +455,17 @@ export type CadastroArchiveTarget = {
  *
  * `archivedStatus` is `inactive` for a pessoa because that is the literal her
  * column stores, and `archiveVerb` follows it, so the word on the button always
- * matches the badge the row shows afterwards.
+ * matches the vocabulary of the confirmation it opens.
+ *
+ * There is no `restoreVerb`: since v2.6.0 an archived row is not listed at all, so
+ * a row-level restore would be an affordance on a row nobody can see. Restore lives
+ * in exactly one place, `Histórico de arquivamentos`, and `confirmBody` says so.
  *
  * Every clause in `confirmBody` is load-bearing and true: an archived row leaves
- * the pickers (see `selectableProducts` here and the `status === 'active'` filters
- * on áreas, funções and pessoas), stays on the records that already reference it
- * (`productNameSnapshot`, `funcaoNameSnapshot`), keeps its `code_suffix` slot (the
- * unique index has no WHERE clause), and can be restored from this same table.
+ * the lists and the pickers (see `selectableProducts` here and the
+ * `status === 'active'` filters on áreas, funções and pessoas), stays on the records
+ * that already reference it (`productNameSnapshot`, `funcaoNameSnapshot`), and keeps
+ * its `code_suffix` slot (the unique index has no WHERE clause).
  */
 const cadastroArchive: Record<
   CadastroKind,
@@ -474,7 +474,6 @@ const cadastroArchive: Record<
     archivedStatus: CadastroStatus;
     noun: string;
     archiveVerb: string;
-    restoreVerb: string;
     confirmTitle: (name: string) => string;
     confirmBody: string;
     confirmAction: string;
@@ -485,10 +484,9 @@ const cadastroArchive: Record<
     archivedStatus: 'archived',
     noun: 'produto',
     archiveVerb: 'Arquivar',
-    restoreVerb: 'Restaurar',
     confirmTitle: (name) => `Arquivar o produto "${name}"?`,
     confirmBody:
-      'Ele sai das listas de seleção de novas propostas, mas continua nas propostas que já o utilizam. Nada é apagado: o código continua reservado para ele e você pode restaurá-lo aqui a qualquer momento.',
+      'Ele sai desta lista e das listas de seleção de novas propostas, mas continua nas propostas que já o utilizam. Nada é apagado: o código continua reservado para ele e você pode restaurá-lo no histórico de arquivamentos, em Cadastros > Geral.',
     confirmAction: 'Arquivar produto',
   },
   servico: {
@@ -496,10 +494,9 @@ const cadastroArchive: Record<
     archivedStatus: 'archived',
     noun: 'serviço',
     archiveVerb: 'Arquivar',
-    restoreVerb: 'Restaurar',
     confirmTitle: (name) => `Arquivar o serviço "${name}"?`,
     confirmBody:
-      'Ele sai das listas de seleção de novas propostas, mas continua nas propostas que já o utilizam. Nada é apagado: o código continua reservado para ele e você pode restaurá-lo aqui a qualquer momento.',
+      'Ele sai desta lista e das listas de seleção de novas propostas, mas continua nas propostas que já o utilizam. Nada é apagado: o código continua reservado para ele e você pode restaurá-lo no histórico de arquivamentos, em Cadastros > Geral.',
     confirmAction: 'Arquivar serviço',
   },
   area: {
@@ -507,10 +504,9 @@ const cadastroArchive: Record<
     archivedStatus: 'archived',
     noun: 'área',
     archiveVerb: 'Arquivar',
-    restoreVerb: 'Restaurar',
     confirmTitle: (name) => `Arquivar a área "${name}"?`,
     confirmBody:
-      'Ela sai das listas de seleção de novos produtos e itens de proposta, mas continua nos produtos e propostas que já a utilizam. Nada é apagado e você pode restaurá-la aqui a qualquer momento.',
+      'Ela sai desta lista e das listas de seleção de novos produtos e itens de proposta, mas continua nos produtos e propostas que já a utilizam. Nada é apagado e você pode restaurá-la no histórico de arquivamentos, em Cadastros > Geral.',
     confirmAction: 'Arquivar área',
   },
   funcao: {
@@ -518,10 +514,9 @@ const cadastroArchive: Record<
     archivedStatus: 'archived',
     noun: 'função',
     archiveVerb: 'Arquivar',
-    restoreVerb: 'Restaurar',
     confirmTitle: (name) => `Arquivar a função "${name}"?`,
     confirmBody:
-      'Ela sai das listas de seleção de novas atribuições e custos padrão, mas continua nas pessoas e propostas que já a utilizam. Nada é apagado e você pode restaurá-la aqui a qualquer momento.',
+      'Ela sai desta lista e das listas de seleção de novas atribuições e custos padrão, mas continua nas pessoas e propostas que já a utilizam. Nada é apagado e você pode restaurá-la no histórico de arquivamentos, em Cadastros > Geral.',
     confirmAction: 'Arquivar função',
   },
   pessoa: {
@@ -529,26 +524,23 @@ const cadastroArchive: Record<
     archivedStatus: 'inactive',
     noun: 'pessoa',
     archiveVerb: 'Inativar',
-    restoreVerb: 'Reativar',
     confirmTitle: (name) => `Inativar a pessoa "${name}"?`,
     confirmBody:
-      'Ela sai das listas de seleção de vendedor, finder e profissional, mas continua nas propostas que já a utilizam. Nada é apagado e você pode reativá-la aqui a qualquer momento.',
+      'Ela sai desta lista e das listas de seleção de vendedor, finder e profissional, mas continua nas propostas que já a utilizam. Nada é apagado e você pode reativá-la no histórico de arquivamentos, em Cadastros > Geral.',
     confirmAction: 'Inativar pessoa',
   },
 };
 
 /**
- * The archive/restore gesture, shared by the four cadastro tables. Archiving goes
- * through the confirmation; restoring does not, because restoring is not
- * destructive - the same asymmetry `SalesView` applies, where `Marcar como ganha`
- * fires directly and only the voiding transitions confirm.
+ * The archive gesture, shared by the four cadastro tables. Every archive goes
+ * through the confirmation - the asymmetry with the un-confirmed restore is gone
+ * with the restore itself, which now lives only in `Histórico de arquivamentos`.
  */
 function useCadastroArchive(onArchive: (target: CadastroArchiveTarget) => void) {
   const [pending, setPending] = useState<CadastroArchiveTarget | null>(null);
   return {
     pending,
-    select: (target: CadastroArchiveTarget) =>
-      target.status === 'active' ? onArchive(target) : setPending(target),
+    select: (target: CadastroArchiveTarget) => setPending(target),
     cancel: () => setPending(null),
     confirm: () => {
       if (pending) onArchive(pending);
@@ -558,9 +550,11 @@ function useCadastroArchive(onArchive: (target: CadastroArchiveTarget) => void) 
 }
 
 /**
- * One row's archive control. An active row offers `Arquivar`, an archived one
- * offers `Restaurar`, and neither ever renders as a disabled version of the other:
- * `type="button"` on both, because a row control must never be a submit.
+ * One row's archive control. `type="button"`, because a row control must never be
+ * a submit.
+ *
+ * There is deliberately no archived branch: the four lists render active rows only,
+ * so this control can only ever mean "archive this".
  *
  * An OPTIMISTIC row renders it disabled for the same reason its `Editar` already
  * is: a placeholder id would fail the Postgres uuid cast on the PATCH path.
@@ -569,34 +563,26 @@ function CadastroArchiveButton({
   cadastro,
   id,
   name,
-  archived,
   disabled,
   onSelect,
 }: {
   cadastro: CadastroKind;
   id: string;
   name: string;
-  archived: boolean;
   disabled?: boolean;
   onSelect: (target: CadastroArchiveTarget) => void;
 }) {
   const copy = cadastroArchive[cadastro];
-  const verb = archived ? copy.restoreVerb : copy.archiveVerb;
-  const status: CadastroStatus = archived ? 'active' : copy.archivedStatus;
   return (
     <button
-      aria-label={`${verb} ${copy.noun} ${name}`}
+      aria-label={`${copy.archiveVerb} ${copy.noun} ${name}`}
       className={disabled ? iconButtonPendingClass : iconButtonClass}
       disabled={disabled}
-      onClick={() => onSelect({ cadastro, id, name, status })}
-      title={verb}
+      onClick={() => onSelect({ cadastro, id, name, status: copy.archivedStatus })}
+      title={copy.archiveVerb}
       type="button"
     >
-      {archived ? (
-        <ArchiveRestore className="h-[15px] w-[15px]" />
-      ) : (
-        <Archive className="h-[15px] w-[15px]" />
-      )}
+      <Archive className="h-[15px] w-[15px]" />
     </button>
   );
 }
@@ -2728,9 +2714,15 @@ export function ProductsView({
 }) {
   const archive = useCadastroArchive(onArchive);
   const isService = kind === 'service';
-  const produtoCount = products.filter((product) => productKindOf(product) === 'product').length;
-  const servicoCount = products.length - produtoCount;
-  const visible = products.filter((product) => productKindOf(product) === kind);
+  /*
+    v2.6.0: an archived produto is not listed. The COUNTS are filtered first, not
+    only the rows - a segment reading `Produtos 3` above a two-row table would read
+    as a row the list had lost.
+  */
+  const listed = products.filter((product) => product.status === 'active');
+  const produtoCount = listed.filter((product) => productKindOf(product) === 'product').length;
+  const servicoCount = listed.length - produtoCount;
+  const visible = listed.filter((product) => productKindOf(product) === kind);
   const funcaoNameById = new Map(funcoes.map((funcao) => [funcao.id, funcao.name]));
 
   return (
@@ -2801,21 +2793,13 @@ export function ProductsView({
           <TableBody>
             {visible.map((product) => {
               const costs = funcaoCosts.filter((row) => row.productId === product.id);
-              const archived = product.status !== 'active';
               return (
-                <TableRow className={archived ? archivedRowClass : undefined} key={product.id}>
+                <TableRow key={product.id}>
                   {/*
-                    No `Status` column: the table already carries nine and a tenth
-                    would squeeze every one of them. The badge rides in the `Nome`
-                    cell and only when the row is archived, so the common case
-                    costs zero width.
+                    No `Status` column and no archived badge: every listed row is
+                    active by construction, so both could only ever say one thing.
                   */}
-                  <TableCell className="px-4 py-3 text-sm font-semibold">
-                    <span className="inline-flex items-center gap-2">
-                      {product.name}
-                      {archived ? <Badge className={neutralBadgeClass}>Arquivado</Badge> : null}
-                    </span>
-                  </TableCell>
+                  <TableCell className="px-4 py-3 text-sm font-semibold">{product.name}</TableCell>
                   <TableCell className={tableCellClass}>
                     {areas.find((area) => area.id === product.areaId)?.name ?? '-'}
                   </TableCell>
@@ -2918,7 +2902,6 @@ export function ProductsView({
                         <Edit3 className="h-[15px] w-[15px]" />
                       </button>
                       <CadastroArchiveButton
-                        archived={archived}
                         cadastro={productKindOf(product) === 'service' ? 'servico' : 'produto'}
                         id={product.id}
                         name={product.name}
@@ -3022,7 +3005,11 @@ export function AreasView({
 }) {
   // Above the early return: `react-hooks/rules-of-hooks` fails lint otherwise.
   const archive = useCadastroArchive(onArchive);
-  if (bootstrap.areas.length === 0) {
+  // v2.6.0: an archived área is not listed at all. The empty state is therefore
+  // keyed on the FILTERED list, or an org whose only área is archived would land on
+  // a table with a header and no rows.
+  const listed = bootstrap.areas.filter((area) => area.status === 'active');
+  if (listed.length === 0) {
     return (
       <EmptyPanel
         text="Cadastre áreas para classificar produtos e itens de venda por unidade de negócio."
@@ -3037,32 +3024,28 @@ export function AreasView({
         <TableHeader>
           <TableRow className="bg-[#fafafb] hover:bg-[#fafafb]">
             <TableHead className={tableHeadClass}>Nome</TableHead>
-            <TableHead className={`${tableHeadClass} text-center`}>Status</TableHead>
+            {/*
+              No `Status` column: every listed área is active by construction, so the
+              column could only ever read `Ativa` and would cost width for nothing.
+            */}
             <TableHead className={`${tableHeadClass} text-center`}>Nº produtos</TableHead>
             <TableHead className={`${tableHeadClass} text-center`}>Ações</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {bootstrap.areas.map((area) => {
+          {listed.map((area) => {
+            /*
+              Active produtos only. An archived produto is not listed, not offered in any
+              picker and not reachable from this screen, so counting it here would put a
+              number on the row that the operator cannot get to by clicking anything.
+            */
             const productCount = bootstrap.products.filter(
-              (product) => product.areaId === area.id,
+              (product) => product.areaId === area.id && product.status === 'active',
             ).length;
             const pending = isOptimisticId(area.id);
-            const archived = area.status !== 'active';
             return (
-              <TableRow className={archived ? archivedRowClass : undefined} key={area.id}>
+              <TableRow key={area.id}>
                 <TableCell className="px-4 py-3 text-sm font-semibold">{area.name}</TableCell>
-                <TableCell className="px-4 py-3 text-center">
-                  <Badge
-                    className={
-                      area.status === 'active'
-                        ? 'bg-[#c9e7cf] text-[#1f7d43]'
-                        : 'bg-[#eeeef1] text-[#6a6a72]'
-                    }
-                  >
-                    {area.status === 'active' ? 'Ativa' : 'Arquivada'}
-                  </Badge>
-                </TableCell>
                 <TableCell className="sales-ops-num px-4 py-3 text-center text-[13.5px]">
                   {productCount}
                 </TableCell>
@@ -3079,7 +3062,6 @@ export function AreasView({
                       <Edit3 className="h-[15px] w-[15px]" />
                     </button>
                     <CadastroArchiveButton
-                      archived={archived}
                       cadastro="area"
                       disabled={pending}
                       id={area.id}
@@ -3122,7 +3104,10 @@ export function PessoasView({
 }) {
   // Above the early return: `react-hooks/rules-of-hooks` fails lint otherwise.
   const archive = useCadastroArchive(onArchive);
-  if (bootstrap.people.length === 0) {
+  // v2.6.0: an inactive pessoa is not listed at all. Keyed on the FILTERED list for
+  // the same reason as `AreasView` - see the note there.
+  const listed = bootstrap.people.filter((person) => person.status === 'active');
+  if (listed.length === 0) {
     return (
       <EmptyPanel
         text="Cadastre pessoas e atribua funções para usá-las como vendedor, finder ou prestador nas propostas."
@@ -3138,17 +3123,16 @@ export function PessoasView({
           <TableRow className="bg-[#fafafb] hover:bg-[#fafafb]">
             <TableHead className={tableHeadClass}>Nome</TableHead>
             <TableHead className={tableHeadClass}>E-mail</TableHead>
+            {/* No `Status` column: every listed pessoa is active by construction. */}
             <TableHead className={`${tableHeadClass} text-center`}>Funções</TableHead>
-            <TableHead className={`${tableHeadClass} text-center`}>Status</TableHead>
             <TableHead className={`${tableHeadClass} text-center`}>Ações</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {bootstrap.people.map((person) => {
+          {listed.map((person) => {
             const pending = isOptimisticId(person.id);
-            const archived = person.status !== 'active';
             return (
-              <TableRow className={archived ? archivedRowClass : undefined} key={person.id}>
+              <TableRow key={person.id}>
                 <TableCell className="px-4 py-3 text-sm font-semibold">
                   {person.displayName}
                 </TableCell>
@@ -3156,6 +3140,12 @@ export function PessoasView({
                   {person.contactEmail ?? <span className="text-[#b6b6bd]">-</span>}
                 </TableCell>
                 <TableCell className="px-4 py-3">
+                  {/*
+                    Deliberately NOT filtered by the função's own status: CLAUDE.md is
+                    explicit that an archived função stays visible on the people who
+                    already carry it. Hiding archived rows is a LIST rule, never a
+                    rule about the records that reference them.
+                  */}
                   {person.funcoes.length === 0 ? (
                     <div className="text-center text-[13.5px] text-[#b6b6bd]">-</div>
                   ) : (
@@ -3172,17 +3162,6 @@ export function PessoasView({
                   )}
                 </TableCell>
                 <TableCell className="px-4 py-3 text-center">
-                  <Badge
-                    className={
-                      person.status === 'active'
-                        ? 'bg-[#c9e7cf] text-[#1f7d43]'
-                        : neutralBadgeClass
-                    }
-                  >
-                    {person.status === 'active' ? 'Ativo' : 'Inativo'}
-                  </Badge>
-                </TableCell>
-                <TableCell className="px-4 py-3 text-center">
                   <div className="flex items-center justify-center gap-1.5">
                     <button
                       aria-label={
@@ -3197,7 +3176,6 @@ export function PessoasView({
                       <Edit3 className="h-[15px] w-[15px]" />
                     </button>
                     <CadastroArchiveButton
-                      archived={archived}
                       cadastro="pessoa"
                       disabled={pending}
                       id={person.id}
@@ -3241,7 +3219,10 @@ export function FuncoesView({
 }) {
   // Above the early return: `react-hooks/rules-of-hooks` fails lint otherwise.
   const archive = useCadastroArchive(onArchive);
-  if (bootstrap.funcoes.length === 0) {
+  // v2.6.0: an archived função is not listed at all. Keyed on the FILTERED list for
+  // the same reason as `AreasView` - see the note there.
+  const listed = bootstrap.funcoes.filter((funcao) => funcao.status === 'active');
+  if (listed.length === 0) {
     return (
       <EmptyPanel
         text="Vendedor e finder são funções predefinidas do app; crie funções personalizadas para prestadores como designer, desenvolvedor ou P.O."
@@ -3257,36 +3238,31 @@ export function FuncoesView({
           <TableRow className="bg-[#fafafb] hover:bg-[#fafafb]">
             <TableHead className={tableHeadClass}>Nome</TableHead>
             <TableHead className={`${tableHeadClass} text-center`}>Tipo</TableHead>
-            <TableHead className={`${tableHeadClass} text-center`}>Status</TableHead>
+            {/* No `Status` column: every listed função is active by construction. */}
             <TableHead className={`${tableHeadClass} text-center`}>Nº pessoas</TableHead>
             <TableHead className={`${tableHeadClass} text-center`}>Ações</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {bootstrap.funcoes.map((funcao) => {
-            // The join key on a person's nested entry is `id`, not `funcaoId`.
-            const personCount = bootstrap.people.filter((person) =>
-              person.funcoes.some((assigned) => assigned.id === funcao.id),
+          {listed.map((funcao) => {
+            /*
+              The join key on a person's nested entry is `id`, not `funcaoId`.
+              Active pessoas only, for the same reason as `Nº produtos` in AreasView: an
+              inactive pessoa is no longer reachable from any screen, so counting one here
+              would show a number the operator cannot click through to.
+            */
+            const personCount = bootstrap.people.filter(
+              (person) =>
+                person.status === 'active' &&
+                person.funcoes.some((assigned) => assigned.id === funcao.id),
             ).length;
             const pending = isOptimisticId(funcao.id);
-            const archived = funcao.status !== 'active';
             return (
-              <TableRow className={archived ? archivedRowClass : undefined} key={funcao.id}>
+              <TableRow key={funcao.id}>
                 <TableCell className="px-4 py-3 text-sm font-semibold">{funcao.name}</TableCell>
                 <TableCell className="px-4 py-3 text-center">
                   <Badge className={funcao.isSystem ? systemBadgeClass : neutralBadgeClass}>
                     {funcao.isSystem ? 'Predefinida' : 'Personalizada'}
-                  </Badge>
-                </TableCell>
-                <TableCell className="px-4 py-3 text-center">
-                  <Badge
-                    className={
-                      funcao.status === 'active'
-                        ? 'bg-[#c9e7cf] text-[#1f7d43]'
-                        : neutralBadgeClass
-                    }
-                  >
-                    {funcao.status === 'active' ? 'Ativa' : 'Arquivada'}
                   </Badge>
                 </TableCell>
                 <TableCell className="sales-ops-num px-4 py-3 text-center text-[13.5px]">
@@ -3323,7 +3299,6 @@ export function FuncoesView({
                         <Edit3 className="h-[15px] w-[15px]" />
                       </button>
                       <CadastroArchiveButton
-                        archived={archived}
                         cadastro="funcao"
                         disabled={pending}
                         id={funcao.id}

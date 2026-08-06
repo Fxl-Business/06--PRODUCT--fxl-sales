@@ -35,13 +35,14 @@ export const AuditActionSchema = z.enum([
   'payout.mark_paid',
   'cadastro.archived',
   'cadastro.restored',
+  'cadastro.purged',
 ]);
 export type AuditAction = z.infer<typeof AuditActionSchema>;
 
 /**
- * The four sales-ops cadastros whose archive/restore lifecycle is audited.
+ * The four sales-ops cadastros whose archive/restore/purge lifecycle is audited.
  *
- * These four strings, together with the two action names in
+ * These four strings, together with the action names in
  * CADASTRO_LIFECYCLE_ACTIONS, are a WIRE CONTRACT and not an internal detail: the
  * org-scoped history read returns `entityType` and `action` verbatim as free
  * text, and the web panel matches on exactly these eight literals. Nothing
@@ -55,8 +56,25 @@ export type AuditAction = z.infer<typeof AuditActionSchema>;
 export const CadastroEntityTypeSchema = z.enum(['produto', 'pessoa', 'funcao', 'area']);
 export type CadastroEntityType = z.infer<typeof CadastroEntityTypeSchema>;
 
-/** The two lifecycle actions the cadastro history reads back. */
-export const CADASTRO_LIFECYCLE_ACTIONS = ['cadastro.archived', 'cadastro.restored'] as const;
+/**
+ * The lifecycle actions the cadastro history reads back.
+ *
+ * `cadastro.purged` is the nightly purge's terminal event. It is a SYSTEM action:
+ * `actor_user_id` is the reserved `'system'` sentinel (the same one the conversion
+ * ingest already writes), `actor_org_id` is the purged row's OWN org - never null,
+ * or the org-scoped history read would filter its own entry away - and the label
+ * snapshot in `after_jsonb` is the only thing left that can name the deleted row.
+ *
+ * The web panel's own copy of this list (`CADASTRO_HISTORY_ACTIONS` in
+ * apps/web/src/sales-ops/cadastro-history.ts) is what actually filters the
+ * request, and nothing type-checks the pair, so an action added here stays
+ * invisible in the UI until it is added there too.
+ */
+export const CADASTRO_LIFECYCLE_ACTIONS = [
+  'cadastro.archived',
+  'cadastro.restored',
+  'cadastro.purged',
+] as const;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Pure helpers (unit-tested in __tests__/service.test.ts)

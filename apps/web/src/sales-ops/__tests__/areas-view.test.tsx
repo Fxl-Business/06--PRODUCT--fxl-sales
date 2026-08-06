@@ -140,7 +140,13 @@ async function submit() {
 }
 
 describe('areas view', () => {
-  it('lists áreas with status badges and linked product counts', async () => {
+  /*
+    v2.6.0 slice 01: an archived área is not listed. The list therefore never shows a
+    status badge either - the column would carry the single constant value `Ativa` and
+    would only cost width. `Arquivada` survives exactly one place, and it is not here:
+    `Histórico de arquivamentos`.
+  */
+  it('lists only active áreas, with their linked product counts and no status column', async () => {
     const areaOne = area();
     const areaTwo = area({
       id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
@@ -164,14 +170,32 @@ describe('areas view', () => {
 
     const text = container.textContent ?? '';
     expect(text).toContain('FXL Tech');
-    expect(text).toContain('Ativa');
-    expect(text).toContain('FXL Visual');
-    expect(text).toContain('Arquivada');
+    expect(text).not.toContain('FXL Visual');
+    expect(text).not.toContain('Arquivada');
+    expect(text).not.toContain('Ativa');
+    expect(container.querySelectorAll('tbody tr')).toHaveLength(1);
 
     const countCell = [...container.querySelectorAll('td')].find(
       (cell) => cell.textContent?.trim() === '1',
     );
     expect(countCell).toBeTruthy();
+  });
+
+  it('shows the empty panel when every área is archived', async () => {
+    await act(async () => {
+      root.render(
+        <AreasView
+          bootstrap={bootstrap({
+            areas: [area({ status: 'archived' })],
+          })}
+          onArchive={vi.fn()}
+          onEdit={vi.fn()}
+        />,
+      );
+    });
+
+    expect(container.textContent ?? '').toContain('Nenhuma área cadastrada');
+    expect(container.querySelector('table')).toBeNull();
   });
 
   it('shows the empty panel when no área exists', async () => {

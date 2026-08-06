@@ -23,6 +23,7 @@ import { userLabel } from '@/lib/displayNames';
 import { isAuthFailure } from '@/lib/require-token';
 import {
   formatLedgerTimestampBr,
+  purgedEntityIds,
   resolveHistoryRow,
   type CadastroHistoryRow,
   type ResolvedHistoryRow,
@@ -43,6 +44,8 @@ const tableHeadClass =
 const tableCellClass = 'px-4 py-3 text-[13.5px] text-[#57575f]';
 const neutralBadgeClass = 'bg-[#eeeef1] text-[#6a6a72]';
 const activeBadgeClass = 'bg-[#c9e7cf] text-[#1f7d43]';
+/** The `Perdida` / `Imposto` palette, reused: this is the one irreversible event. */
+const purgedBadgeClass = 'bg-[#f6d1c5] text-[#a5341c]';
 const mutedStateClass = 'text-[13px] text-[#8b8b92]';
 const restoreButtonClass =
   'inline-flex items-center gap-1.5 rounded-[9px] border border-[#dcdce2] bg-white px-3 py-1.5 text-[13px] font-semibold text-[#57575f] transition hover:border-[#eaa81a] hover:bg-[#f5f2ea] hover:text-[#9c7210] disabled:cursor-not-allowed disabled:opacity-60';
@@ -92,6 +95,13 @@ export function CadastroHistoryPanel({
   /** The `entityId` whose restore is in flight, or null. */
   restoringId: string | null;
 }) {
+  /*
+    Computed ONCE for the whole table, not per row: `Restaurar` has to disappear
+    from an entity's earlier ARCHIVE row too, and that row cannot see the later
+    purge entry on its own. Cheap and pure, so no memo - the page is 50 rows.
+  */
+  const purged = purgedEntityIds(entries);
+
   return (
     <section className={`${panelClass} overflow-hidden`}>
       <div className="border-b border-[#ececf1] px-[22px] py-4">
@@ -124,7 +134,7 @@ export function CadastroHistoryPanel({
         )
       ) : entries.length === 0 ? (
         <MutedBlock
-          text="Quando alguém arquivar um produto, uma área, uma função ou uma pessoa, o evento aparece aqui com autor, data e a opção de restaurar."
+          text="Quando alguém arquivar um produto, uma área, uma função ou uma pessoa, o evento aparece aqui com autor, data e a opção de restaurar. A exclusão automática de itens arquivados há mais de 30 dias também fica registrada aqui."
           title="Nenhum arquivamento registrado"
         />
       ) : (
@@ -141,7 +151,7 @@ export function CadastroHistoryPanel({
             </TableHeader>
             <TableBody>
               {entries.map((entry) => {
-                const row = resolveHistoryRow(entry, bootstrap);
+                const row = resolveHistoryRow(entry, bootstrap, purged);
                 const pending = restoringId === row.entityId;
                 return (
                   <TableRow key={row.id}>
@@ -173,7 +183,13 @@ export function CadastroHistoryPanel({
                     </TableCell>
                     <TableCell className="px-4 py-3 text-center">
                       <Badge
-                        className={row.verb === 'restore' ? activeBadgeClass : neutralBadgeClass}
+                        className={
+                          row.verb === 'restore'
+                            ? activeBadgeClass
+                            : row.verb === 'purge'
+                              ? purgedBadgeClass
+                              : neutralBadgeClass
+                        }
                       >
                         {row.eventLabel}
                       </Badge>
@@ -222,6 +238,13 @@ export function CadastroHistoryPanel({
                           story for something that has already happened.
                         */
                         <span className={mutedStateClass}>Já restaurado</span>
+                      ) : row.restore.state === 'purged' ? (
+                        /*
+                          The same muted shape as `Já restaurado`, and for the same
+                          reason: the row was hard deleted after 30 days, so a
+                          `Restaurar` here would be a guaranteed 404.
+                        */
+                        <span className={mutedStateClass}>Excluído definitivamente</span>
                       ) : row.restore.state === 'missing' ? (
                         <span className={mutedStateClass}>Registro não encontrado</span>
                       ) : null}

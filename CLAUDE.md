@@ -109,7 +109,15 @@ Keep the repository folder name unchanged until the editor session can safely mo
 
 ## Arquivamento e histórico
 
-- There is still NO delete and no DELETE verb. "Arquivar" is a status-only PATCH on the endpoint that already exists, and it is reversible from `cadastros/geral`.
+- There is still no DELETE **verb**: `salesOpsRouter` exposes none and must not gain one. "Arquivar" is a status-only PATCH on the endpoint that already exists, and it is reversible from `cadastros/geral`.
+  A hard delete now happens in exactly ONE place - the nightly `runArchivedCadastroPurge()` job - and only for a row that is archived, older than 30 days, not a system função, and that **nothing references**.
+- The purge lets the DATABASE decide what may be deleted. It attempts the `DELETE` and treats a Postgres `23503` foreign-key violation as "still referenced, skip"; it never hand-writes an "is it referenced?" query, because that would drift out of sync with the schema the moment a new FK is added.
+  The existing FK rules are therefore the safety mechanism, and no `ON DELETE CASCADE` may be added to `sale_items.product_id`, `sales.seller_person_id` / `finder_person_id`, `sale_professionals.person_id` / `funcao_id`, `person_funcoes.funcao_id`, `product_funcao_costs.funcao_id` or either `area_id` - each of those is what makes a produto or pessoa with real history undeletable.
+  The two CASCADE edges that DO exist (`product_funcao_costs.product_id`, `person_funcoes.person_id`) are the item's own configuration rather than shared history, so losing them with the item is correct.
+- Each purge is one transaction per row: the `cadastro.purged` ledger entry is written FIRST with the transaction handle, then the delete. A `23503` rolls the whole thing back, entry included, so a skipped purge leaves no trace - which is also the atomicity oracle, because the FK violation is a failure that lands AFTER the ledger write.
+  `actor_user_id` is the `'system'` sentinel and `actor_org_id` is the purged row's OWN org: a NULL there would make the entry invisible to the tenant's org-scoped history, hiding the deletion from the only screen meant to show it.
+- Archived rows are hidden from the four cadastro LISTS and from every picker, and nowhere else. They still render wherever a record already references them - a sale item's produto, a person's função chips, a produto cost row's função, `selectableAreas`' archived-but-current área - and those paths are load-bearing, not incidental.
+  Because an archived row is no longer listed, there is no row-level `Restaurar`; restore exists only in `Histórico de arquivamentos`. A purged entity offers none at all and reads `Excluído definitivamente`.
   The PATCH body carries `status` and nothing else, so a stale cached `name` or `funcaoIds` can never be written back as a side effect of archiving or restoring.
   Produto, área and função archive to `archived`; a pessoa goes to `inactive`.
 - A **cliente cannot be archived**: `sales_ops_clients` has no `status` column, `ClientSchema` declares no such key, and zod strips unknown keys, so `PATCH /clients/:id {"status":"archived"}` answers `200` with an unchanged row - a silent no-op that reads as success. Do not add the control before the column; the six-step recipe is in `nexo/runs/feature-20260805-cadastro-archive-history/00-OVERVIEW.md`.
