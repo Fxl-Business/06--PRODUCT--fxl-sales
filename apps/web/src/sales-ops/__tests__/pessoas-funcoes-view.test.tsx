@@ -566,6 +566,44 @@ describe('funções cadastro', () => {
     expect(text()).not.toContain(one.id);
   });
 
+  /*
+    The counts above cannot see this: every pessoa in that fixture is active, so the
+    numbers read the same with or without the filter. Release-verify caught the gap -
+    reverting the `status === 'active'` clause left the whole suite green. An inactive
+    pessoa is not listed and not offered in any picker, so counting one here would put a
+    number on the row that the operator cannot reach by clicking anything.
+  */
+  it('counts only active pessoas in Nº pessoas', async () => {
+    const active = withFuncoes(
+      { id: '77777777-7777-4777-8777-777777777777', displayName: 'Ativa' },
+      [vendedor],
+    );
+    const inactive = withFuncoes(
+      {
+        id: '88888888-8888-4888-8888-888888888888',
+        displayName: 'Inativa',
+        status: 'inactive',
+      },
+      [vendedor],
+    );
+
+    await act(async () => {
+      root.render(
+        <FuncoesView
+          bootstrap={bootstrap({ funcoes: [vendedor], people: [active, inactive] })}
+          onArchive={vi.fn()}
+          onEdit={vi.fn()}
+        />,
+      );
+    });
+
+    const row = [...container.querySelectorAll('tbody tr')].find(
+      (candidate) => candidate.querySelector('td')?.textContent?.trim() === 'Vendedor',
+    );
+    const cells = [...(row?.querySelectorAll('td') ?? [])].map((cell) => cell.textContent?.trim());
+    expect(cells[2]).toBe('1');
+  });
+
   it('shows the empty panel when no função exists', async () => {
     await act(async () => {
       root.render(

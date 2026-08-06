@@ -181,6 +181,44 @@ describe('areas view', () => {
     expect(countCell).toBeTruthy();
   });
 
+  /*
+    The count above cannot see this: its área holds a single active produto, so the
+    number reads 1 whether or not the filter is there. Release-verify caught that gap -
+    reverting the `status === 'active'` clause left the whole suite green. An archived
+    produto is not listed and not offered in any picker, so counting one here would put
+    a number on the row that the operator cannot reach by clicking anything.
+  */
+  it('counts only active produtos in Nº produtos', async () => {
+    const areaOne = area();
+
+    await act(async () => {
+      root.render(
+        <AreasView
+          bootstrap={bootstrap({
+            areas: [areaOne],
+            funcoes: [],
+            products: [
+              product({ areaId: areaOne.id }),
+              product({
+                id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+                areaId: areaOne.id,
+                status: 'archived',
+              }),
+            ],
+          })}
+          onArchive={vi.fn()}
+          onEdit={vi.fn()}
+        />,
+      );
+    });
+
+    const cells = [...container.querySelectorAll('tbody td')].map((cell) =>
+      cell.textContent?.trim(),
+    );
+    expect(cells).toContain('1');
+    expect(cells).not.toContain('2');
+  });
+
   it('shows the empty panel when every área is archived', async () => {
     await act(async () => {
       root.render(
