@@ -156,6 +156,7 @@ describe('areas view', () => {
             funcoes: [],
             products: [product({ areaId: areaOne.id })],
           })}
+          onArchive={vi.fn()}
           onEdit={vi.fn()}
         />,
       );
@@ -175,13 +176,21 @@ describe('areas view', () => {
 
   it('shows the empty panel when no área exists', async () => {
     await act(async () => {
-      root.render(<AreasView bootstrap={bootstrap({ areas: [] })} onEdit={vi.fn()} />);
+      root.render(
+        <AreasView bootstrap={bootstrap({ areas: [] })} onArchive={vi.fn()} onEdit={vi.fn()} />,
+      );
     });
 
     expect(container.textContent ?? '').toContain('Nenhuma área cadastrada');
   });
 
-  it('creates an área submitting trimmed name and status', async () => {
+  /*
+    The `Status` picker left this dialog in slice 03: archiving is a row action
+    behind a confirmation now, and two doors to one fact meant an edit opened on an
+    archived área could silently reactivate it on `Salvar`. A create therefore always
+    resolves to `'active'` through the `??` on `modal.area?.status`.
+  */
+  it('creates an área submitting the trimmed name', async () => {
     const onSave = vi.fn();
 
     await act(async () => {
@@ -192,13 +201,9 @@ describe('areas view', () => {
     if (!(nameInput instanceof HTMLInputElement)) throw new Error('name input not found');
     await change(nameInput, '  FXL BPO Sales  ');
 
-    expect(comboboxText('Status da área')).toBe('Ativa');
-    await pickOption('Status da área', 'Arquivada');
-    expect(comboboxText('Status da área')).toBe('Arquivada');
-
     await submit();
 
-    expect(onSave).toHaveBeenCalledWith({ id: undefined, name: 'FXL BPO Sales', status: 'archived' });
+    expect(onSave).toHaveBeenCalledWith({ id: undefined, name: 'FXL BPO Sales', status: 'active' });
   });
 
   it('does not save an área without a name', async () => {
@@ -292,6 +297,7 @@ describe('areas view', () => {
           funcaoCosts={[]}
           funcoes={[]}
           kind="product"
+          onArchive={vi.fn()}
           onEdit={vi.fn()}
           onKindChange={vi.fn()}
           products={[

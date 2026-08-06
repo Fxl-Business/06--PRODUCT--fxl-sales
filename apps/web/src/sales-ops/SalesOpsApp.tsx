@@ -1,4 +1,6 @@
 import {
+  Archive,
+  ArchiveRestore,
   CalendarDays,
   Check,
   ChevronDown,
@@ -83,6 +85,7 @@ import {
   useSaveSalesOpsPerson,
   useSaveSalesOpsProduct,
   useSaveSalesOpsSettings,
+  useSetSalesOpsCadastroStatus,
   useTransitionSalesOpsSale,
   useUpdateSalesOpsSale,
 } from './hooks';
@@ -155,6 +158,8 @@ import {
   type ProfessionalCostUnit,
 } from './calculations';
 import type {
+  CadastroResource,
+  CadastroStatus,
   SaveAreaPayload,
   SaveClientPayload,
   SaveFuncaoPayload,
@@ -430,6 +435,207 @@ function payableTypeMeta(kind: string) {
   return { label: 'Custo', className: 'bg-[#eeeef1] text-[#57575f]' };
 }
 
+/** One visual language for an archived row across all four cadastro tables. */
+const archivedRowClass = 'opacity-55';
+
+/**
+ * Which cadastro a row belongs to, for copy purposes. `produto` and `servico` are
+ * one API resource and two words: the operator picked a bucket in the segmented
+ * bar and the confirmation has to use the same noun they just clicked.
+ */
+export type CadastroKind = 'produto' | 'servico' | 'area' | 'funcao' | 'pessoa';
+
+export type CadastroArchiveTarget = {
+  cadastro: CadastroKind;
+  id: string;
+  name: string;
+  /** The status to write. `'active'` is a restore; anything else is an archive. */
+  status: CadastroStatus;
+};
+
+/**
+ * Everything that differs per cadastro, in one table.
+ *
+ * `archivedStatus` is `inactive` for a pessoa because that is the literal her
+ * column stores, and `archiveVerb` follows it, so the word on the button always
+ * matches the badge the row shows afterwards.
+ *
+ * Every clause in `confirmBody` is load-bearing and true: an archived row leaves
+ * the pickers (see `selectableProducts` here and the `status === 'active'` filters
+ * on áreas, funções and pessoas), stays on the records that already reference it
+ * (`productNameSnapshot`, `funcaoNameSnapshot`), keeps its `code_suffix` slot (the
+ * unique index has no WHERE clause), and can be restored from this same table.
+ */
+const cadastroArchive: Record<
+  CadastroKind,
+  {
+    resource: CadastroResource;
+    archivedStatus: CadastroStatus;
+    noun: string;
+    archiveVerb: string;
+    restoreVerb: string;
+    confirmTitle: (name: string) => string;
+    confirmBody: string;
+    confirmAction: string;
+  }
+> = {
+  produto: {
+    resource: 'products',
+    archivedStatus: 'archived',
+    noun: 'produto',
+    archiveVerb: 'Arquivar',
+    restoreVerb: 'Restaurar',
+    confirmTitle: (name) => `Arquivar o produto "${name}"?`,
+    confirmBody:
+      'Ele sai das listas de seleção de novas propostas, mas continua nas propostas que já o utilizam. Nada é apagado: o código continua reservado para ele e você pode restaurá-lo aqui a qualquer momento.',
+    confirmAction: 'Arquivar produto',
+  },
+  servico: {
+    resource: 'products',
+    archivedStatus: 'archived',
+    noun: 'serviço',
+    archiveVerb: 'Arquivar',
+    restoreVerb: 'Restaurar',
+    confirmTitle: (name) => `Arquivar o serviço "${name}"?`,
+    confirmBody:
+      'Ele sai das listas de seleção de novas propostas, mas continua nas propostas que já o utilizam. Nada é apagado: o código continua reservado para ele e você pode restaurá-lo aqui a qualquer momento.',
+    confirmAction: 'Arquivar serviço',
+  },
+  area: {
+    resource: 'areas',
+    archivedStatus: 'archived',
+    noun: 'área',
+    archiveVerb: 'Arquivar',
+    restoreVerb: 'Restaurar',
+    confirmTitle: (name) => `Arquivar a área "${name}"?`,
+    confirmBody:
+      'Ela sai das listas de seleção de novos produtos e itens de proposta, mas continua nos produtos e propostas que já a utilizam. Nada é apagado e você pode restaurá-la aqui a qualquer momento.',
+    confirmAction: 'Arquivar área',
+  },
+  funcao: {
+    resource: 'funcoes',
+    archivedStatus: 'archived',
+    noun: 'função',
+    archiveVerb: 'Arquivar',
+    restoreVerb: 'Restaurar',
+    confirmTitle: (name) => `Arquivar a função "${name}"?`,
+    confirmBody:
+      'Ela sai das listas de seleção de novas atribuições e custos padrão, mas continua nas pessoas e propostas que já a utilizam. Nada é apagado e você pode restaurá-la aqui a qualquer momento.',
+    confirmAction: 'Arquivar função',
+  },
+  pessoa: {
+    resource: 'people',
+    archivedStatus: 'inactive',
+    noun: 'pessoa',
+    archiveVerb: 'Inativar',
+    restoreVerb: 'Reativar',
+    confirmTitle: (name) => `Inativar a pessoa "${name}"?`,
+    confirmBody:
+      'Ela sai das listas de seleção de vendedor, finder e profissional, mas continua nas propostas que já a utilizam. Nada é apagado e você pode reativá-la aqui a qualquer momento.',
+    confirmAction: 'Inativar pessoa',
+  },
+};
+
+/**
+ * The archive/restore gesture, shared by the four cadastro tables. Archiving goes
+ * through the confirmation; restoring does not, because restoring is not
+ * destructive - the same asymmetry `SalesView` applies, where `Marcar como ganha`
+ * fires directly and only the voiding transitions confirm.
+ */
+function useCadastroArchive(onArchive: (target: CadastroArchiveTarget) => void) {
+  const [pending, setPending] = useState<CadastroArchiveTarget | null>(null);
+  return {
+    pending,
+    select: (target: CadastroArchiveTarget) =>
+      target.status === 'active' ? onArchive(target) : setPending(target),
+    cancel: () => setPending(null),
+    confirm: () => {
+      if (pending) onArchive(pending);
+      setPending(null);
+    },
+  };
+}
+
+/**
+ * One row's archive control. An active row offers `Arquivar`, an archived one
+ * offers `Restaurar`, and neither ever renders as a disabled version of the other:
+ * `type="button"` on both, because a row control must never be a submit.
+ *
+ * An OPTIMISTIC row renders it disabled for the same reason its `Editar` already
+ * is: a placeholder id would fail the Postgres uuid cast on the PATCH path.
+ */
+function CadastroArchiveButton({
+  cadastro,
+  id,
+  name,
+  archived,
+  disabled,
+  onSelect,
+}: {
+  cadastro: CadastroKind;
+  id: string;
+  name: string;
+  archived: boolean;
+  disabled?: boolean;
+  onSelect: (target: CadastroArchiveTarget) => void;
+}) {
+  const copy = cadastroArchive[cadastro];
+  const verb = archived ? copy.restoreVerb : copy.archiveVerb;
+  const status: CadastroStatus = archived ? 'active' : copy.archivedStatus;
+  return (
+    <button
+      aria-label={`${verb} ${copy.noun} ${name}`}
+      className={disabled ? iconButtonPendingClass : iconButtonClass}
+      disabled={disabled}
+      onClick={() => onSelect({ cadastro, id, name, status })}
+      title={verb}
+      type="button"
+    >
+      {archived ? (
+        <ArchiveRestore className="h-[15px] w-[15px]" />
+      ) : (
+        <Archive className="h-[15px] w-[15px]" />
+      )}
+    </button>
+  );
+}
+
+/**
+ * The confirmation, shaped exactly like `SalesView`'s: a page-level `AlertDialog`
+ * sibling of the table, holding a title, a paragraph and two buttons. It contains
+ * no `Combobox` and no `InfoHint` and is not nested inside a `Dialog`, so there is
+ * no inline layer to register with `useInlineLayer`. A null target renders nothing.
+ */
+function CadastroArchiveConfirm({
+  target,
+  onCancel,
+  onConfirm,
+}: {
+  target: CadastroArchiveTarget | null;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const copy = target ? cadastroArchive[target.cadastro] : null;
+  return (
+    <AlertDialog onOpenChange={(open) => (!open ? onCancel() : undefined)} open={target !== null}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>
+            {copy && target ? copy.confirmTitle(target.name) : ''}
+          </AlertDialogTitle>
+          <AlertDialogDescription>{copy ? copy.confirmBody : ''}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Voltar</AlertDialogCancel>
+          <AlertDialogAction onClick={onConfirm}>
+            {copy ? copy.confirmAction : ''}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
 function dateOnly(value: string) {
   return value.slice(0, 10);
 }
@@ -684,13 +890,29 @@ function areaOptions(areas: SalesOpsArea[]): ComboboxOption[] {
   return areas.map((area) => ({ value: area.id, label: area.name }));
 }
 
+/**
+ * Active produtos, plus the one THIS item already references. An archived produto
+ * has to vanish from the picker - that is what archiving means, and it is what the
+ * archive confirmation copy promises - without erasing the label of an item a
+ * stored proposta already carries. Same rule as `selectableAreas` in this file and
+ * as the função cost row in `ProductDialog`.
+ */
+function selectableProducts(products: SalesOpsProduct[], currentId: string): SalesOpsProduct[] {
+  const active = products.filter((product) => product.status === 'active');
+  if (!currentId || active.some((product) => product.id === currentId)) return active;
+  const current = products.find((product) => product.id === currentId);
+  return current ? [current, ...active] : active;
+}
+
 function productOptions(
   products: SalesOpsProduct[],
   areaNameById: Map<string, string>,
 ): ComboboxOption[] {
   return products.map((product) => ({
     value: product.id,
-    label: product.name,
+    // Mirrors `funcaoCostOptionLabel`: an archived row that survives in a picker
+    // because something already references it has to say so.
+    label: product.status === 'archived' ? `${product.name} (arquivado)` : product.name,
     description: product.areaId ? areaNameById.get(product.areaId) : undefined,
   }));
 }
@@ -806,6 +1028,7 @@ export function SalesOpsApp() {
   const transitionSale = useTransitionSalesOpsSale();
   const cancelContract = useCancelSalesOpsContract();
   const saveSettings = useSaveSalesOpsSettings();
+  const setCadastroStatus = useSetSalesOpsCadastroStatus();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
@@ -887,6 +1110,20 @@ export function SalesOpsApp() {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Archive and restore for every cadastro that has a status column. One handler for
+   * all four, because the only thing that varies is the resource segment and the
+   * archived literal, and both live in `cadastroArchive`. The body carries `status`
+   * and nothing else, so a stale cached name can never ride along.
+   */
+  function changeCadastroStatus(target: CadastroArchiveTarget) {
+    setCadastroStatus.mutate({
+      resource: cadastroArchive[target.cadastro].resource,
+      id: target.id,
+      status: target.status,
+    });
   }
 
   async function createAreaByName(name: string): Promise<SalesOpsArea | null> {
@@ -1450,6 +1687,7 @@ export function SalesOpsApp() {
                     funcoes={persistedBootstrap.funcoes}
                     kind={productKind}
                     products={persistedBootstrap.products}
+                    onArchive={changeCadastroStatus}
                     onEdit={(product) => setModal({ kind: 'product', product })}
                     onKindChange={setProductKind}
                   />
@@ -1463,12 +1701,14 @@ export function SalesOpsApp() {
                 {view === 'areas' ? (
                   <AreasView
                     bootstrap={bootstrap}
+                    onArchive={changeCadastroStatus}
                     onEdit={(area) => setModal({ kind: 'area', area })}
                   />
                 ) : null}
                 {view === 'pessoas' ? (
                   <PessoasView
                     bootstrap={bootstrap}
+                    onArchive={changeCadastroStatus}
                     onEdit={(person) => setModal({ kind: 'person', person })}
                   />
                 ) : null}
@@ -1481,6 +1721,7 @@ export function SalesOpsApp() {
                   */
                   <FuncoesView
                     bootstrap={funcoesBootstrap}
+                    onArchive={changeCadastroStatus}
                     onEdit={(funcao) => setModal({ kind: 'funcao', funcao })}
                   />
                 ) : null}
@@ -2459,6 +2700,7 @@ export function ProductsView({
   funcaoCosts,
   kind,
   onKindChange,
+  onArchive,
   onEdit,
 }: {
   areas: SalesOpsArea[];
@@ -2468,8 +2710,10 @@ export function ProductsView({
   funcaoCosts: SalesOpsProductFuncaoCost[];
   kind: SalesOpsProductKind;
   onKindChange: (kind: SalesOpsProductKind) => void;
+  onArchive: (target: CadastroArchiveTarget) => void;
   onEdit: (product: SalesOpsProduct) => void;
 }) {
+  const archive = useCadastroArchive(onArchive);
   const isService = kind === 'service';
   const produtoCount = products.filter((product) => productKindOf(product) === 'product').length;
   const servicoCount = products.length - produtoCount;
@@ -2544,9 +2788,21 @@ export function ProductsView({
           <TableBody>
             {visible.map((product) => {
               const costs = funcaoCosts.filter((row) => row.productId === product.id);
+              const archived = product.status !== 'active';
               return (
-                <TableRow key={product.id}>
-                  <TableCell className="px-4 py-3 text-sm font-semibold">{product.name}</TableCell>
+                <TableRow className={archived ? archivedRowClass : undefined} key={product.id}>
+                  {/*
+                    No `Status` column: the table already carries nine and a tenth
+                    would squeeze every one of them. The badge rides in the `Nome`
+                    cell and only when the row is archived, so the common case
+                    costs zero width.
+                  */}
+                  <TableCell className="px-4 py-3 text-sm font-semibold">
+                    <span className="inline-flex items-center gap-2">
+                      {product.name}
+                      {archived ? <Badge className={neutralBadgeClass}>Arquivado</Badge> : null}
+                    </span>
+                  </TableCell>
                   <TableCell className={tableCellClass}>
                     {areas.find((area) => area.id === product.areaId)?.name ?? '-'}
                   </TableCell>
@@ -2638,13 +2894,24 @@ export function ProductsView({
                     </TableCell>
                   )}
                   <TableCell className="px-4 py-3 text-center">
-                    <button
-                      className={iconButtonClass}
-                      onClick={() => onEdit(product)}
-                      type="button"
-                    >
-                      <Edit3 className="h-[15px] w-[15px]" />
-                    </button>
+                    <div className="flex items-center justify-center gap-1.5">
+                      <button
+                        aria-label={`Editar ${product.name}`}
+                        className={iconButtonClass}
+                        onClick={() => onEdit(product)}
+                        title="Editar"
+                        type="button"
+                      >
+                        <Edit3 className="h-[15px] w-[15px]" />
+                      </button>
+                      <CadastroArchiveButton
+                        archived={archived}
+                        cadastro={productKindOf(product) === 'service' ? 'servico' : 'produto'}
+                        id={product.id}
+                        name={product.name}
+                        onSelect={archive.select}
+                      />
+                    </div>
                   </TableCell>
                 </TableRow>
               );
@@ -2652,6 +2919,15 @@ export function ProductsView({
           </TableBody>
         </Table>
       )}
+      {/*
+        Last child of the panel, so the confirmation exists in the empty branch too:
+        the segmented filter can leave a bucket empty while the other still has rows.
+      */}
+      <CadastroArchiveConfirm
+        onCancel={archive.cancel}
+        onConfirm={archive.confirm}
+        target={archive.pending}
+      />
     </div>
   );
 }
@@ -2724,11 +3000,15 @@ function ClientsView({
 
 export function AreasView({
   bootstrap,
+  onArchive,
   onEdit,
 }: {
   bootstrap: SalesOpsBootstrap;
+  onArchive: (target: CadastroArchiveTarget) => void;
   onEdit: (area: SalesOpsArea) => void;
 }) {
+  // Above the early return: `react-hooks/rules-of-hooks` fails lint otherwise.
+  const archive = useCadastroArchive(onArchive);
   if (bootstrap.areas.length === 0) {
     return (
       <EmptyPanel
@@ -2755,8 +3035,9 @@ export function AreasView({
               (product) => product.areaId === area.id,
             ).length;
             const pending = isOptimisticId(area.id);
+            const archived = area.status !== 'active';
             return (
-              <TableRow key={area.id}>
+              <TableRow className={archived ? archivedRowClass : undefined} key={area.id}>
                 <TableCell className="px-4 py-3 text-sm font-semibold">{area.name}</TableCell>
                 <TableCell className="px-4 py-3 text-center">
                   <Badge
@@ -2773,22 +3054,37 @@ export function AreasView({
                   {productCount}
                 </TableCell>
                 <TableCell className="px-4 py-3 text-center">
-                  <button
-                    aria-label={pending ? `Salvando ${area.name}` : `Editar ${area.name}`}
-                    className={pending ? iconButtonPendingClass : iconButtonClass}
-                    disabled={pending}
-                    onClick={() => onEdit(area)}
-                    title={pending ? 'Salvando...' : 'Editar'}
-                    type="button"
-                  >
-                    <Edit3 className="h-[15px] w-[15px]" />
-                  </button>
+                  <div className="flex items-center justify-center gap-1.5">
+                    <button
+                      aria-label={pending ? `Salvando ${area.name}` : `Editar ${area.name}`}
+                      className={pending ? iconButtonPendingClass : iconButtonClass}
+                      disabled={pending}
+                      onClick={() => onEdit(area)}
+                      title={pending ? 'Salvando...' : 'Editar'}
+                      type="button"
+                    >
+                      <Edit3 className="h-[15px] w-[15px]" />
+                    </button>
+                    <CadastroArchiveButton
+                      archived={archived}
+                      cadastro="area"
+                      disabled={pending}
+                      id={area.id}
+                      name={area.name}
+                      onSelect={archive.select}
+                    />
+                  </div>
                 </TableCell>
               </TableRow>
             );
           })}
         </TableBody>
       </Table>
+      <CadastroArchiveConfirm
+        onCancel={archive.cancel}
+        onConfirm={archive.confirm}
+        target={archive.pending}
+      />
     </div>
   );
 }
@@ -2804,11 +3100,15 @@ const neutralBadgeClass = 'bg-[#eeeef1] text-[#6a6a72]';
  */
 export function PessoasView({
   bootstrap,
+  onArchive,
   onEdit,
 }: {
   bootstrap: SalesOpsBootstrap;
+  onArchive: (target: CadastroArchiveTarget) => void;
   onEdit: (person: SalesOpsPerson) => void;
 }) {
+  // Above the early return: `react-hooks/rules-of-hooks` fails lint otherwise.
+  const archive = useCadastroArchive(onArchive);
   if (bootstrap.people.length === 0) {
     return (
       <EmptyPanel
@@ -2833,8 +3133,9 @@ export function PessoasView({
         <TableBody>
           {bootstrap.people.map((person) => {
             const pending = isOptimisticId(person.id);
+            const archived = person.status !== 'active';
             return (
-              <TableRow key={person.id}>
+              <TableRow className={archived ? archivedRowClass : undefined} key={person.id}>
                 <TableCell className="px-4 py-3 text-sm font-semibold">
                   {person.displayName}
                 </TableCell>
@@ -2869,24 +3170,39 @@ export function PessoasView({
                   </Badge>
                 </TableCell>
                 <TableCell className="px-4 py-3 text-center">
-                  <button
-                    aria-label={
-                      pending ? `Salvando ${person.displayName}` : `Editar ${person.displayName}`
-                    }
-                    className={pending ? iconButtonPendingClass : iconButtonClass}
-                    disabled={pending}
-                    onClick={() => onEdit(person)}
-                    title={pending ? 'Salvando...' : 'Editar'}
-                    type="button"
-                  >
-                    <Edit3 className="h-[15px] w-[15px]" />
-                  </button>
+                  <div className="flex items-center justify-center gap-1.5">
+                    <button
+                      aria-label={
+                        pending ? `Salvando ${person.displayName}` : `Editar ${person.displayName}`
+                      }
+                      className={pending ? iconButtonPendingClass : iconButtonClass}
+                      disabled={pending}
+                      onClick={() => onEdit(person)}
+                      title={pending ? 'Salvando...' : 'Editar'}
+                      type="button"
+                    >
+                      <Edit3 className="h-[15px] w-[15px]" />
+                    </button>
+                    <CadastroArchiveButton
+                      archived={archived}
+                      cadastro="pessoa"
+                      disabled={pending}
+                      id={person.id}
+                      name={person.displayName}
+                      onSelect={archive.select}
+                    />
+                  </div>
                 </TableCell>
               </TableRow>
             );
           })}
         </TableBody>
       </Table>
+      <CadastroArchiveConfirm
+        onCancel={archive.cancel}
+        onConfirm={archive.confirm}
+        target={archive.pending}
+      />
     </div>
   );
 }
@@ -2903,11 +3219,15 @@ export function PessoasView({
  */
 export function FuncoesView({
   bootstrap,
+  onArchive,
   onEdit,
 }: {
   bootstrap: SalesOpsBootstrap;
+  onArchive: (target: CadastroArchiveTarget) => void;
   onEdit: (funcao: SalesOpsFuncao) => void;
 }) {
+  // Above the early return: `react-hooks/rules-of-hooks` fails lint otherwise.
+  const archive = useCadastroArchive(onArchive);
   if (bootstrap.funcoes.length === 0) {
     return (
       <EmptyPanel
@@ -2936,8 +3256,9 @@ export function FuncoesView({
               person.funcoes.some((assigned) => assigned.id === funcao.id),
             ).length;
             const pending = isOptimisticId(funcao.id);
+            const archived = funcao.status !== 'active';
             return (
-              <TableRow key={funcao.id}>
+              <TableRow className={archived ? archivedRowClass : undefined} key={funcao.id}>
                 <TableCell className="px-4 py-3 text-sm font-semibold">{funcao.name}</TableCell>
                 <TableCell className="px-4 py-3 text-center">
                   <Badge className={funcao.isSystem ? systemBadgeClass : neutralBadgeClass}>
@@ -2959,6 +3280,13 @@ export function FuncoesView({
                   {personCount}
                 </TableCell>
                 <TableCell className="px-4 py-3 text-center">
+                  {/*
+                    The system branch keeps the lock and NOTHING else. The archive
+                    control is rendered only in the non-system branch, never merely
+                    disabled inside a shared one: the API answers `409
+                    funcao_is_system` to any status write on vendedor or finder, so
+                    a control that must fail has no business existing.
+                  */}
                   {funcao.isSystem ? (
                     <button
                       aria-label="Função predefinida do app"
@@ -2970,16 +3298,26 @@ export function FuncoesView({
                       <Lock className="h-[15px] w-[15px]" />
                     </button>
                   ) : (
-                    <button
-                      aria-label={pending ? `Salvando ${funcao.name}` : `Editar ${funcao.name}`}
-                      className={pending ? iconButtonPendingClass : iconButtonClass}
-                      disabled={pending}
-                      onClick={() => onEdit(funcao)}
-                      title={pending ? 'Salvando...' : 'Editar'}
-                      type="button"
-                    >
-                      <Edit3 className="h-[15px] w-[15px]" />
-                    </button>
+                    <div className="flex items-center justify-center gap-1.5">
+                      <button
+                        aria-label={pending ? `Salvando ${funcao.name}` : `Editar ${funcao.name}`}
+                        className={pending ? iconButtonPendingClass : iconButtonClass}
+                        disabled={pending}
+                        onClick={() => onEdit(funcao)}
+                        title={pending ? 'Salvando...' : 'Editar'}
+                        type="button"
+                      >
+                        <Edit3 className="h-[15px] w-[15px]" />
+                      </button>
+                      <CadastroArchiveButton
+                        archived={archived}
+                        cadastro="funcao"
+                        disabled={pending}
+                        id={funcao.id}
+                        name={funcao.name}
+                        onSelect={archive.select}
+                      />
+                    </div>
                   )}
                 </TableCell>
               </TableRow>
@@ -2987,6 +3325,11 @@ export function FuncoesView({
           })}
         </TableBody>
       </Table>
+      <CadastroArchiveConfirm
+        onCancel={archive.cancel}
+        onConfirm={archive.confirm}
+        target={archive.pending}
+      />
     </div>
   );
 }
@@ -3805,7 +4148,13 @@ function ProductDialogBody({
       // `providers` is deliberately OMITTED rather than sent as []: PATCH leaves an
       // omitted key unchanged, so the deprecated column survives the first edit after
       // this screen shipped and stays readable for the manual re-entry notice below.
-      status: 'active',
+      //
+      // `status` is the one the record already had, never a literal. This used to be
+      // a hardcoded `'active'`, which meant a produto could not be archived from the
+      // UI at all AND that any edit of an archived one silently reactivated it. The
+      // `??` is the same short-circuit shape as the `name` seed, so a create still
+      // submits `'active'` and an edit can never resurrect an archived produto.
+      status: activeModal.product?.status ?? 'active',
     };
     onSave(payload);
   }
@@ -4792,12 +5141,18 @@ function AreaDialogBody({
   saving: boolean;
 }) {
   const [name, setName] = useState(modal.area?.name ?? '');
-  const [status, setStatus] = useState<'active' | 'archived'>(modal.area?.status ?? 'active');
 
   function submit(event: FormEvent) {
     event.preventDefault();
     if (!name.trim()) return;
-    onSave({ id: modal.area?.id, name: name.trim(), status });
+    /*
+      The status the record already had, never a value this dialog owns. There is
+      exactly one door to a cadastro's status now - the row's `Arquivar` control
+      behind its confirmation - so an edit opened on an archived área can no longer
+      silently reactivate it on `Salvar`. The `??` is the same short-circuit shape
+      as the `name` seed above: a create still submits `'active'`.
+    */
+    onSave({ id: modal.area?.id, name: name.trim(), status: modal.area?.status ?? 'active' });
   }
 
   return (
@@ -4815,19 +5170,6 @@ function AreaDialogBody({
               value={name}
             />
           </Field>
-          <FieldBlock label="Status">
-            <Combobox
-              aria-label="Status da área"
-              className={formSelectClass}
-              onChange={(value) => setStatus(value as 'active' | 'archived')}
-              options={[
-                { value: 'active', label: 'Ativa' },
-                { value: 'archived', label: 'Arquivada' },
-              ]}
-              searchPlaceholder="Buscar status..."
-              value={status}
-            />
-          </FieldBlock>
           <div className="flex justify-end gap-3 border-t border-[#e8e8ec] pt-4">
             <SecondaryButton onClick={onClose}>Cancelar</SecondaryButton>
             <PrimaryButton disabled={saving || !name.trim()} type="submit">
@@ -4871,7 +5213,6 @@ function FuncaoDialogBody({
   saving: boolean;
 }) {
   const [name, setName] = useState(modal.funcao?.name ?? '');
-  const [status, setStatus] = useState<'active' | 'archived'>(modal.funcao?.status ?? 'active');
   /**
    * Defence in depth. `FuncoesView` never wires `onEdit` for a predefined função, so
    * this branch is unreachable in normal use; it exists so a future mis-wire cannot
@@ -4882,7 +5223,8 @@ function FuncaoDialogBody({
   function submit(event: FormEvent) {
     event.preventDefault();
     if (isSystem || !name.trim()) return;
-    onSave({ id: modal.funcao?.id, name: name.trim(), status });
+    // The stored status, never a value this dialog owns - see AreaDialogBody.
+    onSave({ id: modal.funcao?.id, name: name.trim(), status: modal.funcao?.status ?? 'active' });
   }
 
   return (
@@ -4903,23 +5245,9 @@ function FuncaoDialogBody({
               value={name}
             />
           </Field>
-          <FieldBlock label="Status">
-            <Combobox
-              aria-label="Status da função"
-              className={formSelectClass}
-              disabled={isSystem}
-              onChange={(value) => setStatus(value as 'active' | 'archived')}
-              options={[
-                { value: 'active', label: 'Ativa' },
-                { value: 'archived', label: 'Arquivada' },
-              ]}
-              searchPlaceholder="Buscar status..."
-              value={status}
-            />
-          </FieldBlock>
           {isSystem ? (
             <p className="text-[12.5px] text-[#8b8b92]">
-              Função predefinida do app: o nome e o status não podem ser alterados.
+              Função predefinida do app: o nome não pode ser alterado.
             </p>
           ) : null}
           <div className="flex justify-end gap-3 border-t border-[#e8e8ec] pt-4">
@@ -4974,7 +5302,6 @@ function PersonDialogBody({
 }) {
   const [displayName, setDisplayName] = useState(modal.person?.displayName ?? '');
   const [contactEmail, setContactEmail] = useState(modal.person?.contactEmail ?? '');
-  const [status, setStatus] = useState<'active' | 'inactive'>(modal.person?.status ?? 'active');
   const [assignedIds, setAssignedIds] = useState<string[]>(
     () => modal.person?.funcoes.map((funcao) => funcao.id) ?? [],
   );
@@ -5031,7 +5358,8 @@ function PersonDialogBody({
       id: activeModal.person?.id,
       displayName: displayName.trim(),
       contactEmail: contactEmail.trim() || undefined,
-      status,
+      // The stored status, never a value this dialog owns - see AreaDialogBody.
+      status: activeModal.person?.status ?? 'active',
       funcaoIds: assignedIds,
     });
   }
@@ -5061,19 +5389,6 @@ function PersonDialogBody({
               value={contactEmail}
             />
           </Field>
-          <FieldBlock label="Status">
-            <Combobox
-              aria-label="Status da pessoa"
-              className={formSelectClass}
-              onChange={(value) => setStatus(value as 'active' | 'inactive')}
-              options={[
-                { value: 'active', label: 'Ativo' },
-                { value: 'inactive', label: 'Inativo' },
-              ]}
-              searchPlaceholder="Buscar status..."
-              value={status}
-            />
-          </FieldBlock>
           <FieldBlock label="Funções" required>
             {assignedIds.length > 0 ? (
               <div className="flex flex-col gap-2">
@@ -7203,7 +7518,10 @@ function SaleWizardDialogBody({
                                 onCreate={
                                   onCreateProduct ? (name) => onCreateProduct(name) : undefined
                                 }
-                                options={productOptions(bootstrap.products, areaNameById)}
+                                options={productOptions(
+                                  selectableProducts(bootstrap.products, item.productId),
+                                  areaNameById,
+                                )}
                                 searchPlaceholder="Buscar produto..."
                                 value={item.productId}
                               />

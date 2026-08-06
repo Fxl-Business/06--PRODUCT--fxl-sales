@@ -249,6 +249,7 @@ describe('pessoas cadastro', () => {
       root.render(
         <PessoasView
           bootstrap={bootstrap({ funcoes: [vendedor, finder, designer], people: [sig, unassigned, inactive] })}
+          onArchive={vi.fn()}
           onEdit={vi.fn()}
         />,
       );
@@ -273,7 +274,9 @@ describe('pessoas cadastro', () => {
 
   it('shows the empty panel when no pessoa exists', async () => {
     await act(async () => {
-      root.render(<PessoasView bootstrap={bootstrap({ people: [] })} onEdit={vi.fn()} />);
+      root.render(
+        <PessoasView bootstrap={bootstrap({ people: [] })} onArchive={vi.fn()} onEdit={vi.fn()} />,
+      );
     });
 
     expect(text()).toContain('Nenhuma pessoa cadastrada');
@@ -479,6 +482,7 @@ describe('funções cadastro', () => {
       root.render(
         <FuncoesView
           bootstrap={bootstrap({ funcoes: [vendedor, finder, designer], people: [one, two] })}
+          onArchive={vi.fn()}
           onEdit={vi.fn()}
         />,
       );
@@ -507,7 +511,9 @@ describe('funções cadastro', () => {
 
   it('shows the empty panel when no função exists', async () => {
     await act(async () => {
-      root.render(<FuncoesView bootstrap={bootstrap({ funcoes: [] })} onEdit={vi.fn()} />);
+      root.render(
+        <FuncoesView bootstrap={bootstrap({ funcoes: [] })} onArchive={vi.fn()} onEdit={vi.fn()} />,
+      );
     });
 
     expect(text()).toContain('Nenhuma função cadastrada');
@@ -520,6 +526,7 @@ describe('funções cadastro', () => {
       root.render(
         <FuncoesView
           bootstrap={bootstrap({ funcoes: [vendedor, finder, designer] })}
+          onArchive={vi.fn()}
           onEdit={onEdit}
         />,
       );
@@ -541,7 +548,12 @@ describe('funções cadastro', () => {
     expect(onEdit).not.toHaveBeenCalled();
   });
 
-  it('creates a custom função submitting trimmed name and status', async () => {
+  /*
+    The `Status` picker left this dialog in slice 03, same as the área dialog: a
+    create always resolves to `'active'` through the `??` on `modal.funcao?.status`,
+    and archiving is the row action behind its confirmation.
+  */
+  it('creates a custom função submitting the trimmed name', async () => {
     const onSave = vi.fn();
 
     await act(async () => {
@@ -551,13 +563,10 @@ describe('funções cadastro', () => {
     });
 
     await change(requireNameInput(), '  Designer  ');
-    expect(combobox('Status da função').textContent?.trim()).toBe('Ativa');
-    await pickOption('Status da função', 'Arquivada');
-    expect(combobox('Status da função').textContent?.trim()).toBe('Arquivada');
 
     await submit();
 
-    expect(onSave).toHaveBeenCalledWith({ id: undefined, name: 'Designer', status: 'archived' });
+    expect(onSave).toHaveBeenCalledWith({ id: undefined, name: 'Designer', status: 'active' });
   });
 
   it('edits a custom função keeping its id and locks a system one', async () => {
@@ -597,7 +606,8 @@ describe('funções cadastro', () => {
 
     expect(requireNameInput().disabled).toBe(true);
     expect(buttonByText('Salvar').disabled).toBe(true);
-    expect(combobox('Status da função').disabled).toBe(true);
+    // The status Combobox is gone from this dialog entirely, so there is nothing
+    // left to assert as disabled - only the name input and Salvar remain.
     expect(text()).toContain('Função predefinida do app');
     await submit();
     expect(onSave).not.toHaveBeenCalled();
@@ -619,5 +629,21 @@ describe('pessoa dialog UI contract', () => {
     // The create row and the active filter survive the button's removal.
     expect(source).toContain('handleCreateFuncao');
     expect(source).toContain("funcao.status === 'active' && !assignedIds.includes(funcao.id)");
+  });
+
+  /*
+    Slice 03 left exactly ONE door to a cadastro's status: the row's `Arquivar`
+    control behind its confirmation. A `Status` picker reinstated in any of these
+    three dialogs would be a second door and would let an edit silently reactivate
+    an archived row on `Salvar` - the produto bug, generalised.
+  */
+  it('leaves no `Status` picker behind in the área, função or pessoa dialogs', () => {
+    // Positive control: the row-level affordance that replaced them really exists.
+    expect(source).toContain('CadastroArchiveButton');
+    expect(source).toContain('cadastroArchive');
+
+    expect(source).not.toContain('Status da área');
+    expect(source).not.toContain('Status da função');
+    expect(source).not.toContain('Status da pessoa');
   });
 });

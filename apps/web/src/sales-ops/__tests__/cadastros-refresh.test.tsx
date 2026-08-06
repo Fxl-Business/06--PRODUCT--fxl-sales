@@ -54,6 +54,7 @@ vi.mock('../api', () => ({
     saveClient: vi.fn(),
     saveArea: vi.fn(),
     saveFuncao: vi.fn(),
+    setCadastroStatus: vi.fn(),
     createSale: vi.fn(),
     updateSale: vi.fn(),
     transitionSale: vi.fn(),
