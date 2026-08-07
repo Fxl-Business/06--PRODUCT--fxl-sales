@@ -82,6 +82,43 @@ $ npm view @fxl-business/hub-sdk versions
 
 It is live. We pulled the tarball and read `MIGRATION.md`, `schema/session-store.sql` and the `.d.ts` surface before touching anything, as instructed.
 
+### 1b. The published 1.3.0 tarball cannot be resolved at all - please republish
+
+This is the one thing in this document that needs action on your side, and it blocks every consumer, not just us.
+
+`1.3.0`'s published `package.json` carries the SOURCE-resolution fields at the top level:
+
+```
+$ npm view @fxl-business/hub-sdk@1.3.0 main exports
+main = './src/index.ts'
+exports = {
+  '.':       { types: './src/index.ts',       default: './src/index.ts' },
+  './server':{ types: './src/server.ts',      default: './src/server.ts' },
+  './client':{ types: './src/client.ts',      default: './src/client.ts' }
+}
+```
+
+while `files` is `["dist", "schema", "MIGRATION.md"]`, so `src/` is not in the tarball.
+Every entry point therefore points at a file that does not exist:
+
+```
+$ node -e "import('@fxl-business/hub-sdk/server')"
+ERR_MODULE_NOT_FOUND: Cannot find module '.../@fxl-business/hub-sdk/src/server.ts'
+```
+
+Vite fails the same way with `Failed to resolve entry for package "@fxl-business/hub-sdk"`.
+
+`1.2.0` is correct - its published `package.json` has `main: "./dist/index.cjs"` and `exports` pointing at `dist`, which is exactly what your own `publishConfig` block says should happen.
+So the `publishConfig` swap was applied when `1.2.0` was published and was not applied when `1.3.0` was.
+The most likely cause is a publish run through `npm publish` rather than `pnpm publish`: npm does not honour `main`/`module`/`types`/`exports` inside `publishConfig`, pnpm does.
+The `comment` field in your `package.json` already anticipates exactly this hazard.
+
+We have bridged it locally with a `pnpm patch` (`patches/@fxl-business__hub-sdk@1.3.0.patch`) that rewrites those four fields to the `publishConfig` values already present in the same file.
+It changes no code, and `dist/` in the tarball is complete and correct - only the pointers are wrong.
+We will delete the patch as soon as a fixed version is on the registry.
+
+Please republish as `1.3.1` with the swap applied, and consider adding a `prepublishOnly`/`postpack` assertion that the resolved entry points exist inside the packed tarball.
+
 ### 2. Q1's premise does not hold for this repo
 
 The row lock spans the read and the write, per the answer above. The concern is closed, though the flush-failure hole it led us to is real and worth having found.

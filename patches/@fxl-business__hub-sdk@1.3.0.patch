@@ -1,0 +1,52 @@
+diff --git a/package.json b/package.json
+index 26e4d76034e9627bc7e214f3e4c7d798682ff514..283070d67c7f30c5c000ae35ca7ebee08cfd83e6 100644
+--- a/package.json
++++ b/package.json
+@@ -41,20 +41,39 @@
+       }
+     }
+   },
+-  "main": "./src/index.ts",
+-  "types": "./src/index.ts",
++  "main": "./dist/index.cjs",
++  "module": "./dist/index.js",
++  "types": "./dist/index.d.ts",
+   "exports": {
+     ".": {
+-      "types": "./src/index.ts",
+-      "default": "./src/index.ts"
++      "import": {
++        "types": "./dist/index.d.ts",
++        "default": "./dist/index.js"
++      },
++      "require": {
++        "types": "./dist/index.d.cts",
++        "default": "./dist/index.cjs"
++      }
+     },
+     "./server": {
+-      "types": "./src/server.ts",
+-      "default": "./src/server.ts"
++      "import": {
++        "types": "./dist/server.d.ts",
++        "default": "./dist/server.js"
++      },
++      "require": {
++        "types": "./dist/server.d.cts",
++        "default": "./dist/server.cjs"
++      }
+     },
+     "./client": {
+-      "types": "./src/client.ts",
+-      "default": "./src/client.ts"
++      "import": {
++        "types": "./dist/client.d.ts",
++        "default": "./dist/client.js"
++      },
++      "require": {
++        "types": "./dist/client.d.cts",
++        "default": "./dist/client.cjs"
++      }
+     }
+   },
+   "files": [
