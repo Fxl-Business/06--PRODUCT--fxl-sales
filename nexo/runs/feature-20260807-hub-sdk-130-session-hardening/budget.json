@@ -2,7 +2,7 @@
   "active_accumulated_seconds": 0,
   "active_since": 1786113106,
   "counters": {
-    "agent_dispatches": 9,
+    "agent_dispatches": 11,
     "initial_slices": 6,
     "replans": 1,
     "total_slices": 6,
@@ -21,7 +21,9 @@
   },
   "paused": false,
   "scoped_counters": {
-    "verify_attempts": {}
+    "verify_attempts": {
+      "01-sdk-130-store-port": 1
+    }
   },
   "version": 1
 }
