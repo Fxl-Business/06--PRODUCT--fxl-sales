@@ -2,7 +2,7 @@
   "active_accumulated_seconds": 0,
   "active_since": 1786113106,
   "counters": {
-    "agent_dispatches": 15,
+    "agent_dispatches": 17,
     "initial_slices": 6,
     "replans": 1,
     "total_slices": 6,
@@ -24,6 +24,7 @@
     "verify_attempts": {
       "01-sdk-130-store-port": 1,
       "02-session-absolute-ttl": 1,
+      "03-refresh-failure-classification": 1,
       "04-durable-logout-intent": 1
     }
   },
