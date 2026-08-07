@@ -6,54 +6,48 @@
  * redeploy therefore invalidated every logged-in session, and with more than one
  * replica a session created on A was invisible on B.
  *
- * `HubSessionStore` is SYNCHRONOUS - no method may `await`, and `get()` is
- * called inline inside /auth/refresh to build the Hub back-channel Cookie
- * header. The shape used here is HYDRATE-AROUND-THE-HANDLER: a request-scoped
- * unit of work held in an `AsyncLocalStorage`, loaded from Postgres before the
- * BFF handler runs and flushed back after it returns. Inside the handler every
- * store method is a pure `Map` operation; all I/O happens at the async boundary
- * `createHubSessionScopeMiddleware` owns. This is `express-session`'s shape.
+ * `HubSessionStore` is ASYNC and TRANSACTIONAL as of
+ * `@fxl-business/hub-sdk@1.3.0`, and the STORE owns the lock. `withSession(id,
+ * op)` opens ONE `db.transaction`, takes `SELECT ... FOR UPDATE` on the session
+ * row BEFORE `op` runs, and holds it until commit - so two concurrent refreshes
+ * of one session id serialize at Postgres and a rotated refresh token cannot be
+ * lost. There is no hydrate phase, no flush phase and no request-scoped working
+ * set; the read, the Hub round trip and the write all happen inside the one
+ * transaction.
  *
- * The working set is REQUEST-SCOPED, never a long-lived cache. The Hub rotates
- * the refresh token on every /auth/refresh, so a replica must never serve a
- * token it cached before another replica rotated it. Re-reading one indexed
- * primary-key row per auth request is negligible next to the Hub HTTP round
- * trip that same request already makes.
+ * Because the operation's return value is never captured outside that
+ * transaction, a commit failure cannot be returned as success. That was the
+ * pre-1.3.0 hole: the flush phase swallowed its own failure, so the Hub had
+ * rotated RT1 to RT2 while Postgres still held RT1, and the next refresh
+ * replayed RT1 and tripped `reuse_detected`.
+ *
+ * `getAdminDb()` is the only connection, because `hub_bff_sessions` and
+ * `hub_bff_login_txns` carry FORCE RLS with only the `app.fxl_admin` policy.
  *
  * Rotating `FXL_HUB_SECRET_KEY` invalidates every stored session - see
  * `session-crypto.ts`.
  */
-import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomBytes } from 'node:crypto';
 import {
   InMemoryHubSessionStore,
   type HubLoginTransaction,
   type HubSessionRecord,
   type HubSessionStore,
+  type HubSessionTransaction,
 } from '@fxl-business/hub-sdk';
-import { and, eq, gt, lte } from 'drizzle-orm';
+import { eq, lte } from 'drizzle-orm';
 import { getAdminDb } from '../db/client.js';
 import { hubBffLoginTxns, hubBffSessions } from '../db/schema.js';
 import { createSessionSealer, type SessionSealer } from './session-crypto.js';
 
 type NodeDb = ReturnType<typeof getAdminDb>;
-type RequestDb = Parameters<Parameters<NodeDb['transaction']>[0]>[0];
-type RequestPhase = 'hydrate' | 'handler' | 'flush';
 
 /** Sliding: rewritten to now + 30 days on every refresh-token rotation. */
 export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-/** Matches the SDK's LOGIN_TX_MAX_AGE_SECONDS = 600 (dist/server.js:275) byte for byte. */
+/** Matches the SDK's LOGIN_TX_MAX_AGE_SECONDS = 600 (1.3.0 dist/server.js:279). */
 export const LOGIN_TX_TTL_MS = 10 * 60 * 1000;
 
-/** Thrown when a store method is called outside `withRequest`. Loud on purpose. */
-export class HubSessionScopeError extends Error {
-  constructor(message = 'hub session store used outside a request scope') {
-    super(message);
-    this.name = 'HubSessionScopeError';
-  }
-}
-
-/** Thrown when the hydrate read fails, so the middleware can answer 503. */
+/** Thrown when the store cannot answer, so the BFF router can answer 503. */
 export class HubSessionStoreUnavailableError extends Error {
   constructor(message = 'hub session store is unavailable', options?: { cause?: unknown }) {
     super(message, options);
@@ -61,43 +55,12 @@ export class HubSessionStoreUnavailableError extends Error {
   }
 }
 
-export type HubSessionHydrateInput = {
-  sessionId?: string | undefined;
-  loginTxId?: string | undefined;
-  /** Consume-on-hydrate. True only on /auth/callback. */
-  consumeLoginTx: boolean;
-};
-
-export interface DurableHubSessionStore extends HubSessionStore {
-  withRequest<T>(input: HubSessionHydrateInput, fn: () => Promise<T>): Promise<T>;
-}
-
-type SessionOp =
-  | {
-      kind: 'session.create';
-      id: string;
-      tokenEnc: string;
-      accountId: string | null;
-      expiresAt: Date;
-    }
-  | { kind: 'session.update'; id: string; tokenEnc: string; expiresAt: Date }
-  | { kind: 'session.delete'; id: string }
-  | { kind: 'login.create'; id: string; verifierEnc: string; state: string; expiresAt: Date }
-  | { kind: 'login.delete'; id: string };
-
-type UnitOfWork = {
-  sessions: Map<string, { record: HubSessionRecord; expiresAt: Date }>;
-  logins: Map<string, { tx: HubLoginTransaction; durablyRemoved: boolean }>;
-  ops: SessionOp[];
-};
-
 function newId(): string {
   // 256 bits, above the interface's documented 128-bit floor.
   return randomBytes(32).toString('base64url');
 }
 
-class PostgresHubSessionStore implements DurableHubSessionStore {
-  readonly #als = new AsyncLocalStorage<UnitOfWork>();
+class PostgresHubSessionStore implements HubSessionStore {
   readonly #db: NodeDb;
   readonly #sealer: SessionSealer;
   readonly #now: () => Date;
@@ -108,211 +71,149 @@ class PostgresHubSessionStore implements DurableHubSessionStore {
     this.#now = deps.now ?? (() => new Date());
   }
 
-  #scope(): UnitOfWork {
-    const uow = this.#als.getStore();
-    if (!uow) {
-      throw new HubSessionScopeError();
+  #unavailable(message: string, cause: unknown): HubSessionStoreUnavailableError {
+    if (cause instanceof HubSessionStoreUnavailableError) {
+      return cause;
     }
-    return uow;
+    console.error(`[hub-session-store] ${message}`, cause);
+    return new HubSessionStoreUnavailableError(message, { cause });
   }
 
-  create(data: HubSessionRecord): string {
-    const uow = this.#scope();
+  async create(data: HubSessionRecord): Promise<string> {
     const id = newId();
-    const expiresAt = new Date(this.#now().getTime() + SESSION_TTL_MS);
-    uow.sessions.set(id, { record: { ...data }, expiresAt });
-    uow.ops.push({
-      kind: 'session.create',
-      id,
-      tokenEnc: this.#sealer.seal(data.hubRefreshToken, id),
-      accountId: data.accountId ?? null,
-      expiresAt,
-    });
+    try {
+      await this.#db.insert(hubBffSessions).values({
+        id,
+        hubRefreshTokenEnc: this.#sealer.seal(data.hubRefreshToken, id),
+        accountId: data.accountId ?? null,
+        // `data.expiresAt` and `data.absoluteExpiresAt` are deliberately IGNORED.
+        // This store owns the expiry columns, the sliding rule and the nightly
+        // sweeper; the SDK's create-time value is a fixed timestamp that cannot
+        // express sliding, and honouring it would make the TTL depend on
+        // `createHubBff`'s option defaults rather than on SESSION_TTL_MS.
+        expiresAt: new Date(this.#now().getTime() + SESSION_TTL_MS),
+      });
+    } catch (err) {
+      throw this.#unavailable('hub session create failed', err);
+    }
     return id;
   }
 
-  get(sessionId: string): HubSessionRecord | null {
-    const entry = this.#scope().sessions.get(sessionId);
-    if (!entry || entry.expiresAt.getTime() <= this.#now().getTime()) {
-      return null;
-    }
-    // Shallow copy so the SDK cannot mutate the working set.
-    return { ...entry.record };
-  }
+  async withSession<T>(
+    sessionId: string,
+    operation: (tx: HubSessionTransaction) => Promise<T>,
+  ): Promise<T> {
+    try {
+      return await this.#db.transaction(async (tx) => {
+        // The lock is taken FIRST, before `operation` runs, and is held until
+        // this transaction commits. That is the whole point of the 1.3.0
+        // contract: the Hub round trip the operation makes happens under it.
+        const rows = await tx
+          .select()
+          .from(hubBffSessions)
+          .where(eq(hubBffSessions.id, sessionId))
+          .for('update')
+          .limit(1);
 
-  update(sessionId: string, hubRefreshToken: string): void {
-    const uow = this.#scope();
-    const entry = uow.sessions.get(sessionId);
-    if (!entry) {
-      return; // The interface documents "no-op if unknown".
-    }
-    entry.record.hubRefreshToken = hubRefreshToken;
-    entry.expiresAt = new Date(this.#now().getTime() + SESSION_TTL_MS);
-    uow.ops.push({
-      kind: 'session.update',
-      id: sessionId,
-      tokenEnc: this.#sealer.seal(hubRefreshToken, sessionId),
-      expiresAt: entry.expiresAt,
-    });
-  }
+        const now = this.#now().getTime();
+        let row = rows[0] ?? null;
 
-  delete(sessionId: string): void {
-    const uow = this.#scope();
-    uow.sessions.delete(sessionId);
-    // Unconditional, so the op is idempotent even if the row was never hydrated.
-    uow.ops.push({ kind: 'session.delete', id: sessionId });
-  }
-
-  createLogin(tx: HubLoginTransaction): string {
-    const uow = this.#scope();
-    const id = newId();
-    const expiresAt = new Date(this.#now().getTime() + LOGIN_TX_TTL_MS);
-    uow.logins.set(id, { tx: { ...tx }, durablyRemoved: false });
-    uow.ops.push({
-      kind: 'login.create',
-      id,
-      verifierEnc: this.#sealer.seal(tx.codeVerifier, id),
-      state: tx.state,
-      expiresAt,
-    });
-    return id;
-  }
-
-  consumeLogin(txId: string): HubLoginTransaction | null {
-    const uow = this.#scope();
-    const entry = uow.logins.get(txId);
-    if (!entry) {
-      return null;
-    }
-    uow.logins.delete(txId);
-    if (!entry.durablyRemoved) {
-      uow.ops.push({ kind: 'login.delete', id: txId });
-    }
-    return entry.tx;
-  }
-
-  async #hydrate(
-    db: RequestDb,
-    uow: UnitOfWork,
-    input: HubSessionHydrateInput,
-  ): Promise<void> {
-    const now = this.#now();
-    if (input.sessionId) {
-      const rows = await db
-        .select()
-        .from(hubBffSessions)
-        .where(and(eq(hubBffSessions.id, input.sessionId), gt(hubBffSessions.expiresAt, now)))
-        .for('update')
-        .limit(1);
-      const row = rows[0];
-      if (row) {
-        const token = this.#sealer.open(row.hubRefreshTokenEnc, row.id);
-        // A null open leaves the working set empty for that id, which reads
-        // downstream as an unknown session.
-        if (token !== null) {
-          uow.sessions.set(row.id, {
-            record: row.accountId
-              ? { hubRefreshToken: token, accountId: row.accountId }
-              : { hubRefreshToken: token },
-            expiresAt: row.expiresAt,
-          });
+        // Expired: deleted inside this transaction and reported absent.
+        if (row && row.expiresAt.getTime() <= now) {
+          await tx.delete(hubBffSessions).where(eq(hubBffSessions.id, sessionId));
+          row = null;
         }
-      }
-    }
 
-    if (input.loginTxId && input.consumeLoginTx) {
-      // Consume-on-hydrate: only one replica's DELETE can return the row, so
-      // the PKCE verifier is single-use at the DATABASE level rather than
-      // single-use per process.
-      const rows = await db
+        // A seal that will not open reads as an unknown session and the row is
+        // LEFT IN PLACE. This diverges from the bundled `SqlHubSessionStore`,
+        // which throws: a key rotation must cost every user one re-login rather
+        // than a wall of 503s, and deleting rows as a side effect of presenting
+        // the wrong key would destroy data on a misconfigured deploy.
+        const token = row ? this.#sealer.open(row.hubRefreshTokenEnc, row.id) : null;
+        const live = token === null ? null : row;
+
+        const handle: HubSessionTransaction = {
+          get: async () =>
+            live && token !== null
+              ? {
+                  hubRefreshToken: token,
+                  ...(live.accountId ? { accountId: live.accountId } : {}),
+                  expiresAt: live.expiresAt.toISOString(),
+                }
+              : null,
+          update: async (record) => {
+            await tx
+              .update(hubBffSessions)
+              .set({
+                hubRefreshTokenEnc: this.#sealer.seal(record.hubRefreshToken, sessionId),
+                accountId: record.accountId ?? null,
+                // SLIDING, deliberately ignoring `record.expiresAt`: the SDK
+                // spreads back the value it got from `get()` (dist/server.js:464),
+                // so honouring it would freeze the TTL at 30 days from login.
+                expiresAt: new Date(this.#now().getTime() + SESSION_TTL_MS),
+                updatedAt: new Date(),
+              })
+              .where(eq(hubBffSessions.id, sessionId));
+          },
+          delete: async () => {
+            await tx.delete(hubBffSessions).where(eq(hubBffSessions.id, sessionId));
+          },
+        };
+
+        return await operation(handle);
+      });
+    } catch (err) {
+      // ONE rule, no phase tracking: the lock read, a handle method, the
+      // operation itself and the commit all land here, and the operation's
+      // return value is never in scope - so there is nothing a catch could
+      // hand back in place of a failure.
+      throw this.#unavailable('hub session transaction failed', err);
+    }
+  }
+
+  async createLoginTransaction(tx: HubLoginTransaction): Promise<string> {
+    const id = newId();
+    const supplied = tx.expiresAt ? Date.parse(tx.expiresAt) : Number.NaN;
+    const expiresAt = Number.isFinite(supplied)
+      ? new Date(supplied)
+      : new Date(this.#now().getTime() + LOGIN_TX_TTL_MS);
+    try {
+      await this.#db.insert(hubBffLoginTxns).values({
+        id,
+        codeVerifierEnc: this.#sealer.seal(tx.codeVerifier, id),
+        state: tx.state,
+        expiresAt,
+      });
+    } catch (err) {
+      throw this.#unavailable('hub login transaction create failed', err);
+    }
+    return id;
+  }
+
+  async consumeLoginTransaction(id: string): Promise<HubLoginTransaction | null> {
+    let row: typeof hubBffLoginTxns.$inferSelect | undefined;
+    try {
+      // ONE `DELETE ... RETURNING`, atomic on its own and with no `WHERE` on
+      // `expires_at`: only one replica's statement can return the row, so a
+      // replayed /auth/callback cannot retry the PKCE verifier even across
+      // replicas, and an expired row is removed rather than left for the sweeper.
+      const rows = await this.#db
         .delete(hubBffLoginTxns)
-        .where(and(eq(hubBffLoginTxns.id, input.loginTxId), gt(hubBffLoginTxns.expiresAt, now)))
+        .where(eq(hubBffLoginTxns.id, id))
         .returning();
-      const row = rows[0];
-      if (row) {
-        const verifier = this.#sealer.open(row.codeVerifierEnc, row.id);
-        if (verifier !== null) {
-          uow.logins.set(row.id, {
-            tx: { codeVerifier: verifier, state: row.state },
-            durablyRemoved: true,
-          });
-        }
-      }
+      row = rows[0];
+    } catch (err) {
+      throw this.#unavailable('hub login transaction consume failed', err);
     }
-  }
 
-  async #flush(db: RequestDb, uow: UnitOfWork): Promise<void> {
-    if (uow.ops.length === 0) {
-      return;
+    if (!row || row.expiresAt.getTime() <= this.#now().getTime()) {
+      return null;
     }
-    for (const op of uow.ops) {
-      switch (op.kind) {
-        case 'session.create':
-          await db.insert(hubBffSessions).values({
-            id: op.id,
-            hubRefreshTokenEnc: op.tokenEnc,
-            accountId: op.accountId,
-            expiresAt: op.expiresAt,
-          });
-          break;
-        case 'session.update':
-          await db
-            .update(hubBffSessions)
-            .set({
-              hubRefreshTokenEnc: op.tokenEnc,
-              expiresAt: op.expiresAt,
-              updatedAt: new Date(),
-            })
-            .where(eq(hubBffSessions.id, op.id));
-          break;
-        case 'session.delete':
-          await db.delete(hubBffSessions).where(eq(hubBffSessions.id, op.id));
-          break;
-        case 'login.create':
-          await db.insert(hubBffLoginTxns).values({
-            id: op.id,
-            codeVerifierEnc: op.verifierEnc,
-            state: op.state,
-            expiresAt: op.expiresAt,
-          });
-          break;
-        case 'login.delete':
-          await db.delete(hubBffLoginTxns).where(eq(hubBffLoginTxns.id, op.id));
-          break;
-      }
+    const codeVerifier = this.#sealer.open(row.codeVerifierEnc, row.id);
+    if (codeVerifier === null) {
+      return null;
     }
-  }
-
-  async withRequest<T>(input: HubSessionHydrateInput, fn: () => Promise<T>): Promise<T> {
-    const uow: UnitOfWork = { sessions: new Map(), logins: new Map(), ops: [] };
-    let phase: RequestPhase = 'hydrate';
-    let handlerResult: { value: T } | undefined;
-
-    return this.#als.run(uow, async () => {
-      try {
-        return await this.#db.transaction(async (tx) => {
-          await this.#hydrate(tx, uow, input);
-          phase = 'handler';
-          const value = await fn();
-          handlerResult = { value };
-          phase = 'flush';
-          await this.#flush(tx, uow);
-          return value;
-        });
-      } catch (err) {
-        if (phase === 'hydrate') {
-          if (err instanceof HubSessionStoreUnavailableError) {
-            throw err;
-          }
-          throw new HubSessionStoreUnavailableError('hub session hydrate failed', { cause: err });
-        }
-        if (phase === 'handler') {
-          throw err;
-        }
-        console.error('[hub-session-store] flush failed', err);
-        return handlerResult!.value;
-      }
-    });
+    return { codeVerifier, state: row.state, expiresAt: row.expiresAt.toISOString() };
   }
 }
 
@@ -320,20 +221,19 @@ export function createDurableHubSessionStore(deps: {
   db: NodeDb;
   sealer: SessionSealer;
   now?: () => Date;
-}): DurableHubSessionStore {
+}): HubSessionStore {
   return new PostgresHubSessionStore(deps);
 }
 
 /**
- * Env-reading factory used by app-auth. The explicit union is what stops the
- * caller mounting the hydrate/flush middleware around an in-memory store, or
- * forgetting to mount it around a durable one.
+ * Env-reading factory used by app-auth. `kind` is what the wiring test asserts
+ * to prove the durable path was taken, and what drives the memory-fallback warning.
  */
 export function createHubSessionStore(deps: {
   databaseUrlPresent: boolean;
   nodeEnv: string;
   encryptionIkm: string;
-}): { kind: 'durable'; store: DurableHubSessionStore } | { kind: 'memory'; store: HubSessionStore } {
+}): { kind: 'durable' | 'memory'; store: HubSessionStore } {
   if (deps.databaseUrlPresent) {
     // getAdminDb() is reached only from inside this factory, never at module
     // import time, and postgres-js builds the pool without opening a socket

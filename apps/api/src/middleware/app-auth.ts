@@ -1,7 +1,7 @@
 import type { HubSdkConfig } from '@fxl-business/hub-sdk';
 import { createHubBff, requireHubAuth } from '@fxl-business/hub-sdk/server';
 import { Hono, type MiddlewareHandler } from 'hono';
-import { createHubSessionScopeMiddleware } from '../auth/hub-session-scope.js';
+import { hubBffErrorHandler } from '../auth/hub-bff-errors.js';
 import { createHubSessionStore } from '../auth/hub-session-store.js';
 import { tryLoadHubAuthConfig } from '../config/auth-provider.js';
 import { env } from '../env.js';
@@ -176,6 +176,17 @@ export const appAuthMiddleware: MiddlewareHandler = async (c, next) => {
   return blockedResponse ?? authResponse;
 };
 
+/**
+ * Bounds the Hub round-trip the BFF makes from INSIDE the transaction that holds
+ * a session's row lock. 1.2.0 had no timeout at all, so a hung Hub pinned a
+ * pooled connection with an open transaction indefinitely. 5s rather than the
+ * SDK's 10s default: the Hub is same-region, a healthy refresh is tens of
+ * milliseconds, and getAdminDb()'s pool is `max: 5` and is shared with the audit,
+ * history and nightly-job paths - so the worst-case connection hold is the number
+ * that matters, not the average latency. See nexo/ROADMAP.md for the pool sizing.
+ */
+const HUB_BFF_TIMEOUT_MS = 5_000;
+
 export function createAppAuthBff() {
   if (!hubSdkConfig || !hubAuthConfig) {
     return null;
@@ -200,19 +211,19 @@ export function createAppAuthBff() {
   const bff = createHubBff(hubSdkConfig, {
     sessionStore: session.store,
     secureCookies,
+    timeoutMs: HUB_BFF_TIMEOUT_MS,
     redirectUri: resolveHubRedirectUri(process.env),
     postLoginRedirect: resolveHubPostLoginRedirect(process.env),
     postLoginErrorRedirect: resolveHubPostLoginErrorRedirect(process.env),
   });
 
-  if (session.kind === 'memory') {
-    return bff;
-  }
-
-  // The hydrate/flush scope is mounted INSIDE the returned router, so server.ts
-  // stays `app.route('', authBff)` and the middleware cannot be forgotten.
+  // The error handler is mounted INSIDE the returned router, so server.ts stays
+  // `app.route('', authBff)` and it cannot be forgotten. It must be an onError
+  // rather than a middleware - see hub-bff-errors.ts. Mounting it on the memory
+  // path too is inert (that store never throws HubSessionStoreUnavailableError)
+  // and removes a branch.
   const router = new Hono();
-  router.use('/auth/*', createHubSessionScopeMiddleware(session.store, { secureCookies }));
+  router.onError(hubBffErrorHandler);
   router.route('', bff);
   return router;
 }
