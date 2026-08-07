@@ -949,6 +949,14 @@ export const hubBffSessions = pgTable(
   {
     id: text('id').primaryKey(), // opaque, 256-bit, base64url
     hubRefreshTokenEnc: text('hub_refresh_token_enc').notNull(), // AES-256-GCM, aad = id
+    /**
+     * ALWAYS NULL. @fxl-business/hub-sdk@1.3.0's BFF never passes an accountId to
+     * store.create() (dist/server.js:408 passes exactly three keys) and never adds
+     * one on refresh or switch (:464, :519 spread the record straight back), so
+     * nothing can ever populate this column. Do NOT build a supersede, a lookup or
+     * an index on it - the login supersede keys on the prior SESSION id instead,
+     * see hub-login-scope.ts. Dropping it is tracked in nexo/ROADMAP.md.
+     */
     accountId: text('account_id'),
     /** SLIDING: rewritten to now + SESSION_TTL_MS on every rotation. */
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),

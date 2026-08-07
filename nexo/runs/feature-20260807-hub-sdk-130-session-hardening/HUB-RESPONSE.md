@@ -148,6 +148,40 @@ A consumer wanting to act on the classification has to bypass `HubClient.getToke
 Either `getToken` should surface the status, or the migration guide should say plainly that the browser client does not expose it and the consumer must call the endpoint directly.
 We are taking the hand-rolled route in slice 03 and would rather not have to.
 
+### 4b. `HubSessionRecord.accountId` is declared but the bundled BFF never populates it, so invariant 3 cannot be implemented as worded
+
+Your invariant 3 phrases the supersede as "a prior session for that ACCOUNT".
+A consumer implementing that literally finds the field is always `undefined`.
+
+`store.create` has exactly one call site in the whole 1.3.0 bundle, `dist/server.js:407-413`:
+
+```js
+const sessionId = await store.create({
+  hubRefreshToken: tokenJson.refresh_token,
+  expiresAt: ...,
+  absoluteExpiresAt: ...
+});
+```
+
+Three keys, no `accountId`.
+`grep -n accountId dist/server.js` returns exactly one hit, `:208`, inside `verifyHubToken`'s return value on the bearer-token path, which never touches the store.
+The two later write paths add nothing: `/auth/refresh` `:464` and `/auth/switch` `:519` are both `if (rotated) await tx.update({ ...record, hubRefreshToken: rotated })`, and `...record` is what `tx.get()` returned, so a value that was never written cannot appear later.
+
+So `HubSessionRecord.accountId` is vestigial in practice, and our `hub_bff_sessions.account_id` is unconditionally `NULL`.
+The only way to obtain the account id would be to wrap `options.fetchImpl`, sniff the token-endpoint response body, parse an unverified JWT and smuggle `sub` into the store - an unverified-claims parse in the login path, coupled to your internal call ordering. We rejected that outright.
+
+Either `/auth/callback` should set `accountId` from the token exchange it has already performed, or the field and invariant 3's wording should be corrected.
+
+**What we shipped instead, and why we think it is the better key on the merits.**
+We supersede the session id THE BROWSER ITSELF PRESENTED at `/auth/callback`, deleting that row in the same transaction that inserts the new one.
+
+- One browser, two accounts - the case invariant 3 names - is closed by our key and is NOT closed by the account key. With the account key, A logs in, then B logs in and the supersede deletes B's other rows; A's row is not one of them, so A stays live and rotatable in that same browser. The account key solves "one account, many sessions", which is a different and mostly desirable thing.
+- The account key also logs an operator out of every other device on every login. Nothing in the threat model asks for that, and no mainstream product does it, including the Hub.
+- Our key has no multi-device blast radius by construction: only the browser holding a session id can present it, so a second device is untouched. We have a standing integration test asserting exactly that, precisely so nobody later "fixes" the key to be broader.
+- The row we delete is one your handler is about to orphan anyway - it overwrites the session cookie two lines later - so this is collection of a row the request just made unreachable, not a policy decision about anyone else's device.
+
+The deliberate gap: a row orphaned WITHOUT a subsequent login, for example when the browser clears its cookies, is never presented and so is never superseded. We bound those with the absolute session TTL and a nightly sweep instead, which is why we shipped the absolute lifetime first.
+
 ### 5. The upgrade invalidates two load-bearing statements in our own `CLAUDE.md`
 
 Ours, not the Hub's, but they are the reason the port is not mechanical:

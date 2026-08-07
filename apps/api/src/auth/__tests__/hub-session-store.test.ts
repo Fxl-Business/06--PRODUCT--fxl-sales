@@ -36,9 +36,16 @@ function fakeTx(rows: unknown[] = []) {
     limit: () => Promise.resolve(rows),
   };
   const sets: Record<string, unknown>[] = [];
-  const recorded = { sets, deletes: 0 };
+  const inserted: Record<string, unknown>[] = [];
+  const recorded = { sets, inserted, deletes: 0 };
   return {
     select: () => selectChain,
+    insert: () => ({
+      values: (values: Record<string, unknown>) => {
+        inserted.push(values);
+        return Promise.resolve(undefined);
+      },
+    }),
     delete: () => {
       recorded.deletes += 1;
       return { where: () => Promise.resolve(undefined) };
@@ -53,9 +60,16 @@ function fakeTx(rows: unknown[] = []) {
   };
 }
 
-/** A `db` whose `transaction` always yields `tx`, and whose inserts are captured. */
+/**
+ * A `db` whose `transaction` always yields `tx`, and whose inserts are captured.
+ *
+ * Both `db.insert` and `tx.insert` push into the SAME array: `create` writes
+ * through the transaction (it has to, so the login supersede and the insert
+ * commit together) while `createLoginTransaction` writes through the pool, and
+ * no assertion here cares which handle a row arrived on.
+ */
 function fakeDb(tx: ReturnType<typeof fakeTx>) {
-  const inserted: Record<string, unknown>[] = [];
+  const inserted = tx.recorded.inserted;
   return {
     inserted,
     db: {

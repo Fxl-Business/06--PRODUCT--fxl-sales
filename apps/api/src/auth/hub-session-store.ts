@@ -27,6 +27,7 @@
  * Rotating `FXL_HUB_SECRET_KEY` invalidates every stored session - see
  * `session-crypto.ts`.
  */
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomBytes } from 'node:crypto';
 import {
   InMemoryHubSessionStore,
@@ -103,15 +104,54 @@ function newId(): string {
   return randomBytes(32).toString('base64url');
 }
 
-class PostgresHubSessionStore implements HubSessionStore {
+/**
+ * What a login knows about the session the browser was carrying a moment before
+ * it logged in again. One optional string, and nothing else will ever be added:
+ * see `hub-login-scope.ts` for why this reaches `create()` out of band at all.
+ */
+export type HubLoginContext = { priorSessionId: string | undefined };
+
+/**
+ * The durable store's extra member, over and above the SDK's interface.
+ *
+ * Slice 01 deleted this interface because `withRequest` was its only member and
+ * an empty extension is noise. `withLoginContext` makes it non-empty again, so
+ * that reasoning no longer applies - do not delete it a second time. It is what
+ * lets `createAppAuthBff` narrow `session.kind === 'durable'` to a store that can
+ * actually supersede: the SDK's `InMemoryHubSessionStore` cannot, and mounting
+ * the middleware over it would make every local `/auth/callback` throw.
+ */
+export interface DurableHubSessionStore extends HubSessionStore {
+  withLoginContext<T>(context: HubLoginContext, fn: () => Promise<T>): Promise<T>;
+}
+
+class PostgresHubSessionStore implements DurableHubSessionStore {
   readonly #db: NodeDb;
   readonly #sealer: SessionSealer;
   readonly #now: () => Date;
+  readonly #newId: () => string;
+  readonly #loginAls = new AsyncLocalStorage<HubLoginContext>();
 
-  constructor(deps: { db: NodeDb; sealer: SessionSealer; now?: () => Date }) {
+  constructor(deps: {
+    db: NodeDb;
+    sealer: SessionSealer;
+    now?: () => Date;
+    newId?: () => string;
+  }) {
     this.#db = deps.db;
     this.#sealer = deps.sealer;
     this.#now = deps.now ?? (() => new Date());
+    this.#newId = deps.newId ?? newId;
+  }
+
+  /**
+   * Runs `fn` with a login context in scope, so the `create()` the SDK makes from
+   * inside its own `/auth/callback` handler can see which session this browser
+   * presented. The store owns the `AsyncLocalStorage` because the store is what
+   * reads it; the middleware only fills it.
+   */
+  withLoginContext<T>(context: HubLoginContext, fn: () => Promise<T>): Promise<T> {
+    return this.#loginAls.run(context, fn);
   }
 
   #unavailable(message: string, cause: unknown): HubSessionStoreUnavailableError {
@@ -123,28 +163,54 @@ class PostgresHubSessionStore implements HubSessionStore {
   }
 
   async create(data: HubSessionRecord): Promise<string> {
-    const id = newId();
+    const id = this.#newId();
     // ONE clock read for both timestamps, so they can never be anchored to
     // different milliseconds.
     const now = this.#now().getTime();
+    // Read OUTSIDE the transaction callback: the callback is an async boundary
+    // drizzle may schedule freely, and the context has to be the one belonging to
+    // the request that called create().
+    const priorSessionId = this.#loginAls.getStore()?.priorSessionId;
     try {
-      await this.#db.insert(hubBffSessions).values({
-        id,
-        hubRefreshTokenEnc: this.#sealer.seal(data.hubRefreshToken, id),
-        accountId: data.accountId ?? null,
-        // `data.expiresAt` and `data.absoluteExpiresAt` are deliberately IGNORED.
-        // This store owns the expiry columns, the sliding rule and the nightly
-        // sweeper; the SDK's create-time value is a fixed timestamp that cannot
-        // express sliding, and honouring it would make the TTL depend on
-        // `createHubBff`'s option defaults rather than on our own constants.
-        expiresAt: new Date(now + SESSION_TTL_MS),
-        // Written ONCE, here, and nowhere else in this file. No rotation moves
-        // it; that is the entire point of the column. `createHubBff` IS given
-        // matching values so the two views agree - see app-auth.ts - but nothing
-        // here depends on that, because the store has to be correct standing
-        // alone rather than only when the caller remembered to pass
-        // `sessionAbsoluteTtlSeconds`.
-        absoluteExpiresAt: new Date(now + SESSION_ABSOLUTE_TTL_MS),
+      await this.#db.transaction(async (tx) => {
+        // SUPERSEDE FIRST, in the SAME transaction as the insert. The row this
+        // deletes is one the SDK is about to orphan anyway - it overwrites the
+        // session cookie two lines after create() returns (dist/server.js:414) -
+        // and until this slice it stayed live and rotatable for up to 30 days.
+        //
+        // The two statements are one transaction or the feature is unsound.
+        // Deleting afterwards leaves the orphan live if the insert fails;
+        // deleting in a transaction of its own leaves the browser with no session
+        // at all when the insert fails, i.e. a failed login signs the operator
+        // out. `keeps the prior session when the new insert fails` is the oracle.
+        //
+        // Absence of a prior id is NEVER an error: a fresh browser, and every
+        // direct create() in the integration suite, arrives without one.
+        // `priorSessionId !== id` is cheap defence that cannot fire against a
+        // 256-bit random id.
+        if (priorSessionId !== undefined && priorSessionId !== id) {
+          await tx.delete(hubBffSessions).where(eq(hubBffSessions.id, priorSessionId));
+        }
+        await tx.insert(hubBffSessions).values({
+          id,
+          hubRefreshTokenEnc: this.#sealer.seal(data.hubRefreshToken, id),
+          // ALWAYS NULL under 1.3.0 - the BFF never supplies it. See the column
+          // comment in db/schema.ts before building anything on it.
+          accountId: data.accountId ?? null,
+          // `data.expiresAt` and `data.absoluteExpiresAt` are deliberately IGNORED.
+          // This store owns the expiry columns, the sliding rule and the nightly
+          // sweeper; the SDK's create-time value is a fixed timestamp that cannot
+          // express sliding, and honouring it would make the TTL depend on
+          // `createHubBff`'s option defaults rather than on our own constants.
+          expiresAt: new Date(now + SESSION_TTL_MS),
+          // Written ONCE, here, and nowhere else in this file. No rotation moves
+          // it; that is the entire point of the column. `createHubBff` IS given
+          // matching values so the two views agree - see app-auth.ts - but nothing
+          // here depends on that, because the store has to be correct standing
+          // alone rather than only when the caller remembered to pass
+          // `sessionAbsoluteTtlSeconds`.
+          absoluteExpiresAt: new Date(now + SESSION_ABSOLUTE_TTL_MS),
+        });
       });
     } catch (err) {
       throw this.#unavailable('hub session create failed', err);
@@ -279,19 +345,35 @@ export function createDurableHubSessionStore(deps: {
   db: NodeDb;
   sealer: SessionSealer;
   now?: () => Date;
-}): HubSessionStore {
+  /**
+   * TEST-ONLY, and it must stay that way. It defaults to `randomBytes(32)` and is
+   * never overridden by `createHubSessionStore`; wiring it to anything but a test
+   * stops `hub_bff_sessions.id` being unguessable, which is the one property that
+   * column has to have. It exists so the atomicity oracle can force a primary-key
+   * collision deterministically, and it is the same shape as `now`.
+   */
+  newId?: () => string;
+}): DurableHubSessionStore {
   return new PostgresHubSessionStore(deps);
 }
 
 /**
  * Env-reading factory used by app-auth. `kind` is what the wiring test asserts
  * to prove the durable path was taken, and what drives the memory-fallback warning.
+ *
+ * The return is a DISCRIMINATED union, not `{kind; store: HubSessionStore}`:
+ * `kind === 'durable'` has to narrow `store` to `DurableHubSessionStore`, because
+ * the login-supersede middleware may only be mounted over a store that has
+ * `withLoginContext`. Collapsing the union makes that mount a runtime TypeError
+ * on every local dev machine without `DATABASE_URL` instead of a type error here.
  */
 export function createHubSessionStore(deps: {
   databaseUrlPresent: boolean;
   nodeEnv: string;
   encryptionIkm: string;
-}): { kind: 'durable' | 'memory'; store: HubSessionStore } {
+}):
+  | { kind: 'durable'; store: DurableHubSessionStore }
+  | { kind: 'memory'; store: HubSessionStore } {
   if (deps.databaseUrlPresent) {
     // getAdminDb() is reached only from inside this factory, never at module
     // import time, and postgres-js builds the pool without opening a socket

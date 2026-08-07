@@ -23,6 +23,10 @@ import type { HubSdkConfig, HubSessionStore } from '@fxl-business/hub-sdk';
 import { InMemoryHubSessionStore } from '@fxl-business/hub-sdk';
 import { Hono } from 'hono';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import type {
+  DurableHubSessionStore,
+  HubLoginContext,
+} from '../../auth/hub-session-store.js';
 /**
  * Plain numbers, so unlike `HubSessionStoreUnavailableError` below these are safe
  * to take from this file's own module registry: `vi.resetModules()` gives them a
@@ -50,7 +54,13 @@ const REFRESH_OK = { status: 200, body: { ok: true }, clear: false };
 
 let bffOptions: CapturedBffOptions;
 let sessionStoreKind: string | undefined;
-let durableStore: HubSessionStore | undefined;
+/**
+ * `DurableHubSessionStore`, not the SDK's `HubSessionStore`: the assignment below
+ * only compiles because `createHubSessionStore`'s return is DISCRIMINATED, so
+ * `result.kind === 'durable'` narrows the store to the one that can supersede.
+ * Collapsing that union back to a single type is a type error here.
+ */
+let durableStore: DurableHubSessionStore | undefined;
 let encryptionIkm: string | undefined;
 let authBff: Hono | null = null;
 let closeDb: (() => Promise<void>) | undefined;
@@ -129,7 +139,7 @@ afterAll(async () => {
   vi.resetModules();
 });
 
-function requireDurableStore(): HubSessionStore {
+function requireDurableStore(): DurableHubSessionStore {
   if (!durableStore) {
     throw new Error('expected a durable store');
   }
@@ -324,6 +334,52 @@ describe('the SDK BFF route contract apps/web/src/auth/refresh.ts is coupled to'
     const res = await bff.request('http://localhost/auth/refreshx', { method: 'POST' });
 
     expect(res.status).toBe(404);
+  });
+});
+
+/**
+ * The login-supersede MOUNT pin.
+ *
+ * The integration oracles in `test/rls/hub-bff-session-store.test.ts` call
+ * `withLoginContext` themselves, so they stay green with the `router.use(...)`
+ * line deleted and the feature entirely unreachable in production. This is the
+ * only test that fails on that deletion - the same gap the file header describes
+ * for `sessionStore`.
+ */
+describe('createAppAuthBff login supersede', () => {
+  it('mounts the login-supersede middleware on /auth/callback', async () => {
+    const store = requireDurableStore();
+    const seen: HubLoginContext[] = [];
+    const loginSpy = vi
+      .spyOn(store, 'withLoginContext')
+      .mockImplementation(async (context, fn) => {
+        seen.push(context);
+        return fn();
+      });
+    // Both routes would otherwise reach a database that does not exist.
+    const refreshSpy = vi
+      .spyOn(store, 'withSession')
+      .mockImplementation(async () => REFRESH_OK as never);
+    const loginTxSpy = vi.spyOn(store, 'consumeLoginTransaction').mockImplementation(async () => null);
+
+    try {
+      await authBff?.request('http://localhost/auth/callback?state=x', {
+        headers: { cookie: 'fxl_hub_session=session-prior; fxl_hub_login=login-alpha' },
+      });
+      // Scoped to /auth/callback only: store.create is called from exactly one
+      // place in the SDK bundle (dist/server.js:408) and it is inside that
+      // handler, so no other route may acquire a supersede context.
+      await authBff?.request('http://localhost/auth/refresh', {
+        method: 'POST',
+        headers: { cookie: 'fxl_hub_session=session-prior' },
+      });
+    } finally {
+      loginSpy.mockRestore();
+      refreshSpy.mockRestore();
+      loginTxSpy.mockRestore();
+    }
+
+    expect(seen).toEqual([{ priorSessionId: 'session-prior' }]);
   });
 });
 
