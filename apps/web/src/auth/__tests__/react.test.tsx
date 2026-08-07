@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 
 import type { HubClient } from '@fxl-business/hub-sdk/client';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import * as React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter, useLocation } from 'react-router-dom';
@@ -143,17 +144,45 @@ function Probe({ onWorkspace }: { onWorkspace?: (workspaceName?: string) => void
   );
 }
 
-function renderProvider(onWorkspace?: (workspaceName?: string) => void) {
+type TokenReader = () => Promise<string | null>;
+
+/** Stands in for any of the ~40 data hooks that read the token per screen. */
+function TokenProbe({ onReady }: { onReady?: (getToken: TokenReader) => void }) {
+  const { getToken } = useAccessToken();
+
+  React.useEffect(() => {
+    onReady?.(getToken);
+  }, [getToken, onReady]);
+
+  return null;
+}
+
+/**
+ * `QueryClientProvider` wraps `AppAuthProvider`, mirroring `src/App.tsx` exactly.
+ * `HubAuthProvider` reads the client with `useQueryClient()` so it can only ever flush
+ * the client its own subtree reads, so the nesting is a precondition, not decoration.
+ *
+ * `TokenProbe` is mounted here and not only in `renderProtected` because `Protected`
+ * renders a Skeleton while signed out, which unmounts the probe exactly when a
+ * signed-out to signed-in transition needs to read a token.
+ */
+function renderProvider(
+  onWorkspace?: (workspaceName?: string) => void,
+  onReady?: (getToken: TokenReader) => void,
+) {
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
 
   act(() => {
     root.render(
-      <AppAuthProvider>
-        <Probe onWorkspace={onWorkspace} />
-        <UserControls />
-      </AppAuthProvider>,
+      <QueryClientProvider client={queryClient}>
+        <AppAuthProvider>
+          <Probe onWorkspace={onWorkspace} />
+          <UserControls />
+          <TokenProbe onReady={onReady} />
+        </AppAuthProvider>
+      </QueryClientProvider>,
     );
   });
 
@@ -172,19 +201,6 @@ function LocationProbe({ testId = 'location' }: { testId?: string }) {
   return <output data-testid={testId}>{`${pathname}${search}`}</output>;
 }
 
-type TokenReader = () => Promise<string | null>;
-
-/** Stands in for any of the ~40 data hooks that read the token per screen. */
-function TokenProbe({ onReady }: { onReady?: (getToken: TokenReader) => void }) {
-  const { getToken } = useAccessToken();
-
-  React.useEffect(() => {
-    onReady?.(getToken);
-  }, [getToken, onReady]);
-
-  return null;
-}
-
 function renderProtected(initialEntries: string[], onReady?: (getToken: TokenReader) => void) {
   const host = document.createElement('div');
   document.body.append(host);
@@ -192,23 +208,25 @@ function renderProtected(initialEntries: string[], onReady?: (getToken: TokenRea
 
   act(() => {
     nextRoot.render(
-      <AppAuthProvider>
-        {/*
-          Outside `MemoryRouter` on purpose: `UserControls` reads only
-          `useHubAuthContext`, never a router hook, and mounting it outside `Protected`
-          is what keeps the `Sair` button reachable after the sign-out replaces the
-          protected subtree with a panel.
-        */}
-        <UserControls />
-        <MemoryRouter initialEntries={initialEntries}>
-          <Probe />
-          <LocationProbe testId="outer-location" />
-          <Protected>
-            <LocationProbe />
-            <TokenProbe onReady={onReady} />
-          </Protected>
-        </MemoryRouter>
-      </AppAuthProvider>,
+      <QueryClientProvider client={queryClient}>
+        <AppAuthProvider>
+          {/*
+            Outside `MemoryRouter` on purpose: `UserControls` reads only
+            `useHubAuthContext`, never a router hook, and mounting it outside `Protected`
+            is what keeps the `Sair` button reachable after the sign-out replaces the
+            protected subtree with a panel.
+          */}
+          <UserControls />
+          <MemoryRouter initialEntries={initialEntries}>
+            <Probe />
+            <LocationProbe testId="outer-location" />
+            <Protected>
+              <LocationProbe />
+              <TokenProbe onReady={onReady} />
+            </Protected>
+          </MemoryRouter>
+        </AppAuthProvider>
+      </QueryClientProvider>,
     );
   });
 
@@ -266,11 +284,18 @@ async function switchWorkspace(host: HTMLElement, workspaceName: string) {
 
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
+/**
+ * One fresh client per test, so a leaked cache entry cannot make the next test pass.
+ * `retry: false` so a fetch cancelled by the flush does not enter a retry ladder of its
+ * own and outlive the test that started it.
+ */
+let queryClient: QueryClient;
 
 beforeEach(() => {
   vi.clearAllMocks();
   sessionStorage.clear();
   probeRenders = 0;
+  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   vi.stubEnv('VITE_FXL_HUB_API_URL', 'http://hub.test');
   vi.stubEnv('VITE_FXL_HUB_PUBLISHABLE_KEY', 'pk_fxl-sales_test');
   mocks.createHubClient.mockReturnValue(mocks.client);
@@ -1015,5 +1040,266 @@ describe('explicit logout intent', () => {
     // in `applyToken`, behind its unchanged-token early return.
     expect(locationText(container)).toBe('/cadastros/produtos?f=1');
     expect(container.textContent).not.toContain(SIGNED_OUT_COPY);
+  });
+});
+
+/**
+ * Every key in `src/lib/query-keys.ts` is account- and org-agnostic - the bootstrap key
+ * is literally `['sales-ops','bootstrap']` - and `queryClient` is a module-level
+ * singleton that survives every auth event short of a page reload. So without a flush
+ * one cache entry is shared by every identity the tab ever holds: the next operator is
+ * served the previous one's rows, and a workspace switch renders the previous TENANT's
+ * rows in place, with no reload at all.
+ *
+ * `['sales-ops','bootstrap']` is spelled literally in this file rather than imported
+ * from the factory, because the leak is about the SHAPE of the key and a future
+ * workspace-scoped factory must not be able to make these tests pass by changing it.
+ */
+const BOOTSTRAP_KEY = ['sales-ops', 'bootstrap'] as const;
+
+describe('identity-scoped query cache', () => {
+  type Cached = { products: string[] };
+
+  const ALPHA_ROWS: Cached = { products: ['alpha-only'] };
+
+  function seedAlphaCache() {
+    queryClient.setQueryData(BOOTSTRAP_KEY, ALPHA_ROWS);
+    // Non-vacuity: if the seed never landed, an empty cache afterwards proves nothing.
+    expect(queryClient.getQueryData(BOOTSTRAP_KEY)).toEqual(ALPHA_ROWS);
+  }
+
+  function expectEmptyCache() {
+    expect(queryClient.getQueryData(BOOTSTRAP_KEY)).toBeUndefined();
+    expect(queryClient.getQueryCache().getAll()).toHaveLength(0);
+  }
+
+  /** Same shape as the ladder block above: only the ladder schedules a timer here. */
+  function useLadderTimers() {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  }
+
+  it('drops every cached entry on logout', async () => {
+    mocks.cache.getToken.mockResolvedValue(ok(profileToken('Alpha')));
+    ({ container, root } = renderProvider());
+    await flushReact();
+    // AFTER the mount flush: the cold-start flush fires on the first token, so a seed
+    // written before the mount resolves would be wiped and this would pass for the
+    // wrong reason.
+    seedAlphaCache();
+
+    const button = container.querySelector<HTMLButtonElement>('button[aria-label="Sair"]');
+    if (!button) throw new Error('sign-out button not found');
+    await act(async () => {
+      button.click();
+      await Promise.resolve();
+    });
+
+    expectEmptyCache();
+  });
+
+  it('drops every cached entry on a workspace switch', async () => {
+    mocks.cache.getToken.mockResolvedValue(ok(profileToken('Alpha')));
+    mocks.client.setActive.mockResolvedValue({
+      accessToken: profileToken('Beta'),
+      expiresIn: 120,
+      workspaceId: 'workspace-beta',
+    });
+    ({ container, root } = renderProvider());
+    await flushReact();
+    seedAlphaCache();
+
+    await switchWorkspace(container, 'Beta');
+
+    // Asserted together on purpose: the flush has to be proven on a switch that
+    // actually COMPLETED, not on one that failed or was superseded.
+    expect(profileText(container)).toBe('signed-in:Beta');
+    expectEmptyCache();
+  });
+
+  /**
+   * The ordering oracle for `await client.setActive(...)`, and the ONLY test in this
+   * file that fails when the flush is hoisted above that `await`. Verified by mutation:
+   * moving `queryClient.clear()` to the top of `setActive` leaves every other test in
+   * this file green.
+   *
+   * A switch that is still in flight has not happened. The operator is still looking at
+   * the current tenant's screen, and emptying it early strands them on a blank page for
+   * a workspace they never left - and permanently so if the switch then fails.
+   */
+  it("keeps the current tenant's cache while a workspace switch is still in flight", async () => {
+    const switchRequest = deferred<Awaited<ReturnType<HubClient['setActive']>>>();
+    mocks.cache.getToken.mockResolvedValue(ok(profileToken('Alpha')));
+    mocks.client.setActive.mockReturnValue(switchRequest.promise);
+    ({ container, root } = renderProvider());
+    await flushReact();
+    seedAlphaCache();
+
+    await switchWorkspace(container, 'Beta');
+
+    expect(mocks.client.setActive).toHaveBeenCalledWith('workspace-beta');
+    expect(profileText(container)).toBe('signed-in:Alpha');
+    expect(queryClient.getQueryData(BOOTSTRAP_KEY)).toEqual(ALPHA_ROWS);
+
+    // And the flush is merely DEFERRED, not absent - otherwise this test would pass
+    // just as well against a `setActive` that never flushed at all.
+    switchRequest.resolve({
+      accessToken: profileToken('Beta'),
+      expiresIn: 120,
+      workspaceId: 'workspace-beta',
+    });
+    await flushReact();
+    expect(profileText(container)).toBe('signed-in:Beta');
+    expectEmptyCache();
+  });
+
+  /**
+   * The ordering oracle for the `operationGeneration` check. A superseded switch
+   * discards its result whole, so it must discard its flush too: the newest switch has
+   * already completed and its screen has already refetched, and a late loser wiping
+   * that is a blank screen for the tenant the operator is actually looking at.
+   */
+  it('does not flush when a superseded workspace switch resolves late', async () => {
+    const workspaces = [
+      { id: 'workspace-alpha', name: 'Alpha' },
+      { id: 'workspace-beta', name: 'Beta' },
+      { id: 'workspace-gamma', name: 'Gamma' },
+    ];
+    const betaSwitch = deferred<Awaited<ReturnType<HubClient['setActive']>>>();
+    const gammaSwitch = deferred<Awaited<ReturnType<HubClient['setActive']>>>();
+    mocks.cache.getToken.mockResolvedValue(ok(profileToken('Alpha', workspaces)));
+    mocks.client.setActive.mockImplementation((workspaceId) => {
+      if (workspaceId === 'workspace-beta') return betaSwitch.promise;
+      if (workspaceId === 'workspace-gamma') return gammaSwitch.promise;
+      throw new Error(`Unexpected workspace: ${workspaceId}`);
+    });
+    ({ container, root } = renderProvider());
+    await flushReact();
+
+    await switchWorkspace(container, 'Beta');
+    await switchWorkspace(container, 'Gamma');
+
+    gammaSwitch.resolve({
+      accessToken: profileToken('Gamma', workspaces),
+      expiresIn: 120,
+      workspaceId: 'workspace-gamma',
+    });
+    await flushReact();
+    expect(profileText(container)).toBe('signed-in:Gamma');
+
+    // Gamma's own screen, refetched after the switch the operator actually made.
+    const gammaRows = { products: ['gamma-only'] };
+    queryClient.setQueryData(BOOTSTRAP_KEY, gammaRows);
+
+    betaSwitch.resolve({
+      accessToken: profileToken('Beta', workspaces),
+      expiresIn: 120,
+      workspaceId: 'workspace-beta',
+    });
+    await flushReact();
+
+    expect(profileText(container)).toBe('signed-in:Gamma');
+    expect(queryClient.getQueryData(BOOTSTRAP_KEY)).toEqual(gammaRows);
+  });
+
+  /**
+   * The in-flight oracle. It fails if the flush is downgraded to `invalidateQueries` or
+   * narrowed to a filtered `removeQueries`.
+   */
+  it('drops a query issued before a workspace switch instead of letting it repopulate the cache after it', async () => {
+    mocks.cache.getToken.mockResolvedValue(ok(profileToken('Alpha')));
+    mocks.client.setActive.mockResolvedValue({
+      accessToken: profileToken('Beta'),
+      expiresIn: 120,
+      workspaceId: 'workspace-beta',
+    });
+    ({ container, root } = renderProvider());
+    await flushReact();
+
+    const pending = deferred<Cached>();
+    // `clear()` rejects an outstanding fetch with a silent CancelledError, and an
+    // uncaught rejection fails the run.
+    const fetched = queryClient
+      .fetchQuery({ queryKey: BOOTSTRAP_KEY, queryFn: () => pending.promise })
+      .catch(() => undefined);
+
+    await switchWorkspace(container, 'Beta');
+    expect(queryClient.getQueryData(BOOTSTRAP_KEY)).toBeUndefined();
+
+    pending.resolve(ALPHA_ROWS);
+    await act(async () => {
+      await fetched;
+    });
+    await flushReact();
+
+    // The request was issued as Alpha. It must not be able to write into Beta's cache.
+    expectEmptyCache();
+  });
+
+  it("drops the previous identity's cache on an in-page signed-out to signed-in transition", async () => {
+    useLadderTimers();
+    // `transient` and NOT `expired`: an expired read short-circuits straight to
+    // `failSession()` with no ladder at all, so the rung walk below would never run and
+    // the test would reach the signed-out state by a path it is not exercising.
+    mocks.cache.getToken.mockResolvedValueOnce(ok(profileToken('Alpha'))).mockResolvedValue(transient);
+    const held: { current: TokenReader | null } = { current: null };
+
+    ({ container, root } = renderProvider(undefined, (getToken) => {
+      held.current = getToken;
+    }));
+    await flushReact();
+    expect(profileText(container)).toBe('signed-in:Alpha');
+
+    if (!held.current) throw new Error('token reader never became ready');
+    await act(async () => {
+      await held.current?.();
+    });
+    for (const delay of SESSION_REVALIDATE_DELAYS_MS) {
+      await advance(delay);
+    }
+    expect(profileText(container)).toBe('signed-out:');
+
+    // Alpha's rows, still sitting in a cache nobody emptied.
+    seedAlphaCache();
+
+    mocks.cache.getToken.mockReset();
+    mocks.cache.getToken.mockResolvedValue(ok(profileToken('Beta')));
+    await act(async () => {
+      await held.current?.();
+    });
+
+    expect(profileText(container)).toBe('signed-in:Beta');
+    expectEmptyCache();
+  });
+
+  /**
+   * The guard against implementing the login-side flush as "flush on every non-null
+   * token". Without this, that obvious wrong implementation passes every test above and
+   * destroys the operator's cached screen on every transient blip - the same failure
+   * mode `SESSION_REVALIDATE_DELAYS_MS` exists to prevent.
+   */
+  it('keeps the cache when the revalidation ladder recovers from a blip', async () => {
+    useLadderTimers();
+    const token = profileToken('Alpha');
+    mocks.cache.getToken
+      .mockResolvedValueOnce(ok(token))
+      .mockResolvedValueOnce(transient)
+      .mockResolvedValue(ok(token));
+    const held: { current: TokenReader | null } = { current: null };
+
+    ({ container, root } = renderProvider(undefined, (getToken) => {
+      held.current = getToken;
+    }));
+    await flushReact();
+    expect(profileText(container)).toBe('signed-in:Alpha');
+    seedAlphaCache();
+
+    if (!held.current) throw new Error('token reader never became ready');
+    await act(async () => {
+      await held.current?.();
+    });
+    await advance(SESSION_REVALIDATE_DELAYS_MS[0]);
+
+    expect(profileText(container)).toBe('signed-in:Alpha');
+    expect(queryClient.getQueryData(BOOTSTRAP_KEY)).toEqual(ALPHA_ROWS);
   });
 });

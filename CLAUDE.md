@@ -74,6 +74,14 @@ Keep the repository folder name unchanged until the editor session can safely mo
   It must not move into `applyToken`, whose unchanged-token early return would skip it whenever a re-login yielded a byte-identical token.
   `sessionStorage` and not `localStorage`: the intent must die with the tab, because a week-old intent from a closed tab suppressing a fresh login is a lockout bought for nothing, and `client.logout()` destroys the session server-side anyway, so other tabs sign out on their own next refresh.
   `hasLogoutIntent` matches an exact sentinel and fails OPEN on an unreadable storage, both for the same reason: an over-broad or fail-closed read is a lockout, while a narrow or fail-open one is only a return to the prior behaviour.
+- The TanStack query cache is FLUSHED with `queryClient.clear()` on logout, on an in-page signed-out to signed-in transition inside `observeToken`, and on every completed workspace switch inside `setActive`.
+  This is why `QueryClientProvider` is OUTSIDE `AppAuthProvider` in `apps/web/src/App.tsx`: the auth provider reads the client with `useQueryClient()`, so it can only ever flush the exact client its own subtree reads.
+  Every key in `apps/web/src/lib/query-keys.ts` is account- and org-agnostic, and `queryClient` is a module-level singleton that survives every auth event short of a page reload, so without the flush a workspace switch renders the previous tenant's rows and a second operator on the tab is served the first one's data.
+  `clear()` and not `invalidateQueries()`: invalidation leaves the stale data in the cache to be rendered while the refetch is in flight, which is the leak itself. It also clears the mutation cache, so a paused mutation from the previous identity cannot resume under the new one.
+  `Query.destroy()` cancels the retryer, and a cancelled retryer's thenable is already settled, so a request issued before the flush cannot write its result back afterwards.
+  The switch flush goes AFTER `await client.setActive(...)` and after the `operationGeneration` check, and BEFORE `tokenCache.seed` and `observeToken`: flushing earlier would wipe the current tenant's data on a switch that is still in flight, fails, or is superseded.
+  Those two orderings have DEDICATED oracles, because nothing else in the suite catches either one - `keeps the current tenant's cache while a workspace switch is still in flight` and `does not flush when a superseded workspace switch resolves late`, both in `apps/web/src/auth/__tests__/react.test.tsx`.
+  A ladder recovery must NOT flush. The condition is `typeof lastAppliedToken.current === 'string'`, i.e. a token arriving while NO session is held, so a transient blip cannot destroy the operator's cached screen; `keeps the cache when the revalidation ladder recovers from a blip` is the only test that fails on the obvious wrong implementation of "flush on every non-null token".
 
 ## Tenancy
 

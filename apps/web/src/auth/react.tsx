@@ -1,5 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createHubClient, type HubClient } from '@fxl-business/hub-sdk/client';
+import { useQueryClient } from '@tanstack/react-query';
 import { LogOut } from 'lucide-react';
 import {
   createContext,
@@ -144,6 +145,18 @@ function useHubAuthContext() {
 
 function HubAuthProvider({ children }: { children: ReactNode }) {
   /**
+   * Read from context, never imported: this is the exact client this provider's own
+   * subtree reads, so the flush and the reads can never diverge onto two instances.
+   * `App.tsx` mounts `QueryClientProvider` above `AppAuthProvider` to make this legal,
+   * and a source-level test pins that nesting.
+   *
+   * Every key in `@/lib/query-keys` is account- and org-agnostic - the bootstrap key is
+   * literally `['sales-ops','bootstrap']` - and the client is a module-level singleton
+   * that survives every auth event short of a page reload. So one cache entry is shared
+   * by every identity the tab ever holds unless it is emptied at each identity change.
+   */
+  const queryClient = useQueryClient();
+  /**
    * Computed ONCE and handed to both constructions. `refresh.ts` spells the BFF path
    * out itself, so this shared value is what makes the hand-rolled request unable to
    * resolve to a different origin than the SDK client's.
@@ -243,6 +256,31 @@ function HubAuthProvider({ children }: { children: ReactNode }) {
       // setState on a dead root, and rescheduling from it would leak a timer forever.
       if (!mountedRef.current) return;
       if (result.token !== null) {
+        /*
+          The in-page signed-out to signed-in transition. `lastAppliedToken` is
+          `undefined` before the first apply, `null` while signed out, and a token string
+          while signed in, so a non-string here means the previous identity was already
+          torn down and anything still in the cache belongs to it.
+
+          A ladder RECOVERY leaves the previous token string in place and therefore must
+          NOT flush: destroying the operator's cached screen over a transient blip is the
+          same class of bug the ladder itself exists to prevent. Do NOT weaken this to
+          "flush on every non-null token".
+
+          It must be read BEFORE `applyToken`, which is what overwrites the ref, and it
+          must live here rather than inside `applyToken`, whose unchanged-token early
+          return would skip it whenever a re-login yielded a byte-identical token.
+
+          Firing once at cold start, on `undefined`, is a provable no-op: every data hook
+          in the app lives inside `Protected`, which renders a Skeleton until `isSignedIn`,
+          so no query can exist yet. The unconditional form is the one that stays correct
+          if a query ever mounts outside `Protected`.
+
+          A workspace switch does not reach this branch with a non-string, so it can never
+          double-flush with `setActive`'s own explicit flush below.
+        */
+        const wasSignedIn = typeof lastAppliedToken.current === 'string';
+        if (!wasSignedIn) queryClient.clear();
         clearRevalidateTimer();
         revalidateAttempts.current = 0;
         // A normal re-login (attempt 1, callback, token) leaves the loop guard at
@@ -281,7 +319,7 @@ function HubAuthProvider({ children }: { children: ReactNode }) {
     }
 
     return { clearRevalidateTimer, failSession, observeToken };
-  }, [applyToken, tokenCache]);
+  }, [applyToken, queryClient, tokenCache]);
 
   /**
    * Keeps its `Promise<string | null>` signature deliberately. Roughly forty call
@@ -323,6 +361,16 @@ function HubAuthProvider({ children }: { children: ReactNode }) {
     // re-applies a state the app is already in, and the unmount effect clears the
     // pending timer. The durable logout intent above is the real guard.
     failSession();
+    /*
+      Synchronous and before the first `await`, in the same block as `failSession()`, so
+      React commits ONE render: signed-out profile and empty cache together, with no
+      frame in which the tree is live over the previous operator's rows. `clear()` and
+      not `invalidateQueries()` - invalidation leaves the data in the cache to be
+      rendered while the refetch is in flight, which is the leak itself - and `clear()`
+      also empties the mutation cache, so a paused mutation started by this operator
+      cannot resume under the next one's token.
+    */
+    queryClient.clear();
     clearLoginAttempts();
     /*
       No longer inert. `markLogoutIntent()` above is what stops `HubProtected`'s login
@@ -332,7 +380,7 @@ function HubAuthProvider({ children }: { children: ReactNode }) {
     */
     consumeReturnTo(currentOrigin());
     await client.logout();
-  }, [client, failSession, tokenCache]);
+  }, [client, failSession, queryClient, tokenCache]);
 
   const setActive = useCallback(
     async (workspaceId: string) => {
@@ -340,10 +388,25 @@ function HubAuthProvider({ children }: { children: ReactNode }) {
       const switchGeneration = operationGeneration.current;
       const result = await client.setActive(workspaceId);
       if (switchGeneration !== operationGeneration.current) return;
+      /*
+        The sharpest of the three: no reload, components stay mounted, and it crosses
+        TENANTS inside one account. Every mounted screen would otherwise keep rendering
+        the previous tenant's rows until each query happened to refetch.
+
+        AFTER the `await`, never before - flushing early would wipe the current tenant's
+        data on a switch that then fails or is superseded, stranding the operator on an
+        empty screen for a workspace they never left. AFTER the generation check, because
+        a superseded switch discards its result whole and must discard its flush too.
+        BEFORE `seed` and `observeToken`, which are the two statements that make the new
+        identity reachable and visible; the three are one synchronous block today, and
+        this ordering is what keeps it correct if an `await` is ever inserted between
+        them.
+      */
+      queryClient.clear();
       tokenCache.seed(result.accessToken, result.expiresIn);
       observeToken({ token: result.accessToken });
     },
-    [client, observeToken, tokenCache],
+    [client, observeToken, queryClient, tokenCache],
   );
 
   useEffect(() => {
