@@ -20,7 +20,7 @@ const mocks = vi.hoisted(() => {
     manageUrl: vi.fn<HubClient['manageUrl']>(),
   } satisfies HubClient;
   const cache = {
-    getToken: vi.fn<HubClient['getToken']>(),
+    getToken: vi.fn<() => Promise<import('../refresh').HubTokenResult>>(),
     seed: vi.fn<(accessToken: string, expiresInSeconds: number) => void>(),
     clear: vi.fn<() => void>(),
   };
@@ -28,8 +28,16 @@ const mocks = vi.hoisted(() => {
   return {
     client,
     cache,
-    createHubClient: vi.fn(() => client),
-    createHubAccessTokenCache: vi.fn(() => cache),
+    createHubClient: vi.fn<typeof import('@fxl-business/hub-sdk/client').createHubClient>(
+      () => client,
+    ),
+    // Explicitly typed rather than inferred from the factory: the drift-guard test below
+    // reads the refresher back out of `mock.calls`, which an argument-less signature
+    // would type as `never`.
+    createHubAccessTokenCache: vi.fn<typeof import('../token').createHubAccessTokenCache>(
+      () => cache,
+    ),
+    requestHubAccessToken: vi.fn<typeof import('../refresh').requestHubAccessToken>(),
   };
 });
 
@@ -41,6 +49,17 @@ vi.mock('../token', () => ({
   createHubAccessTokenCache: mocks.createHubAccessTokenCache,
 }));
 
+/**
+ * Spread over the real module rather than replaced: `react.tsx` also imports
+ * `TRANSIENT_TOKEN_RESULT` from here, and the ladder's own semantics depend on it
+ * being the genuine value.
+ */
+vi.mock('../refresh', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../refresh')>()),
+  requestHubAccessToken: mocks.requestHubAccessToken,
+}));
+
+import type { HubTokenResult } from '../refresh';
 import {
   AppAuthProvider,
   Protected,
@@ -50,6 +69,15 @@ import {
   useAuthProfile,
 } from '../react';
 import { LOGIN_ATTEMPTS_KEY, LOGOUT_INTENT_KEY, RETURN_TO_KEY } from '../session-recovery';
+
+/**
+ * The three shapes the provider now branches on. `expired` is the BFF's own `401`
+ * verdict and is the only one that may tear a session down; `transient` covers a
+ * `503`, a `502`, a network throw and an unparseable body alike.
+ */
+const ok = (token: string): HubTokenResult => ({ token });
+const expired: HubTokenResult = { token: null, failure: 'session_expired' };
+const transient: HubTokenResult = { token: null, failure: 'transient' };
 
 type Deferred<T> = {
   promise: Promise<T>;
@@ -272,23 +300,56 @@ afterEach(async () => {
 
 describe('AppAuthProvider token cache wiring', () => {
   it('hydrates the provider through the token cache instead of the SDK client', async () => {
-    mocks.cache.getToken.mockResolvedValue(profileToken('Alpha'));
+    mocks.cache.getToken.mockResolvedValue(ok(profileToken('Alpha')));
     ({ container, root } = renderProvider());
 
     await flushReact();
 
-    expect(mocks.createHubAccessTokenCache).toHaveBeenCalledWith(mocks.client);
+    // The cache is handed a refresher, not the SDK client: classification lives in
+    // `refresh.ts` and the cache stays a cache.
+    expect(mocks.createHubAccessTokenCache).toHaveBeenCalledWith(expect.any(Function));
     expect(mocks.cache.getToken).toHaveBeenCalledTimes(1);
+    // Permanent rather than incidental now. `HubClient.getToken()` discards the BFF's
+    // status, so the app must never call it again.
     expect(mocks.client.getToken).not.toHaveBeenCalled();
     expect(container.querySelector('[data-testid="profile"]')?.textContent).toBe(
       'signed-in:Alpha',
     );
   });
 
+  /**
+   * The drift guard for the hand-rolled fetch. `refresh.ts` spells out the BFF path
+   * itself, so the ONE thing that keeps it from resolving to a different origin than
+   * the SDK client is that both are handed the same `getHubBffBasePath` result. If a
+   * future edit computes either one separately, the app posts its refresh somewhere
+   * the BFF is not mounted and every page load reads as a Hub outage.
+   */
+  it('wires the token cache to the BFF refresh endpoint at the same base path as the SDK client', async () => {
+    // The var `getHubBffBasePath` reads FIRST. `VITE_API_URL` is only its fallback, and
+    // the shipped `.env` defines `VITE_AUTH_BFF_BASE_PATH` as `''`, which `??` does not
+    // fall through.
+    vi.stubEnv('VITE_AUTH_BFF_BASE_PATH', 'http://localhost:3006');
+    mocks.requestHubAccessToken.mockResolvedValue(transient);
+    mocks.cache.getToken.mockResolvedValue(ok(profileToken('Alpha')));
+    ({ container, root } = renderProvider());
+
+    await flushReact();
+
+    const refresher = mocks.createHubAccessTokenCache.mock.calls[0]?.[0];
+    if (typeof refresher !== 'function') throw new Error('no refresher was handed to the cache');
+    await refresher();
+
+    expect(mocks.requestHubAccessToken).toHaveBeenCalledWith('http://localhost:3006');
+    expect(mocks.createHubClient).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ bffBasePath: 'http://localhost:3006' }),
+    );
+  });
+
   it('seeds the workspace-switch token before exposing the switched profile', async () => {
     const observeWorkspace = vi.fn<(workspaceName?: string) => void>();
     const switchedToken = profileToken('Beta');
-    mocks.cache.getToken.mockResolvedValue(profileToken('Alpha'));
+    mocks.cache.getToken.mockResolvedValue(ok(profileToken('Alpha')));
     mocks.client.setActive.mockResolvedValue({
       accessToken: switchedToken,
       expiresIn: 120,
@@ -316,7 +377,7 @@ describe('AppAuthProvider token cache wiring', () => {
 
   it('clears browser token state before SDK logout', async () => {
     const logout = deferred<void>();
-    mocks.cache.getToken.mockResolvedValue(profileToken('Alpha'));
+    mocks.cache.getToken.mockResolvedValue(ok(profileToken('Alpha')));
     mocks.client.logout.mockReturnValue(logout.promise);
     ({ container, root } = renderProvider());
     await flushReact();
@@ -344,7 +405,7 @@ describe('AppAuthProvider token cache wiring', () => {
     const logout = deferred<void>();
     const observeWorkspace = vi.fn<(workspaceName?: string) => void>();
     const switchedToken = profileToken('Beta');
-    mocks.cache.getToken.mockResolvedValue(profileToken('Alpha'));
+    mocks.cache.getToken.mockResolvedValue(ok(profileToken('Alpha')));
     mocks.client.setActive.mockReturnValue(switchRequest.promise);
     mocks.client.logout.mockReturnValue(logout.promise);
     ({ container, root } = renderProvider(observeWorkspace));
@@ -388,7 +449,7 @@ describe('AppAuthProvider token cache wiring', () => {
     const observeWorkspace = vi.fn<(workspaceName?: string) => void>();
     const betaToken = profileToken('Beta', workspaces);
     const gammaToken = profileToken('Gamma', workspaces);
-    mocks.cache.getToken.mockResolvedValue(profileToken('Alpha', workspaces));
+    mocks.cache.getToken.mockResolvedValue(ok(profileToken('Alpha', workspaces)));
     mocks.client.setActive.mockImplementation((workspaceId) => {
       if (workspaceId === 'workspace-beta') return betaSwitch.promise;
       if (workspaceId === 'workspace-gamma') return gammaSwitch.promise;
@@ -453,13 +514,18 @@ describe('session preservation and route restore', () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   }
 
-  it('keeps the signed-in session when a refresh resolves null once', async () => {
+  /**
+   * The oracle for "did this outcome enter the ladder" is `vi.getTimerCount()`, never a
+   * latency observation. The ladder is the only thing in `react.tsx` that schedules a
+   * timer, so a count of `0` after a `401` is proof that no rung EXISTS - not evidence
+   * that none has fired yet. CLAUDE.md records a DOM-level test in this exact
+   * environment passing with the bug fully present; this is the invariant that makes
+   * that impossible.
+   */
+  it('signs out at once when the BFF says the session expired, without entering the ladder', async () => {
     useLadderTimers();
     const token = profileToken('Alpha');
-    mocks.cache.getToken
-      .mockResolvedValueOnce(token)
-      .mockResolvedValueOnce(null)
-      .mockResolvedValue(token);
+    mocks.cache.getToken.mockResolvedValueOnce(ok(token)).mockResolvedValue(expired);
     const held = reader();
 
     ({ container, root } = renderProtected(['/cadastros/produtos'], (getToken) => {
@@ -470,7 +536,98 @@ describe('session preservation and route restore', () => {
 
     await readToken(held);
 
-    // The behavioural core: one null read signs nobody out and navigates nobody away.
+    // No timer advance at all: the sign-out is on this single response.
+    expect(profileText(container)).toBe('signed-out:');
+    expect(vi.getTimerCount()).toBe(0);
+    // Mount read plus the probe read. A third would mean a rung ran.
+    expect(mocks.cache.getToken).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the session and enters the ladder when a refresh is transiently unavailable', async () => {
+    useLadderTimers();
+    const token = profileToken('Alpha');
+    mocks.cache.getToken
+      .mockResolvedValueOnce(ok(token))
+      .mockResolvedValueOnce(transient)
+      .mockResolvedValue(ok(token));
+    const held = reader();
+
+    ({ container, root } = renderProtected(['/cadastros/produtos'], (getToken) => {
+      held.current = getToken;
+    }));
+    await flushReact();
+    await readToken(held);
+
+    // A Hub outage is not a verdict on the session, so nothing about the profile moves.
+    expect(profileText(container)).toBe('signed-in:Alpha');
+    expect(mocks.client.login).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(1);
+
+    await advance(SESSION_REVALIDATE_DELAYS_MS[0]);
+    expect(profileText(container)).toBe('signed-in:Alpha');
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('holds a cold start on a transient failure instead of signing out', async () => {
+    useLadderTimers();
+    mocks.cache.getToken.mockResolvedValue(transient);
+
+    ({ container, root } = renderProtected(['/cadastros/produtos']));
+    await flushReact();
+
+    /*
+      Cold start is no longer a special case. An immediate redirect during a Hub outage
+      lands on a login that also fails, burns the `registerLoginAttempt` budget and
+      strands the operator on `SessionRecoveryPanel` - the same class of bug the ladder
+      exists to prevent, reached from the other end. `isLoaded` stays false meanwhile, so
+      `Protected` holds its Skeleton rather than flashing a signed-out screen.
+    */
+    expect(profileText(container)).toBe('loading');
+    expect(vi.getTimerCount()).toBe(1);
+    expect(mocks.client.login).not.toHaveBeenCalled();
+
+    for (const delay of SESSION_REVALIDATE_DELAYS_MS) {
+      await advance(delay);
+    }
+
+    // The ladder TERMINATES; it does not hang. A Hub that never recovers still ends in
+    // exactly today's behaviour.
+    expect(profileText(container)).toBe('signed-out:');
+    expect(mocks.client.login).toHaveBeenCalledTimes(1);
+  });
+
+  it('signs out at cold start when the BFF says the session expired', async () => {
+    useLadderTimers();
+    mocks.cache.getToken.mockResolvedValue(expired);
+
+    ({ container, root } = renderProtected(['/cadastros/produtos']));
+    await flushReact();
+
+    // The anonymous-visitor path: no session cookie, `401 no_session`, straight to
+    // login. It must keep today's latency exactly.
+    expect(profileText(container)).toBe('signed-out:');
+    expect(vi.getTimerCount()).toBe(0);
+    expect(mocks.client.login).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the signed-in session when a refresh fails transiently once', async () => {
+    useLadderTimers();
+    const token = profileToken('Alpha');
+    mocks.cache.getToken
+      .mockResolvedValueOnce(ok(token))
+      .mockResolvedValueOnce(transient)
+      .mockResolvedValue(ok(token));
+    const held = reader();
+
+    ({ container, root } = renderProtected(['/cadastros/produtos'], (getToken) => {
+      held.current = getToken;
+    }));
+    await flushReact();
+    expect(profileText(container)).toBe('signed-in:Alpha');
+
+    await readToken(held);
+
+    // The behavioural core: one failed read signs nobody out and navigates nobody away.
     expect(mocks.client.login).not.toHaveBeenCalled();
     expect(profileText(container)).toBe('signed-in:Alpha');
     expect(locationText(container)).toBe('/cadastros/produtos');
@@ -498,11 +655,11 @@ describe('session preservation and route restore', () => {
     // Mount, then per blip: the probe read that returns null, and the ladder read that
     // recovers. A lifetime counter exhausts the ladder on the last blip; a consecutive
     // one never gets past rung 1.
-    mocks.cache.getToken.mockResolvedValueOnce(token);
+    mocks.cache.getToken.mockResolvedValueOnce(ok(token));
     for (let blip = 0; blip < blips; blip += 1) {
-      mocks.cache.getToken.mockResolvedValueOnce(null).mockResolvedValueOnce(token);
+      mocks.cache.getToken.mockResolvedValueOnce(transient).mockResolvedValueOnce(ok(token));
     }
-    mocks.cache.getToken.mockResolvedValue(token);
+    mocks.cache.getToken.mockResolvedValue(ok(token));
     const held = reader();
 
     ({ container, root } = renderProtected(['/cadastros/produtos?f=1'], (getToken) => {
@@ -532,7 +689,7 @@ describe('session preservation and route restore', () => {
 
   it('clears the login attempt counter once a token is observed', async () => {
     sessionStorage.setItem(LOGIN_ATTEMPTS_KEY, JSON.stringify({ count: 2, firstAt: Date.now() }));
-    mocks.cache.getToken.mockResolvedValue(profileToken('Alpha'));
+    mocks.cache.getToken.mockResolvedValue(ok(profileToken('Alpha')));
 
     ({ container, root } = renderProtected(['/cadastros/produtos']));
     await flushReact();
@@ -545,7 +702,7 @@ describe('session preservation and route restore', () => {
 
   it('clears a still-pending ladder timer at unmount', async () => {
     useLadderTimers();
-    mocks.cache.getToken.mockResolvedValueOnce(profileToken('Alpha')).mockResolvedValue(null);
+    mocks.cache.getToken.mockResolvedValueOnce(ok(profileToken('Alpha'))).mockResolvedValue(transient);
     const held = reader();
 
     ({ container, root } = renderProtected(['/cadastros/produtos'], (getToken) => {
@@ -574,12 +731,12 @@ describe('session preservation and route restore', () => {
   it('drops a ladder refresh that resolves after unmount instead of rescheduling', async () => {
     useLadderTimers();
     const token = profileToken('Alpha');
-    const ladderRead = deferred<string | null>();
+    const ladderRead = deferred<HubTokenResult>();
     mocks.cache.getToken
-      .mockResolvedValueOnce(token)
-      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(ok(token))
+      .mockResolvedValueOnce(transient)
       .mockReturnValueOnce(ladderRead.promise)
-      .mockResolvedValue(token);
+      .mockResolvedValue(ok(token));
     const held = reader();
 
     ({ container, root } = renderProtected(['/cadastros/produtos'], (getToken) => {
@@ -605,7 +762,7 @@ describe('session preservation and route restore', () => {
     // turned into another rung: a post-unmount reschedule leaks a timer forever and
     // ends in a setState on an unmounted root.
     await act(async () => {
-      ladderRead.resolve(null);
+      ladderRead.resolve(transient);
       await Promise.resolve();
     });
     await act(async () => {
@@ -619,7 +776,7 @@ describe('session preservation and route restore', () => {
 
   it('captures and restores the pre-login route across a genuine re-login', async () => {
     useLadderTimers();
-    mocks.cache.getToken.mockResolvedValueOnce(profileToken('Alpha')).mockResolvedValue(null);
+    mocks.cache.getToken.mockResolvedValueOnce(ok(profileToken('Alpha'))).mockResolvedValue(transient);
     const held = reader();
 
     ({ container, root } = renderProtected(['/cadastros/produtos?f=1'], (getToken) => {
@@ -646,7 +803,7 @@ describe('session preservation and route restore', () => {
     root = null;
     container = null;
     mocks.cache.getToken.mockReset();
-    mocks.cache.getToken.mockResolvedValue(profileToken('Alpha'));
+    mocks.cache.getToken.mockResolvedValue(ok(profileToken('Alpha')));
 
     ({ container, root } = renderProtected(['/']));
     await flushReact();
@@ -659,7 +816,7 @@ describe('session preservation and route restore', () => {
     'discards the hostile stored return path %j instead of navigating to it',
     async (hostile) => {
       sessionStorage.setItem(RETURN_TO_KEY, hostile);
-      mocks.cache.getToken.mockResolvedValue(profileToken('Alpha'));
+      mocks.cache.getToken.mockResolvedValue(ok(profileToken('Alpha')));
 
       ({ container, root } = renderProtected(['/']));
       await flushReact();
@@ -675,7 +832,7 @@ describe('session preservation and route restore', () => {
       LOGIN_ATTEMPTS_KEY,
       JSON.stringify({ count: 3, firstAt: Date.now() }),
     );
-    mocks.cache.getToken.mockResolvedValue(null);
+    mocks.cache.getToken.mockResolvedValue(expired);
 
     ({ container, root } = renderProtected(['/']));
     await flushReact();
@@ -696,7 +853,7 @@ describe('session preservation and route restore', () => {
   });
 
   it('does not re-render auth consumers when a refresh returns the same token', async () => {
-    mocks.cache.getToken.mockResolvedValue(profileToken('Alpha'));
+    mocks.cache.getToken.mockResolvedValue(ok(profileToken('Alpha')));
     const held = reader();
 
     ({ container, root } = renderProtected(['/cadastros/produtos'], (getToken) => {
@@ -747,7 +904,7 @@ describe('explicit logout intent', () => {
   }
 
   it('does not capture the route or spend a login attempt when the operator signs out', async () => {
-    mocks.cache.getToken.mockResolvedValue(profileToken('Alpha'));
+    mocks.cache.getToken.mockResolvedValue(ok(profileToken('Alpha')));
 
     ({ container, root } = renderProtected(['/cadastros/produtos?f=1']));
     await flushReact();
@@ -763,7 +920,7 @@ describe('explicit logout intent', () => {
   });
 
   it('keeps the return-to slot empty across a remount after an explicit sign-out', async () => {
-    mocks.cache.getToken.mockResolvedValue(profileToken('Alpha'));
+    mocks.cache.getToken.mockResolvedValue(ok(profileToken('Alpha')));
 
     ({ container, root } = renderProtected(['/cadastros/produtos?f=1']));
     await flushReact();
@@ -775,7 +932,7 @@ describe('explicit logout intent', () => {
     });
     remount();
     mocks.cache.getToken.mockReset();
-    mocks.cache.getToken.mockResolvedValue(null);
+    mocks.cache.getToken.mockResolvedValue(expired);
 
     ({ container, root } = renderProtected(['/cadastros/produtos?f=1']));
     await flushReact();
@@ -788,7 +945,7 @@ describe('explicit logout intent', () => {
 
   it('does not auto-login while the logout intent is set', async () => {
     sessionStorage.setItem(LOGOUT_INTENT_KEY, '1');
-    mocks.cache.getToken.mockResolvedValue(null);
+    mocks.cache.getToken.mockResolvedValue(expired);
 
     ({ container, root } = renderProtected(['/cadastros/produtos?f=1']));
     await flushReact();
@@ -801,7 +958,7 @@ describe('explicit logout intent', () => {
 
   it('resets the URL to the default route while the logout intent is set', async () => {
     sessionStorage.setItem(LOGOUT_INTENT_KEY, '1');
-    mocks.cache.getToken.mockResolvedValue(null);
+    mocks.cache.getToken.mockResolvedValue(expired);
 
     ({ container, root } = renderProtected(['/cadastros/produtos?f=1']));
     await flushReact();
@@ -810,7 +967,7 @@ describe('explicit logout intent', () => {
   });
 
   it('resets the URL to the default route after an explicit sign-out', async () => {
-    mocks.cache.getToken.mockResolvedValue(profileToken('Alpha'));
+    mocks.cache.getToken.mockResolvedValue(ok(profileToken('Alpha')));
 
     ({ container, root } = renderProtected(['/cadastros/produtos?f=1']));
     await flushReact();
@@ -823,7 +980,7 @@ describe('explicit logout intent', () => {
 
   it('clears the intent and re-arms the login effect when the operator clicks Entrar', async () => {
     sessionStorage.setItem(LOGOUT_INTENT_KEY, '1');
-    mocks.cache.getToken.mockResolvedValue(null);
+    mocks.cache.getToken.mockResolvedValue(expired);
 
     ({ container, root } = renderProtected(['/cadastros/produtos?f=1']));
     await flushReact();
@@ -846,7 +1003,7 @@ describe('explicit logout intent', () => {
 
   it('clears the intent whenever a live token is observed, so a stale intent can never lock the tab out', async () => {
     sessionStorage.setItem(LOGOUT_INTENT_KEY, '1');
-    mocks.cache.getToken.mockResolvedValue(profileToken('Alpha'));
+    mocks.cache.getToken.mockResolvedValue(ok(profileToken('Alpha')));
 
     ({ container, root } = renderProtected(['/cadastros/produtos?f=1']));
     await flushReact();
