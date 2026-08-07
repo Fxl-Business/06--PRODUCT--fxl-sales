@@ -2,7 +2,7 @@
   "active_accumulated_seconds": 0,
   "active_since": 1786113106,
   "counters": {
-    "agent_dispatches": 19,
+    "agent_dispatches": 21,
     "initial_slices": 6,
     "replans": 1,
     "total_slices": 6,
@@ -26,7 +26,8 @@
       "02-session-absolute-ttl": 1,
       "03-refresh-failure-classification": 1,
       "04-durable-logout-intent": 1,
-      "05-auth-cache-flush": 1
+      "05-auth-cache-flush": 1,
+      "06-supersede-prior-session": 1
     }
   },
   "version": 1
