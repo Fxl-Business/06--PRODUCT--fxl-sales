@@ -49,7 +49,7 @@ import {
   useAccessToken,
   useAuthProfile,
 } from '../react';
-import { LOGIN_ATTEMPTS_KEY, RETURN_TO_KEY } from '../session-recovery';
+import { LOGIN_ATTEMPTS_KEY, LOGOUT_INTENT_KEY, RETURN_TO_KEY } from '../session-recovery';
 
 type Deferred<T> = {
   promise: Promise<T>;
@@ -134,12 +134,14 @@ function renderProvider(onWorkspace?: (workspaceName?: string) => void) {
 
 /**
  * Renders the router location, so a restore can be asserted without stubbing
- * `window.location`. Lives inside `Protected`, which renders a Skeleton while
- * signed out, so it is only readable once the profile is signed in.
+ * `window.location`. The default `location` instance lives inside `Protected`, which
+ * renders a Skeleton while signed out, so it is only readable once the profile is
+ * signed in. `renderProtected` mounts a second one OUTSIDE `Protected` under the
+ * `outer-location` id, which is the only way to read the URL while a panel is up.
  */
-function LocationProbe() {
+function LocationProbe({ testId = 'location' }: { testId?: string }) {
   const { pathname, search } = useLocation();
-  return <output data-testid="location">{`${pathname}${search}`}</output>;
+  return <output data-testid={testId}>{`${pathname}${search}`}</output>;
 }
 
 type TokenReader = () => Promise<string | null>;
@@ -163,8 +165,16 @@ function renderProtected(initialEntries: string[], onReady?: (getToken: TokenRea
   act(() => {
     nextRoot.render(
       <AppAuthProvider>
+        {/*
+          Outside `MemoryRouter` on purpose: `UserControls` reads only
+          `useHubAuthContext`, never a router hook, and mounting it outside `Protected`
+          is what keeps the `Sair` button reachable after the sign-out replaces the
+          protected subtree with a panel.
+        */}
+        <UserControls />
         <MemoryRouter initialEntries={initialEntries}>
           <Probe />
+          <LocationProbe testId="outer-location" />
           <Protected>
             <LocationProbe />
             <TokenProbe onReady={onReady} />
@@ -182,6 +192,10 @@ const profileText = (host: HTMLElement) =>
 
 const locationText = (host: HTMLElement) =>
   host.querySelector('[data-testid="location"]')?.textContent;
+
+/** Readable even while a panel has replaced `Protected`'s children. */
+const outerLocationText = (host: HTMLElement) =>
+  host.querySelector('[data-testid="outer-location"]')?.textContent;
 
 async function flushReact() {
   await act(async () => {
@@ -697,5 +711,152 @@ describe('session preservation and route restore', () => {
     await flushReact();
 
     expect(probeRenders).toBe(before);
+  });
+});
+
+/**
+ * The oracle throughout this block is a STORAGE INVARIANT, never an observed redirect.
+ * CLAUDE.md records that a DOM-level test in this exact environment once passed with a
+ * bug fully present, so none of these tries to watch the race. `LOGIN_ATTEMPTS_KEY`
+ * being null after a sign-out proves the login effect's BODY never ran, because
+ * `registerLoginAttempt()` is its first statement and it always writes on a fresh
+ * counter. That is an invariant that makes the failure impossible rather than evidence
+ * that it has not happened yet.
+ */
+describe('explicit logout intent', () => {
+  const SIGNED_OUT_COPY = 'Você saiu da sua conta';
+
+  function signOutButton(host: HTMLElement): HTMLButtonElement {
+    const match = host.querySelector<HTMLButtonElement>('button[aria-label="Sair"]');
+    if (!match) throw new Error('sign-out button not found');
+    return match;
+  }
+
+  async function clickSignOut(host: HTMLElement) {
+    const button = signOutButton(host);
+    await act(async () => {
+      button.click();
+      await Promise.resolve();
+    });
+  }
+
+  function remount() {
+    container?.remove();
+    root = null;
+    container = null;
+  }
+
+  it('does not capture the route or spend a login attempt when the operator signs out', async () => {
+    mocks.cache.getToken.mockResolvedValue(profileToken('Alpha'));
+
+    ({ container, root } = renderProtected(['/cadastros/produtos?f=1']));
+    await flushReact();
+    expect(profileText(container)).toBe('signed-in:Alpha');
+
+    await clickSignOut(container);
+
+    expect(sessionStorage.getItem(RETURN_TO_KEY)).toBeNull();
+    // Unspent, so the login effect's body never ran at all.
+    expect(sessionStorage.getItem(LOGIN_ATTEMPTS_KEY)).toBeNull();
+    expect(mocks.client.login).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem(LOGOUT_INTENT_KEY)).toBe('1');
+  });
+
+  it('keeps the return-to slot empty across a remount after an explicit sign-out', async () => {
+    mocks.cache.getToken.mockResolvedValue(profileToken('Alpha'));
+
+    ({ container, root } = renderProtected(['/cadastros/produtos?f=1']));
+    await flushReact();
+    await clickSignOut(container);
+
+    // The full-page navigation an in-memory flag cannot survive.
+    await act(async () => {
+      root?.unmount();
+    });
+    remount();
+    mocks.cache.getToken.mockReset();
+    mocks.cache.getToken.mockResolvedValue(null);
+
+    ({ container, root } = renderProtected(['/cadastros/produtos?f=1']));
+    await flushReact();
+
+    expect(sessionStorage.getItem(RETURN_TO_KEY)).toBeNull();
+    expect(sessionStorage.getItem(LOGIN_ATTEMPTS_KEY)).toBeNull();
+    expect(mocks.client.login).not.toHaveBeenCalled();
+    expect(container.textContent).toContain(SIGNED_OUT_COPY);
+  });
+
+  it('does not auto-login while the logout intent is set', async () => {
+    sessionStorage.setItem(LOGOUT_INTENT_KEY, '1');
+    mocks.cache.getToken.mockResolvedValue(null);
+
+    ({ container, root } = renderProtected(['/cadastros/produtos?f=1']));
+    await flushReact();
+
+    expect(mocks.client.login).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem(LOGIN_ATTEMPTS_KEY)).toBeNull();
+    expect(sessionStorage.getItem(RETURN_TO_KEY)).toBeNull();
+    expect(container.textContent).toContain(SIGNED_OUT_COPY);
+  });
+
+  it('resets the URL to the default route while the logout intent is set', async () => {
+    sessionStorage.setItem(LOGOUT_INTENT_KEY, '1');
+    mocks.cache.getToken.mockResolvedValue(null);
+
+    ({ container, root } = renderProtected(['/cadastros/produtos?f=1']));
+    await flushReact();
+
+    expect(outerLocationText(container)).toBe('/');
+  });
+
+  it('resets the URL to the default route after an explicit sign-out', async () => {
+    mocks.cache.getToken.mockResolvedValue(profileToken('Alpha'));
+
+    ({ container, root } = renderProtected(['/cadastros/produtos?f=1']));
+    await flushReact();
+    expect(outerLocationText(container)).toBe('/cadastros/produtos?f=1');
+
+    await clickSignOut(container);
+
+    expect(outerLocationText(container)).toBe('/');
+  });
+
+  it('clears the intent and re-arms the login effect when the operator clicks Entrar', async () => {
+    sessionStorage.setItem(LOGOUT_INTENT_KEY, '1');
+    mocks.cache.getToken.mockResolvedValue(null);
+
+    ({ container, root } = renderProtected(['/cadastros/produtos?f=1']));
+    await flushReact();
+
+    const entrar = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent?.trim() === 'Entrar',
+    );
+    if (!entrar) throw new Error('sign-in button not found');
+    await act(async () => {
+      entrar.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      await Promise.resolve();
+    });
+
+    expect(sessionStorage.getItem(LOGOUT_INTENT_KEY)).toBeNull();
+    expect(mocks.client.login).toHaveBeenCalledTimes(1);
+    // The URL was already reduced to `/`, and `sanitizeReturnTo` rejects it, so the
+    // capture on the way out stores nothing.
+    expect(sessionStorage.getItem(RETURN_TO_KEY)).toBeNull();
+  });
+
+  it('clears the intent whenever a live token is observed, so a stale intent can never lock the tab out', async () => {
+    sessionStorage.setItem(LOGOUT_INTENT_KEY, '1');
+    mocks.cache.getToken.mockResolvedValue(profileToken('Alpha'));
+
+    ({ container, root } = renderProtected(['/cadastros/produtos?f=1']));
+    await flushReact();
+
+    expect(sessionStorage.getItem(LOGOUT_INTENT_KEY)).toBeNull();
+    expect(profileText(container)).toBe('signed-in:Alpha');
+    // The INNER probe: readable only when `Protected` rendered its children, which is
+    // the proof the panel did not win. This is the test that fails if the clear is put
+    // in `applyToken`, behind its unchanged-token early return.
+    expect(locationText(container)).toBe('/cadastros/produtos?f=1');
+    expect(container.textContent).not.toContain(SIGNED_OUT_COPY);
   });
 });

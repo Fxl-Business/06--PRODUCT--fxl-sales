@@ -3,12 +3,16 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   LOGIN_ATTEMPTS_KEY,
   LOGIN_ATTEMPT_WINDOW_MS,
+  LOGOUT_INTENT_KEY,
   MAX_LOGIN_ATTEMPTS,
   RETURN_TO_KEY,
   captureReturnTo,
   clearLoginAttempts,
+  clearLogoutIntent,
   consumeReturnTo,
+  hasLogoutIntent,
   isLoginBlocked,
+  markLogoutIntent,
   registerLoginAttempt,
   sanitizeReturnTo,
 } from '../session-recovery';
@@ -245,4 +249,51 @@ describe('isLoginBlocked', () => {
     );
     expect(isLoginBlocked(1_000_000, throwingStorage)).toBe(false);
   });
+});
+
+/**
+ * Every assertion in here points the same way: the intent's whole job is to SUPPRESS the
+ * automatic login, so every ambiguous case must read as "no intent". An over-broad read
+ * or a fail-closed read is a lockout; a narrow, fail-open one is only a return to the
+ * behaviour that shipped before it.
+ */
+describe('logout intent', () => {
+  it('records an intent that reads back', () => {
+    const { map, storage } = fakeStorage();
+    markLogoutIntent(storage);
+
+    expect(hasLogoutIntent(storage)).toBe(true);
+    expect(map.get(LOGOUT_INTENT_KEY)).toBe('1');
+  });
+
+  it('reports no intent for an empty storage', () => {
+    expect(hasLogoutIntent(fakeStorage().storage)).toBe(false);
+  });
+
+  it('clears the intent, so a fresh login is never blocked', () => {
+    const { map, storage } = fakeStorage();
+    markLogoutIntent(storage);
+    clearLogoutIntent(storage);
+
+    expect(hasLogoutIntent(storage)).toBe(false);
+    expect(map.has(LOGOUT_INTENT_KEY)).toBe(false);
+  });
+
+  it('fails open when storage throws, in both directions', () => {
+    expect(() => markLogoutIntent(throwingStorage)).not.toThrow();
+    expect(hasLogoutIntent(throwingStorage)).toBe(false);
+    expect(() => clearLogoutIntent(throwingStorage)).not.toThrow();
+  });
+
+  /**
+   * The exact-sentinel pin. Anything this module did not itself write reads as "no
+   * intent", so a stray, corrupt or hand-set value cannot put a tab into a state where
+   * no automatic login ever fires.
+   */
+  it.each(['', '0', 'true', '"1"', '{}', ' 1', '1 ', '01'])(
+    'ignores the value %j, which it did not write',
+    (value) => {
+      expect(hasLogoutIntent(fakeStorage({ [LOGOUT_INTENT_KEY]: value }).storage)).toBe(false);
+    },
+  );
 });

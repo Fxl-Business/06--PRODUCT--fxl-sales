@@ -22,8 +22,11 @@ import { getHubBffBasePath, loadHubBrowserConfig } from './provider';
 import {
   captureReturnTo,
   clearLoginAttempts,
+  clearLogoutIntent,
   consumeReturnTo,
+  hasLogoutIntent,
   isLoginBlocked,
+  markLogoutIntent,
   registerLoginAttempt,
 } from './session-recovery';
 import { createHubAccessTokenCache } from './token';
@@ -237,6 +240,15 @@ function HubAuthProvider({ children }: { children: ReactNode }) {
         // A normal re-login (attempt 1, callback, token) leaves the loop guard at
         // zero, so it can never fire during ordinary operation.
         clearLoginAttempts();
+        // A token in hand is proof the session is live, so any intent still sitting in
+        // storage is stale by definition. This is the BACKSTOP that makes a lockout
+        // impossible: the intent can only ever persist while no token is obtainable,
+        // and the instant one is, it is gone - via the callback round trip, via a
+        // workspace switch, via a ladder recovery, via anything at all. It sits next to
+        // `clearLoginAttempts()` because it is the same argument about the same event,
+        // and deliberately NOT inside `applyToken`, whose unchanged-token early return
+        // would skip it whenever a re-login happened to yield a byte-identical token.
+        clearLogoutIntent();
         applyToken(token);
         return;
       }
@@ -261,14 +273,35 @@ function HubAuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(() => client.login(), [client]);
 
   const logout = useCallback(async () => {
+    /*
+      SYNCHRONOUS, and BEFORE THE FIRST `await` in this function. Written as the first
+      statement as the defensive position: it is the only placement that stays correct
+      if an `await` is ever inserted above it.
+
+      React 18 flushes a discrete event's state update when the handler returns, so
+      `HubProtected` re-renders and its effects run BEFORE the `await` at the bottom
+      resolves. Without a durable intent, `consumeReturnTo()` clears the slot and the
+      login effect then refills it with the exact path this logout is clearing, spends a
+      login attempt, and redirects to the Hub. That is the measured bug.
+
+      Note this is NOT an ordering bug INSIDE the synchronous block - React cannot
+      re-render in the middle of a synchronous function, so every statement below
+      completes before any flush. Do not conflate it with the proposta wizard's submit
+      button, which races two browser phases within a single click.
+    */
+    markLogoutIntent();
     operationGeneration.current += 1;
     tokenCache.clear();
     // Kills any in-flight ladder and clears `hasSessionRef`, so a late resolution
     // cannot resurrect a profile after an explicit sign-out.
     failSession();
     clearLoginAttempts();
-    // A deliberate logout must not bounce the next login into the previous
-    // operator's screen.
+    /*
+      No longer inert. `markLogoutIntent()` above is what stops `HubProtected`'s login
+      effect refilling the slot on the synchronous re-render, so this really does leave
+      it empty: a deliberate logout must not bounce the next login into the previous
+      operator's screen.
+    */
     consumeReturnTo(currentOrigin());
     await client.logout();
   }, [client, failSession, tokenCache]);
@@ -348,17 +381,48 @@ function SessionRecoveryPanel({ onRetry }: { onRetry: () => void }) {
   );
 }
 
+/**
+ * The terminal state of an EXPLICIT `Sair`. Deliberately not an automatic redirect to
+ * the Hub: on a shared machine, auto-re-login undoes the one action the product offers
+ * for ending a session, and the Hub's own SSO cookie can complete it with no prompt at
+ * all, so the next person at that desk finds an authenticated app. Signing back in has
+ * to be a deliberate act by whoever is actually sitting there.
+ *
+ * The default `Button` variant, not `outline`: `SessionRecoveryPanel`'s retry is a
+ * secondary action under an error message, while this is the single primary action on
+ * the screen. Strings are hardcoded pt-BR to match the rest of this file.
+ */
+function SignedOutPanel({ onSignIn }: { onSignIn: () => void }) {
+  return (
+    <div className="flex h-screen flex-col items-center justify-center gap-4 px-6 text-center">
+      <h1 className="text-2xl font-semibold">Você saiu da sua conta</h1>
+      <p className="max-w-md text-muted-foreground">
+        Sua sessão foi encerrada neste navegador. Entre novamente para continuar.
+      </p>
+      <Button onClick={onSignIn}>Entrar</Button>
+    </div>
+  );
+}
+
 function HubProtected({ children }: { children: ReactNode }) {
   const { isLoaded, isSignedIn, login } = useHubAuthContext();
   // The router location, not `window.location`: it is the app's own truth, identical
   // to the browser's under `BrowserRouter`, and testable without stubbing globals.
   const location = useLocation();
   const navigate = useNavigate();
-  // The manual retry is the only thing that can change the loop guard's answer while
-  // this component stays mounted, so it is the only thing that has to force a re-read.
-  const [, recheckLoginGuard] = useReducer((ticks: number) => ticks + 1, 0);
+  // The two panel buttons are the only things that can change either guard's answer
+  // while this component stays mounted, so they are the only things that have to force
+  // a re-read.
+  const [, recheckRecoveryGuards] = useReducer((ticks: number) => ticks + 1, 0);
   const restoredRef = useRef(false);
   const currentPath = `${location.pathname}${location.search}`;
+  /**
+   * Derived from storage on every render, never mirrored into React state, for the same
+   * reason `loginBlocked` is. Both writers re-render this component anyway: `logout()`
+   * flips `isSignedIn` in the same synchronous block as the write, and the `Entrar`
+   * click dispatches `recheckRecoveryGuards`.
+   */
+  const logoutIntent = isLoaded && !isSignedIn && hasLogoutIntent();
   /**
    * Derived from the stored attempt counter, never mirrored into React state. A
    * `setLoginBlocked(true)` inside the login effect would create a second source of
@@ -376,8 +440,21 @@ function HubProtected({ children }: { children: ReactNode }) {
     if (target && target !== currentPath) navigate(target, { replace: true });
   }, [currentPath, isLoaded, isSignedIn, navigate]);
 
+  /**
+   * An explicit `Sair` must not leave the previous operator's route in the URL bar, and
+   * must not leave it sitting in `location` for the login effect to capture the instant
+   * the intent is cleared. Reducing it to `/` here makes both structural rather than
+   * dependent on the order two state updates happen to batch in: `sanitizeReturnTo('/')`
+   * is `null`, so by the time a capture is possible there is nothing left to capture.
+   * `replace` so Back cannot walk into it either.
+   */
   useEffect(() => {
-    if (!isLoaded || isSignedIn || loginBlocked) return;
+    if (!logoutIntent || currentPath === '/') return;
+    navigate('/', { replace: true });
+  }, [currentPath, logoutIntent, navigate]);
+
+  useEffect(() => {
+    if (!isLoaded || isSignedIn || loginBlocked || logoutIntent) return;
     // Belt and braces: the render guard above already refuses, and `registerLoginAttempt`
     // refuses again here without incrementing, so the counter cannot run away.
     if (!registerLoginAttempt()) return;
@@ -385,7 +462,31 @@ function HubProtected({ children }: { children: ReactNode }) {
     // active workspace and page, so restoring the URL restores the screen.
     captureReturnTo(currentPath, currentOrigin());
     login();
-  }, [currentPath, isLoaded, isSignedIn, login, loginBlocked]);
+  }, [currentPath, isLoaded, isSignedIn, login, loginBlocked, logoutIntent]);
+
+  /**
+   * Ahead of `loginBlocked` deliberately. `SessionRecoveryPanel` says "Tentamos entrar
+   * novamente algumas vezes", which would be a lie after an explicit sign-out, since no
+   * automatic attempt was made at all. In practice the two are almost never both true,
+   * because `logout()` calls `clearLoginAttempts()`, but the ordering must not depend on
+   * that.
+   */
+  if (logoutIntent) {
+    return (
+      <SignedOutPanel
+        onSignIn={() => {
+          // Clearing the intent re-arms the login effect on the next render, exactly as
+          // the retry below re-arms it by clearing the counter. No direct `login()`
+          // call: one path into `login()` is what keeps `captureReturnTo` and
+          // `registerLoginAttempt` on that path too. By now the URL reset effect has
+          // already reduced `currentPath` to `/`, and `sanitizeReturnTo('/')` is `null`,
+          // so the capture that follows stores nothing.
+          clearLogoutIntent();
+          recheckRecoveryGuards();
+        }}
+      />
+    );
+  }
 
   if (loginBlocked) {
     return (
@@ -394,7 +495,7 @@ function HubProtected({ children }: { children: ReactNode }) {
           // Clearing the counter flips `loginBlocked` back to false on the next render,
           // which re-arms the login effect. No direct `login()` call is needed.
           clearLoginAttempts();
-          recheckLoginGuard();
+          recheckRecoveryGuards();
         }}
       />
     );
