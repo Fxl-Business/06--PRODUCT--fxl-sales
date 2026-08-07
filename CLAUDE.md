@@ -55,6 +55,19 @@ Keep the repository folder name unchanged until the editor session can safely mo
 - `sanitizeReturnTo` in `apps/web/src/auth/session-recovery.ts` re-asserts its structural checks on the NORMALIZED value it returns, not only on the raw input.
   Validating only the raw string let dot-segment normalization through, so `/..//evil.example` returned `//evil.example` and resolved off-origin.
   The stored path is destroyed BEFORE it is validated, so a hostile value is consumed exactly once and cannot be retried on a later mount.
+- An explicit `Sair` writes a DURABLE logout intent, `fxl-sales.auth.logoutIntent` in `sessionStorage`, and `markLogoutIntent()` is SYNCHRONOUS and lands BEFORE THE FIRST `await` in `logout()`; it is written as the first statement, above `tokenCache.clear()` and above `failSession()`.
+  The measured bug is not an ordering bug INSIDE that synchronous block - React cannot re-render in the middle of a synchronous function, so every statement from `markLogoutIntent()` through `consumeReturnTo()` completes before any flush.
+  It is that `logout()` had no durable intent at all: `consumeReturnTo()` cleared the slot, the discrete click's state update then flushed when the handler returned, and `HubProtected`'s login effect refilled the slot with the exact route the logout was clearing, spent a login attempt, and redirected to the Hub.
+  The "before the first `await`" rule is what makes the intent visible to that flush, and it is the position that stays correct if an `await` is ever inserted above it.
+  This is deliberately NOT the same mechanism as the proposta wizard's submit button, which races two browser phases within a single click; do not conflate them.
+  While the intent is set, `HubProtected` refuses to auto-login BEFORE calling `registerLoginAttempt()`, so the attempt budget is unspent - which is also the test oracle, since it proves the effect body never ran rather than merely that no redirect was seen.
+  It reduces the URL to `/` so the previous operator's route is neither on screen nor available to capture the instant the intent clears, and it renders `SignedOutPanel` in preference to `SessionRecoveryPanel`, whose "Tentamos entrar novamente algumas vezes" would be a lie when no automatic attempt was made.
+  Auto-re-login after an explicit `Sair` is deliberately not offered: on a shared machine the Hub's own SSO cookie can complete it with no prompt, undoing the one action the product has for ending a session.
+  The intent is cleared in exactly two places, and BOTH are needed: the panel's `Entrar` button, and `observeToken`'s live-token branch beside `clearLoginAttempts()`.
+  The second is the anti-lockout backstop - any token at all proves the session is live, so the intent can only ever persist while no token is obtainable.
+  It must not move into `applyToken`, whose unchanged-token early return would skip it whenever a re-login yielded a byte-identical token.
+  `sessionStorage` and not `localStorage`: the intent must die with the tab, because a week-old intent from a closed tab suppressing a fresh login is a lockout bought for nothing, and `client.logout()` destroys the session server-side anyway, so other tabs sign out on their own next refresh.
+  `hasLogoutIntent` matches an exact sentinel and fails OPEN on an unreadable storage, both for the same reason: an over-broad or fail-closed read is a lockout, while a narrow or fail-open one is only a return to the prior behaviour.
 
 ## Tenancy
 

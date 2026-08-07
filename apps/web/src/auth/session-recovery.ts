@@ -22,6 +22,15 @@ export const LOGIN_ATTEMPTS_KEY = 'fxl-sales.auth.loginAttempts';
 export const LOGIN_ATTEMPT_WINDOW_MS = 60_000;
 export const MAX_LOGIN_ATTEMPTS = 3;
 
+export const LOGOUT_INTENT_KEY = 'fxl-sales.auth.logoutIntent';
+/**
+ * An EXACT sentinel, not "any truthy string". A corrupt, stale or hand-set value must
+ * read as "no intent", because the intent's whole job is to suppress the automatic
+ * login - so an over-broad match is a lockout, while an over-narrow one is only a
+ * return to the behaviour that shipped before it.
+ */
+const LOGOUT_INTENT_VALUE = '1';
+
 const MAX_RETURN_TO_LENGTH = 2048;
 
 /**
@@ -226,4 +235,35 @@ export function registerLoginAttempt(
 
 export function clearLoginAttempts(storage: StorageLike | null = defaultStorage()): void {
   dropItem(storage, LOGIN_ATTEMPTS_KEY);
+}
+
+/**
+ * The durable logout intent: "someone pressed `Sair` in this tab".
+ *
+ * It has to be durable rather than a React ref, because `client.login()` is a full-page
+ * navigation and the operator can also just reload: an in-memory flag is destroyed by
+ * both. It has to be per-tab and to die with the tab, which is what makes
+ * `sessionStorage` right and `localStorage` wrong - a week-old intent from a closed tab
+ * suppressing a fresh login is a lockout bought for nothing, and `client.logout()`
+ * destroys the session server-side anyway, so other tabs sign out on their own next
+ * refresh rather than needing to read this.
+ *
+ * It stores no path, no token and no id, so it changes nothing about what this module is
+ * allowed to hold.
+ */
+export function markLogoutIntent(storage: StorageLike | null = defaultStorage()): void {
+  writeItem(storage, LOGOUT_INTENT_KEY, LOGOUT_INTENT_VALUE);
+}
+
+/**
+ * Fails OPEN, the same direction and for the same reason as `registerLoginAttempt`: an
+ * unreadable storage is an empty storage, so a browser that blocks storage gets the
+ * prior behaviour rather than a screen it can never leave.
+ */
+export function hasLogoutIntent(storage: StorageLike | null = defaultStorage()): boolean {
+  return readItem(storage, LOGOUT_INTENT_KEY) === LOGOUT_INTENT_VALUE;
+}
+
+export function clearLogoutIntent(storage: StorageLike | null = defaultStorage()): void {
+  dropItem(storage, LOGOUT_INTENT_KEY);
 }
