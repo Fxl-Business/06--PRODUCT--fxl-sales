@@ -19,6 +19,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { isOrgLabelFallback, orgLabel } from '@/lib/displayNames';
 import { getRoleFromHubClaims, getRolesFromHubClaims, parseJwtPayload, type AppRole } from './claims';
 import { getHubBffBasePath, loadHubBrowserConfig } from './provider';
+import { requestHubAccessToken, TRANSIENT_TOKEN_RESULT, type HubTokenResult } from './refresh';
 import {
   captureReturnTo,
   clearLoginAttempts,
@@ -32,16 +33,19 @@ import {
 import { createHubAccessTokenCache } from './token';
 
 /**
- * The bounded revalidation ladder. `HubClient.getToken()` collapses three genuinely
- * different outcomes - the network threw, the BFF answered non-200, the body did not
- * parse - into a single `null`, so the provider cannot tell "the network hiccuped"
- * from "your session is dead". Treating both as dead is what destroyed a half-filled
- * form every time a refresh blipped.
+ * The bounded revalidation ladder, entered only by a TRANSIENT refresh failure.
  *
- * A `null` observed while a token is already held therefore does not touch the
- * profile; it schedules a re-read instead. Four consecutive nulls (~6 seconds of
- * continuous failure) exhaust the ladder and the session really is torn down, so a
- * genuinely dead session can never leave the app stranded half-authenticated.
+ * `requestHubAccessToken` classifies against the BFF's status: a `401` means the
+ * session is dead and `failSession()` runs at once, with no rung ever scheduled.
+ * Everything else - `503 refresh_unavailable`, `502 invalid_refresh_response`, a
+ * network throw, an unparseable body - preserves the session and schedules a
+ * re-read instead, because treating a Hub blip as a dead session is what destroyed
+ * a half-filled form every time a refresh hiccuped.
+ *
+ * Four CONSECUTIVE transient failures (about six seconds) exhaust the ladder and
+ * the session really is torn down, so a Hub that never recovers cannot leave the
+ * app stranded half-authenticated. The counter resets on every recovery; a
+ * lifetime total reships the original bug.
  */
 export const SESSION_REVALIDATE_DELAYS_MS = [500, 1_500, 4_000] as const;
 
@@ -139,14 +143,20 @@ function useHubAuthContext() {
 }
 
 function HubAuthProvider({ children }: { children: ReactNode }) {
+  /**
+   * Computed ONCE and handed to both constructions. `refresh.ts` spells the BFF path
+   * out itself, so this shared value is what makes the hand-rolled request unable to
+   * resolve to a different origin than the SDK client's.
+   */
+  const bffBasePath = useMemo(() => getHubBffBasePath(import.meta.env), []);
   const client = useMemo(
-    () =>
-      createHubClient(loadHubBrowserConfig(import.meta.env), {
-        bffBasePath: getHubBffBasePath(import.meta.env),
-      }),
-    [],
+    () => createHubClient(loadHubBrowserConfig(import.meta.env), { bffBasePath }),
+    [bffBasePath],
   );
-  const tokenCache = useMemo(() => createHubAccessTokenCache(client), [client]);
+  const tokenCache = useMemo(
+    () => createHubAccessTokenCache(() => requestHubAccessToken(bffBasePath)),
+    [bffBasePath],
+  );
   const operationGeneration = useRef(0);
   /**
    * The token last pushed into React state. `undefined` is a sentinel that no apply
@@ -154,8 +164,6 @@ function HubAuthProvider({ children }: { children: ReactNode }) {
    * which must flip `isLoaded` - always runs.
    */
   const lastAppliedToken = useRef<string | null | undefined>(undefined);
-  /** A token has been observed and not yet invalidated. Gates the ladder. */
-  const hasSessionRef = useRef(false);
   const revalidateAttempts = useRef(0);
   const revalidateTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /**
@@ -209,7 +217,6 @@ function HubAuthProvider({ children }: { children: ReactNode }) {
     function failSession() {
       clearRevalidateTimer();
       revalidateAttempts.current = 0;
-      hasSessionRef.current = false;
       applyToken(null);
     }
 
@@ -225,18 +232,19 @@ function HubAuthProvider({ children }: { children: ReactNode }) {
       revalidateAttempts.current = attempt + 1;
       revalidateTimer.current = setTimeout(() => {
         revalidateTimer.current = null;
-        void tokenCache.getToken().then(observeToken, () => observeToken(null));
+        void tokenCache
+          .getToken()
+          .then(observeToken, () => observeToken(TRANSIENT_TOKEN_RESULT));
       }, SESSION_REVALIDATE_DELAYS_MS[attempt]);
     }
 
-    function observeToken(token: string | null) {
+    function observeToken(result: HubTokenResult) {
       // A resolution that lands after unmount is dropped whole: applying it would be a
       // setState on a dead root, and rescheduling from it would leak a timer forever.
       if (!mountedRef.current) return;
-      if (token !== null) {
+      if (result.token !== null) {
         clearRevalidateTimer();
         revalidateAttempts.current = 0;
-        hasSessionRef.current = true;
         // A normal re-login (attempt 1, callback, token) leaves the loop guard at
         // zero, so it can never fire during ordinary operation.
         clearLoginAttempts();
@@ -249,25 +257,42 @@ function HubAuthProvider({ children }: { children: ReactNode }) {
         // and deliberately NOT inside `applyToken`, whose unchanged-token early return
         // would skip it whenever a re-login happened to yield a byte-identical token.
         clearLogoutIntent();
-        applyToken(token);
+        applyToken(result.token);
         return;
       }
-      // Cold start: no profile to preserve and no in-progress work to lose, so an
-      // immediate sign-out and re-login is the fastest correct answer.
-      if (!hasSessionRef.current) {
-        applyToken(null);
+      /*
+        The BFF's own `401`. The session is provably dead - revoked, reused, expired,
+        or never there - so the ladder has nothing left to prove and six seconds of
+        retries would be pure latency in front of a login the operator already needs.
+      */
+      if (result.failure === 'session_expired') {
+        failSession();
         return;
       }
+      /*
+        Transient, and that includes a COLD START. Signing out on a boot-time Hub blip
+        would redirect into a login that also fails, burn the `registerLoginAttempt`
+        budget and strand the operator on `SessionRecoveryPanel` - the same class of
+        bug the ladder exists to prevent, reached from the other end. `isLoaded` stays
+        false meanwhile, so `HubProtected` holds its Skeleton rather than flashing a
+        signed-out screen.
+      */
       scheduleRevalidate();
     }
 
     return { clearRevalidateTimer, failSession, observeToken };
   }, [applyToken, tokenCache]);
 
+  /**
+   * Keeps its `Promise<string | null>` signature deliberately. Roughly forty call
+   * sites and `AccessTokenHook` depend on it, and the classification stops here: see
+   * the `nexo/ROADMAP.md` entry about `Sessão expirada` still reading wrong for a
+   * transient failure in the sales-ops panels.
+   */
   const getToken = useCallback(async () => {
-    const token = await tokenCache.getToken();
-    observeToken(token);
-    return token;
+    const result = await tokenCache.getToken();
+    observeToken(result);
+    return result.token;
   }, [observeToken, tokenCache]);
 
   const login = useCallback(() => client.login(), [client]);
@@ -292,8 +317,11 @@ function HubAuthProvider({ children }: { children: ReactNode }) {
     markLogoutIntent();
     operationGeneration.current += 1;
     tokenCache.clear();
-    // Kills any in-flight ladder and clears `hasSessionRef`, so a late resolution
-    // cannot resurrect a profile after an explicit sign-out.
+    // Kills any in-flight ladder and applies the signed-out profile. A read that lands
+    // after this can still start a fresh ladder, which is harmless: `applyToken(null)`
+    // is idempotent through `lastAppliedToken`, so an exhausted post-logout ladder
+    // re-applies a state the app is already in, and the unmount effect clears the
+    // pending timer. The durable logout intent above is the real guard.
     failSession();
     clearLoginAttempts();
     /*
@@ -313,7 +341,7 @@ function HubAuthProvider({ children }: { children: ReactNode }) {
       const result = await client.setActive(workspaceId);
       if (switchGeneration !== operationGeneration.current) return;
       tokenCache.seed(result.accessToken, result.expiresIn);
-      observeToken(result.accessToken);
+      observeToken({ token: result.accessToken });
     },
     [client, observeToken, tokenCache],
   );
@@ -322,13 +350,13 @@ function HubAuthProvider({ children }: { children: ReactNode }) {
     let active = true;
     void tokenCache
       .getToken()
-      .then((token) => {
-        if (active) observeToken(token);
+      .then((result) => {
+        if (active) observeToken(result);
       })
       .catch(() => {
-        // A throw on cold start is still an immediate sign-out because
-        // `hasSessionRef` is false; a throw once signed in enters the ladder.
-        if (active) observeToken(null);
+        // `requestHubAccessToken` already absorbs a network throw, so reaching here is
+        // a bug rather than an outage. It is still transient: a throw is not a verdict.
+        if (active) observeToken(TRANSIENT_TOKEN_RESULT);
       });
     return () => {
       active = false;

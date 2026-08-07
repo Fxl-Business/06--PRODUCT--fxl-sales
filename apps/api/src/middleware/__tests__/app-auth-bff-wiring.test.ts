@@ -273,6 +273,60 @@ describe('createAppAuthBff cookie routing, against the real SDK', () => {
   });
 });
 
+/**
+ * The `/auth/refresh` CONTRACT pin, on behalf of `apps/web/src/auth/refresh.ts`.
+ *
+ * That module posts to `<bffBasePath>/auth/refresh` itself, because
+ * `HubClient.getToken()` discards `res.status` and so hides the BFF's 401/503/502
+ * classification from every consumer. The web-side test asserts our own literal
+ * against our own literal, which is the exact weakness the cookie-name pin above
+ * removed: if a future SDK moves the path or the method, that test stays green
+ * while the app silently 404s - and a 404 is neither a 401 nor a 5xx, so every
+ * page load would burn the full revalidation ladder and then bounce to a login.
+ *
+ * This lives here rather than beside `refresh.test.ts` because `hono` is not
+ * resolvable from `apps/web`, and adding it there to host one test would put a
+ * server framework in the browser package's dependency graph. What is being
+ * pinned is the SDK's server-side route table, which is this package's business.
+ */
+describe('the SDK BFF route contract apps/web/src/auth/refresh.ts is coupled to', () => {
+  async function realBff() {
+    const actual = await vi.importActual<typeof import('@fxl-business/hub-sdk/server')>(
+      '@fxl-business/hub-sdk/server',
+    );
+    const config: HubSdkConfig = {
+      apiUrl: 'http://localhost:9016',
+      publishableKey: 'pk_fxl-sales_unit-test-publishable-key',
+      secretKey: HUB_SECRET_KEY,
+      audience: 'product.fxl-sales',
+    };
+    return actual.createHubBff(config, {
+      sessionStore: new InMemoryHubSessionStore(),
+      fetchImpl: (() => {
+        throw new Error('a cookieless refresh must never reach the Hub');
+      }) as unknown as typeof fetch,
+    });
+  }
+
+  it('answers 401 to a cookieless POST /auth/refresh, which is the verdict the web classifier keys on', async () => {
+    const bff = await realBff();
+
+    const res = await bff.request('http://localhost/auth/refresh', { method: 'POST' });
+
+    expect(res.status).toBe(401);
+  });
+
+  it('does not route a neighbouring path, so a moved endpoint cannot pass as a live one', async () => {
+    // Without this, the 401 above would also be satisfied by a catch-all, and the
+    // pin would prove nothing about the path itself.
+    const bff = await realBff();
+
+    const res = await bff.request('http://localhost/auth/refreshx', { method: 'POST' });
+
+    expect(res.status).toBe(404);
+  });
+});
+
 describe('createAppAuthBff store outage', () => {
   it("answers 503 rather than a cookie-clearing 401 when withSession rejects, through app.route('', authBff)", async () => {
     // The end-to-end constraint-2 proof, against the REAL SDK and through the

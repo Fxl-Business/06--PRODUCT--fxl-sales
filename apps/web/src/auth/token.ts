@@ -1,10 +1,10 @@
-import type { HubClient } from '@fxl-business/hub-sdk/client';
 import { parseJwtPayload } from './claims';
+import { TRANSIENT_TOKEN_RESULT, type HubTokenResult } from './refresh';
 
 export const ACCESS_TOKEN_EXPIRY_SKEW_MS = 30_000;
 
 export type HubAccessTokenCache = {
-  getToken: () => Promise<string | null>;
+  getToken: () => Promise<HubTokenResult>;
   seed: (accessToken: string, expiresInSeconds: number) => void;
   clear: () => void;
 };
@@ -23,12 +23,17 @@ function readServerExpiry(expiresInSeconds: number): number | null {
   return Number.isFinite(expiresAt) ? expiresAt : null;
 }
 
+/**
+ * Takes an injected refresher rather than the SDK client, so this module is the CACHE
+ * and `refresh.ts` is the CLASSIFICATION. One seam each: nothing here reinterprets a
+ * verdict, and nothing there remembers a token.
+ */
 export function createHubAccessTokenCache(
-  client: Pick<HubClient, 'getToken'>,
+  refresh: () => Promise<HubTokenResult>,
 ): HubAccessTokenCache {
   let cachedToken: string | null = null;
   let expiresAt: number | null = null;
-  let inFlight: Promise<string | null> | null = null;
+  let inFlight: Promise<HubTokenResult> | null = null;
   let generation = 0;
 
   const readFreshToken = () => {
@@ -47,29 +52,34 @@ export function createHubAccessTokenCache(
     expiresAt = null;
   };
 
-  const getToken = (): Promise<string | null> => {
+  const getToken = (): Promise<HubTokenResult> => {
     const freshToken = readFreshToken();
-    if (freshToken !== null) return Promise.resolve(freshToken);
+    if (freshToken !== null) return Promise.resolve({ token: freshToken });
     if (inFlight) return inFlight;
 
     const refreshGeneration = generation;
-    const refreshPromise = client
-      .getToken()
-      .then((accessToken) => {
-        if (generation !== refreshGeneration) return readFreshToken();
-        if (accessToken === null) {
+    const refreshPromise = refresh()
+      .then((result): HubTokenResult => {
+        if (generation !== refreshGeneration) {
+          // Superseded by a `seed` (workspace switch) or a `clear` (logout). A late
+          // answer proves nothing about the CURRENT session, so it is never allowed
+          // to report `session_expired` and tear one down.
+          const current = readFreshToken();
+          return current === null ? TRANSIENT_TOKEN_RESULT : { token: current };
+        }
+        if (result.token === null) {
           discardCachedToken();
-          return null;
+          return result;
         }
 
-        const jwtExpiry = readJwtExpiry(accessToken);
+        const jwtExpiry = readJwtExpiry(result.token);
         if (jwtExpiry !== null) {
-          cachedToken = accessToken;
+          cachedToken = result.token;
           expiresAt = jwtExpiry;
         } else {
           discardCachedToken();
         }
-        return accessToken;
+        return result;
       })
       .finally(() => {
         if (inFlight === refreshPromise) inFlight = null;
