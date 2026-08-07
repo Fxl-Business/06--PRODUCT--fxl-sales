@@ -16,13 +16,14 @@
  * Run: pnpm --filter @fxl-sales/api test:integration
  */
 import { randomUUID } from 'node:crypto';
-import { InMemoryHubSessionStore, type HubSessionStore } from '@fxl-business/hub-sdk';
+import { InMemoryHubSessionStore } from '@fxl-business/hub-sdk';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   createDurableHubSessionStore,
   deleteExpiredHubBffSessions,
+  type DurableHubSessionStore,
 } from '../../src/auth/hub-session-store.js';
 import { createSessionSealer } from '../../src/auth/session-crypto.js';
 import * as schema from '../../src/db/schema.js';
@@ -57,7 +58,7 @@ describe('durable Hub BFF session store', () => {
   const loginTxIds: string[] = [];
 
   /** A fresh store object over the same connection == a restarted process. */
-  function newStore(now?: () => Date): HubSessionStore {
+  function newStore(now?: () => Date): DurableHubSessionStore {
     return createDurableHubSessionStore({
       db: adminDb,
       sealer: createSessionSealer(IKM),
@@ -76,7 +77,7 @@ describe('durable Hub BFF session store', () => {
   }
 
   /** Reads a session through a fresh store instance, outside any lock. */
-  async function readToken(store: HubSessionStore, sessionId: string) {
+  async function readToken(store: DurableHubSessionStore, sessionId: string) {
     return store.withSession(sessionId, async (tx) => (await tx.get())?.hubRefreshToken ?? null);
   }
 
@@ -441,5 +442,126 @@ describe('durable Hub BFF session store', () => {
     expect(await adminClient`SELECT id FROM hub_bff_login_txns WHERE id = ${liveTx}`).toHaveLength(
       1,
     );
+  });
+
+  /**
+   * The prior-session supersede, which is about ROWS and TRANSACTIONS and so has
+   * no honest unit-level oracle.
+   *
+   * The key is the session id THIS BROWSER presented at /auth/callback, not the
+   * account id: @fxl-business/hub-sdk@1.3.0 never passes an accountId to
+   * store.create (dist/server.js:407-413), so `account_id` is unconditionally
+   * NULL and an account-keyed supersede would match zero rows forever.
+   */
+  describe('prior-session supersede at login', () => {
+    async function rowCount(id: string): Promise<number> {
+      const rows = await adminClient`SELECT id FROM hub_bff_sessions WHERE id = ${id}`;
+      return rows.length;
+    }
+
+    it('deletes the session id the browser presented at login', async () => {
+      const store = newStore();
+      const priorId = trackSession(await store.create({ hubRefreshToken: 'token-prior' }));
+
+      const newSessionId = trackSession(
+        await store.withLoginContext({ priorSessionId: priorId }, () =>
+          store.create({ hubRefreshToken: 'token-new' }),
+        ),
+      );
+
+      expect(newSessionId).not.toBe(priorId);
+      expect(await rowCount(priorId)).toBe(0);
+      expect(await rowCount(newSessionId)).toBe(1);
+    });
+
+    it('leaves a session held by another browser untouched', async () => {
+      // THE MULTI-DEVICE ORACLE, and the anti-oracle for account-id keying. A
+      // supersede keyed on anything broader than the presented session id - the
+      // account, the token family, "every other row" - deletes the second
+      // browser's row too and turns this red. That is the whole reason the key
+      // is what it is; do not widen it without reading slice 06's plan.
+      const store = newStore();
+      const browserOne = trackSession(await store.create({ hubRefreshToken: 'token-one' }));
+      const browserTwo = trackSession(await store.create({ hubRefreshToken: 'token-two' }));
+
+      const replacement = trackSession(
+        await store.withLoginContext({ priorSessionId: browserOne }, () =>
+          store.create({ hubRefreshToken: 'token-one-again' }),
+        ),
+      );
+
+      expect(await rowCount(browserOne)).toBe(0);
+      expect(await rowCount(replacement)).toBe(1);
+      // Not merely present: still usable, which is what "stays signed in" means.
+      expect(await readToken(newStore(), browserTwo)).toBe('token-two');
+    });
+
+    it('makes the superseded session unresolvable through withSession', async () => {
+      // Asserted through the SDK-facing accessor rather than a row count,
+      // because "no longer rotatable" is a statement about what /auth/refresh
+      // sees: dist/server.js:423-426 turns a null get() into 401 no_session with
+      // the cookie cleared.
+      const store = newStore();
+      const priorId = trackSession(await store.create({ hubRefreshToken: 'token-prior' }));
+      expect(await readToken(newStore(), priorId)).toBe('token-prior');
+
+      trackSession(
+        await store.withLoginContext({ priorSessionId: priorId }, () =>
+          store.create({ hubRefreshToken: 'token-new' }),
+        ),
+      );
+
+      expect(await store.withSession(priorId, async (tx) => tx.get())).toBeNull();
+    });
+
+    it('keeps the prior session when the new insert fails', async () => {
+      // THE ATOMICITY ORACLE. A decoy row already owns the id the store is about
+      // to mint, so the INSERT violates the primary key AFTER the supersede
+      // DELETE has run. Deleting outside the transaction, or in a transaction of
+      // its own, loses the prior session and has nothing to put in its place -
+      // the operator is signed out by a failed login.
+      const collisionId = trackSession(`collide_${randomUUID()}`);
+      await adminClient`
+        INSERT INTO hub_bff_sessions (id, hub_refresh_token_enc, expires_at, absolute_expires_at)
+        VALUES (${collisionId}, 'v1.a.b.c', now() + interval '1 day', now() + interval '90 days')
+      `;
+
+      const priorId = trackSession(await newStore().create({ hubRefreshToken: 'token-prior' }));
+      const collidingStore = createDurableHubSessionStore({
+        db: adminDb,
+        sealer: createSessionSealer(IKM),
+        newId: () => collisionId,
+      });
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      try {
+        await expect(
+          collidingStore.withLoginContext({ priorSessionId: priorId }, () =>
+            collidingStore.create({ hubRefreshToken: 'token-new' }),
+          ),
+        ).rejects.toMatchObject({ name: 'HubSessionStoreUnavailableError' });
+      } finally {
+        errorLog.mockRestore();
+      }
+
+      expect(await rowCount(priorId)).toBe(1);
+      expect(await readToken(newStore(), priorId)).toBe('token-prior');
+    });
+
+    it('creates a session normally when no prior session was presented', async () => {
+      // The fresh-browser path, and the non-vacuity control for the four above:
+      // absence of a login context is never an error.
+      const store = newStore();
+
+      const noContext = trackSession(await store.create({ hubRefreshToken: 'token-a' }));
+      const emptyContext = trackSession(
+        await store.withLoginContext({ priorSessionId: undefined }, () =>
+          store.create({ hubRefreshToken: 'token-b' }),
+        ),
+      );
+
+      expect(await readToken(newStore(), noContext)).toBe('token-a');
+      expect(await readToken(newStore(), emptyContext)).toBe('token-b');
+    });
   });
 });

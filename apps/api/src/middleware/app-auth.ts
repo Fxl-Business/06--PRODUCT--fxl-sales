@@ -2,6 +2,7 @@ import type { HubSdkConfig } from '@fxl-business/hub-sdk';
 import { createHubBff, requireHubAuth } from '@fxl-business/hub-sdk/server';
 import { Hono, type MiddlewareHandler } from 'hono';
 import { hubBffErrorHandler } from '../auth/hub-bff-errors.js';
+import { createHubLoginSupersedeMiddleware } from '../auth/hub-login-scope.js';
 import {
   SESSION_ABSOLUTE_TTL_MS,
   SESSION_TTL_MS,
@@ -229,12 +230,23 @@ export function createAppAuthBff() {
     postLoginErrorRedirect: resolveHubPostLoginErrorRedirect(process.env),
   });
 
-  // The error handler is mounted INSIDE the returned router, so server.ts stays
-  // `app.route('', authBff)` and it cannot be forgotten. It must be an onError
-  // rather than a middleware - see hub-bff-errors.ts. Mounting it on the memory
-  // path too is inert (that store never throws HubSessionStoreUnavailableError)
-  // and removes a branch.
+  // Both are mounted INSIDE the returned router, so server.ts stays
+  // `app.route('', authBff)` and neither can be forgotten.
   const router = new Hono();
+  // Narrowed to the durable store EXPLICITLY. Since the hydrate/flush bridge was
+  // deleted, the memory fallback (local dev without DATABASE_URL) flows through
+  // this same router, and the SDK's InMemoryHubSessionStore has no
+  // withLoginContext - so an unconditional mount would make every /auth/callback
+  // throw a TypeError there. Only the durable store can supersede.
+  if (session.kind === 'durable') {
+    router.use(
+      '/auth/callback',
+      createHubLoginSupersedeMiddleware(session.store, { secureCookies }),
+    );
+  }
+  // The error handler must be an onError rather than a middleware - see
+  // hub-bff-errors.ts. Mounting it on the memory path too is inert (that store
+  // never throws HubSessionStoreUnavailableError) and removes a branch.
   router.onError(hubBffErrorHandler);
   router.route('', bff);
   return router;
