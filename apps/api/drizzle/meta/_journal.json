@@ -148,6 +148,13 @@
       "when": 1786030700588,
       "tag": "0020_cadastro_archived_at",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1786119231814,
+      "tag": "0021_hub_session_absolute_ttl",
+      "breakpoints": true
     }
   ]
 }

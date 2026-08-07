@@ -35,17 +35,60 @@ import {
   type HubSessionStore,
   type HubSessionTransaction,
 } from '@fxl-business/hub-sdk';
-import { eq, lte } from 'drizzle-orm';
+import { eq, lte, or } from 'drizzle-orm';
 import { getAdminDb } from '../db/client.js';
 import { hubBffLoginTxns, hubBffSessions } from '../db/schema.js';
 import { createSessionSealer, type SessionSealer } from './session-crypto.js';
 
 type NodeDb = ReturnType<typeof getAdminDb>;
+type HubBffSessionRow = typeof hubBffSessions.$inferSelect;
 
 /** Sliding: rewritten to now + 30 days on every refresh-token rotation. */
 export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * ABSOLUTE ceiling, set once at create and never extended. A continuously
+ * refreshing session dies here no matter how active it is, which is the only thing
+ * that bounds a stolen session id.
+ *
+ * 90 days, not the SDK's 365-day default: the numbers a product picks here are a
+ * security posture, and 365 days means the ceiling almost never binds - a user idle
+ * for 30 days is already killed by the sliding TTL, so a 365-day cap only ever
+ * catches someone who has been active for a year. 90 days is exactly 3x the sliding
+ * window, so a daily user really is forced back through the Hub once a quarter.
+ *
+ * That 90 days happens to equal the SDK's SLIDING default (7 776 000s) is a
+ * coincidence, not an adoption. Our sliding window stays at 30 days.
+ */
+export const SESSION_ABSOLUTE_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+
 /** Matches the SDK's LOGIN_TX_MAX_AGE_SECONDS = 600 (1.3.0 dist/server.js:279). */
 export const LOGIN_TX_TTL_MS = 10 * 60 * 1000;
+
+/**
+ * The ONE conversion boundary between our timestamptz columns, which Drizzle hands
+ * back as Date objects, and HubSessionRecord, which types both expiry fields as an
+ * optional ISO string.
+ *
+ * It only runs in this direction. Nothing ever parses the SDK's strings back into a
+ * Date: `create` and `update` ignore `record.expiresAt` and `record.absoluteExpiresAt`
+ * entirely and compute their own Dates from `#now()`, so there is no inbound half to
+ * keep in sync.
+ *
+ * Handing the SDK a Date instead of a string type-errors on nothing at runtime and
+ * fails silently: dist/server.js:424 does `now() >= Date.parse(record.absoluteExpiresAt)`,
+ * and Date.parse of a Date object is NaN, so the SDK's own expiry gate would just
+ * stop firing. That is what the 'hands the SDK both expiries as ISO strings' oracle
+ * pins.
+ */
+function toSessionRecord(row: HubBffSessionRow, hubRefreshToken: string): HubSessionRecord {
+  return {
+    hubRefreshToken,
+    ...(row.accountId ? { accountId: row.accountId } : {}),
+    expiresAt: row.expiresAt.toISOString(),
+    absoluteExpiresAt: row.absoluteExpiresAt.toISOString(),
+  };
+}
 
 /** Thrown when the store cannot answer, so the BFF router can answer 503. */
 export class HubSessionStoreUnavailableError extends Error {
@@ -81,6 +124,9 @@ class PostgresHubSessionStore implements HubSessionStore {
 
   async create(data: HubSessionRecord): Promise<string> {
     const id = newId();
+    // ONE clock read for both timestamps, so they can never be anchored to
+    // different milliseconds.
+    const now = this.#now().getTime();
     try {
       await this.#db.insert(hubBffSessions).values({
         id,
@@ -90,8 +136,15 @@ class PostgresHubSessionStore implements HubSessionStore {
         // This store owns the expiry columns, the sliding rule and the nightly
         // sweeper; the SDK's create-time value is a fixed timestamp that cannot
         // express sliding, and honouring it would make the TTL depend on
-        // `createHubBff`'s option defaults rather than on SESSION_TTL_MS.
-        expiresAt: new Date(this.#now().getTime() + SESSION_TTL_MS),
+        // `createHubBff`'s option defaults rather than on our own constants.
+        expiresAt: new Date(now + SESSION_TTL_MS),
+        // Written ONCE, here, and nowhere else in this file. No rotation moves
+        // it; that is the entire point of the column. `createHubBff` IS given
+        // matching values so the two views agree - see app-auth.ts - but nothing
+        // here depends on that, because the store has to be correct standing
+        // alone rather than only when the caller remembered to pass
+        // `sessionAbsoluteTtlSeconds`.
+        absoluteExpiresAt: new Date(now + SESSION_ABSOLUTE_TTL_MS),
       });
     } catch (err) {
       throw this.#unavailable('hub session create failed', err);
@@ -118,8 +171,14 @@ class PostgresHubSessionStore implements HubSessionStore {
         const now = this.#now().getTime();
         let row = rows[0] ?? null;
 
-        // Expired: deleted inside this transaction and reported absent.
-        if (row && row.expiresAt.getTime() <= now) {
+        // Past EITHER timestamp: deleted inside this transaction and reported
+        // absent, per MIGRATION.md ("A store implementing withSession should
+        // treat a record past either timestamp as absent: delete it inside the
+        // transaction and resolve null"). The absolute term is not redundant
+        // with the sliding one: a row rotated yesterday has expires_at 29 days
+        // in the future while absolute_expires_at may already have passed, and
+        // that row is exactly the one the ceiling exists to kill.
+        if (row && (row.expiresAt.getTime() <= now || row.absoluteExpiresAt.getTime() <= now)) {
           await tx.delete(hubBffSessions).where(eq(hubBffSessions.id, sessionId));
           row = null;
         }
@@ -133,14 +192,7 @@ class PostgresHubSessionStore implements HubSessionStore {
         const live = token === null ? null : row;
 
         const handle: HubSessionTransaction = {
-          get: async () =>
-            live && token !== null
-              ? {
-                  hubRefreshToken: token,
-                  ...(live.accountId ? { accountId: live.accountId } : {}),
-                  expiresAt: live.expiresAt.toISOString(),
-                }
-              : null,
+          get: async () => (live && token !== null ? toSessionRecord(live, token) : null),
           update: async (record) => {
             await tx
               .update(hubBffSessions)
@@ -151,6 +203,12 @@ class PostgresHubSessionStore implements HubSessionStore {
                 // spreads back the value it got from `get()` (dist/server.js:464),
                 // so honouring it would freeze the TTL at 30 days from login.
                 expiresAt: new Date(this.#now().getTime() + SESSION_TTL_MS),
+                // `absoluteExpiresAt` is ABSENT from this object ON PURPOSE, and
+                // `record.absoluteExpiresAt` is ignored for the mirror-image
+                // reason. A rotation must never extend the ceiling, so the safest
+                // expression of that is to have no statement here that could
+                // write it. Adding it back - even as `record.absoluteExpiresAt` -
+                // restores the immortal session.
                 updatedAt: new Date(),
               })
               .where(eq(hubBffSessions.id, sessionId));
@@ -262,9 +320,13 @@ export async function deleteExpiredHubBffSessions(
   db: NodeDb,
 ): Promise<{ sessions: number; loginTxns: number }> {
   const now = new Date();
+  // EITHER timestamp, matching withSession's predicate and the SDK's bundled DDL
+  // sweep (schema/session-store.sql, "expiry sweep"). withSession already deletes
+  // an expired row on access, so this is only about rows nobody comes back for -
+  // which is exactly the stolen-and-abandoned session the ceiling is for.
   const removedSessions = await db
     .delete(hubBffSessions)
-    .where(lte(hubBffSessions.expiresAt, now))
+    .where(or(lte(hubBffSessions.expiresAt, now), lte(hubBffSessions.absoluteExpiresAt, now)))
     .returning({ id: hubBffSessions.id });
   const removedLogins = await db
     .delete(hubBffLoginTxns)

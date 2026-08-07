@@ -288,6 +288,48 @@ describe('durable Hub BFF session store', () => {
     expect(await readExpiresAt()).toBeGreaterThan(before);
   });
 
+  it('treats a session past only its absolute expiry as absent and deletes the row inside the transaction', async () => {
+    const sid = trackSession(`abs_${randomUUID()}`);
+    // The sliding window is 29 days from now, so ONLY the ceiling has passed.
+    // This is the row the whole slice exists to kill: an attacker refreshing a
+    // stolen session id keeps expires_at permanently in the future.
+    await adminClient`
+      INSERT INTO hub_bff_sessions (id, hub_refresh_token_enc, expires_at, absolute_expires_at)
+      VALUES (${sid}, 'v1.a.b.c', now() + interval '29 days', now() - interval '1 second')
+    `;
+
+    expect(await readToken(newStore(), sid)).toBeNull();
+    expect(await adminClient`SELECT id FROM hub_bff_sessions WHERE id = ${sid}`).toHaveLength(0);
+  });
+
+  it('does not move absolute_expires_at when a rotation slides expires_at', async () => {
+    const storeA = newStore();
+    const sid = trackSession(await storeA.create({ hubRefreshToken: 'token-old' }));
+    const readExpiries = async (): Promise<{ sliding: number; absolute: string }> => {
+      const [row] = await adminClient<{ expires_at: string | Date; absolute_expires_at: string }[]>`
+        SELECT expires_at, absolute_expires_at FROM hub_bff_sessions WHERE id = ${sid}
+      `;
+      // The absolute value is compared as the RAW column text, so a rewrite that
+      // happens to land on the same millisecond is still caught.
+      return { sliding: new Date(row!.expires_at).getTime(), absolute: String(row!.absolute_expires_at) };
+    };
+    const before = await readExpiries();
+
+    const later = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    await newStore(() => later).withSession(sid, async (tx) => {
+      const record = await tx.get();
+      // dist/server.js:464 verbatim - the record spread back with only
+      // hubRefreshToken replaced, BOTH expiries untouched by the SDK.
+      await tx.update({ ...record!, hubRefreshToken: 'token-new' });
+    });
+
+    const after = await readExpiries();
+    expect(after.sliding).toBeGreaterThan(before.sliding);
+    // Persisting record.absoluteExpiresAt would move this and restore the
+    // immortal active session.
+    expect(after.absolute).toBe(before.absolute);
+  });
+
   it('never stores the Hub refresh token in plaintext', async () => {
     const storeA = newStore();
     const sid = trackSession(await storeA.create({ hubRefreshToken: 'refresh-token-alpha' }));
@@ -357,22 +399,24 @@ describe('durable Hub BFF session store', () => {
     const smuggledId = `smuggled_${randomUUID()}`;
     await expect(
       appClient`
-        INSERT INTO hub_bff_sessions (id, hub_refresh_token_enc, expires_at)
-        VALUES (${smuggledId}, 'v1.x.y.z', now() + interval '1 day')
+        INSERT INTO hub_bff_sessions (id, hub_refresh_token_enc, expires_at, absolute_expires_at)
+        VALUES (${smuggledId}, 'v1.x.y.z', now() + interval '1 day', now() + interval '90 days')
       `,
     ).rejects.toThrow();
   });
 
-  it('removes only expired rows', async () => {
+  it('removes rows expired by either timestamp and keeps a row expired by neither', async () => {
     const liveSid = trackSession(`live_${randomUUID()}`);
     const deadSid = trackSession(`dead_${randomUUID()}`);
+    const cappedSid = trackSession(`capped_${randomUUID()}`);
     const liveTx = trackLogin(`live_${randomUUID()}`);
     const deadTx = trackLogin(`dead_${randomUUID()}`);
 
     await adminClient`
-      INSERT INTO hub_bff_sessions (id, hub_refresh_token_enc, expires_at) VALUES
-        (${liveSid}, 'v1.a.b.c', now() + interval '1 day'),
-        (${deadSid}, 'v1.a.b.c', now() - interval '1 day')
+      INSERT INTO hub_bff_sessions (id, hub_refresh_token_enc, expires_at, absolute_expires_at) VALUES
+        (${liveSid}, 'v1.a.b.c', now() + interval '1 day', now() + interval '90 days'),
+        (${deadSid}, 'v1.a.b.c', now() - interval '1 day', now() + interval '90 days'),
+        (${cappedSid}, 'v1.a.b.c', now() + interval '29 days', now() - interval '1 second')
     `;
     await adminClient`
       INSERT INTO hub_bff_login_txns (id, code_verifier_enc, state, expires_at) VALUES
@@ -381,10 +425,15 @@ describe('durable Hub BFF session store', () => {
     `;
 
     const removed = await deleteExpiredHubBffSessions(adminDb);
-    expect(removed.sessions).toBeGreaterThanOrEqual(1);
+    expect(removed.sessions).toBeGreaterThanOrEqual(2);
     expect(removed.loginTxns).toBeGreaterThanOrEqual(1);
 
     expect(await adminClient`SELECT id FROM hub_bff_sessions WHERE id = ${deadSid}`).toHaveLength(0);
+    // The non-vacuity row: drop the `or(...)` term from the sweep and this one
+    // survives while every other assertion in this test still passes.
+    expect(await adminClient`SELECT id FROM hub_bff_sessions WHERE id = ${cappedSid}`).toHaveLength(
+      0,
+    );
     expect(await adminClient`SELECT id FROM hub_bff_sessions WHERE id = ${liveSid}`).toHaveLength(1);
     expect(await adminClient`SELECT id FROM hub_bff_login_txns WHERE id = ${deadTx}`).toHaveLength(
       0,

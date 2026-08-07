@@ -950,11 +950,21 @@ export const hubBffSessions = pgTable(
     id: text('id').primaryKey(), // opaque, 256-bit, base64url
     hubRefreshTokenEnc: text('hub_refresh_token_enc').notNull(), // AES-256-GCM, aad = id
     accountId: text('account_id'),
+    /** SLIDING: rewritten to now + SESSION_TTL_MS on every rotation. */
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    /**
+     * ABSOLUTE ceiling: written once at create, never moved by a rotation. NOT NULL
+     * with no default so an uncapped session is unrepresentable and a forgotten
+     * insert is a compile error rather than an immortal session.
+     */
+    absoluteExpiresAt: timestamp('absolute_expires_at', { withTimezone: true }).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
-  (t) => [index('hub_bff_sessions_expires_at_idx').on(t.expiresAt)],
+  (t) => [
+    index('hub_bff_sessions_expires_at_idx').on(t.expiresAt),
+    index('hub_bff_sessions_absolute_expires_at_idx').on(t.absoluteExpiresAt),
+  ],
 );
 
 export const hubBffLoginTxns = pgTable(
