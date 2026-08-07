@@ -15,6 +15,12 @@
     }
   },
   "gate1": {
+    "feature": "feature-20260807-hub-sdk-130-session-hardening",
+    "decision": "skipped-autopilot",
+    "decided_at": "2026-08-07",
+    "note": "User selected Autopilot at the front door, and pre-answered the one design fork that mattered: keep our own session store, do not adopt SqlHubSessionStore. Six slices in three waves upgrade @fxl-business/hub-sdk to ^1.3.0, port the store to the async transactional withSession contract, add an absolute session lifetime, consume the new refresh-failure classification, and close the logout leak as a defect. Gate 2 remains mandatory per slice and per wave. Gate 3 remains human-gated; this run stops at master."
+  },
+  "gate1_prior": {
     "feature": "batch-20260805-release-blocker-repair",
     "decision": "skipped-autopilot",
     "decided_at": "2026-08-05",
