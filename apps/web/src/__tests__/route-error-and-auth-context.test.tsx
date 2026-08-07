@@ -75,6 +75,24 @@ describe('dev-race regression contract', () => {
     expect(source).toContain('warmup');
   });
 
+  /**
+   * The structural precondition that makes `useQueryClient()` inside `HubAuthProvider`
+   * legal, and therefore what makes the identity flush on logout, on an in-page
+   * signed-out to signed-in transition and on a workspace switch possible at all.
+   *
+   * Reverting the nesting also reddens the auth tests, but only because their harness
+   * happens to wrap them, which reads as a test-setup failure rather than as the
+   * contract violation it is. A source pin says what the invariant is.
+   */
+  it('App.tsx mounts QueryClientProvider outside AppAuthProvider', () => {
+    const source = readSource('src/App.tsx');
+    const queryProvider = source.indexOf('<QueryClientProvider');
+    const authProvider = source.indexOf('<AppAuthProvider');
+    expect(queryProvider).toBeGreaterThanOrEqual(0);
+    expect(authProvider).toBeGreaterThanOrEqual(0);
+    expect(queryProvider).toBeLessThan(authProvider);
+  });
+
   it('HubAuthContext is a globalThis singleton so duplicated modules share one context', () => {
     const source = readSource('src/auth/react.tsx');
     expect(source).toContain('__fxlHubAuthContext');
