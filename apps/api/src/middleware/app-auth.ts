@@ -2,7 +2,11 @@ import type { HubSdkConfig } from '@fxl-business/hub-sdk';
 import { createHubBff, requireHubAuth } from '@fxl-business/hub-sdk/server';
 import { Hono, type MiddlewareHandler } from 'hono';
 import { hubBffErrorHandler } from '../auth/hub-bff-errors.js';
-import { createHubSessionStore } from '../auth/hub-session-store.js';
+import {
+  SESSION_ABSOLUTE_TTL_MS,
+  SESSION_TTL_MS,
+  createHubSessionStore,
+} from '../auth/hub-session-store.js';
 import { tryLoadHubAuthConfig } from '../config/auth-provider.js';
 import { env } from '../env.js';
 
@@ -212,6 +216,14 @@ export function createAppAuthBff() {
     sessionStore: session.store,
     secureCookies,
     timeoutMs: HUB_BFF_TIMEOUT_MS,
+    // Derived from the store's own constants, so the SDK's view of a session's
+    // lifetime and the store's cannot disagree. The store ignores the values the
+    // SDK computes from these (it owns both columns), so passing them is
+    // DECLARATIVE - it exists to keep the SDK's 90-day sliding / 365-day absolute
+    // DEFAULTS out of play and to make a future divergence a test failure rather
+    // than a surprise.
+    sessionTtlSeconds: SESSION_TTL_MS / 1000,
+    sessionAbsoluteTtlSeconds: SESSION_ABSOLUTE_TTL_MS / 1000,
     redirectUri: resolveHubRedirectUri(process.env),
     postLoginRedirect: resolveHubPostLoginRedirect(process.env),
     postLoginErrorRedirect: resolveHubPostLoginErrorRedirect(process.env),

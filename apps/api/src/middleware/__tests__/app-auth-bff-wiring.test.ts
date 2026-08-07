@@ -23,11 +23,27 @@ import type { HubSdkConfig, HubSessionStore } from '@fxl-business/hub-sdk';
 import { InMemoryHubSessionStore } from '@fxl-business/hub-sdk';
 import { Hono } from 'hono';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+/**
+ * Plain numbers, so unlike `HubSessionStoreUnavailableError` below these are safe
+ * to take from this file's own module registry: `vi.resetModules()` gives them a
+ * different module object but the same values, and there is no `instanceof` here.
+ */
+import {
+  SESSION_ABSOLUTE_TTL_MS,
+  SESSION_TTL_MS,
+} from '../../auth/hub-session-store.js';
 
 /** Long enough to clear the sealer's 32-character floor on its own. */
 const HUB_SECRET_KEY = 'unit-test-hub-secret-key-0123456789abcdef';
 
-type CapturedBffOptions = { sessionStore?: unknown; timeoutMs?: number } | undefined;
+type CapturedBffOptions =
+  | {
+      sessionStore?: unknown;
+      timeoutMs?: number;
+      sessionTtlSeconds?: number;
+      sessionAbsoluteTtlSeconds?: number;
+    }
+  | undefined;
 
 /** What the SDK expects back from `withSession` on /auth/refresh. */
 const REFRESH_OK = { status: 200, body: { ok: true }, clear: false };
@@ -148,6 +164,20 @@ describe('createAppAuthBff wiring', () => {
     // session row lock. Unbounded, a hung Hub pins a getAdminDb() connection
     // (pool max 5, shared with audit and history) with an open transaction.
     expect(bffOptions?.timeoutMs).toBe(5_000);
+  });
+
+  it('wires the SDK session TTLs to the store constants so the two views cannot disagree', () => {
+    // The store owns both expiry columns and ignores the values the SDK computes
+    // from these options, so passing them is DECLARATIVE: it keeps the SDK's
+    // 90-day sliding / 365-day absolute defaults (dist/server.js:324-325) out of
+    // play, and makes a future divergence a test failure rather than a surprise.
+    expect(bffOptions?.sessionTtlSeconds).toBe(SESSION_TTL_MS / 1000);
+    expect(bffOptions?.sessionAbsoluteTtlSeconds).toBe(SESSION_ABSOLUTE_TTL_MS / 1000);
+    // The resolved numbers, spelled out: deleting either option and letting the
+    // SDK default to 7_776_000 / 31_536_000 fails here even if someone
+    // "simplified" the two assertions above into a tautology.
+    expect(bffOptions?.sessionTtlSeconds).toBe(2_592_000);
+    expect(bffOptions?.sessionAbsoluteTtlSeconds).toBe(7_776_000);
   });
 });
 
