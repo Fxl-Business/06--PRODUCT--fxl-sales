@@ -35,12 +35,12 @@
     "note": "User approved the production cut in the invocation (\"run /nexo-ship-prod-ready when finished on auto, so when I come back it's already on prod\"). Release-verify PASS, including a clean-clone deploy simulation running the literal vercel.json build command, both migrations applied to a throwaway database restored to the real v2.5.0 schema under a NOSUPERUSER NOBYPASSRLS role, and the nightly purge executed rather than reasoned about. Production moved from v2.5.0 and therefore also carried the previously unpromoted v2.6.0. master == staging == production == a2511b4; the invariant production subset-of staging subset-of master holds."
   },
   "gate3_hotfix": {
-    "release": "v2.3.1",
-    "commit": "cd852bdb20c222cf612959a48f9568824363a572",
+    "release": "v2.7.1",
+    "commit": "e8a5810b0c496bfa701c1194762d11e85df2081f",
     "flow": "hotfix",
-    "decision": "approved-in-invocation",
-    "decided_at": "2026-07-31",
-    "note": "The v2.3.0 Vercel web deploy failed with TS2307 on a workspace subpath. User approved the production deploy explicitly in the request. Release-verify added a clean-clone deploy simulation and a negative control proving v2.3.0 fails and v2.3.1 passes on the same machine and lockfile."
+    "decision": "approved-restore-service",
+    "decided_at": "2026-08-10",
+    "note": "v2.7.0 took production down: hub-sdk 1.3.x added an undocumented CSRF origin guard that 403s every BFF POST when the web app and API are on different hosts, which is this product's topology. Entitled operators saw a blank screen then the session recovery panel. Fixed forward, because rolling back to v2.5.0 was NOT safe - migration 0021 added absolute_expires_at NOT NULL and v2.5.0 code does not write it. Gate 2 PASS by a separate Verify agent with 14 CSRF bypass attempts all rejected. Production CORS_ORIGIN verified against the live API before promoting; the fix confirmed live (403 to 401, browser reached /tatico/dashboard). master == staging == production == e8a5810."
   },
   "gate3_staging": {
     "release": "v2.4.0",
