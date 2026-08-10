@@ -195,6 +195,96 @@ describe('createHubAccessTokenCache', () => {
     }
   });
 
+  /**
+   * `renew` exists because the proactive renewal fires at `exp - 60s` while `getToken`
+   * still serves from memory until `exp - 30s`. Reusing `getToken` for the renewal would
+   * therefore be a guaranteed no-op: it would hand back the very token that is about to
+   * expire and never issue a request at all.
+   */
+  it('renew forces a refresh even while the cached token is still servable', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW_MS);
+    const expiresAt = NOW_MS + 180_000;
+    const cachedToken = jwtWithExpiry(expiresAt);
+    const renewedToken = jwtWithExpiry(expiresAt + 180_000);
+    const refresh = vi
+      .fn<Refresher>()
+      .mockResolvedValueOnce({ token: cachedToken })
+      .mockResolvedValueOnce({ token: renewedToken });
+    const cache = createHubAccessTokenCache(refresh);
+
+    await expect(cache.getToken()).resolves.toEqual({ token: cachedToken });
+    // Well inside the skew window, so `getToken` would answer from memory here.
+    vi.setSystemTime(expiresAt - 60_000);
+    await expect(cache.getToken()).resolves.toEqual({ token: cachedToken });
+    expect(refresh).toHaveBeenCalledTimes(1);
+
+    await expect(cache.renew()).resolves.toEqual({ token: renewedToken });
+    expect(refresh).toHaveBeenCalledTimes(2);
+    // And the renewed token is what every later read gets, so the renewal really
+    // replaced the cache rather than merely fetching beside it.
+    await expect(cache.getToken()).resolves.toEqual({ token: renewedToken });
+    expect(refresh).toHaveBeenCalledTimes(2);
+  });
+
+  it('renew joins an in-flight refresh instead of issuing a second one', async () => {
+    const pending = deferred<HubTokenResult>();
+    const refresh = vi.fn<Refresher>(() => pending.promise);
+    const cache = createHubAccessTokenCache(refresh);
+
+    const read = cache.getToken();
+    const renewal = cache.renew();
+    pending.resolve({ token: 'opaque-token' });
+
+    await expect(Promise.all([read, renewal])).resolves.toEqual([
+      { token: 'opaque-token' },
+      { token: 'opaque-token' },
+    ]);
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * The scheduler outside cannot compute `exp - 60s` without this, and it must read the
+   * SAME number the cache serves from - a second JWT parse in the provider would be a
+   * second source of truth for one fact.
+   */
+  it('reports the cached expiry, and null whenever nothing is cached', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW_MS);
+    const expiresAt = NOW_MS + 180_000;
+    const refresh = vi
+      .fn<Refresher>()
+      .mockResolvedValueOnce({ token: jwtWithExpiry(expiresAt) })
+      .mockResolvedValueOnce(TRANSIENT);
+    const cache = createHubAccessTokenCache(refresh);
+
+    expect(cache.expiresAt()).toBeNull();
+    await cache.getToken();
+    expect(cache.expiresAt()).toBe(expiresAt);
+
+    cache.clear();
+    expect(cache.expiresAt()).toBeNull();
+
+    // A seed (workspace switch) is the other writer, and it is the earlier of the two
+    // expiries, exactly as `getToken` would serve it.
+    cache.seed(jwtWithExpiry(expiresAt), 600);
+    expect(cache.expiresAt()).toBe(expiresAt);
+
+    // A failed refresh discards the cache, so the scheduler is told there is nothing
+    // left to renew rather than being handed a stale target.
+    vi.setSystemTime(expiresAt);
+    await cache.getToken();
+    expect(cache.expiresAt()).toBeNull();
+  });
+
+  it('does not report an expiry for a token it refused to cache', async () => {
+    const refresh = vi.fn<Refresher>().mockResolvedValue({ token: 'opaque-token' });
+    const cache = createHubAccessTokenCache(refresh);
+
+    await expect(cache.getToken()).resolves.toEqual({ token: 'opaque-token' });
+    expect(cache.expiresAt()).toBeNull();
+  });
+
   it('seed uses the earlier JWT or server expiry and rejects immortal fallback lifetimes', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW_MS);

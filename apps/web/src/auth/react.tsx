@@ -50,6 +50,21 @@ import { createHubAccessTokenCache } from './token';
  */
 export const SESSION_REVALIDATE_DELAYS_MS = [500, 1_500, 4_000] as const;
 
+/**
+ * How long before a token's `exp` the proactive renewal fires, while the document is
+ * VISIBLE.
+ *
+ * Nothing in the app reads a token while the tab is idle, so without this the cached
+ * token simply lapses and the first read after the operator returns pays for a refresh -
+ * and, when that refresh fails, used to pay with their unsaved form. An open tab that
+ * renews itself never reaches that read at all.
+ *
+ * Deliberately LONGER than `ACCESS_TOKEN_EXPIRY_SKEW_MS` (30s), which is why the cache
+ * exposes `renew()`: at this point `getToken()` would still answer from memory, so a
+ * renewal driven through it would issue no request whatsoever.
+ */
+export const SESSION_RENEWAL_LEAD_MS = 60_000;
+
 /** `''` makes every `new URL(value, origin)` throw, so a missing DOM means "no restore". */
 function currentOrigin(): string {
   return typeof window === 'undefined' ? '' : window.location.origin;
@@ -73,6 +88,12 @@ type HubWorkspacePreview = {
 };
 
 type HubAuthState = AuthProfile & {
+  /**
+   * A session that was LIVE in this document and then went away, as opposed to a document
+   * that was opened without one. The two need opposite treatments and `HubProtected`
+   * cannot tell them apart from `isSignedIn` alone, which is false for both.
+   */
+  sessionLost: boolean;
   client: HubClient;
   getToken: () => Promise<string | null>;
   login: () => void;
@@ -193,6 +214,14 @@ function HubAuthProvider({ children }: { children: ReactNode }) {
   const revalidateAttempts = useRef(0);
   const revalidateTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /**
+   * The proactive renewal, and the SECOND timer source in this file. `renewalTarget` is
+   * the expiry the pending rung was armed for, so ~40 token reads per screen re-arm
+   * nothing: one renewal per token lifetime, the same shape as the ladder's "while a
+   * timer is pending, further nulls are no-ops".
+   */
+  const renewalTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const renewalTarget = useRef<number | null>(null);
+  /**
    * Clearing the pending timer at unmount does not cover the interleaving where the
    * timer has ALREADY fired and its refresh is still in flight: `revalidateTimer` is
    * null by then, so the cleanup finds nothing, and the late resolution schedules a
@@ -205,6 +234,7 @@ function HubAuthProvider({ children }: { children: ReactNode }) {
     roles: [],
   });
   const [workspaces, setWorkspaces] = useState<HubWorkspacePreview[]>([]);
+  const [sessionLost, setSessionLost] = useState(false);
 
   const applyToken = useCallback((token: string | null) => {
     // `profileFromToken` is pure over the token, so the same token deterministically
@@ -212,6 +242,17 @@ function HubAuthProvider({ children }: { children: ReactNode }) {
     // screen built a fresh profile object and a fresh workspaces array, both of which
     // only bail out on `Object.is`, and re-rendered every consumer of the auth context.
     if (lastAppliedToken.current === token) return;
+    /*
+      COLD ENTRY versus LIVE LOSS, read off the same ref that already discriminates the
+      cache flush below. `undefined` before the first apply, `null` after a loss, a string
+      while signed in - so a live loss is exactly "was a string, is now null".
+
+      Read BEFORE the ref is overwritten, and pushed into STATE rather than left in a ref,
+      because `HubProtected` has to render on it. It rides the same batch as `setProfile`,
+      so the pair can never be committed out of step.
+    */
+    const wasSignedIn = typeof lastAppliedToken.current === 'string';
+    setSessionLost(token === null && wasSignedIn);
     lastAppliedToken.current = token;
     const next = profileFromToken(token);
     setWorkspaces(next.workspaces);
@@ -233,15 +274,93 @@ function HubAuthProvider({ children }: { children: ReactNode }) {
    * every one of them keeps a stable identity - `getToken` is handed to ~40 call sites
    * and must not change on every render.
    */
-  const { clearRevalidateTimer, failSession, observeToken } = useMemo(() => {
+  const { clearTimers, failSession, handleVisibilityChange, observeToken } = useMemo(() => {
     function clearRevalidateTimer() {
       if (revalidateTimer.current === null) return;
       clearTimeout(revalidateTimer.current);
       revalidateTimer.current = null;
     }
 
-    function failSession() {
+    function clearRenewalTimer() {
+      renewalTarget.current = null;
+      if (renewalTimer.current === null) return;
+      clearTimeout(renewalTimer.current);
+      renewalTimer.current = null;
+    }
+
+    function clearTimers() {
       clearRevalidateTimer();
+      clearRenewalTimer();
+    }
+
+    /** A missing DOM (SSR, a unit test without one) is treated as "not visible". */
+    function documentIsVisible() {
+      return typeof document !== 'undefined' && document.visibilityState === 'visible';
+    }
+
+    function renewNow() {
+      clearRenewalTimer();
+      void tokenCache.renew().then(observeToken, () => observeToken(TRANSIENT_TOKEN_RESULT));
+    }
+
+    function scheduleRenewal() {
+      /*
+        NEVER while hidden. A background tab's timers are throttled to minutes, so the
+        rung would fire late and useless, and keeping a session alive for a tab nobody is
+        looking at is not a service to anyone. `handleVisibilityChange` re-arms on the way
+        back, which is the moment it starts mattering again.
+      */
+      if (!documentIsVisible()) {
+        clearRenewalTimer();
+        return;
+      }
+      const expiresAt = tokenCache.expiresAt();
+      if (expiresAt === null) {
+        clearRenewalTimer();
+        return;
+      }
+      if (renewalTimer.current !== null && renewalTarget.current === expiresAt) return;
+      clearRenewalTimer();
+      /*
+        STRICTLY positive. A non-positive delay means the token is already inside the
+        renewal window, and renewing from here would arm the next rung out of the answer
+        to this one - an unbounded loop for any token whose whole life is shorter than the
+        lead. That case belongs to `handleVisibilityChange`, which fires once per event.
+      */
+      const delay = expiresAt - SESSION_RENEWAL_LEAD_MS - Date.now();
+      if (delay <= 0) return;
+      renewalTarget.current = expiresAt;
+      renewalTimer.current = setTimeout(() => {
+        renewalTimer.current = null;
+        renewalTarget.current = null;
+        renewNow();
+      }, delay);
+    }
+
+    function handleVisibilityChange() {
+      if (!documentIsVisible()) {
+        clearRenewalTimer();
+        return;
+      }
+      // A tab with no session has nothing to renew, and must not be given one behind the
+      // operator's back - `undefined` is a boot still in flight, `null` a signed-out tab.
+      if (typeof lastAppliedToken.current !== 'string') return;
+      const expiresAt = tokenCache.expiresAt();
+      if (expiresAt !== null && expiresAt - SESSION_RENEWAL_LEAD_MS > Date.now()) {
+        scheduleRenewal();
+        return;
+      }
+      /*
+        Expired, inside the window, or holding a token the cache would not keep. Renewed
+        SYNCHRONOUSLY on the event, before any focus-triggered query refetch can read the
+        token: a refetch that wins that race reads a lapsed token and walks straight into
+        the failure path this slice exists to avoid.
+      */
+      renewNow();
+    }
+
+    function failSession() {
+      clearTimers();
       revalidateAttempts.current = 0;
       applyToken(null);
     }
@@ -309,6 +428,10 @@ function HubAuthProvider({ children }: { children: ReactNode }) {
         // would skip it whenever a re-login happened to yield a byte-identical token.
         clearLogoutIntent();
         applyToken(result.token);
+        // AFTER the apply, and on every observed token rather than only on a changed one:
+        // a `seed` from a workspace switch replaces the expiry under an unchanged-looking
+        // read, and the pending rung has to follow it.
+        scheduleRenewal();
         return;
       }
       /*
@@ -331,7 +454,7 @@ function HubAuthProvider({ children }: { children: ReactNode }) {
       scheduleRevalidate();
     }
 
-    return { clearRevalidateTimer, failSession, observeToken };
+    return { clearTimers, failSession, handleVisibilityChange, observeToken };
   }, [applyToken, queryClient, tokenCache]);
 
   /**
@@ -439,19 +562,33 @@ function HubAuthProvider({ children }: { children: ReactNode }) {
     };
   }, [observeToken, tokenCache]);
 
+  /**
+   * The renewal is armed only while the document is visible, so the transition itself has
+   * to be observed. This is also the only place a tab that has been hidden for hours
+   * learns that its token lapsed while nobody was watching.
+   */
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [handleVisibilityChange]);
+
   // Re-armed in the effect body, not only initialized at `useRef`, so a StrictMode
   // mount-unmount-mount cannot leave the provider permanently marked as unmounted.
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
-      clearRevalidateTimer();
+      clearTimers();
     };
-  }, [clearRevalidateTimer]);
+  }, [clearTimers]);
 
   const value = useMemo(
     () => ({
       ...profile,
+      sessionLost,
       client,
       getToken,
       login,
@@ -459,7 +596,7 @@ function HubAuthProvider({ children }: { children: ReactNode }) {
       setActive,
       workspaces,
     }),
-    [client, getToken, login, logout, profile, setActive, workspaces],
+    [client, getToken, login, logout, profile, sessionLost, setActive, workspaces],
   );
 
   return <HubAuthContext.Provider value={value}>{children}</HubAuthContext.Provider>;
@@ -486,30 +623,37 @@ function SessionRecoveryPanel({ onRetry }: { onRetry: () => void }) {
 }
 
 /**
- * The terminal state of an EXPLICIT `Sair`. Deliberately not an automatic redirect to
- * the Hub: on a shared machine, auto-re-login undoes the one action the product offers
- * for ending a session, and the Hub's own SSO cookie can complete it with no prompt at
- * all, so the next person at that desk finds an authenticated app. Signing back in has
- * to be a deliberate act by whoever is actually sitting there.
+ * The terminal state of an EXPLICIT `Sair`, and - with different copy - of a session lost
+ * while the app was open. Deliberately not an automatic redirect to the Hub: on a shared
+ * machine, auto-re-login undoes the one action the product offers for ending a session,
+ * and the Hub's own SSO cookie can complete it with no prompt at all, so the next person
+ * at that desk finds an authenticated app. Signing back in has to be a deliberate act by
+ * whoever is actually sitting there.
  *
  * The default `Button` variant, not `outline`: `SessionRecoveryPanel`'s retry is a
  * secondary action under an error message, while this is the single primary action on
  * the screen. Strings are hardcoded pt-BR to match the rest of this file.
  */
-function SignedOutPanel({ onSignIn }: { onSignIn: () => void }) {
+function SignedOutPanel({
+  onSignIn,
+  title = 'Você saiu da sua conta',
+  description = 'Sua sessão foi encerrada neste navegador. Entre novamente para continuar.',
+}: {
+  onSignIn: () => void;
+  title?: string;
+  description?: string;
+}) {
   return (
     <div className="flex h-screen flex-col items-center justify-center gap-4 px-6 text-center">
-      <h1 className="text-2xl font-semibold">Você saiu da sua conta</h1>
-      <p className="max-w-md text-muted-foreground">
-        Sua sessão foi encerrada neste navegador. Entre novamente para continuar.
-      </p>
+      <h1 className="text-2xl font-semibold">{title}</h1>
+      <p className="max-w-md text-muted-foreground">{description}</p>
       <Button onClick={onSignIn}>Entrar</Button>
     </div>
   );
 }
 
 function HubProtected({ children }: { children: ReactNode }) {
-  const { isLoaded, isSignedIn, login } = useHubAuthContext();
+  const { isLoaded, isSignedIn, login, sessionLost } = useHubAuthContext();
   // The router location, not `window.location`: it is the app's own truth, identical
   // to the browser's under `BrowserRouter`, and testable without stubbing globals.
   const location = useLocation();
@@ -517,7 +661,18 @@ function HubProtected({ children }: { children: ReactNode }) {
   // The two panel buttons are the only things that can change either guard's answer
   // while this component stays mounted, so they are the only things that have to force
   // a re-read.
-  const [, recheckRecoveryGuards] = useReducer((ticks: number) => ticks + 1, 0);
+  const [guardTick, recheckRecoveryGuards] = useReducer((ticks: number) => ticks + 1, 0);
+  /**
+   * The operator's own decision to leave this page, and the ONLY thing that re-arms the
+   * login effect after a live loss.
+   *
+   * A ref rather than state, consumed by the login it re-arms, because it is a one-shot
+   * REQUEST and not a fact about the session: mirroring it into state would need a second
+   * effect to clear it, which is a setState in an effect body and which `loginBlocked`
+   * and `logoutIntent` already refuse to do for the same reason. `guardTick` is what makes
+   * the effect re-run on the click - exactly the job that reducer already had.
+   */
+  const signInRequested = useRef(false);
   const restoredRef = useRef(false);
   const currentPath = `${location.pathname}${location.search}`;
   /**
@@ -533,6 +688,11 @@ function HubProtected({ children }: { children: ReactNode }) {
    * truth for one fact and would be a synchronous setState in an effect body.
    */
   const loginBlocked = isLoaded && !isSignedIn && isLoginBlocked();
+  /**
+   * A session that was live in this document and went away, with the operator's own
+   * `Sair` excluded because that has its own state and its own copy.
+   */
+  const liveSessionLoss = isLoaded && !isSignedIn && sessionLost && !logoutIntent;
 
   useEffect(() => {
     // `restoredRef` plus consume-before-validate makes a StrictMode double effect inert.
@@ -559,14 +719,39 @@ function HubProtected({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!isLoaded || isSignedIn || loginBlocked || logoutIntent) return;
+    /*
+      THE FIX for the destroyed-form report. `login()` is `window.location.assign` to the
+      Hub, so calling it destroys the document and every byte of unsaved form state with
+      it; `captureReturnTo` restores the ROUTE and has never restored form state.
+
+      A COLD ENTRY keeps redirecting exactly as before - there is nothing on screen yet,
+      so nothing is destroyed, and breaking that path means nobody can ever sign in. A
+      LIVE LOSS waits for the operator instead, so the navigation is theirs and the loss
+      is expected rather than inflicted.
+    */
+    if (sessionLost && !signInRequested.current) return;
     // Belt and braces: the render guard above already refuses, and `registerLoginAttempt`
     // refuses again here without incrementing, so the counter cannot run away.
     if (!registerLoginAttempt()) return;
+    /*
+      Spent by the login it re-armed, and spent AFTER the attempt guard so a refusal there
+      leaves the request intact for a later re-read rather than turning the button dead.
+      `login()` normally destroys the document before this matters, but it is a navigation
+      REQUEST and not a guarantee - a blocked assign leaves the tab alive - and a request
+      that survived would silently restore the auto-navigation this effect just removed,
+      on the NEXT loss instead of the first.
+    */
+    signInRequested.current = false;
     // CLAUDE.md, "Sales Ops Routing": the URL is the single source of truth for the
     // active workspace and page, so restoring the URL restores the screen.
     captureReturnTo(currentPath, currentOrigin());
     login();
-  }, [currentPath, isLoaded, isSignedIn, login, loginBlocked, logoutIntent]);
+    /*
+      `guardTick` is a dependency, not decoration: it is the only thing that re-runs this
+      effect when the live-loss panel's `Entrar` sets the ref above, since neither
+      `isSignedIn` nor either storage-derived guard changes on that click.
+    */
+  }, [currentPath, guardTick, isLoaded, isSignedIn, login, loginBlocked, logoutIntent, sessionLost]);
 
   /**
    * Ahead of `loginBlocked` deliberately. `SessionRecoveryPanel` says "Tentamos entrar
@@ -589,6 +774,43 @@ function HubProtected({ children }: { children: ReactNode }) {
           recheckRecoveryGuards();
         }}
       />
+    );
+  }
+
+  /**
+   * AHEAD of `loginBlocked`, and the only branch in this component that keeps `children`
+   * mounted. That is the whole point: React state lives exactly as long as the component
+   * holding it, so the operator's half-filled wizard survives precisely because the
+   * subtree underneath this overlay is never unmounted.
+   *
+   * Ahead of `loginBlocked` because the loop guard exists to stop AUTOMATIC re-login
+   * loops, and a live loss never spends an attempt on its own. Letting a leftover counter
+   * swap this for `SessionRecoveryPanel` would unmount the work this branch exists to
+   * protect, in order to describe retries that never happened.
+   */
+  if (liveSessionLoss) {
+    return (
+      <>
+        {children}
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-background/95 backdrop-blur-sm">
+          <SignedOutPanel
+            description="Entre novamente para continuar. Nada do que você digitou nesta página foi perdido."
+            onSignIn={() => {
+              /*
+                The click IS the deliberate retry the loop guard makes room for, exactly as
+                `SessionRecoveryPanel`'s does, so it clears the counter rather than leaving
+                a dead button sitting on top of unsaved work. The login effect does the
+                rest: one path into `login()` is what keeps `captureReturnTo` and
+                `registerLoginAttempt` on that path too.
+              */
+              clearLoginAttempts();
+              signInRequested.current = true;
+              recheckRecoveryGuards();
+            }}
+            title="Sua sessão expirou"
+          />
+        </div>
+      </>
     );
   }
 
