@@ -34,6 +34,15 @@ The user reported it directly: a blank screen for about a minute, then a panel s
 - **The workspace switcher ALWAYS asks. It never auto-switches**, not even when exactly one other workspace qualifies. Silently moving an operator into a different tenant is the same class of surprise as the cross-tenant cache leak `v2.7.0` just fixed, and on a shared machine it could open an org they did not intend. Decided by the user.
 - **The `403` reclassification is IN scope** for this feature, and lands together with the screens rather than before them. On its own it would only change which generic panel appears. Decided by the user.
 
+### Added after the frame: losing a session must not destroy unsaved work
+
+Reported after `v2.7.1` shipped: leaving a tab open for a few minutes and returning reloads the whole page and loses an in-progress form.
+Measured over ten minutes on production - the app makes ZERO requests while idle and never reloads on its own, so elapsed time is not the trigger.
+The cause is that `HubProtected` calls `login()` the instant `isSignedIn` goes false, and `login()` is a full `window.location.assign` to the Hub.
+`captureReturnTo` restores the route; nothing restores the form.
+
+Slice 04 covers it. Criterion 8 below is added for it.
+
 ### Acceptance criteria (feature level)
 
 1. While a session is being resolved, the operator sees a visible indicator that authentication is in progress, not a blank page.
@@ -42,7 +51,9 @@ The user reported it directly: a blank screen for about a minute, then a panel s
 4. An operator who is not signed in sees a state that says so and offers to sign in.
 5. An operator whose ACTIVE workspace lacks the product sees a state that says so and lists their other workspaces; choosing one switches to it. Nothing switches without an explicit choice.
 6. An operator whose ACCOUNT is not entitled anywhere sees a state that says so and does not see a workspace list implying a way in that does not exist.
-7. `pnpm run lint`, `pnpm run type-check`, `pnpm test` and `pnpm run build` are green.
+7. Losing a session while the app is open and in use keeps the operator on their page and asks them to sign in, instead of navigating to the Hub. Opening the app with no session still redirects as before.
+8. While the tab is visible the access token is renewed before it expires, so returning to a long-open tab does not find it expired.
+9. `pnpm run lint`, `pnpm run type-check`, `pnpm test` and `pnpm run build` are green.
 
 ### Scope limits (YAGNI)
 
@@ -70,3 +81,4 @@ Trunk `master`, milestone `v2.8.0`, serial execution. All three slices touch `ap
 | 01 | `01-auth-boot-indicator` | - |
 | 02 | `02-refresh-403-permanent` | - |
 | 03 | `03-auth-terminal-states` | 01, 02 |
+| 04 | `04-preserve-work-on-session-loss` | 02, 03 |
