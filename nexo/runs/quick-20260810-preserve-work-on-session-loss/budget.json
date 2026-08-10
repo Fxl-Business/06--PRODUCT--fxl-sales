@@ -2,7 +2,7 @@
   "active_accumulated_seconds": 0,
   "active_since": 1786394972,
   "counters": {
-    "agent_dispatches": 1,
+    "agent_dispatches": 4,
     "initial_slices": 0,
     "replans": 0,
     "total_slices": 0,
@@ -21,7 +21,9 @@
   },
   "paused": false,
   "scoped_counters": {
-    "verify_attempts": {}
+    "verify_attempts": {
+      "04-preserve-work": 2
+    }
   },
   "version": 1
 }
