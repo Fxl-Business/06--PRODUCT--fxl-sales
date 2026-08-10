@@ -1348,6 +1348,7 @@ describe('proactive token renewal', () => {
  */
 describe('explicit logout intent', () => {
   const SIGNED_OUT_COPY = 'Você saiu da sua conta';
+  const LIVE_LOSS_COPY = 'Sua sessão expirou';
 
   function signOutButton(host: HTMLElement): HTMLButtonElement {
     const match = host.querySelector<HTMLButtonElement>('button[aria-label="Sair"]');
@@ -1465,6 +1466,49 @@ describe('explicit logout intent', () => {
     // The URL was already reduced to `/`, and `sanitizeReturnTo` rejects it, so the
     // capture on the way out stores nothing.
     expect(sessionStorage.getItem(RETURN_TO_KEY)).toBeNull();
+  });
+
+  /**
+   * The same click as the test above, reached from the other side. That one seeds the
+   * intent in storage BEFORE mount, so it exercises a COLD document where no token was
+   * ever applied and `sessionLost` is false throughout. This one signs out INSIDE a live
+   * signed-in tab, which is the only way an operator actually reaches that panel, and it
+   * is the case that regressed: `logout()` reaches `applyToken(null)` while a token
+   * string is still held, so the loss discriminator would fire for a departure the
+   * operator asked for.
+   *
+   * Three assertions because the one cause had three separate consequences: a dead
+   * button, the wrong copy, and the protected subtree re-mounting under the overlay for
+   * someone who deliberately signed out.
+   */
+  it('signs in on the first Entrar click after a Sair inside a live tab', async () => {
+    mocks.cache.getToken.mockResolvedValue(ok(profileToken('Alpha')));
+
+    ({ container, root } = renderProtected(['/cadastros/produtos?f=1']));
+    await flushReact();
+    expect(profileText(container)).toBe('signed-in:Alpha');
+
+    await clickSignOut(container);
+    expect(container.textContent).toContain(SIGNED_OUT_COPY);
+
+    await clickButton(container, 'Entrar');
+
+    // ONE click, exactly as on a cold document. A second click reaching the Hub is not a
+    // pass: the operator pressed the only button on the screen and nothing happened.
+    expect(mocks.client.login).toHaveBeenCalledTimes(1);
+    /*
+      An explicit `Sair` is not a loss, so the operator is never told their session
+      expired, and never told that nothing they typed was lost on a page they chose to
+      leave.
+    */
+    expect(container.textContent).not.toContain(LIVE_LOSS_COPY);
+    /*
+      The INNER location probe renders only inside `Protected`'s children, and the
+      live-loss branch is the one branch that keeps them mounted. Absent here is the proof
+      that a signed-out operator's tab is not left holding an authenticated tree behind an
+      overlay - the shared-machine reason `SignedOutPanel` exists at all.
+    */
+    expect(locationText(container)).toBeUndefined();
   });
 
   it('clears the intent whenever a live token is observed, so a stale intent can never lock the tab out', async () => {

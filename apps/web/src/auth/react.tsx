@@ -89,9 +89,13 @@ type HubWorkspacePreview = {
 
 type HubAuthState = AuthProfile & {
   /**
-   * A session that was LIVE in this document and then went away, as opposed to a document
-   * that was opened without one. The two need opposite treatments and `HubProtected`
-   * cannot tell them apart from `isSignedIn` alone, which is false for both.
+   * A session that was LIVE in this document and then went away WITHOUT the operator
+   * asking, as opposed to a document that was opened without one. The two need opposite
+   * treatments and `HubProtected` cannot tell them apart from `isSignedIn` alone, which is
+   * false for both.
+   *
+   * An explicit `Sair` is not a loss and is excluded at the source, in `logout()`, not by
+   * the readers - see the comment there.
    */
   sessionLost: boolean;
   client: HubClient;
@@ -497,6 +501,24 @@ function HubAuthProvider({ children }: { children: ReactNode }) {
     // re-applies a state the app is already in, and the unmount effect clears the
     // pending timer. The durable logout intent above is the real guard.
     failSession();
+    /*
+      `sessionLost` means the session went away WITHOUT the operator asking, and this is
+      the operator asking. `failSession()` above reaches `applyToken(null)` while
+      `lastAppliedToken` still holds a token string, so the loss discriminator fires and
+      would otherwise be true for a departure that was deliberate.
+
+      Corrected HERE, at the source, and not by an extra term in each reader: `logout()`
+      is the one place that knows the difference, whereas a reader can only guess from
+      whatever `logoutIntent` happens to say at the moment it renders - and that intent is
+      cleared by the `Entrar` click one render before the login effect runs, which is
+      exactly the window in which the wrong panel used to appear.
+
+      Same synchronous block as `failSession()`, so React commits ONE render with the last
+      write winning and the flag never becomes true at all. A post-logout ladder that
+      exhausts later cannot resurrect it either: its `applyToken(null)` early-returns on
+      the unchanged token before reaching `setSessionLost`.
+    */
+    setSessionLost(false);
     /*
       Synchronous and before the first `await`, in the same block as `failSession()`, so
       React commits ONE render: signed-out profile and empty cache together, with no
