@@ -383,6 +383,54 @@ describe('createAppAuthBff login supersede', () => {
   });
 });
 
+describe('createAppAuthBff trusted-origin mount', () => {
+  it('does not 403 a cross-origin refresh from CORS_ORIGIN, through the real mount', async () => {
+    /*
+      The oracle for the 2026-08-10 production outage, and specifically for the
+      MOUNT rather than the shim. `hub-bff-origin.test.ts` proves the shim works;
+      this proves `createAppAuthBff` actually uses it. Reverting the mount to
+      `router.route('', bff)` left all 391 API tests green while reproducing the
+      outage exactly, so without this a future "simplify back to route()" cleanup
+      re-breaks production with a green suite.
+
+      CORS_ORIGIN is stubbed to http://localhost:8006 in this file's setup, and
+      the request is issued from http://localhost - a DIFFERENT origin, which is
+      the whole point.
+    */
+    if (!authBff) {
+      throw new Error('expected an auth BFF router');
+    }
+    const app = new Hono();
+    app.route('', authBff);
+
+    const res = await app.request('http://localhost/auth/refresh', {
+      method: 'POST',
+      headers: { origin: 'http://localhost:8006', 'sec-fetch-site': 'same-site' },
+    });
+
+    // 401 is the cookieless-session verdict. 403 means the SDK's CSRF guard
+    // rejected us, which is the outage.
+    expect(res.status).not.toBe(403);
+    expect(res.status).toBe(401);
+  });
+
+  it('still 403s a cross-origin refresh from an origin that is not CORS_ORIGIN', async () => {
+    // The other half: the mount must not have widened into a blanket bypass.
+    if (!authBff) {
+      throw new Error('expected an auth BFF router');
+    }
+    const app = new Hono();
+    app.route('', authBff);
+
+    const res = await app.request('http://localhost/auth/refresh', {
+      method: 'POST',
+      headers: { origin: 'https://evil.example.test', 'sec-fetch-site': 'cross-site' },
+    });
+
+    expect(res.status).toBe(403);
+  });
+});
+
 describe('createAppAuthBff store outage', () => {
   it("answers 503 rather than a cookie-clearing 401 when withSession rejects, through app.route('', authBff)", async () => {
     // The end-to-end constraint-2 proof, against the REAL SDK and through the
