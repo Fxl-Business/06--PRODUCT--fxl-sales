@@ -93,7 +93,20 @@ function readWorkspaces(value: unknown): HubWorkspacePreview[] {
   return value.reduce<HubWorkspacePreview[]>((acc, item) => {
     if (typeof item !== 'object' || item === null) return acc;
     const workspace = item as Record<string, unknown>;
-    const id = readString(workspace.id);
+    /*
+      The Hub mints this entry keyed `workspaceId`, NOT `id` - see
+      `packages/shared-types/src/hub/claims.ts` in the Hub repo, and the minter
+      and repo agree with it. Reading only `id` silently dropped every entry, so
+      `workspaces` was always `[]` against a real token and the workspace
+      switcher in `UserControls` (which renders only when `length > 1`) had never
+      appeared in production at all.
+
+      Nothing caught it because the test fixtures were written against the web
+      type rather than the token, so they used `id` and agreed with the bug.
+      `id` is kept as a fallback deliberately: it costs one `??`, and it is what
+      the pre-existing fixtures and any older Hub emit.
+    */
+    const id = readString(workspace.workspaceId) ?? readString(workspace.id);
     if (!id) return acc;
     const products = Array.isArray(workspace.products)
       ? workspace.products.filter((product): product is string => typeof product === 'string')
