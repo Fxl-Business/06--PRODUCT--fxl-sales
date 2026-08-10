@@ -100,9 +100,17 @@ function jwt(claims: Record<string, unknown>): string {
 
 function profileToken(
   workspaceName: string,
-  workspaces: Array<{ id: string; name: string }> = [
-    { id: 'workspace-alpha', name: 'Alpha' },
-    { id: 'workspace-beta', name: 'Beta' },
+  /*
+    Keyed `workspaceId`, which is what the Hub actually mints - see
+    `packages/shared-types/src/hub/claims.ts` in the Hub repo. The earlier
+    fixtures used `id`, matching the web type rather than the token, so they
+    agreed with the bug that made `readWorkspaces` drop every entry and left the
+    workspace switcher invisible in production. A fixture written against our own
+    shape instead of the wire shape can only ever confirm our own assumption.
+  */
+  workspaces: Array<{ workspaceId?: string; id?: string; name: string }> = [
+    { workspaceId: 'workspace-alpha', name: 'Alpha' },
+    { workspaceId: 'workspace-beta', name: 'Beta' },
   ],
 ): string {
   return jwt({
