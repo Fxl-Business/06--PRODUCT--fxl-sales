@@ -1208,6 +1208,62 @@ describe('proactive token renewal', () => {
     expect(profileText(host)).toBe('signed-in:Alpha');
   });
 
+  /**
+   * `scheduleRenewal` runs on EVERY observed non-null token - roughly forty per screen -
+   * and on every visibilitychange back to visible. Its idempotency is two lines, the
+   * `renewalTarget` early return and the `clearRenewalTimer()` under it, and without
+   * them each of those calls arms an additional live `setTimeout` that nothing will ever
+   * clear.
+   *
+   * The oracle is therefore the timer COUNT and not "a renewal happened": every other
+   * test in this block still passes with the guard deleted, because one renewal per token
+   * lifetime and forty of them look identical from the outside. Asserted after each
+   * individual read rather than only at the end, so the first leaked timer names the
+   * event that leaked it.
+   */
+  it('arms exactly one renewal however many times the token is read', async () => {
+    useRenewalTimers();
+    setVisibility('visible');
+    mocks.cache.expiresAt.mockReturnValue(Date.now() + TOKEN_LIFETIME_MS);
+    mocks.cache.renew.mockResolvedValue(ok(profileToken('Alpha')));
+    mocks.cache.getToken.mockResolvedValue(ok(profileToken('Alpha')));
+
+    const held: { current: TokenReader | null } = { current: null };
+    const mounted = renderProtected(['/cadastros/produtos'], (getToken) => {
+      held.current = getToken;
+    });
+    container = mounted.container;
+    root = mounted.root;
+    await flushReact();
+    expect(profileText(mounted.container)).toBe('signed-in:Alpha');
+    expect(vi.getTimerCount()).toBe(1);
+
+    // Stands in for the ~40 data hooks that read the token on one screen.
+    for (let read = 0; read < 5; read += 1) {
+      await act(async () => {
+        await held.current?.();
+      });
+      expect(vi.getTimerCount()).toBe(1);
+    }
+
+    // And for an operator tabbing away and back, which re-arms through the other path.
+    for (let focus = 0; focus < 3; focus += 1) {
+      fireVisibilityChange();
+      expect(vi.getTimerCount()).toBe(1);
+    }
+
+    // None of that renewed anything: the pending rung is still the one the mount armed.
+    expect(mocks.cache.renew).not.toHaveBeenCalled();
+
+    /*
+      Non-vacuity for the count: the single surviving timer really is the renewal, it
+      still fires at `exp - 60s`, and it fires ONCE. Eight leaked timers armed at eight
+      different moments would each renew in turn.
+    */
+    await advance(TOKEN_LIFETIME_MS - RENEWAL_LEAD_MS);
+    expect(mocks.cache.renew).toHaveBeenCalledTimes(1);
+  });
+
   it('does not schedule a renewal while the document is hidden', async () => {
     useRenewalTimers();
     setVisibility('hidden');
