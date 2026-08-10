@@ -22,6 +22,8 @@ const mocks = vi.hoisted(() => {
   } satisfies HubClient;
   const cache = {
     getToken: vi.fn<() => Promise<import('../refresh').HubTokenResult>>(),
+    renew: vi.fn<() => Promise<import('../refresh').HubTokenResult>>(),
+    expiresAt: vi.fn<() => number | null>(),
     seed: vi.fn<(accessToken: string, expiresInSeconds: number) => void>(),
     clear: vi.fn<() => void>(),
   };
@@ -264,6 +266,18 @@ async function advance(ms: number) {
   });
 }
 
+/** Drives a panel button the way an operator does, by its visible pt-BR label. */
+async function clickButton(host: HTMLElement, label: string) {
+  const match = [...host.querySelectorAll('button')].find(
+    (button) => button.textContent?.trim() === label,
+  );
+  if (!match) throw new Error(`button not found: ${label}`);
+  await act(async () => {
+    match.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    await Promise.resolve();
+  });
+}
+
 function workspaceTrigger(host: HTMLElement): HTMLButtonElement {
   const match = host.querySelector('button[role="combobox"][aria-label="Workspace"]');
   if (!(match instanceof HTMLButtonElement)) throw new Error('workspace combobox not found');
@@ -308,6 +322,15 @@ beforeEach(() => {
   vi.stubEnv('VITE_FXL_HUB_PUBLISHABLE_KEY', 'pk_fxl-sales_test');
   mocks.createHubClient.mockReturnValue(mocks.client);
   mocks.createHubAccessTokenCache.mockReturnValue(mocks.cache);
+  /*
+    `null` is "this cache holds no token expiry", which is what the proactive renewal
+    schedules against. Pinned here rather than per test so that no test outside the
+    renewal block below can arm the renewal timer, which is what keeps
+    `vi.getTimerCount()` a LADDER-specific count everywhere else in this file. See
+    `useLadderTimers`.
+  */
+  mocks.cache.expiresAt.mockReturnValue(null);
+  mocks.cache.renew.mockResolvedValue(transient);
   mocks.client.login.mockReturnValue(undefined);
   mocks.client.logout.mockResolvedValue(undefined);
   mocks.client.checkoutUrl.mockResolvedValue('http://hub.test/checkout');
@@ -539,12 +562,24 @@ describe('session preservation and route restore', () => {
   }
 
   /**
-   * Only `setTimeout`/`clearTimeout` are faked. The revalidation ladder is the
-   * only thing in this file that schedules a timer, and leaving React's
-   * scheduler and `Date` on real implementations keeps `act` deterministic.
+   * Only `setTimeout`/`clearTimeout` are faked, and leaving React's scheduler and `Date`
+   * on real implementations keeps `act` deterministic.
+   *
+   * `react.tsx` now has TWO timer sources: this ladder and the proactive renewal. So
+   * `vi.getTimerCount()` is only a ladder oracle while the renewal provably cannot arm,
+   * and the renewal arms only from a FINITE `tokenCache.expiresAt()`. The global
+   * `beforeEach` pins that to `null`, and this helper re-states it at the point of use,
+   * so every count in this block is ladder-specific BY CONSTRUCTION rather than by luck.
+   * Verified rather than assumed: happy-dom reports `document.visibilityState` as
+   * `visible` whenever the document has a `defaultView`, so a visibility guard alone
+   * would NOT have kept these tests inert.
+   *
+   * Non-vacuity for the pin lives in `proactive token renewal` below, which asserts that
+   * a finite `expiresAt` really does arm exactly one timer.
    */
   function useLadderTimers() {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    mocks.cache.expiresAt.mockReturnValue(null);
   }
 
   /**
@@ -807,6 +842,12 @@ describe('session preservation and route restore', () => {
     expect(mocks.client.login).not.toHaveBeenCalled();
   });
 
+  /**
+   * The route restore is unchanged; what changed is who triggers the navigation. A LIVE
+   * loss no longer redirects on its own (see `live session loss` below), so the capture
+   * now happens on the operator's own `Entrar` click. The restore half - storage written,
+   * consumed once, applied on the next mount - is exactly what it always was.
+   */
   it('captures and restores the pre-login route across a genuine re-login', async () => {
     useLadderTimers();
     mocks.cache.getToken.mockResolvedValueOnce(ok(profileToken('Alpha'))).mockResolvedValue(transient);
@@ -825,6 +866,12 @@ describe('session preservation and route restore', () => {
     }
 
     expect(profileText(container)).toBe('signed-out:');
+    // Still nothing: an exhausted ladder is a live loss, and a live loss waits.
+    expect(mocks.client.login).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem(RETURN_TO_KEY)).toBeNull();
+
+    await clickButton(container, 'Entrar');
+
     expect(mocks.client.login).toHaveBeenCalledTimes(1);
     expect(sessionStorage.getItem(RETURN_TO_KEY)).toBe('/cadastros/produtos?f=1');
 
@@ -905,6 +952,448 @@ describe('session preservation and route restore', () => {
 });
 
 /**
+ * The reported bug: "if I leave the tab open for a few minutes, when I come back the
+ * whole page reloads and I lose the form I was filling."
+ *
+ * `login()` is `window.location.assign` to the Hub, so calling it destroys the document
+ * and every byte of unsaved form state with it. `captureReturnTo` restores the ROUTE and
+ * has never restored form state. So the oracle is `mocks.client.login`: a live loss must
+ * not call it at all, and a cold entry must still call it exactly once.
+ */
+describe('live session loss', () => {
+  const LIVE_LOSS_COPY = 'Sua sessão expirou';
+  const SIGNED_OUT_COPY = 'Você saiu da sua conta';
+
+  type Reader = { current: TokenReader | null };
+
+  function reader(): Reader {
+    return { current: null };
+  }
+
+  async function readToken(held: Reader) {
+    if (!held.current) throw new Error('token reader never became ready');
+    await act(async () => {
+      await held.current?.();
+    });
+  }
+
+  function useLadderTimers() {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    mocks.cache.expiresAt.mockReturnValue(null);
+  }
+
+  /** Mounts signed in, then drives the session to a permanent failure. */
+  async function loseSessionWhileSignedIn(entry = '/cadastros/produtos?f=1') {
+    mocks.cache.getToken.mockResolvedValueOnce(ok(profileToken('Alpha'))).mockResolvedValue(expired);
+    const held = reader();
+    const mounted = renderProtected([entry], (getToken) => {
+      held.current = getToken;
+    });
+    container = mounted.container;
+    root = mounted.root;
+    await flushReact();
+    expect(profileText(mounted.container)).toBe('signed-in:Alpha');
+
+    await readToken(held);
+    return mounted.container;
+  }
+
+  it('does not navigate to the Hub when a session is lost while the app is signed in', async () => {
+    useLadderTimers();
+    const host = await loseSessionWhileSignedIn();
+
+    expect(profileText(host)).toBe('signed-out:');
+    // THE oracle for the report. `login()` is a full-page navigation, so not calling it
+    // is the whole fix; everything else in this block describes what happens instead.
+    expect(mocks.client.login).not.toHaveBeenCalled();
+    expect(host.textContent).toContain(LIVE_LOSS_COPY);
+    // Nothing captured and no attempt spent, because the login effect's body never ran.
+    expect(sessionStorage.getItem(RETURN_TO_KEY)).toBeNull();
+    expect(sessionStorage.getItem(LOGIN_ATTEMPTS_KEY)).toBeNull();
+  });
+
+  it('keeps the page mounted when a session is lost', async () => {
+    useLadderTimers();
+    const host = await loseSessionWhileSignedIn();
+
+    /*
+      The INNER location probe renders inside `Protected`. Reading it proves the
+      protected subtree was never replaced, which at this level is what "the operator's
+      half-filled form is still there" means: React state survives exactly as long as the
+      component holding it stays mounted.
+    */
+    expect(locationText(host)).toBe('/cadastros/produtos?f=1');
+    // And the URL is untouched too, so the page underneath is still the page they were on.
+    expect(outerLocationText(host)).toBe('/cadastros/produtos?f=1');
+  });
+
+  it('still redirects to the Hub when the app is opened with no session', async () => {
+    useLadderTimers();
+    mocks.cache.getToken.mockResolvedValue(expired);
+
+    ({ container, root } = renderProtected(['/cadastros/produtos?f=1']));
+    await flushReact();
+
+    /*
+      The slice's must-not-break. Cold entry destroys nothing, because there is nothing on
+      screen yet, and breaking it means nobody can ever sign in - strictly worse than the
+      bug above. This is also what stops "never call login()" being an acceptable fix.
+    */
+    expect(mocks.client.login).toHaveBeenCalledTimes(1);
+    expect(sessionStorage.getItem(RETURN_TO_KEY)).toBe('/cadastros/produtos?f=1');
+    expect(container.textContent).not.toContain(LIVE_LOSS_COPY);
+  });
+
+  it('redirects on a cold entry whose very first read is a transient ladder exhaustion', async () => {
+    useLadderTimers();
+    mocks.cache.getToken.mockResolvedValue(transient);
+
+    ({ container, root } = renderProtected(['/cadastros/produtos?f=1']));
+    await flushReact();
+    for (const delay of SESSION_REVALIDATE_DELAYS_MS) {
+      await advance(delay);
+    }
+
+    // A cold entry stays a cold entry however long it took to fail: no token was ever
+    // applied in this document, so there is still nothing on screen to protect.
+    expect(profileText(container)).toBe('signed-out:');
+    expect(mocks.client.login).toHaveBeenCalledTimes(1);
+    expect(container.textContent).not.toContain(LIVE_LOSS_COPY);
+  });
+
+  it('navigates only when the operator asks, capturing the route they were on', async () => {
+    useLadderTimers();
+    const host = await loseSessionWhileSignedIn();
+
+    await clickButton(host, 'Entrar');
+
+    expect(mocks.client.login).toHaveBeenCalledTimes(1);
+    // The redirect is now THEIRS, so the loss is expected rather than inflicted - and the
+    // route restore still happens, through the one path into `login()`.
+    expect(sessionStorage.getItem(RETURN_TO_KEY)).toBe('/cadastros/produtos?f=1');
+  });
+
+  it('shows the explicit sign-out state rather than the session-loss state after Sair', async () => {
+    mocks.cache.getToken.mockResolvedValue(ok(profileToken('Alpha')));
+
+    ({ container, root } = renderProtected(['/cadastros/produtos?f=1']));
+    await flushReact();
+
+    // An explicit `Sair` is also a live loss by the discriminator - a token was applied,
+    // then it was not - so the durable intent has to keep winning, or the operator would
+    // be told their session expired when they ended it themselves.
+    const sair = container.querySelector<HTMLButtonElement>('button[aria-label="Sair"]');
+    if (!sair) throw new Error('sign-out button not found');
+    await act(async () => {
+      sair.click();
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain(SIGNED_OUT_COPY);
+    expect(container.textContent).not.toContain(LIVE_LOSS_COPY);
+    expect(mocks.client.login).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem(LOGOUT_INTENT_KEY)).toBe('1');
+  });
+
+  it('does not carry a spent sign-in request into a later loss in the same document', async () => {
+    useLadderTimers();
+    const token = profileToken('Alpha');
+    mocks.cache.getToken
+      .mockResolvedValueOnce(ok(token))
+      .mockResolvedValueOnce(expired)
+      .mockResolvedValueOnce(ok(token))
+      .mockResolvedValue(expired);
+    const held = reader();
+    const mounted = renderProtected(['/cadastros/produtos'], (getToken) => {
+      held.current = getToken;
+    });
+    container = mounted.container;
+    root = mounted.root;
+    await flushReact();
+
+    await readToken(held);
+    await clickButton(mounted.container, 'Entrar');
+    expect(mocks.client.login).toHaveBeenCalledTimes(1);
+
+    // `login()` is a navigation REQUEST, not a guarantee: a blocked assign leaves this tab
+    // alive. So the tab signs back in, and then loses the session a second time.
+    await readToken(held);
+    expect(profileText(mounted.container)).toBe('signed-in:Alpha');
+    await readToken(held);
+
+    expect(profileText(mounted.container)).toBe('signed-out:');
+    // A spent request must not silently restore the auto-navigation this block removed.
+    expect(mocks.client.login).toHaveBeenCalledTimes(1);
+    expect(mounted.container.textContent).toContain(LIVE_LOSS_COPY);
+  });
+
+  it('keeps offering a working sign-in after a live loss inside a blocked login window', async () => {
+    useLadderTimers();
+    sessionStorage.setItem(LOGIN_ATTEMPTS_KEY, JSON.stringify({ count: 3, firstAt: Date.now() }));
+    const host = await loseSessionWhileSignedIn();
+
+    // The loop guard exists to stop AUTOMATIC re-login loops. A live loss never spends an
+    // attempt on its own, so a counter left over from an earlier episode must not turn the
+    // operator's own click into a dead button on top of their unsaved work.
+    expect(host.textContent).toContain(LIVE_LOSS_COPY);
+    await clickButton(host, 'Entrar');
+
+    expect(mocks.client.login).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * Part B. Nothing in the app reads a token while the tab is idle, so the cached token
+ * simply lapses and the FIRST read after the operator returns pays for a refresh - and,
+ * if it fails, used to pay with their form. Renewing at `exp - 60s` while the tab is
+ * visible means an open tab holds a valid token continuously and that read never happens.
+ */
+describe('proactive token renewal', () => {
+  const TOKEN_LIFETIME_MS = 180_000;
+  const RENEWAL_LEAD_MS = 60_000;
+
+  /**
+   * happy-dom derives `visibilityState` from `defaultView` and has no setter, so the
+   * property is redefined on the instance and restored in `afterEach`.
+   */
+  function setVisibility(state: 'visible' | 'hidden') {
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => state,
+    });
+  }
+
+  function fireVisibilityChange() {
+    document.dispatchEvent(new Event('visibilitychange'));
+  }
+
+  afterEach(() => {
+    // The own-property shadow would otherwise outlive the test and hide the real getter.
+    delete (document as unknown as Record<string, unknown>).visibilityState;
+  });
+
+  function useRenewalTimers() {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  }
+
+  async function mountSignedIn() {
+    mocks.cache.getToken.mockResolvedValue(ok(profileToken('Alpha')));
+    const mounted = renderProtected(['/cadastros/produtos']);
+    container = mounted.container;
+    root = mounted.root;
+    await flushReact();
+    expect(profileText(mounted.container)).toBe('signed-in:Alpha');
+    return mounted.container;
+  }
+
+  it('renews the token before it expires while the document is visible', async () => {
+    useRenewalTimers();
+    setVisibility('visible');
+    mocks.cache.expiresAt.mockReturnValue(Date.now() + TOKEN_LIFETIME_MS);
+    mocks.cache.renew.mockResolvedValue(ok(profileToken('Alpha')));
+
+    const host = await mountSignedIn();
+    // Non-vacuity for the `expiresAt: null` pin the ladder block relies on: a finite
+    // expiry really does arm exactly one timer.
+    expect(vi.getTimerCount()).toBe(1);
+
+    await advance(TOKEN_LIFETIME_MS - RENEWAL_LEAD_MS);
+
+    // `renew`, never `getToken`: at `exp - 60s` the cache still serves from memory
+    // (`ACCESS_TOKEN_EXPIRY_SKEW_MS` is 30s), so a `getToken` renewal would be a no-op
+    // that issues no request at all.
+    expect(mocks.cache.renew).toHaveBeenCalledTimes(1);
+    // The mount read, and nothing else: no consumer read the token to make this happen.
+    expect(mocks.cache.getToken).toHaveBeenCalledTimes(1);
+    expect(profileText(host)).toBe('signed-in:Alpha');
+  });
+
+  /**
+   * `scheduleRenewal` runs on EVERY observed non-null token - roughly forty per screen -
+   * and on every visibilitychange back to visible. Its idempotency is two lines, the
+   * `renewalTarget` early return and the `clearRenewalTimer()` under it, and without
+   * them each of those calls arms an additional live `setTimeout` that nothing will ever
+   * clear.
+   *
+   * The oracle is therefore the timer COUNT and not "a renewal happened": every other
+   * test in this block still passes with the guard deleted, because one renewal per token
+   * lifetime and forty of them look identical from the outside. Asserted after each
+   * individual read rather than only at the end, so the first leaked timer names the
+   * event that leaked it.
+   */
+  it('arms exactly one renewal however many times the token is read', async () => {
+    useRenewalTimers();
+    setVisibility('visible');
+    mocks.cache.expiresAt.mockReturnValue(Date.now() + TOKEN_LIFETIME_MS);
+    mocks.cache.renew.mockResolvedValue(ok(profileToken('Alpha')));
+    mocks.cache.getToken.mockResolvedValue(ok(profileToken('Alpha')));
+
+    const held: { current: TokenReader | null } = { current: null };
+    const mounted = renderProtected(['/cadastros/produtos'], (getToken) => {
+      held.current = getToken;
+    });
+    container = mounted.container;
+    root = mounted.root;
+    await flushReact();
+    expect(profileText(mounted.container)).toBe('signed-in:Alpha');
+    expect(vi.getTimerCount()).toBe(1);
+
+    // Stands in for the ~40 data hooks that read the token on one screen.
+    for (let read = 0; read < 5; read += 1) {
+      await act(async () => {
+        await held.current?.();
+      });
+      expect(vi.getTimerCount()).toBe(1);
+    }
+
+    // And for an operator tabbing away and back, which re-arms through the other path.
+    for (let focus = 0; focus < 3; focus += 1) {
+      fireVisibilityChange();
+      expect(vi.getTimerCount()).toBe(1);
+    }
+
+    // None of that renewed anything: the pending rung is still the one the mount armed.
+    expect(mocks.cache.renew).not.toHaveBeenCalled();
+
+    /*
+      Non-vacuity for the count: the single surviving timer really is the renewal, it
+      still fires at `exp - 60s`, and it fires ONCE. Eight leaked timers armed at eight
+      different moments would each renew in turn.
+    */
+    await advance(TOKEN_LIFETIME_MS - RENEWAL_LEAD_MS);
+    expect(mocks.cache.renew).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not schedule a renewal while the document is hidden', async () => {
+    useRenewalTimers();
+    setVisibility('hidden');
+    mocks.cache.expiresAt.mockReturnValue(Date.now() + TOKEN_LIFETIME_MS);
+
+    await mountSignedIn();
+
+    // A hidden tab is throttled, so the rung would fire late and useless, and holding a
+    // session alive for a tab nobody is looking at is not a service to anyone.
+    expect(vi.getTimerCount()).toBe(0);
+    await advance(TOKEN_LIFETIME_MS * 4);
+    expect(mocks.cache.renew).not.toHaveBeenCalled();
+  });
+
+  it('renews immediately on becoming visible with an expired token', async () => {
+    useRenewalTimers();
+    setVisibility('hidden');
+    mocks.cache.expiresAt.mockReturnValue(Date.now() + TOKEN_LIFETIME_MS);
+    mocks.cache.renew.mockResolvedValue(ok(profileToken('Alpha')));
+    const host = await mountSignedIn();
+
+    // The tab was hidden long enough for the token to lapse.
+    mocks.cache.expiresAt.mockReturnValue(Date.now() - 1_000);
+    setVisibility('visible');
+    fireVisibilityChange();
+
+    /*
+      Asserted with no flush and no timer advance at all: the renewal is requested
+      SYNCHRONOUSLY on the visibilitychange event. That is the whole point - a query
+      refetch on window focus would otherwise race it, read a lapsed token and reach the
+      failure path this slice exists to avoid.
+    */
+    expect(mocks.cache.renew).toHaveBeenCalledTimes(1);
+    expect(mocks.cache.getToken).toHaveBeenCalledTimes(1);
+
+    // And the renewal really is ahead of the consumer read that follows it.
+    await flushReact();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(profileText(host)).toBe('signed-in:Alpha');
+  });
+
+  it('schedules rather than renews when the tab becomes visible with a healthy token', async () => {
+    useRenewalTimers();
+    setVisibility('hidden');
+    mocks.cache.expiresAt.mockReturnValue(Date.now() + TOKEN_LIFETIME_MS);
+    await mountSignedIn();
+    expect(vi.getTimerCount()).toBe(0);
+
+    setVisibility('visible');
+    fireVisibilityChange();
+
+    // Still inside its life, so there is nothing to fix - only a rung to arm.
+    expect(mocks.cache.renew).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(1);
+  });
+
+  it('drops a pending renewal when the tab is hidden again', async () => {
+    useRenewalTimers();
+    setVisibility('visible');
+    mocks.cache.expiresAt.mockReturnValue(Date.now() + TOKEN_LIFETIME_MS);
+    await mountSignedIn();
+    expect(vi.getTimerCount()).toBe(1);
+
+    setVisibility('hidden');
+    fireVisibilityChange();
+
+    expect(vi.getTimerCount()).toBe(0);
+    await advance(TOKEN_LIFETIME_MS * 4);
+    expect(mocks.cache.renew).not.toHaveBeenCalled();
+  });
+
+  it('does not renew for a tab that is not signed in', async () => {
+    useRenewalTimers();
+    setVisibility('visible');
+    mocks.cache.expiresAt.mockReturnValue(null);
+    mocks.cache.getToken.mockResolvedValue(expired);
+
+    ({ container, root } = renderProtected(['/cadastros/produtos']));
+    await flushReact();
+    expect(profileText(container)).toBe('signed-out:');
+
+    fireVisibilityChange();
+
+    expect(mocks.cache.renew).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('clears a pending renewal at unmount', async () => {
+    useRenewalTimers();
+    setVisibility('visible');
+    mocks.cache.expiresAt.mockReturnValue(Date.now() + TOKEN_LIFETIME_MS);
+    await mountSignedIn();
+    expect(vi.getTimerCount()).toBe(1);
+
+    await act(async () => {
+      root?.unmount();
+    });
+    container?.remove();
+    root = null;
+    container = null;
+
+    expect(vi.getTimerCount()).toBe(0);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(TOKEN_LIFETIME_MS * 4);
+    });
+    // An uncleared rung would refresh a session for a screen the operator has left.
+    expect(mocks.cache.renew).not.toHaveBeenCalled();
+  });
+
+  it('shows the session-loss state instead of navigating when a renewal finds the session dead', async () => {
+    useRenewalTimers();
+    setVisibility('visible');
+    mocks.cache.expiresAt.mockReturnValue(Date.now() + TOKEN_LIFETIME_MS);
+    mocks.cache.renew.mockResolvedValue(expired);
+    const host = await mountSignedIn();
+
+    await advance(TOKEN_LIFETIME_MS - RENEWAL_LEAD_MS);
+
+    // The two halves of the slice meeting: the renewal is what NOTICES the dead session
+    // now, and it must land on the in-place panel rather than on a navigation.
+    expect(mocks.cache.renew).toHaveBeenCalledTimes(1);
+    expect(profileText(host)).toBe('signed-out:');
+    expect(mocks.client.login).not.toHaveBeenCalled();
+    expect(host.textContent).toContain('Sua sessão expirou');
+  });
+});
+
+/**
  * The oracle throughout this block is a STORAGE INVARIANT, never an observed redirect.
  * CLAUDE.md records that a DOM-level test in this exact environment once passed with a
  * bug fully present, so none of these tries to watch the race. `LOGIN_ATTEMPTS_KEY`
@@ -915,6 +1404,7 @@ describe('session preservation and route restore', () => {
  */
 describe('explicit logout intent', () => {
   const SIGNED_OUT_COPY = 'Você saiu da sua conta';
+  const LIVE_LOSS_COPY = 'Sua sessão expirou';
 
   function signOutButton(host: HTMLElement): HTMLButtonElement {
     const match = host.querySelector<HTMLButtonElement>('button[aria-label="Sair"]');
@@ -1034,6 +1524,49 @@ describe('explicit logout intent', () => {
     expect(sessionStorage.getItem(RETURN_TO_KEY)).toBeNull();
   });
 
+  /**
+   * The same click as the test above, reached from the other side. That one seeds the
+   * intent in storage BEFORE mount, so it exercises a COLD document where no token was
+   * ever applied and `sessionLost` is false throughout. This one signs out INSIDE a live
+   * signed-in tab, which is the only way an operator actually reaches that panel, and it
+   * is the case that regressed: `logout()` reaches `applyToken(null)` while a token
+   * string is still held, so the loss discriminator would fire for a departure the
+   * operator asked for.
+   *
+   * Three assertions because the one cause had three separate consequences: a dead
+   * button, the wrong copy, and the protected subtree re-mounting under the overlay for
+   * someone who deliberately signed out.
+   */
+  it('signs in on the first Entrar click after a Sair inside a live tab', async () => {
+    mocks.cache.getToken.mockResolvedValue(ok(profileToken('Alpha')));
+
+    ({ container, root } = renderProtected(['/cadastros/produtos?f=1']));
+    await flushReact();
+    expect(profileText(container)).toBe('signed-in:Alpha');
+
+    await clickSignOut(container);
+    expect(container.textContent).toContain(SIGNED_OUT_COPY);
+
+    await clickButton(container, 'Entrar');
+
+    // ONE click, exactly as on a cold document. A second click reaching the Hub is not a
+    // pass: the operator pressed the only button on the screen and nothing happened.
+    expect(mocks.client.login).toHaveBeenCalledTimes(1);
+    /*
+      An explicit `Sair` is not a loss, so the operator is never told their session
+      expired, and never told that nothing they typed was lost on a page they chose to
+      leave.
+    */
+    expect(container.textContent).not.toContain(LIVE_LOSS_COPY);
+    /*
+      The INNER location probe renders only inside `Protected`'s children, and the
+      live-loss branch is the one branch that keeps them mounted. Absent here is the proof
+      that a signed-out operator's tab is not left holding an authenticated tree behind an
+      overlay - the shared-machine reason `SignedOutPanel` exists at all.
+    */
+    expect(locationText(container)).toBeUndefined();
+  });
+
   it('clears the intent whenever a live token is observed, so a stale intent can never lock the tab out', async () => {
     sessionStorage.setItem(LOGOUT_INTENT_KEY, '1');
     mocks.cache.getToken.mockResolvedValue(ok(profileToken('Alpha')));
@@ -1081,9 +1614,10 @@ describe('identity-scoped query cache', () => {
     expect(queryClient.getQueryCache().getAll()).toHaveLength(0);
   }
 
-  /** Same shape as the ladder block above: only the ladder schedules a timer here. */
+  /** Same shape, and the same `expiresAt` pin, as the ladder block above. */
   function useLadderTimers() {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    mocks.cache.expiresAt.mockReturnValue(null);
   }
 
   it('drops every cached entry on logout', async () => {
