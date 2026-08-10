@@ -93,3 +93,78 @@ The overlay's appearance over a live wizard has not been seen with human eyes.
 
 - The shipped fix replaced the old "losing a session destroys unsaved work" entry; the form-persistence-across-a-redirect entry stays, rewritten to say why it now rarely matters.
 - New entry: the overlay leaves `children` mounted while signed out, so hooks underneath sit in an `AuthTokenUnavailableError` state behind the panel. Bounded (`retry: 1`, and `requireToken` throws before any fetch) and invisible today, but it would become load-bearing if a wizard were ever rebuilt to reset its own state on a query error.
+
+---
+
+# Gate 2 rework: F1 and F2
+
+Two defects the independent Verify agent found on `3872d27`.
+Both are in the blast radius the commit created rather than in its Part A or Part B contract, and both are fixed here test-first.
+
+## F1 - an explicit `Sair` was being read as a session loss
+
+The cause is one fact stated in one place: `logout()` calls `failSession()`, which reaches `applyToken(null)` while `lastAppliedToken` still holds a token string.
+That is exactly the shape of the live-loss discriminator, so `sessionLost` became true for a departure the operator asked for.
+Three consequences followed from that one cause: the `Entrar` button was dead on the first press, the panel said `Sua sessão expirou` to someone who had signed out on purpose, and the `liveSessionLoss` branch re-mounted the protected subtree under the overlay for a signed-out operator.
+
+### The fix chosen, and why
+
+`setSessionLost(false)` in `logout()`, immediately after `failSession()`.
+`sessionLost` is defined as "the session went away WITHOUT the operator asking", and `logout()` is the one place in the codebase that knows the difference, so that is where the exclusion belongs.
+React batches both writes in the same synchronous handler, so the last one wins and the flag never becomes true at all - there is no window in which anything reads it wrong.
+All three consequences fall out at once: after `Sair` the state is `logoutIntent` true and `sessionLost` false, so the `Entrar` click clears the intent and the login effect's `if (sessionLost && !signInRequested.current) return;` guard passes on the very next render.
+
+### The alternative rejected
+
+Adding `signInRequested.current = true` to the logout panel's `onSignIn` fixes only consequence 1.
+React renders before effects run, so there is still one render in which `logoutIntent` is already false and `sessionLost` is still true: the live-loss copy appears and `{children}` mounts, for one frame, for someone who deliberately signed out.
+It also spreads the definition of `sessionLost` across its readers, where each one can only guess from whatever `logoutIntent` happens to say at the moment it renders.
+
+### Cold entry re-checked against every path Verify enumerated
+
+None changed branch.
+`setSessionLost(false)` is reachable only from `logout()`, and every cold path reaches `applyToken(null)` with `lastAppliedToken.current === undefined`, which already yields `sessionLost === false`.
+A post-logout ladder that exhausts later cannot resurrect the flag either: its `applyToken(null)` early-returns on the unchanged token before reaching `setSessionLost`.
+The pinned cold-entry row `Cold entry carrying a stale logout_intent` still passes unchanged, which is what makes the new test a genuinely different case rather than a duplicate.
+
+### The oracle
+
+`signs in on the first Entrar click after a Sair inside a live tab`, in the `explicit logout intent` block.
+It signs out INSIDE a live signed-in tab, which is the only way an operator actually reaches that panel; the pre-existing `clears the intent and re-arms the login effect when the operator clicks Entrar` seeds the intent in storage BEFORE mount and therefore exercises a cold document where `sessionLost` is false throughout.
+Three assertions for the three consequences: `login` called exactly once, the live-loss copy absent, and the INNER `LocationProbe` absent - that probe renders only inside `Protected`'s children, so its absence is the proof the authenticated tree was not left mounted behind the overlay.
+
+## F2 - the renewal re-arm guard had no oracle
+
+`scheduleRenewal` runs on every observed non-null token (~40 per screen) and on every `visibilitychange` back to visible.
+Its idempotency is two lines, the `renewalTarget` early return and the `clearRenewalTimer()` under it, and the code is correct - what was missing was any test that would notice if they went away.
+
+The oracle is `arms exactly one renewal however many times the token is read`.
+It mounts signed in with a finite expiry, then asserts `vi.getTimerCount()` is exactly 1 after each of 5 further token reads and after each of 3 further visibility transitions, asserts no renewal fired during any of them, and finally advances to `exp - 60s` and asserts the renewal fires exactly ONCE.
+The count is asserted after each individual event rather than only at the end, so the first leaked timer names the event that leaked it.
+Every other test in the renewal block passes with the guard deleted, because one renewal per token lifetime and forty of them look identical from the outside - which is why the count, and not "a renewal happened", had to be the assertion.
+
+## Mutation evidence, all five run and all five reverted
+
+| Mutation | Expected | Observed |
+| --- | --- | --- |
+| M1 - remove `setSessionLost(false)` from `logout()` | the new F1 test red | **exactly 1 red**: `signs in on the first Entrar click after a Sair inside a live tab` |
+| M2 - remove the `renewalTarget` early return and the `clearRenewalTimer()` under it | the new F2 test red | **exactly 1 red**: `arms exactly one renewal however many times the token is read`, failing `expected 2 to be 1` on the FIRST extra read. Verify measured this same mutation leaving all 661 tests green |
+| M3 - delete `if (sessionLost && !signInRequested.current) return;` | the bug oracle red | **6 red**, including `does not navigate to the Hub when a session is lost while the app is signed in` - unchanged from Verify's run, so the F1 fix did not blunt it |
+| M4 - make the discriminator read a cold entry as a live loss | cold entry red | **6 red**, including `still redirects to the Hub when the app is opened with no session` |
+| M5 - drop `revalidateAttempts.current = 0` from the recovery branch | ladder reset red | **exactly 1 red**: `resets the ladder after each recovery` - still the only one, so it is still non-vacuous |
+
+M2 turning nothing else red also re-confirms that `vi.getTimerCount()` stays LADDER-specific elsewhere: the `expiresAt: null` pin in the global `beforeEach` is untouched, and the new test opts into a finite expiry for itself.
+
+## Verification
+
+- `pnpm run type-check` - clean.
+- `pnpm run lint` - clean.
+- `pnpm test` - 49 files, **663** tests (661 plus the two new oracles), `build-contract: ok`.
+- `pnpm run build` - clean, built in 1.65s.
+
+Working tree restored and verified after every mutation.
+
+## Not verified, honestly
+
+Still no real-browser run, for the same reason as the original slice: no dev server was started.
+The oracles here are ones happy-dom observes faithfully - a spy call count, the presence of a component in the tree, and `vi.getTimerCount()` under faked `setTimeout`/`clearTimeout` - rather than the activation-behaviour class CLAUDE.md warns about.
