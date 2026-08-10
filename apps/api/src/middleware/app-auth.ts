@@ -2,6 +2,7 @@ import type { HubSdkConfig } from '@fxl-business/hub-sdk';
 import { createHubBff, requireHubAuth } from '@fxl-business/hub-sdk/server';
 import { Hono, type MiddlewareHandler } from 'hono';
 import { hubBffErrorHandler } from '../auth/hub-bff-errors.js';
+import { createHubBffOriginShim } from '../auth/hub-bff-origin.js';
 import { createHubLoginSupersedeMiddleware } from '../auth/hub-login-scope.js';
 import {
   SESSION_ABSOLUTE_TTL_MS,
@@ -247,7 +248,22 @@ export function createAppAuthBff() {
   // The error handler must be an onError rather than a middleware - see
   // hub-bff-errors.ts. Mounting it on the memory path too is inert (that store
   // never throws HubSessionStoreUnavailableError) and removes a branch.
+  // The handler must sit on BOTH apps, and that is not belt-and-braces.
+  // `bff` is now invoked through its own `fetch` rather than mounted with
+  // `route()`, so it is a separate Hono app with a separate error handler: a
+  // store outage thrown inside it is caught THERE and would answer the SDK's
+  // default 500, never reaching the outer router. That is the same
+  // catch-at-the-level-that-threw behaviour that made an error-mapping
+  // middleware dead code in the first place. The outer one still covers a throw
+  // in the shim itself.
+  bff.onError(hubBffErrorHandler);
   router.onError(hubBffErrorHandler);
-  router.route('', bff);
+  // NOT `router.route('', bff)`. The SDK's 1.3.x CSRF guard compares the browser
+  // `Origin` against the API's own origin, which are different hosts in
+  // production (sales.fxlbusiness.com vs sales-api.fxlbusiness.com), so every
+  // POST answered 403 and logged entitled operators out. The shim vouches for
+  // CORS_ORIGIN explicitly and hands everything else through untouched. See
+  // hub-bff-origin.ts.
+  router.all('/auth/*', createHubBffOriginShim(bff, { trustedOrigins: [env.CORS_ORIGIN] }));
   return router;
 }
