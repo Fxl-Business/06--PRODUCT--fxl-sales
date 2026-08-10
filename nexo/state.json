@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "current_milestone_id": "v2.6.0",
+  "current_milestone_id": "v2.8.0",
   "delivery": {
     "mode": "promotion",
     "trunk": "master",
@@ -27,12 +27,12 @@
     "note": "User explicitly approved the v2.4.0 release-blocker repair design and selected --auto. Four verified release blockers are planned as independent slices. Gate 2 remains mandatory for every slice and the integrated release. Gate 3a remains human-gated before the staging cut."
   },
   "gate3": {
-    "release": "v2.5.0",
-    "commit": "71ddfbd3fbdb21288511982000dfe3ee1a051138",
-    "flow": "ship",
-    "decision": "approved-full-promotion",
-    "decided_at": "2026-08-06",
-    "note": "Gate 3a approved as ship-via-staging; Gate 3b approved explicitly after staging. Release-verify PASS on 281bc5b. production == staging == 71ddfbd; invariant production subset-of staging subset-of master holds."
+    "release": "v2.7.0",
+    "commit": "a2511b48b7386a408b1aaa467f8288b16b68f84f",
+    "flow": "ship-prod-ready",
+    "decision": "approved-in-invocation",
+    "decided_at": "2026-08-10",
+    "note": "User approved the production cut in the invocation (\"run /nexo-ship-prod-ready when finished on auto, so when I come back it's already on prod\"). Release-verify PASS, including a clean-clone deploy simulation running the literal vercel.json build command, both migrations applied to a throwaway database restored to the real v2.5.0 schema under a NOSUPERUSER NOBYPASSRLS role, and the nightly purge executed rather than reasoned about. Production moved from v2.5.0 and therefore also carried the previously unpromoted v2.6.0. master == staging == production == a2511b4; the invariant production subset-of staging subset-of master holds."
   },
   "gate3_hotfix": {
     "release": "v2.3.1",
