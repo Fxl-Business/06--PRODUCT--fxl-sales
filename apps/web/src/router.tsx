@@ -4,7 +4,7 @@ import { createBrowserRouter, Navigate, type RouteObject } from 'react-router-do
 import { AdminShell } from './admin/layout/AdminShell';
 import { FinderShell } from './components/layout/FinderShell';
 import { SellerShell } from './components/layout/SellerShell';
-import { RoleGuard } from './components/auth/RoleGuard';
+import { NoRoleGuard, RoleGuard } from './components/auth/RoleGuard';
 import { NoRolePage } from './pages/errors/NoRolePage';
 import { Protected } from '@/auth/react';
 import { RouteErrorPage } from './pages/errors/RouteErrorPage';
@@ -146,7 +146,9 @@ const routes: RouteObject[] = [
     errorElement: <RouteErrorPage />,
     element: (
       <Protected>
-        <NoRolePage />
+        <NoRoleGuard>
+          <NoRolePage />
+        </NoRoleGuard>
       </Protected>
     ),
   },
