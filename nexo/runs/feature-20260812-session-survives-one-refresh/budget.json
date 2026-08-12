@@ -2,7 +2,7 @@
   "active_accumulated_seconds": 0,
   "active_since": 1786572327,
   "counters": {
-    "agent_dispatches": 11,
+    "agent_dispatches": 13,
     "initial_slices": 4,
     "replans": 0,
     "total_slices": 4,
@@ -24,7 +24,8 @@
     "verify_attempts": {
       "01-persist-rotated-hub-session-cookie": 1,
       "02-keep-the-route-on-session-loss": 1,
-      "03-never-restore-the-no-role-route": 1
+      "03-never-restore-the-no-role-route": 1,
+      "04-no-role-redirects-when-entitled": 1
     }
   },
   "version": 1
