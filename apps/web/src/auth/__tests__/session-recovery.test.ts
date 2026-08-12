@@ -62,6 +62,11 @@ const ACCEPTED_RETURN_TO: Array<[string, string]> = [
   // Benign dot-segment normalization still resolves and is still honoured. The guard
   // rejects what normalization PRODUCES, never the fact that it happened.
   ['/a/../cadastros', '/cadastros'],
+  // No over-blocking. The terminal-route refusal is an EXACT pathname match, so an
+  // ordinary Sales Ops route is untouched, and so is a legacy content tree whose
+  // `RoleGuard` merely redirects to `/no-role` when the operator lacks the role.
+  ['/tatico/dashboard', '/tatico/dashboard'],
+  ['/admin/finders', '/admin/finders'],
 ];
 
 const REJECTED_RETURN_TO: string[] = [
@@ -92,6 +97,22 @@ const REJECTED_RETURN_TO: string[] = [
   '/..//user@evil.example/',
   '/.//evil.example',
   '/a/../..//evil.example',
+  /**
+   * The terminal-screen family. `/no-role` is where a failed authorization ENDS, so
+   * restoring it after a login is the reported "I click Entrar and get Acesso não
+   * autorizado". Every spelling here is one React Router renders as `NoRolePage`: the
+   * matcher never sees the query string, `compilePath` eats trailing slashes with `\/*$`
+   * and carries the `i` flag, and `matchRoutes` percent-decodes the pathname before
+   * matching. A guard that refuses only the literal `/no-role` leaves all of them open.
+   */
+  '/no-role',
+  '/no-role/',
+  '/no-role//',
+  '/no-role?x=1',
+  '/no-role#frag',
+  '/NO-ROLE',
+  '/No-Role/',
+  '/%6Eo-role',
 ];
 
 describe('sanitizeReturnTo', () => {
@@ -106,6 +127,32 @@ describe('sanitizeReturnTo', () => {
   it('rejects null and undefined', () => {
     expect(sanitizeReturnTo(null, ORIGIN)).toBeNull();
     expect(sanitizeReturnTo(undefined, ORIGIN)).toBeNull();
+  });
+
+  /**
+   * THE assertion this slice exists for, and the only one that separates a refusal
+   * written against the NORMALIZED path from one written against the raw input. Every
+   * value here has `.` as its second character and resolves same-origin, so it walks past
+   * every raw structural check and only BECOMES `/no-role` inside `new URL`. A refusal
+   * placed on the raw string passes every other test in this file and fails exactly this.
+   */
+  it('refuses a terminal route that only appears after dot-segment normalization', () => {
+    const bypasses = ['/foo/../no-role', '/./no-role', '/a/b/../../no-role', '/foo/../no-role?x=1'];
+
+    for (const value of bypasses) {
+      expect({ value, result: sanitizeReturnTo(value, ORIGIN) }).toEqual({ value, result: null });
+    }
+  });
+
+  /**
+   * The refusal is an EXACT pathname match, never a prefix one. Neither of these matches
+   * the `/no-role` route: `compilePath` produces `^\/no\-role\/*$`, so the first falls
+   * through to `/:workspace/:view` and the second to the `*` redirect. Refusing them would
+   * cost a restore while protecting nothing.
+   */
+  it('does not over-block routes that merely start with a terminal route', () => {
+    expect(sanitizeReturnTo('/no-role/extra', ORIGIN)).toBe('/no-role/extra');
+    expect(sanitizeReturnTo('/no-roles', ORIGIN)).toBe('/no-roles');
   });
 
   /**
@@ -158,6 +205,26 @@ describe('captureReturnTo / consumeReturnTo', () => {
     const { map, storage } = fakeStorage();
     captureReturnTo('//evil.example/x', ORIGIN, storage);
 
+    expect(map.has(RETURN_TO_KEY)).toBe(false);
+  });
+
+  it('writes nothing when the captured path is the terminal /no-role screen', () => {
+    const { map, storage } = fakeStorage();
+    captureReturnTo('/no-role', ORIGIN, storage);
+
+    expect(map.has(RETURN_TO_KEY)).toBe(false);
+  });
+
+  /**
+   * The consume-before-validate property, asserted for the new refusal too. The slot is
+   * emptied on the read that rejects it, so a `/no-role` written by anything else is
+   * consumed exactly once and cannot be retried on a later mount or by a StrictMode
+   * double effect.
+   */
+  it('destroys a stored terminal route on the read that rejects it', () => {
+    const { map, storage } = fakeStorage({ [RETURN_TO_KEY]: '/no-role' });
+
+    expect(consumeReturnTo(ORIGIN, storage)).toBeNull();
     expect(map.has(RETURN_TO_KEY)).toBe(false);
   });
 

@@ -92,6 +92,60 @@ function dropItem(storage: StorageLike | null, key: string): void {
 }
 
 /**
+ * Routes that are TERMINAL auth screens. Reaching one is the END of a failed
+ * authorization, never a place the operator asked to be, so none of them is ever a
+ * legitimate post-login `returnTo`: restoring one turns `Entrar` into
+ * `Acesso não autorizado` while the session it just created is perfectly good.
+ *
+ * - `/no-role` renders `NoRolePage`. `SalesOpsApp` navigates here whenever `roles === []`,
+ *   which is exactly what a live session loss produces underneath the `SignedOutPanel`
+ *   overlay, so this is the value most likely to be sitting in the slot at the one moment
+ *   it matters.
+ *
+ * Deliberately NOT members: `/admin/*`, `/finder/*` and `/seller/*`. Those are legacy
+ * CONTENT trees rather than error screens. Their `RoleGuard` bounces an unentitled
+ * operator to `/no-role`, while an entitled one lands on a real page, so refusing them
+ * would strand a legitimate restore for the only operator who can reach them. `/auth` and
+ * `/auth/*` keep their own separate check below, for an unrelated reason: they are proxied
+ * to the API BFF.
+ */
+const TERMINAL_AUTH_ROUTES: readonly string[] = ['/no-role'];
+
+/**
+ * Matches a NORMALIZED pathname against `TERMINAL_AUTH_ROUTES` the way React Router
+ * matches it against the route table, because anything looser leaves a spelling this
+ * guard permits and the router still renders as the terminal screen.
+ *
+ * - Per-segment percent-decoding, mirroring `decodePath` in `@remix-run/router`, which
+ *   `matchRoutesImpl` applies BEFORE matching: `new URL('/%6Eo-role', origin).pathname`
+ *   keeps the escape verbatim, so a raw compare would miss it. The `/` re-encoding is
+ *   copied from there too, so an encoded slash cannot manufacture a segment boundary the
+ *   router would not see. A malformed escape falls back to the undecoded value, exactly
+ *   as `decodePath` does, so nothing is over-blocked.
+ * - Case-insensitive, because `compilePath` builds its matcher with the `i` flag unless a
+ *   route opts into `caseSensitive` and no route in `router.tsx` does, so `/NO-ROLE`
+ *   renders `NoRolePage`. `toLowerCase` and not `toLocaleLowerCase`: this comparison must
+ *   not depend on the operator's locale.
+ * - Trailing slashes stripped, because `compilePath` ends the pattern with `\/*$`, so
+ *   `/no-role/` and `/no-role//` render `NoRolePage` too.
+ *
+ * The query string is deliberately not consulted: the matcher never sees it, so
+ * `/no-role?x=1` is the same terminal screen and the pathname alone decides.
+ */
+function isTerminalAuthRoute(pathname: string): boolean {
+  let decoded: string;
+  try {
+    decoded = pathname
+      .split('/')
+      .map((segment) => decodeURIComponent(segment).replace(/\//g, '%2F'))
+      .join('/');
+  } catch {
+    decoded = pathname;
+  }
+  return TERMINAL_AUTH_ROUTES.includes(decoded.replace(/\/+$/, '').toLowerCase());
+}
+
+/**
  * The open-redirect guard. A value is honoured only as a same-origin RELATIVE path.
  *
  * 1. non-empty string, at most `MAX_RETURN_TO_LENGTH` characters;
@@ -111,7 +165,11 @@ function dropItem(storage: StorageLike | null, key: string): void {
  *    root. Checks 3-4 validate the RAW string and check 5 validates the PARSED url,
  *    but what leaves this function is the normalized path, so the normalized path is
  *    what has to be validated;
- * 8. the normalized result is not `/`, the default landing route - nothing to restore.
+ * 8. the NORMALIZED pathname is not a TERMINAL auth screen. Same placement as check 7 and
+ *    for the same reason: `/foo/../no-role` has `.` as its second character and resolves
+ *    same-origin, so it walks past every raw check and only BECOMES `/no-role` here. A
+ *    refusal written against the raw input is bypassed by one dot segment;
+ * 9. the normalized result is not `/`, the default landing route - nothing to restore.
  *
  * An absolute URL is rejected even when it is same-origin: "only ever a same-origin
  * relative path" is far easier to keep true than "an absolute URL that happens to match".
@@ -141,6 +199,10 @@ export function sanitizeReturnTo(
   // returned rather than trusting the raw check above to still describe it.
   if (normalized[0] !== '/') return null;
   if (normalized[1] === '/' || normalized[1] === '\\') return null;
+  // Same place and same reason: what this function hands back is the NORMALIZED path, so
+  // that is the string the terminal-route refusal has to be asserted on. Checking the raw
+  // input instead is bypassed by `/foo/../no-role`.
+  if (isTerminalAuthRoute(url.pathname)) return null;
   return normalized === '/' ? null : normalized;
 }
 
