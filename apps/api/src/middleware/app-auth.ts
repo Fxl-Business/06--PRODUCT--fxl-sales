@@ -4,6 +4,7 @@ import { Hono, type MiddlewareHandler } from 'hono';
 import { hubBffErrorHandler } from '../auth/hub-bff-errors.js';
 import { createHubBffOriginShim } from '../auth/hub-bff-origin.js';
 import { createHubLoginSupersedeMiddleware } from '../auth/hub-login-scope.js';
+import { createHubRotatedCookieFetch } from '../auth/hub-rotated-cookie.js';
 import {
   SESSION_ABSOLUTE_TTL_MS,
   SESSION_TTL_MS,
@@ -216,6 +217,13 @@ export function createAppAuthBff() {
 
   const bff = createHubBff(hubSdkConfig, {
     sessionStore: session.store,
+    // The BACKCHANNEL fetch, not the browser cookie below. In production the Hub
+    // rotates the session cookie as `__Host-fxl_hub_session`, which the SDK's
+    // `parseRotatedRefresh` regex cannot match, so the rotated refresh token was
+    // dropped on every /auth/refresh and every /auth/switch while the BFF still
+    // answered 200 - and the Hub revoked the family on the second replay. See
+    // hub-rotated-cookie.ts. This has nothing to do with `secureCookies`.
+    fetchImpl: createHubRotatedCookieFetch(),
     secureCookies,
     timeoutMs: HUB_BFF_TIMEOUT_MS,
     // Derived from the store's own constants, so the SDK's view of a session's
