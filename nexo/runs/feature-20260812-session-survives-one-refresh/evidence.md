@@ -1,4 +1,4 @@
-# Evidence — a session survives exactly one refresh
+# Evidence - a session survives exactly one refresh
 
 Gathered 2026-08-12, before planning. Everything here is measured, not inferred.
 
@@ -58,9 +58,9 @@ Driving the genuine `createHubBff` refresh handler against a fake Hub (recording
 
 | Hub response | store calls | stored token |
 | --- | --- | --- |
-| rotated token in JSON body only | `withSession -> get` | `RT1` — **rotation lost** |
-| rotated token in `Set-Cookie` | `withSession -> get -> update(RT2)` | `RT2` — persisted |
-| neither | `withSession -> get` | `RT1` — **rotation lost** |
+| rotated token in JSON body only | `withSession -> get` | `RT1` - **rotation lost** |
+| rotated token in `Set-Cookie` | `withSession -> get -> update(RT2)` | `RT2` - persisted |
+| neither | `withSession -> get` | `RT1` - **rotation lost** |
 
 All three answered `200`. The loss is silent.
 
@@ -77,7 +77,7 @@ Every existing rotation test calls `handle.update(...)` **directly**:
 
 and `app-auth-bff-wiring.test.ts` stubs `withSession` to return a canned
 `REFRESH_OK = { status: 200, body: { ok: true }, clear: false }` (line 52), so the SDK's
-real refresh handler — the Hub round trip and the rotation write — never executes in any
+real refresh handler - the Hub round trip and the rotation write - never executes in any
 test we own.
 
 **The missing oracle:** drive the real SDK BFF `/auth/refresh` against a fake Hub and

@@ -2,7 +2,7 @@
   "active_accumulated_seconds": 0,
   "active_since": 1786572327,
   "counters": {
-    "agent_dispatches": 6,
+    "agent_dispatches": 7,
     "initial_slices": 4,
     "replans": 0,
     "total_slices": 4,
@@ -21,7 +21,9 @@
   },
   "paused": false,
   "scoped_counters": {
-    "verify_attempts": {}
+    "verify_attempts": {
+      "01-persist-rotated-hub-session-cookie": 1
+    }
   },
   "version": 1
 }
