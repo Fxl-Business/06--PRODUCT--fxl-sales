@@ -1,7 +1,7 @@
 ---
 id: 01-persist-rotated-hub-session-cookie
 milestone: v2.8.0
-status: todo
+status: done
 depends_on: []
 files_modified:
   - apps/api/src/auth/hub-rotated-cookie.ts

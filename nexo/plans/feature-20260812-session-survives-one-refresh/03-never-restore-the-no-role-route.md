@@ -1,7 +1,7 @@
 ---
 id: 03-never-restore-the-no-role-route
 milestone: v2.8.0
-status: todo
+status: done
 depends_on: []
 files_modified:
   - apps/web/src/auth/session-recovery.ts

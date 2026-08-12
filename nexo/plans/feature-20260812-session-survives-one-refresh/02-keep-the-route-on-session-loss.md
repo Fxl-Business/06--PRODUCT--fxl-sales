@@ -1,7 +1,7 @@
 ---
 id: 02-keep-the-route-on-session-loss
 milestone: v2.8.0
-status: todo
+status: done
 depends_on: []
 files_modified:
   - apps/web/src/sales-ops/SalesOpsApp.tsx

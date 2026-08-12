@@ -1,7 +1,7 @@
 ---
 id: 04-no-role-redirects-when-entitled
 milestone: v2.8.0
-status: todo
+status: done
 depends_on: []
 files_modified:
   - apps/web/src/components/auth/RoleGuard.tsx
