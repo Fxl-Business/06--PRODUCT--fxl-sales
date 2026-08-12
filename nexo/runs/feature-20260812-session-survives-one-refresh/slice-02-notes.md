@@ -133,7 +133,7 @@ Neither watched file moved in the full run:
  ✓ src/sales-ops/__tests__/routing.test.tsx (16 tests) 680ms
 ```
 
-No em dash in either touched file (`grep -n "—"` returns nothing).
+No em dash character in either touched file; the repo-wide grep for that character returns nothing.
 No processes were left running; every command was run-once.
 
 ## Disagreement with the plan
