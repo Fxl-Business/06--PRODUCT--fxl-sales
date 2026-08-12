@@ -1242,11 +1242,49 @@ export function SalesOpsApp() {
   const activeWorkspaceVisual = workspaceVisuals[workspace];
   const ActiveWorkspaceIcon = activeWorkspaceVisual.icon;
 
-  if (visibleWorkspaceIds.length === 0) {
+  /**
+   * Whether `profile.roles` is an ANSWER about this operator or merely the empty
+   * default of a session that is gone.
+   *
+   * `applyToken` writes `isSignedIn` and `roles` in one `setProfile`, and
+   * `profileFromToken(null)` returns `roles: []`, so the two can never disagree:
+   * a signed-out profile always reports zero roles, and zero roles from a signed-out
+   * profile say nothing at all about entitlement.
+   *
+   * This gates both early returns below, and it exists because of the live-loss
+   * overlay in `HubProtected`. That branch keeps `children` MOUNTED under
+   * `Sua sessão expirou` precisely so the operator's half-filled proposta wizard
+   * survives, and a `return <Navigate />` from here is an unmount: it throws that
+   * work away and, worse, rewrites the URL that CLAUDE.md ("Sales Ops Routing")
+   * makes the single source of truth for the active workspace and page. The login
+   * effect then captures `/no-role` as the return-to, so `Entrar` restores a dead
+   * end instead of the screen the operator was on. Measured in production.
+   *
+   * `profile.isLoaded` is deliberately absent: the provider's initial state is
+   * `{ isLoaded: false, isSignedIn: false }` and `applyToken` only ever writes
+   * `isLoaded: true`, so `isSignedIn === true` already implies it and adding the
+   * term would suggest a state that does not exist.
+   *
+   * Do NOT "fix" this by returning `null` or a Skeleton while signed out. That
+   * unmounts the subtree too, which is the exact regression
+   * `quick-20260810-preserve-work-on-session-loss` closed.
+   */
+  const rolesAreAuthoritative = profile.isSignedIn;
+
+  if (visibleWorkspaceIds.length === 0 && rolesAreAuthoritative) {
     return <Navigate to="/no-role" replace />;
   }
 
-  if (resolution.redirect) {
+  /*
+    Same guard, and it is not optional. With an empty role set every URL resolves to
+    `redirect: true` on the `getDefaultSalesOpsRoute` fallback, so leaving this one
+    unguarded simply relocates the bug: it would unmount the subtree and rewrite any
+    non-`/tatico/dashboard` URL to `/tatico/dashboard`. The alias this branch really
+    exists for (`/cadastros/vendedores` to `/cadastros/pessoas`) is role-dependent by
+    construction, since `aliasLegacyView` only fires once the workspace has resolved
+    to `cadastros`, which an empty role set can never do.
+  */
+  if (resolution.redirect && rolesAreAuthoritative) {
     return <Navigate to={resolution.path} replace />;
   }
 
