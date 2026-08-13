@@ -1,7 +1,7 @@
 ---
 id: 06-close-the-verifier-follow-ups
 milestone: v2.8.0
-status: todo
+status: done
 depends_on: []
 files_modified:
   - apps/web/src/components/auth/RoleGuard.tsx

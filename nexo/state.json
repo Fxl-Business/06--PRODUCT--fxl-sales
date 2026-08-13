@@ -58,5 +58,11 @@
     "decision": "approved-production",
     "decided_at": "2026-08-05",
     "note": "Gate 3b was approved explicitly after staging schema validation. Production fast-forwarded to v2.4.0, staging and production match the release tag, and the Vercel production deployment completed successfully."
+  },
+  "gate1_followups": {
+    "feature": "batch-20260813-session-followups",
+    "decision": "skipped-autopilot",
+    "decided_at": "2026-08-13",
+    "note": "Operator said 'go fix all of that' after the session-refresh feature closed, then chose explicitly: do NOT promote (they will ship themselves) and do NOT touch 16--INTERNAL--fxl-hub (they want a prompt to run there instead, written to nexo/playbooks/fix-hub-sdk-rotated-cookie-prefix.md). Two slices closed the follow-ups the feature's Gate 2 verifiers filed. Slice 05 pins the composed session-loss journey, which revealed that the fixes cover for each other: with slice 03 reverted the operator still reaches the right screen because slice 04 rescues them, so only a never-visited-/no-role assertion can see the regression. Slice 06 closed four items, including a journey scenario that carried the acceptance criterion as its title yet structurally could not fail. master is 1213 tests green with a real build. NOT promoted."
   }
 }

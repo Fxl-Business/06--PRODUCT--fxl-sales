@@ -1,7 +1,7 @@
 ---
 id: 05-pin-the-composed-session-journey
 milestone: v2.8.0
-status: todo
+status: done
 depends_on: []
 files_modified:
   - apps/web/src/__tests__/session-journey.test.tsx
