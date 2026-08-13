@@ -632,6 +632,21 @@ describe('createAppAuthBff rotated Hub session cookie, against the real SDK hand
   it('still persists the rotated refresh token when the Hub sends the unprefixed fxl_hub_session', async () => {
     // The local-development path, which always worked. The wrapper must not have
     // broken it on the way past.
+    //
+    // Read this one carefully before drawing a conclusion from it, because two
+    // reviewers have now had to re-derive the same thing: deleting `fetchImpl`
+    // from app-auth.ts ALSO turns this test red, and that is a HARNESS artifact
+    // rather than evidence that local development needs the wrapper. Without the
+    // wrapper, `createHubBff` binds `options.fetchImpl ?? fetch` ONCE at
+    // construction, and construction happened back in `beforeAll`; `stubHub`'s
+    // later `vi.stubGlobal('fetch', ...)` therefore never reaches the SDK, the
+    // request escapes to whatever `FXL_HUB_API_URL` points at, and no rotation is
+    // ever seen. What goes red is the stub not being reached, not the unprefixed
+    // parse failing.
+    //
+    // The oracle for the real defect is the `__Host-` case above, which is the
+    // one that fails with the stub fully in play. The unprefixed cookie is
+    // matched by the SDK's own `parseRotatedRefresh` and always was.
     const session = recordingSession();
     const spy = useRecordingSession(session);
     stubHub([HUB_ROTATION_DEV], HUB_REFRESH_BODY);
