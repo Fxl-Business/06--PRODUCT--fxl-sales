@@ -9,8 +9,9 @@ files_modified:
   - apps/web/src/auth/session-recovery.ts
   - apps/web/src/auth/__tests__/session-recovery.test.ts
   - apps/api/src/middleware/__tests__/app-auth-bff-wiring.test.ts
-acceptance: "given the three small follow-ups the verifiers filed, when this slice lands, then RoleRouter is gone, sanitizeReturnTo's /auth check is case-insensitive like its sibling, and the unprefixed-cookie test records why it goes red under the fetchImpl probe"
-goal: Close the three small follow-ups the Gate 2 verifiers filed, each as its own atomic commit.
+  - apps/web/src/__tests__/session-journey.test.tsx
+acceptance: "given the four small follow-ups the verifiers filed, when this slice lands, then RoleRouter is gone, sanitizeReturnTo's /auth check is case-insensitive like its sibling, the unprefixed-cookie test records why it goes red under the fetchImpl probe, and the journey test's headline scenario can actually fail"
+goal: Close the four small follow-ups the Gate 2 verifiers filed, each as its own atomic commit.
 must_not_break:
   - RoleGuard and NoRoleGuard, which stay exactly as they are
   - every existing sanitizeReturnTo assertion, especially the off-origin and dot-segment families
@@ -96,3 +97,38 @@ pnpm --filter @fxl-sales/api test
 pnpm run lint
 pnpm run type-check
 ```
+
+## Item 4 - make the journey test's headline scenario able to fail
+
+Filed by the slice 05 Gate 2 verifier, and the most substantive of the four.
+
+`apps/web/src/__tests__/session-journey.test.tsx` scenario 1 is
+`returns the operator to the route they were on after a lost session and a successful login`.
+It carries the slice's acceptance criterion as its title, and it cannot demonstrate it.
+
+It enters at `/tatico/dashboard`, which is ALSO the admin default landing route. So "restored to the
+route I was on" and "fell back to the role default" are the same string, and both of its
+post-remount assertions pass for the wrong reason:
+
+- the final URL is the default landing, reached with or without a restore
+- the empty returnTo slot comes from `consumeReturnTo`'s destroy-before-validate, which runs whether
+  or not a navigation follows it
+
+The verifier proved this by neutering only the restore navigation in `react.tsx` while leaving the
+consume in place: scenario 1 stayed GREEN while scenarios 2 and 3 went red.
+
+Coverage of the behaviour does exist, in scenarios 2 and 3, so nothing is currently untested. The
+defect is that the one scenario named after the acceptance criterion is the one that cannot fail,
+which is exactly the shape of bug this whole feature exists to prevent. It is also a trap: someone
+later trimming "redundant" scenarios would keep 1 and delete 2, and coverage would vanish silently.
+
+Fix it so the scenario proves its own name. Prefer entering at a route that is NOT the operator's
+default landing, so that a missing restore lands somewhere provably different, and keep the returnTo
+assertion but make it distinguish a consumed-and-navigated slot from a merely consumed one. Do not
+delete scenarios 2 or 3; they stay.
+
+Then prove the fix: repeat the verifier's probe. Neuter ONLY the restore navigation in
+`apps/web/src/auth/react.tsx` (the effect that calls `navigate(target, { replace: true })`), leaving
+`consumeReturnTo` running, and confirm scenario 1 NOW goes red. Restore `react.tsx` byte-exactly and
+prove the tree is clean. Capture that output. If scenario 1 still passes under that probe, the fix
+did not work and you must say so.
