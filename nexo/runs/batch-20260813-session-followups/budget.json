@@ -2,7 +2,7 @@
   "active_accumulated_seconds": 0,
   "active_since": 1786647305,
   "counters": {
-    "agent_dispatches": 0,
+    "agent_dispatches": 2,
     "initial_slices": 2,
     "replans": 0,
     "total_slices": 2,
@@ -21,7 +21,9 @@
   },
   "paused": false,
   "scoped_counters": {
-    "verify_attempts": {}
+    "verify_attempts": {
+      "05-pin-the-composed-session-journey": 1
+    }
   },
   "version": 1
 }
