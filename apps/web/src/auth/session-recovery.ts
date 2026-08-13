@@ -156,8 +156,9 @@ function isTerminalAuthRoute(pathname: string): boolean {
  * 5. `new URL(value, origin)` parses and resolves back to `origin` - the backstop
  *    behind the character checks, because `URL` normalizes backslashes and
  *    percent-encodings that could otherwise slip past them;
- * 6. the path is not `/auth` nor under `/auth/`; those are proxied to the API BFF and
- *    restoring one would bounce the operator straight back into the login flow;
+ * 6. the path is not `/auth` nor under `/auth/`, compared case-insensitively exactly as
+ *    check 8 compares; those are proxied to the API BFF and restoring one would bounce the
+ *    operator straight back into the login flow;
  * 7. the NORMALIZED result passes check 4 again, because normalization can manufacture
  *    a prefix the raw input never had: `/..//evil.example` has `.` as its second
  *    character, so it walks past check 4, and resolves same-origin, so it walks past
@@ -192,7 +193,13 @@ export function sanitizeReturnTo(
     return null;
   }
   if (url.origin !== origin) return null;
-  if (url.pathname === '/auth' || url.pathname.startsWith('/auth/')) return null;
+  // Case-insensitive, matching `isTerminalAuthRoute` above rather than disagreeing with it
+  // one line away. `toLowerCase` and not `toLocaleLowerCase`, for the same reason: this
+  // comparison must not depend on the operator's locale. Lowercasing can only ever make
+  // this branch reject MORE inputs than before and never fewer, so it cannot open a
+  // redirect that was previously closed.
+  const lowerPath = url.pathname.toLowerCase();
+  if (lowerPath === '/auth' || lowerPath.startsWith('/auth/')) return null;
 
   const normalized = `${url.pathname}${url.search}`;
   // The invariant is on the RETURNED string, so re-assert it on the value being
