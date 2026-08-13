@@ -80,6 +80,17 @@ const REJECTED_RETURN_TO: string[] = [
   '/',
   '/auth/login',
   '/auth',
+  /**
+   * The same family in mixed case. `/auth/*` is proxied to the API BFF rather than being a
+   * React route, so restoring one costs a wasted navigation straight back into the login
+   * flow whatever its casing; and the sibling `isTerminalAuthRoute` right beneath it in
+   * `session-recovery.ts` already compares case-insensitively, so two guards in one
+   * function disagreeing on case is the asymmetry that becomes a real bug the day someone
+   * copies the wrong one.
+   */
+  '/Auth/login',
+  '/AUTH',
+  '/aUtH/callback',
   `/${'a'.repeat(3000)}`,
   '/x y',
   /**

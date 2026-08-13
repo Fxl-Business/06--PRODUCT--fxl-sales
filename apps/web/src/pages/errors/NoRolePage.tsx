@@ -3,8 +3,12 @@ import { useLogout } from '@/auth/react';
 import { Button } from '@/components/ui/button';
 
 /**
- * Shown to a signed-in user with no platform role (Phase 03 T13). RoleRouter and
- * RoleGuard redirect here when publicMetadata.role is absent or mismatched.
+ * Shown to a signed-in operator this app has nothing to offer (Phase 03 T13).
+ *
+ * Two live navigators send them here: `RoleGuard`, when a legacy `/admin/*`, `/finder/*`
+ * or `/seller/*` URL asks for an `AppRole` the profile does not hold, and `SalesOpsApp`,
+ * when `getVisibleWorkspaces(roles)` is empty. `NoRoleGuard` is the way back out and
+ * redirects to `/` the moment either of those facts stops being true.
  */
 export function NoRolePage() {
   const { t } = useTranslation();
