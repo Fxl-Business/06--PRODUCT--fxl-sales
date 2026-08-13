@@ -401,9 +401,23 @@ afterEach(async () => {
 
 describe('the composed session journey', () => {
   it('returns the operator to the route they were on after a lost session and a successful login', async () => {
-    const app = await loseSessionAt('/tatico/dashboard');
+    /*
+      The entry route is deliberately NOT `/tatico/dashboard`.
 
-    expect(locationText(app.host)).toBe('/tatico/dashboard');
+      This scenario carries the feature's acceptance criterion as its title, and while it
+      entered on the admin DEFAULT landing route it structurally could not fail: "restored
+      to the route I was on" and "fell back to the role default" were the same string, so
+      the post-remount URL assertion passed with the restore deleted. The slice 05 Gate 2
+      verifier proved exactly that by neutering only the `navigate(target, ...)` in
+      `react.tsx` and leaving `consumeReturnTo` in place: this scenario stayed green while
+      the two below went red.
+
+      `/operacional/vendas` is a route the default landing can never produce, so a missing
+      restore now lands provably elsewhere.
+    */
+    const app = await loseSessionAt('/operacional/vendas');
+
+    expect(locationText(app.host)).toBe('/operacional/vendas');
     expect(app.host.textContent).toContain(SESSION_LOST);
     expect(app.host.textContent).not.toContain(UNAUTHORIZED);
     /*
@@ -417,15 +431,29 @@ describe('the composed session journey', () => {
     await clickButton(app.host, 'Entrar');
 
     expect(mocks.client.login).toHaveBeenCalledTimes(1);
-    expect(sessionStorage.getItem(RETURN_TO_KEY)).toBe('/tatico/dashboard');
+    const captured = sessionStorage.getItem(RETURN_TO_KEY);
+    expect(captured).toBe('/operacional/vendas');
 
     const next = await completeHubRoundTrip(app, adminToken);
 
-    expect(locationText(next.host)).toBe('/tatico/dashboard');
+    /*
+      The callback lands on `/`, so all three endings are now distinguishable: a restore
+      arrives at `captured`, a deleted restore falls through to the admin default
+      `/tatico/dashboard`, and a login that never took hold stays at `/`.
+    */
+    expect(locationText(next.host)).toBe(captured);
     expect(next.host.textContent).not.toContain(SESSION_LOST);
     expect(next.host.textContent).not.toContain(UNAUTHORIZED);
-    // Consumed by the restore, so nothing is left to replay.
-    expect(sessionStorage.getItem(RETURN_TO_KEY)).toBeNull();
+    /*
+      An empty slot on its own proves only that SOMETHING consumed it, and `consumeReturnTo`
+      destroys before it validates, so the slot empties whether or not a navigation follows.
+      Asserting it against `captured`, the value the URL above had to come from, is what
+      separates a consumed-and-navigated slot from a merely consumed one.
+    */
+    expect({ slot: sessionStorage.getItem(RETURN_TO_KEY), url: locationText(next.host) }).toEqual({
+      slot: null,
+      url: captured,
+    });
   });
 
   it('returns the operator to a non-tatico route, where the second guard is load-bearing', async () => {
