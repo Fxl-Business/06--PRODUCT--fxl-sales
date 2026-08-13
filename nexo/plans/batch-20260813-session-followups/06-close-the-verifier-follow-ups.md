@@ -17,16 +17,17 @@ must_not_break:
   - every existing sanitizeReturnTo assertion, especially the off-origin and dot-segment families
   - the api wiring suite, which must stay green with only a comment added
 rules:
-  - three atomic commits, one per item, never one combined commit
+  - four atomic commits, one per item, never one combined commit
   - no em dashes anywhere
 verifier_focus: that the case-insensitive /auth check only ever rejects MORE than before and cannot open a redirect it previously closed
 ---
 
 # 06 - Close the verifier follow-ups
 
-Three unrelated small items, filed by the Gate 2 verifiers during
-`feature-20260812-session-survives-one-refresh`. They are grouped because each is a few lines, but
-they are independent and must land as THREE atomic commits, not one.
+Four unrelated small items, filed by the Gate 2 verifiers during
+`feature-20260812-session-survives-one-refresh` and its follow-up run. They are grouped because each
+is small, but they are independent and must land as FOUR atomic commits, not one.
+Item 4 is the substantive one; read it first.
 
 ## Item 1 - delete `RoleRouter`
 
@@ -88,16 +89,6 @@ Two separate reviewers had to re-derive that from scratch, which is the definiti
 worth writing. Add one to that test explaining it. Comment only. No assertion, no name, no behaviour
 may change, and the suite must stay green with a pure comment diff.
 
-## Commands
-
-```
-pnpm --filter @fxl-sales/web exec vitest run src/auth/__tests__/session-recovery.test.ts
-pnpm --filter @fxl-sales/web test
-pnpm --filter @fxl-sales/api test
-pnpm run lint
-pnpm run type-check
-```
-
 ## Item 4 - make the journey test's headline scenario able to fail
 
 Filed by the slice 05 Gate 2 verifier, and the most substantive of the four.
@@ -132,3 +123,13 @@ Then prove the fix: repeat the verifier's probe. Neuter ONLY the restore navigat
 `consumeReturnTo` running, and confirm scenario 1 NOW goes red. Restore `react.tsx` byte-exactly and
 prove the tree is clean. Capture that output. If scenario 1 still passes under that probe, the fix
 did not work and you must say so.
+
+## Commands
+
+```
+pnpm --filter @fxl-sales/web exec vitest run src/auth/__tests__/session-recovery.test.ts
+pnpm --filter @fxl-sales/web test
+pnpm --filter @fxl-sales/api test
+pnpm run lint
+pnpm run type-check
+```
