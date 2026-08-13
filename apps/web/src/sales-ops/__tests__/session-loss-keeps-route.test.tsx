@@ -107,10 +107,22 @@ vi.mock('../hooks', () => ({
   useSetSalesOpsCadastroStatus: () => mutation,
 }));
 
+import '@/i18n';
 import type { HubTokenResult } from '@/auth/refresh';
 import { AppAuthProvider, Protected, useAccessToken } from '@/auth/react';
 import { RETURN_TO_KEY } from '@/auth/session-recovery';
+import { NoRoleGuard } from '@/components/auth/RoleGuard';
+import { NoRolePage } from '@/pages/errors/NoRolePage';
 import { SalesOpsApp } from '../SalesOpsApp';
+
+/**
+ * `NoRolePage`'s own copy, read through the real i18n bundle. This file used to hang a
+ * `data-testid` stub on `/no-role`, which made its own `/no-role` branch a fiction: a stub
+ * cannot show that an entitled operator is bounced back OUT of the dead end, so the route
+ * now carries the real `NoRoleGuard` wrapping the real `NoRolePage`, exactly as
+ * `router.tsx` wires it.
+ */
+const UNAUTHORIZED = 'Acesso não autorizado';
 
 /**
  * `expired` is the BFF's own `401` verdict, the only result that may tear a session
@@ -202,7 +214,9 @@ function renderApp(entry: string, held: { current: TokenReader | null }) {
               <Route
                 element={
                   <Protected>
-                    <div data-testid="no-role-page">Acesso não autorizado</div>
+                    <NoRoleGuard>
+                      <NoRolePage />
+                    </NoRoleGuard>
                   </Protected>
                 }
                 path="/no-role"
@@ -332,7 +346,21 @@ describe('Sales Ops keeps its route when a live session is lost', () => {
     const host = await loseSessionWhileSignedIn('/tatico/dashboard');
 
     expect(locationText(host)).toBe('/tatico/dashboard');
-    expect(host.querySelector('[data-testid="no-role-page"]')).toBeNull();
+    expect(host.textContent).not.toContain(UNAUTHORIZED);
+    expect(host.textContent).toContain('Sua sessão expirou');
+  });
+
+  /**
+   * The other five cases all enter at `/tatico/dashboard`, which is the admin DEFAULT
+   * route: there the second early return in `SalesOpsApp` self-navigates and its URL
+   * rewrite is masked. `/cadastros/produtos` is the URL an unguarded `resolution.redirect`
+   * really does destroy, so this is the case that can see it.
+   */
+  it('keeps a non-default route on a live loss, where the second guard is visible', async () => {
+    const host = await loseSessionWhileSignedIn('/cadastros/produtos');
+
+    expect(locationText(host)).toBe('/cadastros/produtos');
+    expect(host.textContent).not.toContain(UNAUTHORIZED);
     expect(host.textContent).toContain('Sua sessão expirou');
   });
 
@@ -383,7 +411,9 @@ describe('Sales Ops keeps its route when a live session is lost', () => {
     const host = await renderSignedIn('/tatico/dashboard', noRoleToken);
 
     expect(locationText(host)).toBe('/no-role');
-    expect(host.querySelector('[data-testid="no-role-page"]')).not.toBeNull();
+    // The REAL page now, reached through the real `NoRoleGuard`: an operator with zero
+    // recognized roles is exactly who the guard leaves on the unauthorized screen.
+    expect(host.textContent).toContain(UNAUTHORIZED);
     expect(host.textContent).not.toContain('Sua sessão expirou');
   });
 
