@@ -169,3 +169,61 @@ Red first: the oracle was written before the component and failed to collect wit
 `SalesOpsApp.tsx` (slice 04 owns the wiring), `apps/web/src/auth/react.tsx`,
 `apps/web/src/lib/*`, `apps/web/src/components/ui/*`. No API change, no SDK upgrade, no
 `?organization=` deep link.
+
+---
+
+## Follow-up 03b - closing the M4 ordering gap (2026-08-28)
+
+Verify graded this slice PASS but found one surviving mutant, M4: rendering the Hub
+checkout block BEFORE the switch block left the oracle fully green. The acceptance
+criterion is an ORDER, and nothing in the file asserted an order. Every existing test
+asserts PRESENCE, which a swap preserves exactly.
+
+### The change
+
+One test added to `apps/web/src/sales-ops/__tests__/missing-entitlement-panel.test.tsx`,
+in the `- the switch offer` describe:
+
+`renders the switch offer before the Hub checkout offer in document order`
+
+It takes ONE `querySelectorAll('[data-organization-switch], [data-hub-checkout]')` over
+the panel section, which by specification returns matches in document order, and asserts
+`switchIndex < checkoutIndex`. Indices from a single sweep rather than a pair of separate
+lookups, so the assertion cannot depend on how either block happens to be nested, and it
+reads in the same `container.querySelector` idiom the rest of the file already uses.
+
+It runs on the DEFAULT fixture, which is the case where BOTH affordances really exist:
+two other Organizations, so the switch block renders as a Combobox, and a resolved
+`checkoutUrl`, so the checkout block renders a live anchor. Both are asserted present
+before the order is asserted, because an order over one block is vacuous - a swap-proof
+test that silently degrades to "the checkout block exists" would be the same hole again.
+
+`MissingEntitlementPanel.tsx` and `missing-entitlement-copy.ts` are BYTE-UNCHANGED. The
+shipped order was already correct; what was missing was the proof.
+
+### Mutation proof - all three observations
+
+1. Test added, component untouched:
+   `19 passed (19)`  GREEN.
+2. The two JSX blocks physically swapped in `MissingEntitlementPanel.tsx` (the checkout
+   `div` moved above the `others.length > 0` switch block, both moved verbatim):
+   `1 failed | 18 passed (19)`  RED, with
+   `AssertionError: expected 1 to be less than 0` at the new assertion.
+   Exactly ONE test failed, and it was the new one - so the mutant is caught by this
+   test and by nothing else, which is precisely the M4 finding.
+3. `git checkout -- apps/web/src/sales-ops/MissingEntitlementPanel.tsx`:
+   `19 passed (19)`  GREEN again.
+
+### Verification
+
+```
+pnpm --filter @fxl-sales/web exec vitest run src/sales-ops/__tests__/missing-entitlement-panel.test.tsx
+  Test Files  1 passed (1)
+       Tests  19 passed (19)
+
+pnpm --filter @fxl-sales/web lint          clean
+pnpm --filter @fxl-sales/web type-check    clean
+```
+
+19 = the slice's 18 plus this one. No existing test changed.
+`git status` shows only the test file and this note.

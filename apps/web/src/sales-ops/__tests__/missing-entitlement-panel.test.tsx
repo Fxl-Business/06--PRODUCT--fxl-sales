@@ -273,6 +273,31 @@ describe('MissingEntitlementPanel - the switch offer', () => {
     expect(checkoutAnchor()?.getAttribute('href')).toBe(CHECKOUT_HREF);
   });
 
+  it('renders the switch offer before the Hub checkout offer in document order', async () => {
+    /*
+      The acceptance criterion is an ORDER, so the oracle has to be an order: both
+      blocks being present passes even when they are swapped. Switching is free and
+      instant while checkout costs money, so the free option is read first.
+
+      Indices come from ONE `querySelectorAll` over a selector matching both blocks,
+      which returns them in document order by definition, so nothing here depends on
+      how either block is nested.
+    */
+    await renderPanel();
+    const blocks = [
+      ...section().querySelectorAll<HTMLElement>('[data-organization-switch], [data-hub-checkout]'),
+    ];
+    const switchIndex = blocks.findIndex((block) => block.hasAttribute('data-organization-switch'));
+    const checkoutIndex = blocks.findIndex((block) => block.hasAttribute('data-hub-checkout'));
+
+    /* Both affordances must really be on screen, or the order below is vacuous. */
+    expect(switchIndex).toBeGreaterThanOrEqual(0);
+    expect(checkoutIndex).toBeGreaterThanOrEqual(0);
+    expect(checkoutAnchor()?.getAttribute('href')).toBe(CHECKOUT_HREF);
+
+    expect(switchIndex).toBeLessThan(checkoutIndex);
+  });
+
   it('keeps the raw Organization id on the muted secondary line of every picker row', async () => {
     seam = makeSeam({ organizations: [orgAtiva, orgSemNome, orgAlfa] });
     await renderPanel();
