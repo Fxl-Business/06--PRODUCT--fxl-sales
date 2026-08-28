@@ -64,5 +64,12 @@
     "decision": "skipped-autopilot",
     "decided_at": "2026-08-13",
     "note": "Operator said 'go fix all of that' after the session-refresh feature closed, then chose explicitly: do NOT promote (they will ship themselves) and do NOT touch 16--INTERNAL--fxl-hub (they want a prompt to run there instead, written to nexo/playbooks/fix-hub-sdk-rotated-cookie-prefix.md). Two slices closed the follow-ups the feature's Gate 2 verifiers filed. Slice 05 pins the composed session-loss journey, which revealed that the fixes cover for each other: with slice 03 reverted the operator still reaches the right screen because slice 04 rescues them, so only a never-visited-/no-role assertion can see the regression. Slice 06 closed four items, including a journey scenario that carried the acceptance criterion as its title yet structurally could not fail. master is 1213 tests green with a real build. NOT promoted."
+  },
+  "gate1_hub_sdk_210": {
+    "feature": "feature-20260827-hub-sdk-210-access-model",
+    "decision": "skipped-autopilot",
+    "decided_at": "2026-08-27",
+    "note": "Operator invoked /nexo-feature --autopilot to migrate onto @fxl-business/hub-sdk 2.1.0 and the access-model-v1 gate, with an explicit instruction to do all code work that does not depend on a credential and then stop and ask for the keys. Stage 1 completed: recon of the real 2.1.0 tarball, five slices in four waves, and an adversarial plan-check.",
+    "outcome": "PARKED after Stage 1 with NO migration code written. Two independent reasons: the finite runtime budget was effectively spent (about 13,200 of 14,400 active seconds) when the plan-check landed, and the plan-check returned PASS WITH REQUIRED EDITS judging four of the five slices RED as written, the largest defect being that slice 04 reverts slice 02's config architecture. Executing either way would have left a half-built slice. master carries one hygiene commit only: the managed-context sync plus the repair of a pre-existing red legacy-auth guard. No credential was invented and no network call was made to the Hub. Next run: consume one replans unit, apply the fifteen required edits in plan-check.md, re-run waves.sh, then execute."
   }
 }

@@ -1,0 +1,27 @@
+{
+  "active_accumulated_seconds": 0,
+  "active_since": 1787867754,
+  "counters": {
+    "agent_dispatches": 9,
+    "initial_slices": 5,
+    "replans": 0,
+    "total_slices": 5,
+    "wave_recoveries": 0
+  },
+  "exhausted": null,
+  "limits": {
+    "agent_result_timeout_seconds": 600,
+    "max_active_seconds": 14400,
+    "max_agent_dispatches": 64,
+    "max_initial_slices": 16,
+    "max_replans": 3,
+    "max_total_slices": 24,
+    "max_verify_attempts_per_slice": 3,
+    "max_wave_recoveries": 1
+  },
+  "paused": false,
+  "scoped_counters": {
+    "verify_attempts": {}
+  },
+  "version": 1
+}
