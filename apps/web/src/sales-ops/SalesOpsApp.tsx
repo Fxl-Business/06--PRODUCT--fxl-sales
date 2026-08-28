@@ -72,7 +72,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { isAuthFailure } from '@/lib/require-token';
+import { isAuthFailure, isEntitlementFailure } from '@/lib/require-token';
 import { cn } from '@/lib/utils';
 import {
   useCancelSalesOpsContract,
@@ -125,6 +125,7 @@ import { computeSaleFinancials } from '@fxl-sales/shared-utils/sale-financials';
 */
 import { SPLIT_BP_TOTAL } from '@fxl-sales/shared-utils/professional-split';
 import { CadastroHistorySection } from './CadastroHistoryPanel';
+import { MissingEntitlementPanel } from './MissingEntitlementPanel';
 import { ProfessionalSplitPanel } from './ProfessionalSplitPanel';
 import {
   addMonthsToIsoDate,
@@ -1664,7 +1665,29 @@ export function SalesOpsApp() {
           <div className="min-h-0 flex-1 overflow-y-auto px-[22px] py-5">
             {bootstrapQuery.isLoading ? <LoadingPanel /> : null}
             {bootstrapQuery.isError ? (
-              isAuthFailure(bootstrapQuery.error) ? (
+              /*
+                Most specific classification first, and it must STAY first.
+                A `402 missing_entitlement` is the Hub telling us the operator's ACTIVE
+                Organization does not carry FXL Sales. It is a correct verdict about WHICH
+                tenant is selected, not a transport fault and not a dead session, and it is
+                the only one of the three that the operator can fix from inside the app.
+                `isAuthFailure` is false for a 402 today, so the order is not what makes this
+                branch reachable - it is what keeps it reachable if `isAuthFailure` is ever
+                widened, and it is what stops a reader from believing the generic panel below
+                is the fallback for "any non-401".
+                The invariant this chain encodes: the "verifique o servidor local" copy is
+                reachable ONLY for an error that is neither an entitlement failure nor an auth
+                failure. `entitlement-dead-end.test.tsx` is the oracle for all three arms.
+
+                No `onRetry` is passed, deliberately: `setActive` already runs
+                `queryClient.clear()`, which DESTROYS the query, so the mounted observer
+                re-subscribes at `status: 'pending'` and the skeleton takes over. A
+                `refetch()` would leave `status: 'error'` and keep this panel on screen
+                naming the OLD Organization while the new tenant's request is in flight.
+              */
+              isEntitlementFailure(bootstrapQuery.error) ? (
+                <MissingEntitlementPanel />
+              ) : isAuthFailure(bootstrapQuery.error) ? (
                 /*
                   An expired or unrenewable Hub session used to render as the API-fault
                   panel below, so a logged-out operator was told the server was broken.
