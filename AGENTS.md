@@ -1,55 +1,40 @@
 # 06--PRODUCT--fxl-sales - Agent Standing Context
 
-<!-- nexo:managed:start -->
-<!-- Managed by Nexo (/nexo-init, /nexo-doctor). Edit only OUTSIDE these markers. -->
+<!-- nexo:managed:start version=4 sha256=02fd055249adb37ac71ec0db87e5e313c575eadc762d972ac81c07a1a398a84b -->
+## Nexo workflow contract
 
-## Methodology: Nexo - Extreme Programming, enforced
+Nexo owns the delivery workflow while a Nexo flow is active.
+Work moves through Frame, Plan, Execute, Verify, and Capture.
+Feature and batch flows plan the complete initial slice set before execution, then adapt only within the finite runtime policy.
 
-Work runs through the loop, **one small slice at a time** (a feature is many slices):
+The human owns WHAT and why.
+The agent owns HOW.
+Gate 1 is human approval of WHAT and is skipped only by explicit autopilot.
+Gate 2 is local verification and is never skipped.
+Gate 3 is the human-approved release cut and is never automatic.
 
-```
-Frame → Plan → [Human Gate] → Execute(Red→Green→Refactor) → Verify → Capture → ↺
-```
+Verification is tiered.
+Each slice runs its named locked oracle tests plus lint on changed files.
+Each integrated wave runs the full suite, full lint, and security checks once.
+Each feature runs mutation testing once after all waves are green.
+Execute and Verify use separate agents whenever the host supports them and the user has not explicitly required single-agent execution.
 
-- **Frame** - capture *what* + *why*; write acceptance criteria as testable statements ("given X, when Y, then Z").
-- **Plan** - slice to the smallest shippable increment; state scope limits (YAGNI); name the test that proves "done". If it needs the word "and", it's two slices.
-- **Human Gate (Gate 1)** - the human approves the plan + test contract. *(skippable: `--autopilot`)*
-- **Execute** - **Red** (write the failing test = locked oracle, immutable to the implementer) → **Green** (simplest thing that passes) → **Refactor** (only on green).
-- **Verify (Gate 2)** - a **different agent** runs the full suite + lint + typecheck + security, locally. Objective PASS/FAIL.
-- **Capture** - atomic Conventional Commit; record the run in `nexo/runs/`; distill learnings to `nexo/knowledge/` + curate `CLAUDE.md`.
+Delivery is local trunk flow.
+Verified short-lived branches merge serially to `main` with no pull request and no hosted CI requirement.
+Promotion to `staging` and `production` exists only when `nexo/state.json` opts into it, and every promotion is fast-forward-only.
+The user never commits by hand because Nexo owns branch, commit, verification, merge, and cleanup.
 
-Roles never invert: the **human owns WHAT** (goals, priorities, "ship it", "stop - over-engineered"); the **agent owns HOW** (implementation, tests, refactor, research). If WHAT is unclear, **stop and ask** - never guess and build.
-
-## The three gates
-
-| Gate | Checks | Enforced by | Skippable? |
-|---|---|---|---|
-| **1 · WHAT** | the plan is right | the human | yes (`--autopilot`) |
-| **2 · Machine** | tests + lint + typecheck + security green | a **separate Verify agent, run locally** | **never** |
-| **3a · Cut → staging** | release-verify green + version correct; tag on `master` (`/nexo-ship`) | human approval | **never auto** |
-| **3b · Staging → prod** | staging validated in-env; ff-push `production` | human approval | **never auto** |
-
-## Delivery - local trunk + promotion (`master → staging → production`, no hosted CI)
-
-- **`master`** is the single long-lived trunk. Always green (local Verify passed before merge), always testable. Everything integrates here.
-- Per slice: short-lived **local** `feat/*` / `fix/*` → separate-agent Verify PASS → `git merge --no-ff` into `master` → delete branch → `git push origin master`.
-- **Promotion (opt-in, this repo):** `staging` and `production` are **deployment pointers**, never integration branches. Promotion is **fast-forward-only** `git push` run by `/nexo-ship` (Gate 3a/3b) - never force-pushed, never reset, never merged `--no-ff`. The deploy platform (Vercel/Coolify) watches the branches; deploys happen ONLY from `staging`/`production` (`master` deploys are disabled in vercel.json).
-- **No PRs, no hosted CI.** Gate 2 is the local Verify.
-- **The user never commits by hand - Nexo runs the whole delivery sequence.**
-
-## Conventional Commits (drives SemVer at ship time)
-
-Atomic - one logical change per commit. If the message needs "and", split it.
-
-```
-<type>(<scope>): <summary>
-```
-
-Types: `feat` (→ minor) · `fix` / `perf` (→ patch) · `refactor` · `test` · `docs` · `chore` · `ci`.
-Breaking change: `feat!:` or a `BREAKING CHANGE:` footer (→ major).
-
-## Artifacts live in one place - `nexo/`
-
-`ROADMAP.md` (backlog) · `state.json` (pointer + `delivery` block) · `plans/` · `runs/` · `milestones/` · `knowledge/{decisions,doubts}/` · `playbooks/`. Never scatter into `.nexo/`, `docs/nexo/`, or `.planning/`.
-
+Autopilot never waits for a human and never expands a budget.
+A blocker or exhausted budget is recorded in `AUDIT.md`, unfinished work is parked, owned worktrees and processes are cleaned up, and the run returns a partial completion report.
 <!-- nexo:managed:end -->
+
+## Repository delivery specifics (outside the managed block)
+
+These facts are repo-local and override the generic wording above wherever they differ.
+
+- The trunk of this repository is **`master`**, not `main`. Every "trunk" statement in the managed block above means `master` here, as declared by `delivery.trunk` in `nexo/state.json`.
+- Promotion is opted in: `master` -> `staging` -> `production`, fast-forward-only, never force-pushed, never reset, never merged with `--no-ff`.
+- `staging` and `production` are deployment pointers, never integration branches. The deploy platform watches those two branches; `master` deploys are disabled in `vercel.json`.
+- Per slice: a short-lived local `feat/*` or `fix/*` branch, a separate-agent Verify PASS, `git merge --no-ff` into `master`, delete the branch, then `git push origin master`.
+- Gate 3a cuts and tags on `master` and fast-forwards `staging`; Gate 3b fast-forwards `production` to that same tagged commit. Both are human-approved and never automatic.
+- Artifacts live only under `nexo/`: `ROADMAP.md`, `state.json`, `plans/`, `runs/`, `milestones/`, `knowledge/{decisions,doubts}/`, `playbooks/`.

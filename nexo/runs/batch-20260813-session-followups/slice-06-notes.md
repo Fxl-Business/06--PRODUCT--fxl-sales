@@ -26,8 +26,8 @@ them prose.
 The new docstring names the two navigators that really do send an operator to `/no-role` today,
 `RoleGuard` for a legacy `/admin/*`, `/finder/*` or `/seller/*` URL and `SalesOpsApp` for an empty
 `getVisibleWorkspaces(roles)`, plus `NoRoleGuard` as the way back out.
-It also drops the stale `publicMetadata.role` phrasing, which is Clerk-era language this product has
-not used since the Hub migration.
+It also drops the stale `publicMetadata.role` phrasing, which belongs to the removed legacy auth
+provider and is language this product has not used since the Hub migration.
 
 `RoleGuard` and `NoRoleGuard` are byte-unchanged; the whole diff in that file is one removed hunk.
 `Navigate` and `Skeleton` are both still used by the two surviving components, so no import changed.
