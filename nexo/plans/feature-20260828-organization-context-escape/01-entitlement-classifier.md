@@ -1,7 +1,7 @@
 ---
 id: 01-entitlement-classifier
 milestone: v2.8.0
-status: todo
+status: done
 depends_on: []
 files_modified: [apps/web/src/lib/api-client.ts, apps/web/src/lib/require-token.ts, apps/web/src/lib/__tests__/api-client-token-guard.test.ts]
 acceptance: "given the API answers 402 {error: 'payment_required', code: 'missing_entitlement'}, when apiFetch or apiFetchBlob rejects, then the thrown ApiError carries that code and isEntitlementFailure(error) is true while isAuthFailure(error) is false"

@@ -1,7 +1,7 @@
 ---
 id: 02-organization-seam
 milestone: v2.8.0
-status: todo
+status: done
 depends_on: []
 files_modified: [apps/web/src/auth/react.tsx, apps/web/src/auth/__tests__/react.test.tsx]
 acceptance: "given a Hub access token whose claims carry workspaceId, workspaceName and a workspaces preview in which two entries share the name Alpha, when a consumer reads the exported useOrganizations seam and when HubUserControls renders its picker, then the seam reports the active Organization as the entry whose id equals the workspaceId claim, reports the account's Organizations and the others, exposes setActive and the Hub client, and the picker marks that same entry as selected rather than the first entry that happens to share the name"

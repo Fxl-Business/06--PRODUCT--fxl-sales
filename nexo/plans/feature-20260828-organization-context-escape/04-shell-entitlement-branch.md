@@ -1,7 +1,7 @@
 ---
 id: 04-shell-entitlement-branch
 milestone: v2.8.0
-status: todo
+status: done
 depends_on: [03-missing-entitlement-panel]
 files_modified: [apps/web/src/sales-ops/SalesOpsApp.tsx, apps/web/src/sales-ops/__tests__/entitlement-dead-end.test.tsx]
 acceptance: "given an operator whose active Hub Organization does not carry FXL Sales, when the sales-ops bootstrap query fails with 402 {error:'payment_required', code:'missing_entitlement'}, then the shell renders MissingEntitlementPanel and the string 'Verifique o servidor local' is absent from the document"

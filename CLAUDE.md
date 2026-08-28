@@ -201,6 +201,50 @@ Keep the repository folder name unchanged until the editor session can safely mo
   `NoRoleGuard` lives beside `RoleGuard`, which is what sends operators INTO `/no-role`, and is mounted INSIDE `<Protected>`: outside it would judge an unresolved profile on a cold entry.
   It is inert during a live session loss, because the profile is then loaded with `roles: []`, so the overlay never has the URL pulled out from under it.
 
+## Organization context
+
+- A Hub ORGANIZATION and a Sales WORKSPACE are two different things that once shared one word on screen, and the whole of this section exists because that collision produced a dead end nobody could get out of.
+  An Organization is the Hub tenant the session is anchored to; a Sales workspace is the internal view group (`tatico`, `operacional`, `cadastros`, `meus-dados`) that the URL names.
+  The Hub gives each Application its OWN Organization context, so switching Organization in the Hub web does NOT move Sales' session, and Sales anchors on the account's primary Organization at session mint.
+- An operator whose active Organization does not carry FXL Sales gets `402 {error: 'payment_required', code: 'missing_entitlement'}` from `apps/api/src/middleware/app-auth.ts` on every sales-ops call, and that `402` is CORRECT.
+  What was wrong was that the shell rendered it as `A API de vendas não respondeu corretamente. Verifique o servidor local e tente novamente.`, which blames a machine that answered perfectly and said exactly why, and that the shell's account dropdown offered only `Sair`, whose re-login lands on the same Organization and therefore in the same dead end.
+- The classification chain in `SalesOpsApp`'s `isError` branch is `isEntitlementFailure` then `isAuthFailure` then generic, and the INVARIANT is that the generic `Verifique o servidor local` copy is reachable ONLY for an error that is neither an entitlement failure nor an auth failure.
+  The entitlement branch is deliberately FIRST.
+  `isAuthFailure` is false for a 402 today, so the order is not what makes the branch reachable now - it is what keeps it reachable if `isAuthFailure` is ever widened, because a widened predicate placed above it would silently steal every 402 into `Sessão expirada` and the operator would be told to sign in again to fix an entitlement they do not hold.
+  The four cases are pinned together in `apps/web/src/sales-ops/__tests__/entitlement-dead-end.test.tsx`, which drives the REAL `apiFetch` error path with `../api`, `@/lib/api-client` and `../hooks` unmocked, so it proves the status survives into the `ApiError` the shell classifies rather than only pinning a ternary.
+  Replacing the panel with an empty fragment is the decisive mutation and goes red on the `[data-missing-entitlement]` marker, so the 402 case cannot pass by rendering nothing.
+- `isEntitlementFailure` in `apps/web/src/lib/require-token.ts` keys on `status === 402` ALONE and deliberately does NOT also require `code === 'missing_entitlement'`.
+  `apiFetch` builds its error from `await res.json().catch(() => ({}))`, so a 402 whose body does not parse - a proxy error page, a truncated response, a gateway that rewrites the payload - carries no `code` at all, and requiring the code would classify exactly that response as NOT an entitlement failure and route it straight back onto the `Verifique o servidor local` copy this work exists to remove.
+  The two failure modes are asymmetric: keying on the code fails CLOSED onto that lie, keying on the status fails OPEN onto a panel that names the Organization and offers a switch.
+  The predicate stays narrow otherwise - no `>= 400`, no error-string alternative, strict `===`, `null` and `undefined` handled - and `isEntitlementFailure is true for a 402 that carries no code at all` is the pin that fails the day someone makes the code mandatory.
+  A SECOND 402 code meaning something other than "no Sales entitlement" is the one thing that would invalidate this, and that is the day the predicate must grow a discriminator.
+  `require-token.ts` still imports NOTHING, so the predicate is duck-typed on `status` rather than importing `ApiError`, which would be a cycle.
+- `MissingEntitlementPanel` in `apps/web/src/sales-ops/MissingEntitlementPanel.tsx` is the honest state: it names the currently active Organization, then offers switching to another of the account's Organizations, then a Hub checkout link for the active one, in that order.
+  Switch comes before checkout because switching is free and instant while checkout costs money, and offering the expensive escape first would sell an entitlement to an operator who already holds one next door.
+  Its `onRetry` prop is OPTIONAL and the shell passes NOTHING.
+  That is not an oversight: `setActive` already runs `queryClient.clear()`, which DESTROYS the query so its observer re-subscribes at `status: 'pending'` and the shell renders the loading skeleton, whereas a `refetch()` would leave the query at `status: 'error'` and keep this panel on screen still naming the OLD Organization the operator has just left.
+  Nothing in the panel calls `window.location.reload`, and the oracle installs a `reload` spy and asserts it was never called on both the success and the `setActive`-rejects paths.
+  The checkout href is unreachable while it is resolving, because `CheckoutState` is a discriminated union and `href` exists only on its `ready` member, so TypeScript itself forbids an anchor with an unresolved destination; the loading branch renders a `Skeleton` and never an empty state.
+- `useOrganizations()` in `apps/web/src/auth/react.tsx` is the ONE place `setActive` plus the token's `workspaces` claim is projected, and it is a THIN projection: no state, no request, no timer, and above all no reimplementation of `setActive`, which is handed through BY REFERENCE.
+  `setActive` owns a four-statement critical section whose ordering this file documents at length and whose two orderings have dedicated oracles, so there must be exactly one copy of it in the app; the seam must never call `queryClient.clear()` itself, because that second flush would land on the WRONG side of the `await` and is precisely the failure the in-flight oracle exists to catch.
+  `others` is derived HERE, as `workspaces.filter((w) => w.id !== active?.id)`, so no caller re-derives it - a per-call-site filter is exactly where name matching creeps back in, and there are two callers.
+  When `active` is null it removes nothing, which is the honest answer: if we cannot tell where the operator is, every Organization is somewhere else they could go.
+- The active Organization is matched by the `workspaceId` claim and NEVER by name.
+  A name cannot disambiguate two Organizations both called `Alpha`, it yields nothing whenever the name claim is absent, and it misses entirely whenever the active Organization sits outside the capped `workspaces` preview - all three were live defects in `HubUserControls`, which marked the active entry by name before this.
+  The name match survives only as the documented fallback for a token carrying no `workspaceId` claim, so such a token degrades to yesterday's behaviour rather than reporting that no Organization is active, and it must never be promoted back to the primary path.
+  `active.name` prefers the top-level `workspaceName` claim over the matched preview entry, because that claim describes the ACTIVE Organization and is present even when the preview does not contain it.
+- The sales-ops account dropdown carries its own Organization section above the `Sair` group, driven entirely by the same seam, because the shell draws its own chrome and never renders `HubUserControls`.
+  Its render guard is `others.length === 0` and must NOT be `organizations.length > 1`.
+  The one-entry-preview-that-is-not-the-active-Organization case is the whole point: the account has somewhere to go and the arithmetic guard hides it, which is the dead end all over again with a different cause.
+  `workspaces` is a CAPPED, display-only preview, so an empty picker must never render and both zero-target cases (one Organization total, and an empty preview) return `null` after the hook call rather than an empty list.
+  The active row is rendered but `disabled` and `aria-current`, never a switch target; a raw id appears only in the secondary line behind `isOrgLabelFallback`, in muted monospace, and never as the primary label.
+- The sidebar view-group chrome was renamed from `Workspace` to `Painel`, and the fence is hard: ONLY display strings moved.
+  `SalesOpsWorkspace`, the `workspace` URL segment, `getVisibleWorkspaces`, `salesOpsWorkspaces`, `workspaceForView`, `resolveSalesOpsRoute` and `buildSalesOpsPath` are unchanged, and `navigation.ts` is byte-unchanged, because the URL remains the single source of truth for the active Sales workspace and page and renaming the type or the segment would rewrite every stored link an operator holds.
+  Five strings moved and no more: `Trocar workspace` to `Trocar painel`, the eyebrow `Workspace` to `Painel`, the collapsed trigger's `aria-label` `Workspace: ${label}` to `Painel: ${label}`, the scrim's `Fechar workspaces` to `Fechar painéis`, and the menu heading `Workspaces` to `Painéis`.
+  The two `aria-label`-only renames are NOT pinned by any test, because `textContent` does not see an attribute, and that gap is recorded rather than hidden - the visible strings are pinned both by presence and by `not.toContain('Workspace')` on the sidebar text.
+- `?organization=` deep linking is NOT available on `@fxl-business/hub-sdk` 1.3.x, which drops the parameter, so do not build a link that relies on it.
+  It belongs to the parked SDK 2.1.0 migration run, and until that lands a switch is always an in-app `setActive` call.
+
 ## Arquivamento e histórico
 
 - There is still no DELETE **verb**: `salesOpsRouter` exposes none and must not gain one. "Arquivar" is a status-only PATCH on the endpoint that already exists, and it is reversible from `cadastros/geral`.

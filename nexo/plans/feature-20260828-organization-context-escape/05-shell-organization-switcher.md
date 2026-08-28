@@ -1,7 +1,7 @@
 ---
 id: 05-shell-organization-switcher
 milestone: v2.8.0
-status: todo
+status: done
 depends_on: [04-shell-entitlement-branch]
 files_modified: [apps/web/src/sales-ops/SalesOpsApp.tsx, apps/web/src/sales-ops/__tests__/shell-organization-switcher.test.tsx, apps/web/src/sales-ops/__tests__/routing.test.tsx]
 acceptance: "given an operator signed into the sales-ops shell whose account carries more than one Hub Organization, when the sidebar account menu is opened, then it lists the other Organizations beside Sair and choosing one calls the auth context setActive with that Organization's id, with no page reload"
