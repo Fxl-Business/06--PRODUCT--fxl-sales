@@ -3,7 +3,7 @@ id: 03-missing-entitlement-panel
 milestone: v2.8.0
 status: todo
 depends_on: [01-entitlement-classifier, 02-organization-seam]
-files_modified: [apps/web/src/sales-ops/MissingEntitlementPanel.tsx, apps/web/src/sales-ops/__tests__/missing-entitlement-panel.test.tsx]
+files_modified: [apps/web/src/sales-ops/MissingEntitlementPanel.tsx, apps/web/src/sales-ops/missing-entitlement-copy.ts, apps/web/src/sales-ops/__tests__/missing-entitlement-panel.test.tsx]
 acceptance: "given an operator whose active Hub Organization does not carry FXL Sales, when MissingEntitlementPanel renders, then it names that Organization, offers the account's OTHER Organizations as switch targets through setActive followed by onRetry, then offers a Hub checkout link resolved from client.checkoutUrl(), renders NO picker when there is no other Organization, renders a skeleton while the checkout href is resolving, degrades to honest copy when checkoutUrl or setActive rejects, and never calls window.location.reload"
 goal: Add a self-contained, unit-tested MissingEntitlementPanel that renders the honest PT-BR state for a 402 missing_entitlement.
 must_not_break:
