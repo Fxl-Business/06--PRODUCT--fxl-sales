@@ -17,6 +17,14 @@ const baseUrl = import.meta.env.VITE_API_URL ?? 'http://localhost:3006';
 
 export type ApiError = {
   error: string;
+  /**
+   * The API's machine-readable sub-reason, when it sends one. Today the only
+   * one that matters is `missing_entitlement` on a 402. Optional because an
+   * older API build, or a 402 whose body does not parse, sends no `code` at
+   * all - classification therefore keys on `status`, never on this field. See
+   * `isEntitlementFailure` in ./require-token.
+   */
+  code?: string;
   message?: string;
   status: number;
 };
@@ -41,6 +49,7 @@ export async function apiFetch<T>(
     const body = await res.json().catch(() => ({}));
     const err: ApiError = {
       error: body.error ?? 'request_failed',
+      code: body.code,
       message: body.message,
       status: res.status,
     };
@@ -72,6 +81,7 @@ export async function apiFetchBlob(
     const body = await res.json().catch(() => ({}));
     const err: ApiError = {
       error: body.error ?? 'request_failed',
+      code: body.code,
       message: body.message,
       status: res.status,
     };
