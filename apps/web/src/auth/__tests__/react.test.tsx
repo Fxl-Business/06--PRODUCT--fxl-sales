@@ -70,6 +70,7 @@ import {
   UserControls,
   useAccessToken,
   useAuthProfile,
+  useOrganizations,
 } from '../react';
 import { LOGIN_ATTEMPTS_KEY, LOGOUT_INTENT_KEY, RETURN_TO_KEY } from '../session-recovery';
 
@@ -114,15 +115,40 @@ function profileToken(
     { workspaceId: 'workspace-alpha', name: 'Alpha' },
     { workspaceId: 'workspace-beta', name: 'Beta' },
   ],
+  /*
+    The ACTIVE Organization's id, minted at the token's TOP LEVEL exactly as the Hub
+    mints it and exactly as `apps/api/src/middleware/app-auth.ts` reads it. Optional and
+    UNSET by default on purpose: every pre-existing test in this file then keeps
+    exercising the name based fallback, which is the behaviour that must not regress,
+    while the new tests below opt in to the id.
+
+    CLAUDE.md records that this file's fixtures once used `id` rather than `workspaceId`
+    because they were written against the WEB type instead of the TOKEN, and thereby
+    agreed with a bug that hid a whole feature in production. This parameter is
+    token shaped for that reason: a fixture written against our own shape can only ever
+    confirm our own assumption.
+  */
+  workspaceId?: string,
 ): string {
   return jwt({
     name: 'Ada Lovelace',
     email: 'ada@example.com',
+    workspaceId,
     workspaceName,
     roles: { workspace: 'admin' },
     workspaces,
   });
 }
+
+/**
+ * Two Organizations that genuinely share a display name, which is the case name matching
+ * cannot represent at all. The ACTIVE one is deliberately the SECOND, so a `find` by name
+ * lands on the wrong entry rather than accidentally on the right one.
+ */
+const SAME_NAME_ORGS = [
+  { workspaceId: 'workspace-alpha-1', name: 'Alpha' },
+  { workspaceId: 'workspace-alpha-2', name: 'Alpha' },
+];
 
 /**
  * Commits of `Probe`, i.e. how many times an auth consumer actually re-rendered.
@@ -151,6 +177,45 @@ function Probe({ onWorkspace }: { onWorkspace?: (workspaceName?: string) => void
         ? `${profile.isSignedIn ? 'signed-in' : 'signed-out'}:${profile.workspaceName ?? ''}`
         : 'loading'}
     </output>
+  );
+}
+
+/**
+ * Reads the seam the way slices 03 and 05 will. It renders ids rather than labels on
+ * purpose: these assertions are about IDENTITY, and a label based assertion is exactly
+ * the confusion the seam removes. The rendered UI keeps using `orgLabel`, and
+ * `switchWorkspace` still asserts on the visible pt-BR name.
+ */
+function OrganizationProbe() {
+  const { active, activeName, organizations, others, setActive, client } = useOrganizations();
+  const profile = useAuthProfile();
+
+  return (
+    <div>
+      <output data-testid="profile-workspace-id">{profile.workspaceId ?? ''}</output>
+      <output data-testid="active-org">{`${active?.id ?? ''}|${active?.name ?? ''}`}</output>
+      <output data-testid="active-org-name">{activeName ?? ''}</output>
+      <output data-testid="all-orgs">{organizations.map((org) => org.id).join(',')}</output>
+      <output data-testid="other-orgs">{others.map((org) => org.id).join(',')}</output>
+      <button
+        data-testid="seam-switch"
+        onClick={() => {
+          void setActive('workspace-beta');
+        }}
+        type="button"
+      >
+        trocar
+      </button>
+      <button
+        data-testid="seam-checkout"
+        onClick={() => {
+          void client.checkoutUrl('sales.core');
+        }}
+        type="button"
+      >
+        assinar
+      </button>
+    </div>
   );
 }
 
@@ -197,6 +262,30 @@ function renderProvider(
   });
 
   return { container, root };
+}
+
+/**
+ * Mounts the seam probe beside `UserControls`, with no `MemoryRouter` and no `Protected`:
+ * neither the seam nor `UserControls` reads a router hook, and keeping the tree flat
+ * means the picker is reachable in every auth state.
+ */
+function renderOrganizations() {
+  const host = document.createElement('div');
+  document.body.append(host);
+  const nextRoot = createRoot(host);
+
+  act(() => {
+    nextRoot.render(
+      <QueryClientProvider client={queryClient}>
+        <AppAuthProvider>
+          <OrganizationProbe />
+          <UserControls />
+        </AppAuthProvider>
+      </QueryClientProvider>,
+    );
+  });
+
+  return { container: host, root: nextRoot };
 }
 
 /**
@@ -302,6 +391,25 @@ async function switchWorkspace(host: HTMLElement, workspaceName: string) {
     row.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     await Promise.resolve();
   });
+}
+
+/**
+ * Opens the picker WITHOUT committing a row. `switchWorkspace` cannot be reused for the
+ * selection assertions: it finds its row by visible label, and the case under test is
+ * precisely two rows that share one label.
+ */
+async function openWorkspacePicker(host: HTMLElement) {
+  const trigger = workspaceTrigger(host);
+  await act(async () => {
+    trigger.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  });
+}
+
+/** Every option row in render order. `Combobox` renders them in the order it is given. */
+function workspaceOptions(host: HTMLElement): HTMLElement[] {
+  return [...host.querySelectorAll('[role="option"]')].filter(
+    (node): node is HTMLElement => node instanceof HTMLElement,
+  );
 }
 
 let root: Root | null = null;
@@ -1843,5 +1951,193 @@ describe('identity-scoped query cache', () => {
 
     expect(profileText(container)).toBe('signed-in:Alpha');
     expect(queryClient.getQueryData(BOOTSTRAP_KEY)).toEqual(ALPHA_ROWS);
+  });
+});
+
+const activeOrgText = (host: HTMLElement) =>
+  host.querySelector('[data-testid="active-org"]')?.textContent;
+
+const testIdText = (host: HTMLElement, testId: string) =>
+  host.querySelector(`[data-testid="${testId}"]`)?.textContent;
+
+async function clickTestId(host: HTMLElement, testId: string) {
+  const match = host.querySelector(`[data-testid="${testId}"]`);
+  if (!(match instanceof HTMLElement)) throw new Error(`element not found: ${testId}`);
+  await act(async () => {
+    match.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    await Promise.resolve();
+  });
+}
+
+describe('active organization and the useOrganizations seam', () => {
+  it('surfaces the active organization id from the token claims', async () => {
+    mocks.cache.getToken.mockResolvedValue(ok(profileToken('Alpha', undefined, 'workspace-alpha')));
+    ({ container, root } = renderOrganizations());
+    await flushReact();
+
+    expect(testIdText(container, 'profile-workspace-id')).toBe('workspace-alpha');
+    expect(activeOrgText(container)).toBe('workspace-alpha|Alpha');
+    expect(testIdText(container, 'active-org-name')).toBe('Alpha');
+  });
+
+  it('resolves the active organization by id when two organizations share a name', async () => {
+    /*
+      Non-vacuity: a NAME based resolution answers `workspace-alpha-1` here, because that
+      is the first entry whose name is `Alpha`. Only an id based resolution can reach the
+      second one, so this assertion genuinely discriminates the two implementations.
+    */
+    mocks.cache.getToken.mockResolvedValue(
+      ok(profileToken('Alpha', SAME_NAME_ORGS, 'workspace-alpha-2')),
+    );
+    ({ container, root } = renderOrganizations());
+    await flushReact();
+
+    expect(activeOrgText(container)).toBe('workspace-alpha-2|Alpha');
+  });
+
+  it('falls back to the name claim when the token carries no workspaceId', async () => {
+    mocks.cache.getToken.mockResolvedValue(ok(profileToken('Beta')));
+    ({ container, root } = renderOrganizations());
+    await flushReact();
+
+    expect(testIdText(container, 'profile-workspace-id')).toBe('');
+    expect(activeOrgText(container)).toBe('workspace-beta|Beta');
+  });
+
+  it('reports no active organization when the token yields neither an id nor a name match', async () => {
+    mocks.cache.getToken.mockResolvedValue(ok(profileToken('Gamma')));
+    ({ container, root } = renderOrganizations());
+    await flushReact();
+
+    expect(activeOrgText(container)).toBe('|');
+    expect(testIdText(container, 'active-org-name')).toBe('Gamma');
+    // `others` degrades to the WHOLE list: if we cannot tell where the operator is,
+    // every Organization is somewhere else they could go.
+    expect(testIdText(container, 'other-orgs')).toBe('workspace-alpha,workspace-beta');
+  });
+
+  it('lists the account organizations and excludes the active one from the others', async () => {
+    mocks.cache.getToken.mockResolvedValue(ok(profileToken('Alpha', undefined, 'workspace-alpha')));
+    ({ container, root } = renderOrganizations());
+    await flushReact();
+
+    expect(testIdText(container, 'all-orgs')).toBe('workspace-alpha,workspace-beta');
+    expect(testIdText(container, 'other-orgs')).toBe('workspace-beta');
+  });
+
+  it('reaches client.setActive through the seam and flushes the query cache exactly once', async () => {
+    mocks.cache.getToken.mockResolvedValue(ok(profileToken('Alpha', undefined, 'workspace-alpha')));
+    mocks.client.setActive.mockResolvedValue({
+      accessToken: profileToken('Beta', undefined, 'workspace-beta'),
+      expiresIn: 120,
+      workspaceId: 'workspace-beta',
+    });
+
+    ({ container, root } = renderOrganizations());
+    await flushReact();
+    /*
+      Installed AFTER the mount flush on purpose: the cold start signed-out to signed-in
+      transition legitimately flushes once inside `observeToken`, and counting it would
+      make "exactly once" mean nothing.
+    */
+    const clearSpy = vi.spyOn(queryClient, 'clear');
+
+    await clickTestId(container, 'seam-switch');
+    await flushReact();
+
+    expect(mocks.client.setActive).toHaveBeenCalledWith('workspace-beta');
+    expect(activeOrgText(container)).toBe('workspace-beta|Beta');
+    // The guard against the seam growing a flush of its own, which would be a flush on
+    // the WRONG side of the await and which no pre-existing test would catch.
+    expect(clearSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('hands back the Hub client so a later slice can build the checkout link', async () => {
+    mocks.cache.getToken.mockResolvedValue(ok(profileToken('Alpha', undefined, 'workspace-alpha')));
+    ({ container, root } = renderOrganizations());
+    await flushReact();
+
+    await clickTestId(container, 'seam-checkout');
+
+    expect(mocks.client.checkoutUrl).toHaveBeenCalledWith('sales.core');
+  });
+
+  it('marks the active organization in the picker by id when two organizations share a name', async () => {
+    mocks.cache.getToken.mockResolvedValue(
+      ok(profileToken('Alpha', SAME_NAME_ORGS, 'workspace-alpha-2')),
+    );
+    ({ container, root } = renderOrganizations());
+    await flushReact();
+    await openWorkspacePicker(container);
+
+    const rows = workspaceOptions(container);
+    // Non-vacuity: the ambiguity really is on screen, two rows reading the same label.
+    expect(rows).toHaveLength(2);
+    expect(rows.map((row) => row.textContent?.trim())).toEqual(['Alpha', 'Alpha']);
+
+    const selected = rows.filter((row) => row.getAttribute('aria-selected') === 'true');
+    expect(selected).toHaveLength(1);
+    /*
+      The SECOND row. This is the assertion that fails against the pre-existing name
+      matching implementation, which marks index 0 because that is the first entry whose
+      name equals the `workspaceName` claim.
+    */
+    expect(selected[0]).toBe(rows[1]);
+    // The trigger still names the Organization, never a raw id.
+    expect(workspaceTrigger(container).textContent).toContain('Alpha');
+  });
+
+  it('renders no organization picker for an account with a single organization', async () => {
+    mocks.cache.getToken.mockResolvedValue(
+      ok(
+        profileToken('Alpha', [{ workspaceId: 'workspace-alpha', name: 'Alpha' }], 'workspace-alpha'),
+      ),
+    );
+    ({ container, root } = renderOrganizations());
+    await flushReact();
+
+    expect(container.querySelector('button[role="combobox"][aria-label="Workspace"]')).toBeNull();
+    // Proves the component rendered at all, rather than the query above being wrong.
+    expect(container.querySelector('button[aria-label="Sair"]')).not.toBeNull();
+  });
+
+  it('renders the organization picker for an account with more than one organization', async () => {
+    mocks.cache.getToken.mockResolvedValue(ok(profileToken('Alpha', undefined, 'workspace-alpha')));
+    ({ container, root } = renderOrganizations());
+    await flushReact();
+
+    expect(workspaceTrigger(container).textContent).toContain('Alpha');
+  });
+
+  it('renders a raw organization id on the muted secondary line', async () => {
+    /*
+      The second entry's `name` is `''`, which `readString` rejects, so `readWorkspaces`
+      yields `{ id: 'workspace-nameless', name: undefined }` and `isOrgLabelFallback` is
+      true for it. `orgLabel` falls back to the id BY DESIGN, so the id legitimately
+      appears on the primary line too; what this pins is that the muted secondary line is
+      PRESENT, which is the part the refactor could silently drop.
+    */
+    mocks.cache.getToken.mockResolvedValue(
+      ok(
+        profileToken(
+          'Alpha',
+          [
+            { workspaceId: 'workspace-alpha', name: 'Alpha' },
+            { workspaceId: 'workspace-nameless', name: '' },
+          ],
+          'workspace-alpha',
+        ),
+      ),
+    );
+    ({ container, root } = renderOrganizations());
+    await flushReact();
+    await openWorkspacePicker(container);
+
+    const namelessRow = workspaceOptions(container).find((row) =>
+      row.textContent?.includes('workspace-nameless'),
+    );
+    if (!namelessRow) throw new Error('nameless organization row not found');
+    const description = namelessRow.querySelector('.text-muted-foreground');
+    expect(description?.textContent).toBe('workspace-nameless');
   });
 });

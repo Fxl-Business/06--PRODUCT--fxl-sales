@@ -2,7 +2,7 @@
   "active_accumulated_seconds": 0,
   "active_since": 1787922708,
   "counters": {
-    "agent_dispatches": 9,
+    "agent_dispatches": 11,
     "initial_slices": 5,
     "replans": 1,
     "total_slices": 5,
@@ -22,7 +22,8 @@
   "paused": false,
   "scoped_counters": {
     "verify_attempts": {
-      "01-entitlement-classifier": 1
+      "01-entitlement-classifier": 1,
+      "02-organization-seam": 1
     }
   },
   "version": 1

@@ -78,6 +78,18 @@ type AuthProfile = {
   name?: string;
   email?: string;
   avatarUrl?: string;
+  /**
+   * The ACTIVE Hub Organization's id, read from the token's top level `workspaceId`
+   * claim. This is the same claim `apps/api/src/middleware/app-auth.ts` reads as
+   * `MinimalHubAuthContext.workspaceId` and maps to `orgId`, so the browser and the API
+   * now agree on one identity for "which tenant is this request in" instead of the
+   * browser guessing from a display name.
+   *
+   * Optional because a token minted without it must still produce a usable profile; the
+   * name based fallback in `useHubOrganizations` covers that case and is the only reason
+   * the old matching survives at all.
+   */
+  workspaceId?: string;
   workspaceName?: string;
 };
 
@@ -86,6 +98,21 @@ type HubWorkspacePreview = {
   name?: string;
   products?: string[];
 };
+
+/**
+ * The user facing name for a Hub tenant, and the seam's public shape.
+ *
+ * Structurally identical to `HubWorkspacePreview` on purpose: aliasing rather than
+ * redeclaring means the seam never allocates a mapped copy of the preview array, so the
+ * array identity that `applyToken`'s unchanged-token early return works so hard to keep
+ * stable survives all the way out to the caller.
+ *
+ * The wire spells this "workspace" everywhere - the claim, the SDK parameter, the API's
+ * `orgId` mapping - but "Workspace" already names a SALES INTERNAL view group in
+ * `apps/web/src/sales-ops/navigation.ts`, and one word for two concepts is how the
+ * sidebar came to read as an Organization picker in the first place.
+ */
+export type Organization = HubWorkspacePreview;
 
 type HubAuthState = AuthProfile & {
   /**
@@ -159,6 +186,9 @@ function profileFromToken(token: string | null): Omit<AuthProfile, 'isLoaded' | 
     name: readString(claims.name),
     email: readString(claims.email),
     avatarUrl: readString(claims.avatarUrl),
+    // Top LEVEL, not inside `workspaces`. The Hub mints the active Organization's id
+    // beside its name, which is why `readString` is enough and no lookup is needed here.
+    workspaceId: readString(claims.workspaceId),
     workspaceName: readString(claims.workspaceName),
     workspaces: readWorkspaces(claims.workspaces),
   };
@@ -268,6 +298,7 @@ function HubAuthProvider({ children }: { children: ReactNode }) {
       name: next.name,
       email: next.email,
       avatarUrl: next.avatarUrl,
+      workspaceId: next.workspaceId,
       workspaceName: next.workspaceName,
     });
   }, []);
@@ -862,9 +893,19 @@ function useHubAccessToken() {
 }
 
 function useHubProfile(): AuthProfile {
-  const { isLoaded, isSignedIn, role, roles, name, email, avatarUrl, workspaceName } =
+  const { isLoaded, isSignedIn, role, roles, name, email, avatarUrl, workspaceId, workspaceName } =
     useHubAuthContext();
-  return { isLoaded, isSignedIn, role, roles, name, email, avatarUrl, workspaceName };
+  return {
+    isLoaded,
+    isSignedIn,
+    role,
+    roles,
+    name,
+    email,
+    avatarUrl,
+    workspaceId,
+    workspaceName,
+  };
 }
 
 function useHubLogout(): () => Promise<void> {
@@ -872,12 +913,118 @@ function useHubLogout(): () => Promise<void> {
   return logout;
 }
 
+/**
+ * The ONE seam for "which Hub Organization am I in, which others could I switch to, and
+ * how do I switch".
+ *
+ * A THIN PROJECTION over `useHubAuthContext` and nothing more. It holds no state, starts
+ * no request, schedules no timer, and above all it does NOT reimplement `setActive`:
+ * that function owns a four statement critical section whose ordering CLAUDE.md spells
+ * out (await the switch, check the generation, flush the query cache, seed the token,
+ * observe it) and whose two orderings have dedicated oracles in
+ * `apps/web/src/auth/__tests__/react.test.tsx`. It is handed through by reference so
+ * there is exactly one copy of that ordering in the app.
+ *
+ * For the same reason this hook must never call `queryClient.clear()`. The switch
+ * already flushes exactly once; a second flush here would be a flush on the WRONG side
+ * of the `await`, which is the failure the in flight oracle exists to catch.
+ */
+function useHubOrganizations(): {
+  active: Organization | null;
+  activeName: string | undefined;
+  organizations: Organization[];
+  others: Organization[];
+  setActive: (organizationId: string) => Promise<void>;
+  client: HubClient;
+} {
+  const { client, setActive, workspaceId, workspaceName, workspaces } = useHubAuthContext();
+
+  /**
+   * Resolved by ID first, which is the whole point of reading the `workspaceId` claim.
+   *
+   * The name match below is a documented FALLBACK for a token that carries no
+   * `workspaceId` claim, and only that. It is kept because it is exactly the previous
+   * behaviour, so a token minted without the claim degrades to what it did yesterday
+   * rather than reporting that no Organization is active. It must never be promoted back
+   * to the primary path: a name cannot tell two Organizations called `Alpha` apart, it
+   * is empty whenever the name claim is absent, and it misses entirely whenever the
+   * active Organization is outside the capped `workspaces` preview.
+   *
+   * The name on the resolved entry prefers the TOP LEVEL `workspaceName` claim, because
+   * that claim describes the ACTIVE Organization and is present even when the preview
+   * does not contain it at all.
+   */
+  const active = useMemo<Organization | null>(() => {
+    if (workspaceId) {
+      const match = workspaces.find((workspace) => workspace.id === workspaceId);
+      return {
+        id: workspaceId,
+        name: workspaceName ?? match?.name,
+        products: match?.products,
+      };
+    }
+    return workspaces.find((workspace) => workspace.name === workspaceName) ?? null;
+  }, [workspaceId, workspaceName, workspaces]);
+
+  /**
+   * The account's Organizations minus the active one, derived HERE rather than at each
+   * call site. Two callers need it - the missing entitlement panel and the sales ops
+   * account dropdown - and a per caller `filter` is where the name matching would creep
+   * back in.
+   *
+   * When `active` is null this removes nothing, which is the honest answer: if we cannot
+   * tell where the operator is, every Organization is somewhere else they could go.
+   */
+  const others = useMemo(
+    () => workspaces.filter((workspace) => workspace.id !== active?.id),
+    [active, workspaces],
+  );
+
+  return useMemo(
+    () => ({
+      active,
+      /*
+        The `workspaceName` claim verbatim, and a strict FALLBACK. Whenever `active` is
+        non null, callers name the Organization with `orgLabel(active)` instead; this
+        field exists only for the degenerate token that yields no id at all, where naming
+        the Organization is still better copy than admitting nothing.
+      */
+      activeName: workspaceName,
+      organizations: workspaces,
+      others,
+      setActive,
+      /*
+        The RAW SDK client, deliberately not wrapped. A later slice builds the Hub
+        checkout deep link with `client.checkoutUrl(sku?)`, which is async: wrapping it
+        would force this hook to own loading and error state, and a stateless projection
+        is the property that keeps it safe to call from anywhere. Narrowing the type to
+        the one or two methods in use would mean editing this file again for the next
+        method, which is the coupling the seam exists to remove.
+
+        Do NOT call `client.logout()` or `client.login()` through this. `useLogout()` is
+        the only supported sign out: it writes the durable logout intent before its first
+        `await`, clears the token cache, tears the session down and flushes the query
+        cache in an order CLAUDE.md documents at length, and none of that happens if the
+        SDK method is called directly.
+      */
+      client,
+    }),
+    [active, client, others, setActive, workspaceName, workspaces],
+  );
+}
+
 function HubUserControls() {
-  const { logout, setActive, workspaceName, workspaces } = useHubAuthContext();
+  const logout = useHubLogout();
+  /*
+    The SAME seam the missing entitlement panel and the sales ops account dropdown read.
+    Before this slice this component resolved the active entry itself, by NAME, which is
+    the implementation the seam replaces rather than joins.
+  */
+  const { active, organizations, setActive } = useHubOrganizations();
 
   return (
     <>
-      {workspaces.length > 1 ? (
+      {organizations.length > 1 ? (
         <div className="w-56">
           <Combobox
             aria-label="Workspace"
@@ -885,15 +1032,26 @@ function HubUserControls() {
             onChange={(workspaceId) => {
               void setActive(workspaceId);
             }}
-            options={workspaces.map((workspace) => ({
-              value: workspace.id,
-              label: orgLabel(workspace),
+            options={organizations.map((organization) => ({
+              value: organization.id,
+              label: orgLabel(organization),
               // CLAUDE.md forbids a raw workspace id as a primary label. When there is no
               // name, the id drops to the muted secondary line instead.
-              description: isOrgLabelFallback(workspace) ? workspace.id : undefined,
+              description: isOrgLabelFallback(organization) ? organization.id : undefined,
             }))}
             searchPlaceholder="Buscar workspace..."
-            value={workspaces.find((workspace) => workspace.name === workspaceName)?.id ?? ''}
+            /*
+              The ACTIVE Organization by ID. This used to be
+              `workspaces.find((w) => w.name === workspaceName)?.id ?? ''`, which marked
+              the first entry that merely SHARED the active Organization's name and
+              marked nothing at all whenever the name claim was absent. The seam resolves
+              it from the token's `workspaceId` claim and keeps the name match only as a
+              fallback for a token that carries no such claim.
+
+              `''` is still the empty selection the Combobox expects when nothing is
+              active, and it is now reachable only when the token yields no id at all.
+            */
+            value={active?.id ?? ''}
           />
         </div>
       ) : null}
@@ -917,4 +1075,5 @@ export const Protected = HubProtected;
 export const useAccessToken: AccessTokenHook = useHubAccessToken;
 export const useAuthProfile = useHubProfile;
 export const useLogout: LogoutHook = useHubLogout;
+export const useOrganizations = useHubOrganizations;
 export const UserControls = HubUserControls;
