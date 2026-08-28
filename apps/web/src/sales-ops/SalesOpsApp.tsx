@@ -1,5 +1,6 @@
 import {
   Archive,
+  Building2,
   CalendarDays,
   Check,
   ChevronDown,
@@ -33,7 +34,7 @@ import {
   type ReactNode,
 } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
-import { useAuthProfile, useLogout } from '@/auth/react';
+import { useAuthProfile, useLogout, useOrganizations } from '@/auth/react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -72,6 +73,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { isOrgLabelFallback, orgLabel } from '@/lib/displayNames';
 import { isAuthFailure, isEntitlementFailure } from '@/lib/require-token';
 import { cn } from '@/lib/utils';
 import {
@@ -1000,6 +1002,142 @@ function LoadingPanel() {
   );
 }
 
+/**
+ * The Organization switcher for the sales-ops shell.
+ *
+ * The Hub gives each Application its OWN Organization context, so switching in the
+ * Hub web does not move this session. Sales anchors on the account's PRIMARY
+ * Organization at session mint, and this dropdown was the only account surface the
+ * shell has - so an operator whose active Organization does not carry Sales had no
+ * way out of the 402 from inside the app. This is that way out.
+ *
+ * It owns NO switching logic. `useOrganizations` is the single seam: the SDK call,
+ * the token re-mint and the cache decision all live in the auth provider behind it.
+ * Nothing here may call `client.setActive`, flush a query cache, or reload the page.
+ *
+ * The hook is called HERE and not in `SalesOpsApp`, because Radix mounts
+ * `DropdownMenuContent` only while the menu is open. Hoisting it to the shell would
+ * run it on every render of every test that mocks `@/auth/react` with a closed
+ * factory and never opens this menu, and there are five of those.
+ *
+ * Rows are `DropdownMenuItem`s rather than a `Combobox` on purpose. This is a menu of
+ * session actions, not a single-select form picker, and it already sits inside a menu:
+ * a text input nested in Radix's `DropdownMenu` has its keystrokes eaten by the menu's
+ * own typeahead and its focus stolen by roving item navigation. Typeahead is the search
+ * affordance, and it works at any list length. Every entry is rendered and the section
+ * scrolls past six; nothing is truncated away, because an Organization the operator
+ * cannot reach is the exact dead end this whole feature exists to remove. If the Hub's
+ * cap on the `workspaces` claim ever grows past roughly a dozen, the answer is a
+ * dedicated screen, not an input in a menu.
+ */
+function AccountOrganizationSection({ onSwitched }: { onSwitched: () => void }) {
+  const { active, others, setActive } = useOrganizations();
+  const [switchingTo, setSwitchingTo] = useState<string | null>(null);
+  const [switchFailed, setSwitchFailed] = useState(false);
+  const latestSwitch = useRef<string | null>(null);
+
+  // `others`, not `organizations.length > 1`. A preview that lists exactly one entry
+  // which is NOT the active Organization still has a switch target, and that lone
+  // target is the case that unstrands the operator. Zero targets renders nothing at
+  // all: `workspaces` is a capped, display-only claim, so an empty list proves the
+  // account has no other Organization no better than it proves the claim was absent.
+  if (others.length === 0) return null;
+
+  const busy = switchingTo !== null;
+
+  return (
+    <div data-testid="account-organization-section">
+      <div className="px-2.5 pb-[5px] pt-[7px] text-[10px] font-bold uppercase tracking-[0.1em] text-[#9b9ba3]">
+        Organização
+      </div>
+      <div className="max-h-[240px] overflow-y-auto">
+        {active ? (
+          <DropdownMenuItem asChild disabled>
+            <button
+              aria-current="true"
+              aria-label={`Organização atual: ${orgLabel(active)}`}
+              className="flex w-full items-center gap-2.5 rounded-[10px] bg-[#eaa81a] px-2.5 py-2.5 text-left outline-none transition"
+              type="button"
+            >
+              <Check className="size-4 flex-none text-[#18181b]" />
+              <span className="min-w-0 flex-1 leading-[1.2]">
+                <span className="block truncate text-[13.5px] font-bold text-[#18181b]">
+                  {orgLabel(active)}
+                </span>
+                {isOrgLabelFallback(active) ? (
+                  <span className="mt-0.5 block truncate font-mono text-[10.5px] text-[#8b8b92]">
+                    {active.id}
+                  </span>
+                ) : null}
+              </span>
+            </button>
+          </DropdownMenuItem>
+        ) : null}
+        {others.map((organization) => {
+          const inFlight = switchingTo === organization.id;
+          return (
+            <DropdownMenuItem
+              asChild
+              disabled={busy}
+              key={organization.id}
+              onSelect={(event) => {
+                event.preventDefault();
+                latestSwitch.current = organization.id;
+                setSwitchingTo(organization.id);
+                setSwitchFailed(false);
+                void setActive(organization.id).then(
+                  () => {
+                    if (latestSwitch.current !== organization.id) return;
+                    setSwitchingTo(null);
+                    onSwitched();
+                  },
+                  () => {
+                    if (latestSwitch.current !== organization.id) return;
+                    setSwitchingTo(null);
+                    setSwitchFailed(true);
+                  },
+                );
+              }}
+            >
+              <button
+                aria-busy={inFlight ? 'true' : undefined}
+                aria-label={`Trocar para ${orgLabel(organization)}`}
+                className="flex w-full cursor-pointer items-center gap-2.5 rounded-[10px] px-2.5 py-2.5 text-left outline-none transition hover:bg-[#f5f5f7] focus:bg-[#f5f5f7]"
+                type="button"
+              >
+                {inFlight ? (
+                  <Loader2 className="size-4 flex-none animate-spin text-[#84848c]" />
+                ) : (
+                  <Building2 className="size-4 flex-none text-[#84848c]" />
+                )}
+                <span className="min-w-0 flex-1 leading-[1.2]">
+                  <span className="block truncate text-[13.5px] font-semibold text-[#201f24]">
+                    {orgLabel(organization)}
+                  </span>
+                  {isOrgLabelFallback(organization) ? (
+                    <span className="mt-0.5 block truncate font-mono text-[10.5px] text-[#8b8b92]">
+                      {organization.id}
+                    </span>
+                  ) : null}
+                </span>
+              </button>
+            </DropdownMenuItem>
+          );
+        })}
+      </div>
+      {switchFailed ? (
+        <div
+          className="px-2.5 pb-1 pt-1.5 text-[11.5px] font-semibold text-[#c93d32]"
+          role="alert"
+        >
+          Não foi possível trocar de organização. Tente novamente.
+        </div>
+      ) : null}
+      <DropdownMenuSeparator className="my-1.5 bg-[#e5e5ea]" />
+    </div>
+  );
+}
+
 export function SalesOpsApp() {
   const navigate = useNavigate();
   const routeParams = useParams();
@@ -1337,7 +1475,7 @@ export function SalesOpsApp() {
               aria-expanded={workspaceMenuOpen}
               className="flex w-full items-center gap-[11px] rounded-[14px] border border-[#343439] bg-[#242428] p-2 text-left transition hover:bg-[#2c2c31]"
               onClick={() => setWorkspaceMenuOpen((open) => !open)}
-              title="Trocar workspace"
+              title="Trocar painel"
               type="button"
             >
               <span
@@ -1350,8 +1488,18 @@ export function SalesOpsApp() {
                 <ActiveWorkspaceIcon className="h-[18px] w-[18px]" />
               </span>
               <span className="min-w-0 flex-1 leading-[1.2]">
+                {/*
+                  `Painel`, not `Workspace`. This is a SALES-INTERNAL view group
+                  (`SalesOpsWorkspace` in navigation.ts), and the account menu below now
+                  holds a real Hub Organization switcher. Two concepts under one word in
+                  one sidebar made the bigger, chevroned control read as the Organization
+                  picker while being the one that is not. Only the DISPLAY string moved:
+                  the type, the `workspace` URL segment and every `navigation.ts` export
+                  keep their names, because CLAUDE.md makes the URL the single source of
+                  truth for the active Sales workspace and page.
+                */}
                 <span className="block text-[10px] font-bold uppercase tracking-[0.16em] text-[#8b8b92]">
-                  Workspace
+                  Painel
                 </span>
                 <span className="sales-ops-num block truncate text-[15px] font-bold text-[#f3f3f5]">
                   {activeWorkspaceMeta?.label ?? 'Tático'}
@@ -1361,7 +1509,7 @@ export function SalesOpsApp() {
             </button>
           ) : (
             <button
-              aria-label={`Workspace: ${activeWorkspaceMeta?.label ?? 'Tático'}`}
+              aria-label={`Painel: ${activeWorkspaceMeta?.label ?? 'Tático'}`}
               className="mx-auto flex h-10 w-10 items-center justify-center rounded-[11px]"
               onClick={() => setSidebarCollapsed(false)}
               style={{
@@ -1376,14 +1524,14 @@ export function SalesOpsApp() {
           {workspaceMenuOpen && !sidebarCollapsed ? (
             <>
               <button
-                aria-label="Fechar workspaces"
+                aria-label="Fechar painéis"
                 className="fixed inset-0 z-[55] cursor-default"
                 onClick={() => setWorkspaceMenuOpen(false)}
                 type="button"
               />
               <div className="absolute left-0 right-0 top-[58px] z-[60] rounded-[14px] border border-[#e5e5ea] bg-white p-[7px] shadow-[0_20px_48px_rgba(0,0,0,.32)]">
                 <div className="px-2.5 pb-[5px] pt-[7px] text-[10px] font-bold uppercase tracking-[0.1em] text-[#9b9ba3]">
-                  Workspaces
+                  Painéis
                 </div>
                 {availableWorkspaces.map((item) => {
                   const itemVisual = workspaceVisuals[item.id];
@@ -1540,6 +1688,7 @@ export function SalesOpsApp() {
                 </span>
               </DropdownMenuLabel>
               <DropdownMenuSeparator className="my-1.5 bg-[#e5e5ea]" />
+              <AccountOrganizationSection onSwitched={() => setAccountMenuOpen(false)} />
               <DropdownMenuGroup>
                 <DropdownMenuItem asChild>
                   <button
