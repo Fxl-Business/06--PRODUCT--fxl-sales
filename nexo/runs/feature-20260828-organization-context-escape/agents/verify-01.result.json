@@ -1,0 +1,1 @@
+{"agent":"verify","slice":"01-entitlement-classifier","status":"PASS","report":"nexo/runs/feature-20260828-organization-context-escape/01-verify.md","summary":"Oracle 12/12, lint and type-check clean, full web suite 724/724, all four mutations RED, scope and trailers correct.","done":true,"started":"2026-08-28T10:41:20Z","ended":"2026-08-28T10:44:10Z","ts":"2026-08-28T10:44:10Z"}

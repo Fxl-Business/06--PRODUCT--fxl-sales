@@ -47,6 +47,31 @@ export function isAuthFailure(error: unknown): boolean {
   );
 }
 
+/**
+ * True for the entitlement gate's 402, and for nothing else.
+ *
+ * `apps/api/src/middleware/app-auth.ts` answers
+ * `402 {error: 'payment_required', code: 'missing_entitlement'}` when the active
+ * Hub Organization does not carry FXL Sales. That 402 is CORRECT; what was wrong
+ * was that nothing could tell it apart from a dead server, so it rendered as
+ * "verifique o servidor local".
+ *
+ * It keys on the STATUS alone. That 402 is the only 402 this API emits, so `code`
+ * adds no discrimination, and requiring it would fail closed: an older API build,
+ * or a 402 whose body does not parse, carries no `code` and would silently land
+ * back on the server-fault copy. `ApiError.code` is preserved for reading, not
+ * for branching. The predicate stays deliberately narrow - `status === 402` and
+ * nothing looser - because only this one failure may reach the entitlement panel.
+ *
+ * Duck-typed rather than `instanceof ApiError`, for the reason given at the top
+ * of this file: importing api-client.ts back would be a cycle.
+ */
+export function isEntitlementFailure(error: unknown): boolean {
+  return (
+    typeof error === 'object' && error !== null && (error as { status?: unknown }).status === 402
+  );
+}
+
 /** TypeScript cannot express "non-empty string", so emptiness is a runtime check. */
 export function assertBearerToken(token: unknown): asserts token is string {
   if (typeof token !== 'string' || token.trim() === '') {
