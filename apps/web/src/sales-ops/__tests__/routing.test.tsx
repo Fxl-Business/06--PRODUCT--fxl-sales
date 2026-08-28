@@ -45,7 +45,16 @@ let profileRoles: AppRole[] = [];
 
 const authMocks = vi.hoisted(() => ({
   logout: vi.fn(async () => undefined),
+  setActive: vi.fn(async (_organizationId: string) => undefined),
+  checkoutUrl: vi.fn(async () => 'https://hub.example/checkout'),
 }));
+
+/**
+ * Allocated ONCE, outside the factory. A fresh object literal per render allocates a new
+ * `client` every time, and any effect that depends on it then re-runs forever.
+ */
+const hubClient = { checkoutUrl: authMocks.checkoutUrl };
+const primaryOrganization = { id: 'org-primary', name: 'FXL Matriz' };
 
 vi.mock('@/auth/react', () => ({
   useAuthProfile: () => ({
@@ -56,6 +65,17 @@ vi.mock('@/auth/react', () => ({
     email: 'test.user@fxl.example',
   }),
   useLogout: () => authMocks.logout,
+  useOrganizations: () => ({
+    // One Organization, so the section renders nothing and this file keeps testing
+    // exactly what it tested before. The switcher's own cases live in
+    // shell-organization-switcher.test.tsx.
+    active: primaryOrganization,
+    activeName: primaryOrganization.name,
+    organizations: [primaryOrganization],
+    others: [],
+    setActive: authMocks.setActive,
+    client: hubClient,
+  }),
 }));
 
 const mutation = {
@@ -248,7 +268,7 @@ function buttonByTextOrNull(label: string): HTMLButtonElement | null {
 }
 
 function workspaceButton(): HTMLButtonElement {
-  const match = container.querySelector('button[title="Trocar workspace"]');
+  const match = container.querySelector('button[title="Trocar painel"]');
   if (!(match instanceof HTMLButtonElement)) throw new Error('workspace button not found');
   return match;
 }
