@@ -3,11 +3,11 @@
  *
  * Every secret persisted by `hub-session-store.ts` (the Hub refresh token, the
  * PKCE code verifier) is sealed with a key derived by HKDF-SHA256 from
- * `HUB_SESSION_ENCRYPTION_KEY` when set, otherwise from `FXL_HUB_SECRET_KEY`.
+ * `HUB_SESSION_ENCRYPTION_KEY` when set, otherwise from `FXL_HUB_CLIENT_SECRET`.
  * The row's own id is the AEAD additional data, so a ciphertext cannot be moved
  * from one row to another.
  *
- * OPERATIONAL CONSEQUENCE: rotating `FXL_HUB_SECRET_KEY` (or
+ * OPERATIONAL CONSEQUENCE: rotating `FXL_HUB_CLIENT_SECRET` (or
  * `HUB_SESSION_ENCRYPTION_KEY`) invalidates EVERY stored session. Decryption
  * failure is treated exactly as "unknown session", so the effect on a user is a
  * single re-login. Operators who need to rotate the Hub client secret without a

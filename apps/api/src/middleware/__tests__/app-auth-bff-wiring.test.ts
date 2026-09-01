@@ -42,8 +42,12 @@ import {
   SESSION_TTL_MS,
 } from '../../auth/hub-session-store.js';
 
-/** Long enough to clear the sealer's 32-character floor on its own. */
-const HUB_SECRET_KEY = 'unit-test-hub-secret-key-0123456789abcdef';
+/**
+ * Obviously synthetic fixtures. The secret is long enough to clear the sealer's
+ * 32-character floor on its own.
+ */
+const HUB_CLIENT_ID = 'pk_fxl-sales_development_unit-test-only-0123456789';
+const HUB_CLIENT_SECRET = 'sk_fxl-sales_development_unit-test-only-not-a-real-secret-0123456789';
 
 type CapturedBffOptions =
   | {
@@ -52,6 +56,7 @@ type CapturedBffOptions =
       timeoutMs?: number;
       sessionTtlSeconds?: number;
       sessionAbsoluteTtlSeconds?: number;
+      redirectUri?: unknown;
     }
   | undefined;
 
@@ -89,9 +94,17 @@ beforeAll(async () => {
   vi.stubEnv('DATABASE_URL', 'postgresql://postgres:postgres@localhost:5006/fxl_sales_wiring_test');
   vi.stubEnv('ADMIN_DATABASE_URL', '');
   vi.stubEnv('FXL_HUB_API_URL', 'http://localhost:9016');
-  vi.stubEnv('FXL_HUB_PUBLISHABLE_KEY', 'pk_fxl-sales_unit-test-publishable-key');
-  vi.stubEnv('FXL_HUB_SECRET_KEY', HUB_SECRET_KEY);
-  vi.stubEnv('FXL_HUB_AUDIENCE', 'product.fxl-sales');
+  // NODE_ENV is stubbed to 'test' in this very block, so this file is a live
+  // demonstration that the Hub environment and the process environment are
+  // independent: the Hub environment is explicit configuration and is never
+  // inferred.
+  vi.stubEnv('FXL_HUB_ENVIRONMENT', 'development');
+  vi.stubEnv('FXL_HUB_CLIENT_ID', HUB_CLIENT_ID);
+  vi.stubEnv('FXL_HUB_CLIENT_SECRET', HUB_CLIENT_SECRET);
+  vi.stubEnv('FXL_HUB_AUDIENCE', 'app.fxl-sales');
+  // Blank reads as unset. A developer's own apps/api/.env could otherwise carry
+  // the JSON form and make this file throw on ambiguity at import.
+  vi.stubEnv('FXL_HUB_CONFIG', '');
   vi.stubEnv('FXL_HUB_REDIRECT_URI', 'http://localhost:8006/auth/callback');
   vi.stubEnv('FXL_HUB_POST_LOGIN_REDIRECT', 'http://localhost:8006');
   vi.stubEnv('FXL_HUB_POST_LOGIN_ERROR_REDIRECT', 'http://localhost:8006/?error=auth');
@@ -233,8 +246,8 @@ function stubHub(setCookies: readonly string[], body: unknown, status = 200) {
 describe('createAppAuthBff wiring', () => {
   it('boots with the blank HUB_SESSION_ENCRYPTION_KEY that .env.dev.example ships', () => {
     // The blank override must read as "unset" and fall back to the documented
-    // HKDF-from-FXL_HUB_SECRET_KEY default, not reach the sealer as ''.
-    expect(encryptionIkm).toBe(HUB_SECRET_KEY);
+    // HKDF-from-FXL_HUB_CLIENT_SECRET default, not reach the sealer as ''.
+    expect(encryptionIkm).toBe(HUB_CLIENT_SECRET);
     expect(authBff).not.toBeNull();
   });
 
@@ -251,6 +264,13 @@ describe('createAppAuthBff wiring', () => {
     // Identity, not merely "some durable-looking object": the SDK must receive
     // the very instance that owns the Postgres transaction.
     expect(bffOptions?.sessionStore).toBe(durableStore);
+  });
+
+  it("points the BFF callback at this app's own origin rather than the Hub's", () => {
+    // 2.x's createHubBff defaults redirectUri to `${config.apiUrl}/auth/callback`,
+    // which is the HUB's origin and is always wrong for this app.
+    expect(bffOptions?.redirectUri).toBe('http://localhost:8006/auth/callback');
+    expect(String(bffOptions?.redirectUri)).not.toContain('localhost:9016');
   });
 
   it('bounds the upstream Hub call with timeoutMs', () => {
@@ -346,7 +366,7 @@ describe('createAppAuthBff cookie routing, against the real SDK', () => {
     const config: HubSdkConfig = {
       apiUrl: 'http://localhost:9016',
       publishableKey: 'pk_fxl-sales_unit-test-publishable-key',
-      secretKey: HUB_SECRET_KEY,
+      secretKey: HUB_CLIENT_SECRET,
       audience: 'product.fxl-sales',
     };
 
@@ -391,7 +411,7 @@ describe('the SDK BFF route contract apps/web/src/auth/refresh.ts is coupled to'
     const config: HubSdkConfig = {
       apiUrl: 'http://localhost:9016',
       publishableKey: 'pk_fxl-sales_unit-test-publishable-key',
-      secretKey: HUB_SECRET_KEY,
+      secretKey: HUB_CLIENT_SECRET,
       audience: 'product.fxl-sales',
     };
     return actual.createHubBff(config, {
@@ -756,7 +776,7 @@ describe('the SDK rotation defect this wrapper exists for', () => {
     const config: HubSdkConfig = {
       apiUrl: 'http://localhost:9016',
       publishableKey: 'pk_fxl-sales_unit-test-publishable-key',
-      secretKey: HUB_SECRET_KEY,
+      secretKey: HUB_CLIENT_SECRET,
       audience: 'product.fxl-sales',
     };
     const hub = fakeHubFetch([HUB_UNRELATED, HUB_ROTATION_PROD], HUB_REFRESH_BODY);
