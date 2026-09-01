@@ -17,8 +17,12 @@
 import { Hono } from 'hono';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
-/** Long enough to clear the sealer's 32-character floor on its own. */
-const HUB_SECRET_KEY = 'unit-test-hub-secret-key-0123456789abcdef';
+/**
+ * Obviously synthetic fixtures. The secret is long enough to clear the sealer's
+ * 32-character floor on its own.
+ */
+const HUB_CLIENT_ID = 'pk_fxl-sales_development_unit-test-only-0123456789';
+const HUB_CLIENT_SECRET = 'sk_fxl-sales_development_unit-test-only-not-a-real-secret-0123456789';
 
 let sessionStoreKind: string | undefined;
 let authBff: Hono | null = null;
@@ -34,9 +38,17 @@ beforeAll(async () => {
   vi.stubEnv('DATABASE_URL', '');
   vi.stubEnv('ADMIN_DATABASE_URL', '');
   vi.stubEnv('FXL_HUB_API_URL', 'http://localhost:9016');
-  vi.stubEnv('FXL_HUB_PUBLISHABLE_KEY', 'pk_fxl-sales_unit-test-publishable-key');
-  vi.stubEnv('FXL_HUB_SECRET_KEY', HUB_SECRET_KEY);
-  vi.stubEnv('FXL_HUB_AUDIENCE', 'product.fxl-sales');
+  // NODE_ENV is stubbed to 'test' in this very block, so this file is a live
+  // demonstration that the Hub environment and the process environment are
+  // independent: the Hub environment is explicit configuration and is never
+  // inferred.
+  vi.stubEnv('FXL_HUB_ENVIRONMENT', 'development');
+  vi.stubEnv('FXL_HUB_CLIENT_ID', HUB_CLIENT_ID);
+  vi.stubEnv('FXL_HUB_CLIENT_SECRET', HUB_CLIENT_SECRET);
+  vi.stubEnv('FXL_HUB_AUDIENCE', 'app.fxl-sales');
+  // Blank reads as unset. A developer's own apps/api/.env could otherwise carry
+  // the JSON form and make this file throw on ambiguity at import.
+  vi.stubEnv('FXL_HUB_CONFIG', '');
   vi.stubEnv('FXL_HUB_REDIRECT_URI', 'http://localhost:8006/auth/callback');
   vi.stubEnv('FXL_HUB_POST_LOGIN_REDIRECT', 'http://localhost:8006');
   vi.stubEnv('FXL_HUB_POST_LOGIN_ERROR_REDIRECT', 'http://localhost:8006/?error=auth');
