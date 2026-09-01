@@ -939,11 +939,29 @@ describe('phased professional payable identity migration', () => {
       await blocker.unsafe('SELECT count(*) FROM sales_ops_sale_professionals');
       const [backend] = await indexClient<Array<{ pid: number }>>`SELECT pg_backend_pid() AS pid`;
       if (!backend) throw new Error('index backend PID was not returned');
-      const indexPromise = Promise.resolve(
-        indexClient.unsafe(
+      /*
+        The rejection handler is attached HERE, at creation, and not at the
+        `await` far below. `pg_cancel_backend` makes this statement reject while
+        the assertion that consumes it is still several statements away, so a
+        promise carrying no handler in that window is an unhandled rejection.
+        It fails no test, because the assertion still runs and still passes, but
+        it exits the runner NONZERO, which reads as a red integration gate for a
+        suite in which every test passed. The window is timing dependent and
+        widens under CPU load, so it appears on a busy machine and hides on an
+        idle one.
+
+        Settling into a tagged outcome rather than swallowing with `.catch(() => {})`
+        keeps the claim intact: the assertions below still require this statement
+        to have REJECTED, and to have rejected with 57014 specifically.
+      */
+      const indexOutcome = indexClient
+        .unsafe(
           'CREATE UNIQUE INDEX CONCURRENTLY "sales_ops_sale_professionals_org_sale_id_id_idx" ON "sales_ops_sale_professionals" USING btree ("org_id","sale_id","id")',
-        ),
-      );
+        )
+        .then(
+          () => ({ rejected: false as const, error: undefined as unknown }),
+          (error: unknown) => ({ rejected: true as const, error }),
+        );
 
       try {
         await waitFor(async () => {
@@ -973,7 +991,9 @@ describe('phased professional payable identity migration', () => {
           SELECT pg_cancel_backend(${backend.pid}) AS cancelled
         `;
         expect(cancelled?.cancelled).toBe(true);
-        await expect(indexPromise).rejects.toMatchObject({ code: '57014' });
+        const outcome = await indexOutcome;
+        expect(outcome.rejected).toBe(true);
+        expect(outcome.error).toMatchObject({ code: '57014' });
       } finally {
         await blocker.unsafe('ROLLBACK');
         blockerOpen = false;
