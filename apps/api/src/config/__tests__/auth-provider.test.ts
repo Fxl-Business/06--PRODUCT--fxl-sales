@@ -59,19 +59,26 @@ function caught(run: () => unknown): HubConfigError {
 
 describe('loadHubAuthConfig', () => {
   it('loads the Hub contract for app.fxl-sales from FXL_HUB_CONFIG', () => {
-    expect(loadHubAuthConfig(JSON_BAG)).toMatchObject({
+    const config = loadHubAuthConfig(JSON_BAG);
+    expect(config).toMatchObject({
       audience: 'app.fxl-sales',
       environment: 'development',
-      coreModule: 'sales.core',
     });
+    /*
+      `toMatchObject` ignores extra keys, so without this line the deletion of the
+      derived core module would not actually be pinned. Baseline access is the
+      `entitlements.access` boolean now, and no module string feeds it.
+    */
+    expect(config).not.toHaveProperty('coreModule');
   });
 
   it('loads the same contract from the five discrete variables', () => {
-    expect(loadHubAuthConfig(discreteBag())).toMatchObject({
+    const config = loadHubAuthConfig(discreteBag());
+    expect(config).toMatchObject({
       audience: 'app.fxl-sales',
       environment: 'development',
-      coreModule: 'sales.core',
     });
+    expect(config).not.toHaveProperty('coreModule');
   });
 
   it('refuses an incomplete Hub configuration from the strict loader and names the client secret field', () => {
