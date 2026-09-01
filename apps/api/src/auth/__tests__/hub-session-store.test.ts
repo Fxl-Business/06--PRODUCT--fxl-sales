@@ -7,10 +7,13 @@ import {
   SESSION_TTL_MS,
   createDurableHubSessionStore,
   createHubSessionStore,
+  type HubSessionReadResult,
 } from '../hub-session-store.js';
 import { createSessionSealer } from '../session-crypto.js';
 
 const IKM = 'hub-session-store-unit-test-ikm-0123456789';
+/** A different key entirely, i.e. what a rotated FXL_HUB_SECRET_KEY looks like to an old row. */
+const OTHER_IKM = 'a-completely-different-key-0123456789abcd';
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function storeWithDb(db: unknown) {
@@ -364,5 +367,186 @@ describe('absolute session lifetime', () => {
     expect(Number.isFinite(Date.parse(record!.absoluteExpiresAt!))).toBe(true);
     expect(Date.parse(record!.absoluteExpiresAt!)).toBe(absoluteExpiresAt.getTime());
     expect(Date.parse(record!.expiresAt!)).toBe(expiresAt.getTime());
+  });
+});
+
+describe('the three-state read contract', () => {
+  /** Live on both timestamps, so nothing but the seal can decide the outcome. */
+  function liveRow() {
+    return sessionRow({
+      expiresAt: new Date(FROZEN.getTime() + 29 * DAY_MS),
+      absoluteExpiresAt: new Date(FROZEN.getTime() + 60 * DAY_MS),
+    });
+  }
+
+  it('reports absent and leaves the row when the seal will not open, so a wrong key costs one re-login rather than data', async () => {
+    const unopenable = {
+      ...liveRow(),
+      // Sealed under a key this store does not hold, which is exactly what every
+      // stored row looks like the moment FXL_HUB_SECRET_KEY is rotated.
+      hubRefreshTokenEnc: createSessionSealer(OTHER_IKM).seal('token-old', SESSION_ID),
+    };
+    const tx = fakeTx([unopenable]);
+    const { db } = fakeDb(tx);
+
+    const result = await frozenStore(db).withSession(SESSION_ID, async (handle) => handle.read());
+
+    expect(result.status).toBe('absent');
+    // Stated separately and on purpose: `expired` clears the browser's session
+    // cookie, so answering it here would turn a key rotation into a forced
+    // logout on top of the re-login the operator already owes.
+    expect(result.status).not.toBe('expired');
+    expect(tx.recorded.deletes).toBe(0);
+
+    // NON-VACUITY: the identical row sealed with the working key reads `found`,
+    // so the fixture above is broken by the KEY and by nothing else.
+    const workingTx = fakeTx([liveRow()]);
+    const working = await frozenStore(fakeDb(workingTx).db).withSession(
+      SESSION_ID,
+      async (handle) => handle.read(),
+    );
+    expect(working.status).toBe('found');
+  });
+
+  it('reports expired and deletes the row inside the same transaction when only the absolute expiry has passed', async () => {
+    const tx = fakeTx([
+      sessionRow({
+        expiresAt: new Date(FROZEN.getTime() + 29 * DAY_MS),
+        absoluteExpiresAt: new Date(FROZEN.getTime() - 1_000),
+      }),
+    ]);
+    const { db } = fakeDb(tx);
+
+    let deletesWhenObserved = -1;
+    const result = await frozenStore(db).withSession(SESSION_ID, async (handle) => {
+      const read = await handle.read();
+      deletesWhenObserved = tx.recorded.deletes;
+      return read;
+    });
+
+    expect(result.status).toBe('expired');
+    // On the SAME tx handle, and before the operation could observe anything else.
+    expect(deletesWhenObserved).toBe(1);
+  });
+
+  it('reports expired and deletes the row inside the same transaction when only the sliding expiry has passed', async () => {
+    // The mirror of the test above, so a future edit cannot fix one term by
+    // breaking the other.
+    const tx = fakeTx([
+      sessionRow({
+        expiresAt: new Date(FROZEN.getTime() - 1_000),
+        absoluteExpiresAt: new Date(FROZEN.getTime() + 60 * DAY_MS),
+      }),
+    ]);
+    const { db } = fakeDb(tx);
+
+    let deletesWhenObserved = -1;
+    const result = await frozenStore(db).withSession(SESSION_ID, async (handle) => {
+      const read = await handle.read();
+      deletesWhenObserved = tx.recorded.deletes;
+      return read;
+    });
+
+    expect(result.status).toBe('expired');
+    expect(deletesWhenObserved).toBe(1);
+  });
+
+  it('reports absent and deletes nothing when there is no row at all', async () => {
+    // The absent-versus-expired split at its cheapest point: a store that
+    // answered `expired` here would log out every user of a replica that lost
+    // its row, and the cookie would be gone before they could retry.
+    const tx = fakeTx([]);
+    const { db } = fakeDb(tx);
+
+    const result = await frozenStore(db).withSession(SESSION_ID, async (handle) => handle.read());
+
+    expect(result.status).toBe('absent');
+    expect(tx.recorded.deletes).toBe(0);
+  });
+
+  it('reports found with the stored refresh token when neither expiry has passed', async () => {
+    // The non-vacuity control for the two expiry tests above.
+    const tx = fakeTx([liveRow()]);
+    const { db } = fakeDb(tx);
+
+    const result = await frozenStore(db).withSession(SESSION_ID, async (handle) => handle.read());
+
+    expect(result.status).toBe('found');
+    expect(result.status === 'found' ? result.record.hubRefreshToken : null).toBe('token-old');
+    expect(tx.recorded.deletes).toBe(0);
+  });
+
+  it('never lets get() and read() disagree about the same locked row', async () => {
+    // THE NO-DRIFT ORACLE. `get()` is a projection of the ONE resolved read, so
+    // it can neither answer differently nor perform a second lookup or delete
+    // while the two accessors coexist.
+    const cases = [
+      { label: 'live', row: liveRow(), expectedDeletes: 0 },
+      {
+        label: 'sliding-expired',
+        row: sessionRow({
+          expiresAt: new Date(FROZEN.getTime() - 1_000),
+          absoluteExpiresAt: new Date(FROZEN.getTime() + 60 * DAY_MS),
+        }),
+        expectedDeletes: 1,
+      },
+      {
+        label: 'absolute-expired',
+        row: sessionRow({
+          expiresAt: new Date(FROZEN.getTime() + 29 * DAY_MS),
+          absoluteExpiresAt: new Date(FROZEN.getTime() - 1_000),
+        }),
+        expectedDeletes: 1,
+      },
+      {
+        label: 'unopenable-seal',
+        row: {
+          ...liveRow(),
+          hubRefreshTokenEnc: createSessionSealer(OTHER_IKM).seal('token-old', SESSION_ID),
+        },
+        expectedDeletes: 0,
+      },
+    ];
+
+    for (const testCase of cases) {
+      const tx = fakeTx([testCase.row]);
+      const { db } = fakeDb(tx);
+
+      const observed = await frozenStore(db).withSession(SESSION_ID, async (handle) => {
+        const result: HubSessionReadResult = await handle.read();
+        const legacy = await handle.get();
+        return { result, legacy, deletes: tx.recorded.deletes };
+      });
+
+      expect(observed.legacy === null, testCase.label).toBe(observed.result.status !== 'found');
+      if (observed.result.status === 'found') {
+        expect(observed.legacy, testCase.label).toEqual(observed.result.record);
+      }
+      // Unchanged by the extra `get()`: no second lookup and no second delete.
+      expect(observed.deletes, testCase.label).toBe(testCase.expectedDeletes);
+      expect(tx.recorded.deletes, testCase.label).toBe(testCase.expectedDeletes);
+    }
+  });
+
+  it('declares kind persistent on the durable store and ephemeral on the in-process fallback, without moving the factory envelope tags', async () => {
+    const { db } = fakeDb(fakeTx([]));
+    expect(frozenStore(db).kind).toBe('persistent');
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const session = createHubSessionStore({
+        databaseUrlPresent: false,
+        nodeEnv: 'development',
+        encryptionIkm: IKM,
+      });
+      // The ENVELOPE tag, which app-auth.ts narrows on to decide whether the
+      // login-supersede middleware may be mounted. Renaming it is how this slice
+      // would silently 500 every local /auth/callback.
+      expect(session.kind).toBe('memory');
+      // The STORE's own 2.x self-description, which is a different property.
+      expect(session.store.kind).toBe('ephemeral');
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

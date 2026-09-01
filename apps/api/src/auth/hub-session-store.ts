@@ -24,8 +24,15 @@
  * `getAdminDb()` is the only connection, because `hub_bff_sessions` and
  * `hub_bff_login_txns` carry FORCE RLS with only the `app.fxl_admin` policy.
  *
- * Rotating `FXL_HUB_SECRET_KEY` invalidates every stored session - see
+ * Rotating `FXL_HUB_CLIENT_SECRET` invalidates every stored session - see
  * `session-crypto.ts`.
+ *
+ * The transaction handle already speaks the 2.x `read()` contract while the
+ * dependency is still `@fxl-business/hub-sdk@1.3.1`: `read()` answers a
+ * three-state `found | expired | absent` result, because `expired` clears the
+ * browser's session cookie and `absent` never does. `get()` survives only until
+ * the SDK flip, which is the one thing the installed BFF still calls, and it is a
+ * PROJECTION of `read()` rather than a second lookup.
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomBytes } from 'node:crypto';
@@ -34,7 +41,7 @@ import {
   type HubLoginTransaction,
   type HubSessionRecord,
   type HubSessionStore,
-  type HubSessionTransaction,
+  type HubSessionTransaction as SdkHubSessionTransaction,
 } from '@fxl-business/hub-sdk';
 import { eq, lte, or } from 'drizzle-orm';
 import { getAdminDb } from '../db/client.js';
@@ -105,6 +112,44 @@ function newId(): string {
 }
 
 /**
+ * The 2.x session contract, declared HERE while the dependency is still 1.3.1.
+ *
+ * These three names are byte-for-byte the SDK 2.1.0 names
+ * (dist/session-store-DOWOoBx8.d.ts:17-43). Slice 04 deletes these declarations and
+ * adds the identifiers to the import above; nothing else in the repo changes, which
+ * is the whole reason they are spelled the same.
+ */
+export type HubSessionStoreKind = 'ephemeral' | 'persistent';
+
+/**
+ * Why this is not `HubSessionRecord | null`.
+ *
+ * Under `null`, a session that had EXPIRED and one that simply is not here looked
+ * identical, so the BFF treated both as definitive and deleted the session cookie: a
+ * database blip logged the operator out with no way back. With the status
+ * discriminated, `expired` clears and `absent` never does.
+ *
+ * The asymmetry is the design rule for this file. `absent` costs a retry; `expired`
+ * costs a logout. Anything this store cannot positively prove is expiry is therefore
+ * reported `absent`.
+ */
+export type HubSessionReadResult =
+  | { status: 'found'; record: HubSessionRecord }
+  | { status: 'expired' }
+  | { status: 'absent' };
+
+/**
+ * The 2.x handle, plus the 1.3.1 `get()` the INSTALLED SDK still calls
+ * (dist/server.js:464). Slice 04 deletes this interface, imports
+ * `HubSessionTransaction` from the SDK, and deletes `get` from the handle literal.
+ * Until then `get()` is implemented in terms of `read()` and never as a second
+ * lookup.
+ */
+export interface HubSessionTransaction extends SdkHubSessionTransaction {
+  read(): Promise<HubSessionReadResult>;
+}
+
+/**
  * What a login knows about the session the browser was carrying a moment before
  * it logged in again. One optional string, and nothing else will ever be added:
  * see `hub-login-scope.ts` for why this reaches `create()` out of band at all.
@@ -122,10 +167,20 @@ export type HubLoginContext = { priorSessionId: string | undefined };
  * the middleware over it would make every local `/auth/callback` throw.
  */
 export interface DurableHubSessionStore extends HubSessionStore {
+  /**
+   * 2.x makes the store describe its OWN durability, because the boot assertion has
+   * to be able to refuse an ephemeral store outside development and cannot do that by
+   * class name. This one is Postgres, so it is persistent by construction. It is NOT
+   * the same property as `createHubSessionStore`'s envelope tag below.
+   */
+  readonly kind: 'persistent';
+  /** Narrowed to the handle that has `read()`. */
+  withSession<T>(id: string, operation: (tx: HubSessionTransaction) => Promise<T>): Promise<T>;
   withLoginContext<T>(context: HubLoginContext, fn: () => Promise<T>): Promise<T>;
 }
 
 class PostgresHubSessionStore implements DurableHubSessionStore {
+  readonly kind = 'persistent' as const;
   readonly #db: NodeDb;
   readonly #sealer: SessionSealer;
   readonly #now: () => Date;
@@ -235,30 +290,60 @@ class PostgresHubSessionStore implements DurableHubSessionStore {
           .limit(1);
 
         const now = this.#now().getTime();
-        let row = rows[0] ?? null;
+        const row = rows[0] ?? null;
 
-        // Past EITHER timestamp: deleted inside this transaction and reported
-        // absent, per MIGRATION.md ("A store implementing withSession should
-        // treat a record past either timestamp as absent: delete it inside the
-        // transaction and resolve null"). The absolute term is not redundant
-        // with the sliding one: a row rotated yesterday has expires_at 29 days
-        // in the future while absolute_expires_at may already have passed, and
-        // that row is exactly the one the ceiling exists to kill.
-        if (row && (row.expiresAt.getTime() <= now || row.absoluteExpiresAt.getTime() <= now)) {
+        // ONE lookup, resolved here, under the lock, BEFORE `operation` runs, and
+        // never recomputed. `read()` hands this value back and `get()` projects it,
+        // so the two accessors cannot disagree and `get()` cannot re-delete.
+        //
+        // The order is deliberate and is the safety rule of this whole file:
+        // `expired` clears the browser's session cookie and `absent` does not, so
+        // only a state this store can PROVE from its own columns is reported
+        // expired. Everything else is absent, which costs a retry instead of a
+        // logout.
+        let outcome: HubSessionReadResult;
+        if (row === null) {
+          // Not here. Possibly never was, possibly not on this replica. Not proof of
+          // expiry, so it must not read as one.
+          outcome = { status: 'absent' };
+        } else if (row.expiresAt.getTime() <= now || row.absoluteExpiresAt.getTime() <= now) {
+          // Past EITHER timestamp: deleted inside THIS transaction and reported
+          // expired. The absolute term is not redundant with the sliding one: a row
+          // rotated yesterday has expires_at 29 days in the future while
+          // absolute_expires_at may already have passed, and that row is exactly the
+          // one the ceiling exists to kill.
+          //
+          // Checked BEFORE the seal is opened on purpose. Expiry is readable from two
+          // columns and needs no key, so this answer is correct even under a rotated
+          // key, and the row is one the nightly sweep would remove anyway.
           await tx.delete(hubBffSessions).where(eq(hubBffSessions.id, sessionId));
-          row = null;
+          outcome = { status: 'expired' };
+        } else {
+          const token = this.#sealer.open(row.hubRefreshTokenEnc, row.id);
+          // A seal that will not open reads as an UNKNOWN session, never an expired
+          // one, and the row is LEFT IN PLACE. This diverges from the bundled
+          // `SqlHubSessionStore`, which throws: a key rotation must cost every user
+          // one re-login rather than a wall of 503s, and deleting rows as a side
+          // effect of presenting the wrong key would destroy data on a misconfigured
+          // deploy. Reporting `expired` here would do the same damage in the other
+          // direction, by making the misconfiguration sign everyone out.
+          outcome =
+            token === null
+              ? { status: 'absent' }
+              : { status: 'found', record: toSessionRecord(row, token) };
         }
 
-        // A seal that will not open reads as an unknown session and the row is
-        // LEFT IN PLACE. This diverges from the bundled `SqlHubSessionStore`,
-        // which throws: a key rotation must cost every user one re-login rather
-        // than a wall of 503s, and deleting rows as a side effect of presenting
-        // the wrong key would destroy data on a misconfigured deploy.
-        const token = row ? this.#sealer.open(row.hubRefreshTokenEnc, row.id) : null;
-        const live = token === null ? null : row;
+        const read = async (): Promise<HubSessionReadResult> => outcome;
 
         const handle: HubSessionTransaction = {
-          get: async () => (live && token !== null ? toSessionRecord(live, token) : null),
+          read,
+          // The 1.3.1 BFF still calls this (dist/server.js:464). It is a PROJECTION of
+          // `read()` and never a second lookup, so the two cannot drift while both
+          // exist. Slice 04 deletes it with the SDK bump.
+          get: async () => {
+            const result = await read();
+            return result.status === 'found' ? result.record : null;
+          },
           update: async (record) => {
             await tx
               .update(hubBffSessions)
@@ -358,6 +443,16 @@ export function createDurableHubSessionStore(deps: {
 }
 
 /**
+ * The in-process fallback, with the `kind` the installed 1.3.1
+ * `InMemoryHubSessionStore` does not have yet. 2.1.0's own class declares
+ * `kind = 'ephemeral'`, so slice 04 deletes this class and uses the SDK's directly.
+ * The subclass adds a property and overrides no behaviour.
+ */
+class EphemeralHubSessionStore extends InMemoryHubSessionStore {
+  readonly kind = 'ephemeral' as const;
+}
+
+/**
  * Env-reading factory used by app-auth. `kind` is what the wiring test asserts
  * to prove the durable path was taken, and what drives the memory-fallback warning.
  *
@@ -373,7 +468,7 @@ export function createHubSessionStore(deps: {
   encryptionIkm: string;
 }):
   | { kind: 'durable'; store: DurableHubSessionStore }
-  | { kind: 'memory'; store: HubSessionStore } {
+  | { kind: 'memory'; store: EphemeralHubSessionStore } {
   if (deps.databaseUrlPresent) {
     // getAdminDb() is reached only from inside this factory, never at module
     // import time, and postgres-js builds the pool without opening a socket
@@ -394,7 +489,7 @@ export function createHubSessionStore(deps: {
   console.warn(
     '[hub-session-store] DATABASE_URL is not set - falling back to the in-process session store; sessions will NOT survive a restart',
   );
-  return { kind: 'memory', store: new InMemoryHubSessionStore() };
+  return { kind: 'memory', store: new EphemeralHubSessionStore() };
 }
 
 /** Cleanup, called by the nightly scheduler. Returns rows removed. */
