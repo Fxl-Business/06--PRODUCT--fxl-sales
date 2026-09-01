@@ -10,7 +10,7 @@ import {
   SESSION_TTL_MS,
   createHubSessionStore,
 } from '../auth/hub-session-store.js';
-import { tryLoadHubAuthConfig } from '../config/auth-provider.js';
+import { hubEnvBag, tryLoadHubAuthConfig } from '../config/auth-provider.js';
 import { env } from '../env.js';
 
 type EnvLike = Record<string, string | undefined>;
@@ -81,12 +81,16 @@ declare module 'hono' {
   }
 }
 
-const hubAuthConfig = tryLoadHubAuthConfig(process.env);
+const hubAuthConfig = tryLoadHubAuthConfig(hubEnvBag(env));
 const hubSdkConfig: HubSdkConfig | null = hubAuthConfig
   ? {
       apiUrl: hubAuthConfig.apiUrl,
-      publishableKey: hubAuthConfig.publishableKey,
-      secretKey: hubAuthConfig.secretKey,
+      // 1.3.1 still calls these publishableKey / secretKey and sends them as
+      // client_id / client_secret. The SDK bump renames them at that boundary.
+      publishableKey: hubAuthConfig.clientId,
+      secretKey: hubAuthConfig.clientSecret,
+      // ALWAYS passed. The audience is configured, never derived: with an
+      // explicit audience the SDK's own derivation is never consulted.
       audience: hubAuthConfig.audience,
     }
   : null;
@@ -112,6 +116,14 @@ export function hasHubCoreEntitlement(auth: MinimalHubAuthContext, coreModule: s
   return auth.claims.entitlements.modules.includes(coreModule);
 }
 
+/**
+ * THIS app's own origin plus `/auth/callback`, never the Hub's. 2.x's
+ * `createHubBff` defaults `redirectUri` to `${config.apiUrl}/auth/callback`,
+ * which is the HUB's origin and is therefore always wrong here. Locally vite
+ * proxies `/auth` from 8006 to the api on 3006, so the registered callback is
+ * the WEB origin. The NODE_ENV read below is about whether an EXPLICIT redirect
+ * is mandatory; it has nothing to do with the Hub environment.
+ */
 export function resolveHubRedirectUri(envBag: EnvLike): string | undefined {
   const explicit = envBag.FXL_HUB_REDIRECT_URI;
   if (explicit) {
@@ -200,19 +212,22 @@ export function createAppAuthBff() {
   }
 
   // ONE boolean drives both the SDK's cookie name and our cookie read.
-  const secureCookies = (process.env.NODE_ENV ?? 'development') === 'production';
+  const secureCookies = env.NODE_ENV === 'production';
+
+  // Computed ONCE and reused by every resolver below.
+  const hubEnv = hubEnvBag(env);
 
   const session = createHubSessionStore({
     databaseUrlPresent: Boolean(env.DATABASE_URL),
-    nodeEnv: process.env.NODE_ENV ?? 'development',
+    nodeEnv: env.NODE_ENV,
     // Read the VALIDATED env, never process.env: .env.dev.example ships
     // `HUB_SESSION_ENCRYPTION_KEY=` (blank) and CLAUDE.md documents that file as
     // the one an operator copies to .env. `process.env.X ?? secret` keeps the
     // empty string, createSessionSealer('') throws its 32-char floor, and
     // server.ts calls this at module top level - so a blank value would stop the
     // API booting. env.ts's emptyToUndefined turns '' into undefined, which is
-    // what makes the documented HKDF-from-FXL_HUB_SECRET_KEY default apply.
-    encryptionIkm: env.HUB_SESSION_ENCRYPTION_KEY ?? hubAuthConfig.secretKey,
+    // what makes the documented HKDF-from-FXL_HUB_CLIENT_SECRET default apply.
+    encryptionIkm: env.HUB_SESSION_ENCRYPTION_KEY ?? hubAuthConfig.clientSecret,
   });
 
   const bff = createHubBff(hubSdkConfig, {
@@ -234,9 +249,9 @@ export function createAppAuthBff() {
     // than a surprise.
     sessionTtlSeconds: SESSION_TTL_MS / 1000,
     sessionAbsoluteTtlSeconds: SESSION_ABSOLUTE_TTL_MS / 1000,
-    redirectUri: resolveHubRedirectUri(process.env),
-    postLoginRedirect: resolveHubPostLoginRedirect(process.env),
-    postLoginErrorRedirect: resolveHubPostLoginErrorRedirect(process.env),
+    redirectUri: resolveHubRedirectUri(hubEnv),
+    postLoginRedirect: resolveHubPostLoginRedirect(hubEnv),
+    postLoginErrorRedirect: resolveHubPostLoginErrorRedirect(hubEnv),
   });
 
   // Both are mounted INSIDE the returned router, so server.ts stays
