@@ -1,0 +1,35 @@
+{
+  "status": "done",
+  "summary": "Ported the Hub BFF session transaction to the 2.x three-state read contract on the installed hub-sdk 1.3.1, without bumping the SDK. withSession now resolves ONE outcome under the row lock before the operation runs: absent for a missing row, expired plus an in-transaction delete for a row past either timestamp, found for a live row whose seal opens, and absent with the row LEFT IN PLACE for an unopenable seal. get() survives for the 1.3.1 BFF as a pure projection of read(). The durable store declares kind 'persistent' and a new EphemeralHubSessionStore subclass supplies kind 'ephemeral' for the memory fallback, with both createHubSessionStore envelope tags ('durable' | 'memory') unchanged. Also adopted slice 02's one-line header comment rename FXL_HUB_SECRET_KEY to FXL_HUB_CLIENT_SECRET, and recorded the contract in CLAUDE.md.",
+  "commits": [
+    {"sha": "cec5b83", "subject": "test(auth): pin the three-state session read contract"},
+    {"sha": "62a9835", "subject": "feat(auth): answer the session transaction with a three-state read"},
+    {"sha": "58a1820", "subject": "docs(claude): record the three-state session read contract"}
+  ],
+  "files_changed": [
+    "apps/api/src/auth/hub-session-store.ts",
+    "apps/api/src/auth/__tests__/hub-session-store.test.ts",
+    "apps/api/src/auth/__tests__/hub-login-scope.test.ts",
+    "CLAUDE.md"
+  ],
+  "oracles_written": [
+    {"title": "reports absent and leaves the row when the seal will not open, so a wrong key costs one re-login rather than data", "passing": true},
+    {"title": "reports expired and deletes the row inside the same transaction when only the absolute expiry has passed", "passing": true},
+    {"title": "reports expired and deletes the row inside the same transaction when only the sliding expiry has passed", "passing": true},
+    {"title": "reports absent and deletes nothing when there is no row at all", "passing": true},
+    {"title": "reports found with the stored refresh token when neither expiry has passed", "passing": true},
+    {"title": "never lets get() and read() disagree about the same locked row", "passing": true},
+    {"title": "declares kind persistent on the durable store and ephemeral on the in-process fallback, without moving the factory envelope tags", "passing": true}
+  ],
+  "commands_run": {
+    "pnpm --filter @fxl-sales/api test": 0,
+    "pnpm run type-check": 0,
+    "pnpm run lint": 0
+  },
+  "deviations_from_plan": [],
+  "concerns": [
+    "The plan's prescribed Omit<HubSessionStore, 'withSession'> fallback was NOT needed: tsc accepted the narrowed withSession redeclaration on DurableHubSessionStore as written. No cast was added.",
+    "RED was recorded before the implementation: all seven new tests failed, six with 'handle.read is not a function' and the seventh with 'expected undefined to be persistent'.",
+    "The integration suite (apps/api/test/rls/hub-bff-session-store.test.ts, hub-bff-login-supersede.test.ts) was NOT run per instruction; it calls tx.get(), which survives this slice unchanged, so it is expected green but is unverified here."
+  ]
+}

@@ -1,0 +1,93 @@
+{
+  "status": "complete",
+  "verdict": "PASS",
+  "oracles": [
+    {
+      "title": "reports absent and leaves the row when the seal will not open, so a wrong key costs one re-login rather than data",
+      "exists": true,
+      "passing": true
+    },
+    {
+      "title": "reports expired and deletes the row inside the same transaction when only the absolute expiry has passed",
+      "exists": true,
+      "passing": true
+    },
+    {
+      "title": "reports expired and deletes the row inside the same transaction when only the sliding expiry has passed",
+      "exists": true,
+      "passing": true
+    },
+    {
+      "title": "reports absent and deletes nothing when there is no row at all",
+      "exists": true,
+      "passing": true
+    },
+    {
+      "title": "reports found with the stored refresh token when neither expiry has passed",
+      "exists": true,
+      "passing": true
+    },
+    {
+      "title": "never lets get() and read() disagree about the same locked row",
+      "exists": true,
+      "passing": true
+    },
+    {
+      "title": "declares kind persistent on the durable store and ephemeral on the in-process fallback, without moving the factory envelope tags",
+      "exists": true,
+      "passing": true
+    }
+  ],
+  "mutations": [
+    {
+      "mutation": "unopenable seal branch reports {status:'expired'} instead of {status:'absent'} in hub-session-store.ts",
+      "oracle": "reports absent and leaves the row when the seal will not open, so a wrong key costs one re-login rather than data",
+      "went_red": true
+    },
+    {
+      "mutation": "row === null branch reports {status:'expired'} instead of {status:'absent'}",
+      "oracle": "reports absent and deletes nothing when there is no row at all",
+      "went_red": true
+    },
+    {
+      "mutation": "get() re-selects the row FOR the handle and re-runs the expiry delete instead of projecting read()",
+      "oracle": "never lets get() and read() disagree about the same locked row",
+      "went_red": true
+    },
+    {
+      "mutation": "PostgresHubSessionStore.kind changed from 'persistent' to 'ephemeral'",
+      "oracle": "declares kind persistent on the durable store and ephemeral on the in-process fallback, without moving the factory envelope tags",
+      "went_red": true
+    }
+  ],
+  "invariants": {
+    "single_db_transaction_with_select_for_update_before_op": "HOLDS: withSession still opens one this.#db.transaction and takes .for('update').limit(1) as the first statement, before the outcome is resolved and before operation(handle) runs. The diff does not touch those lines.",
+    "absolute_expires_at_written_once_by_create_absent_from_update_set": "HOLDS: update's set object is byte-unchanged by the diff and still contains no absoluteExpiresAt key.",
+    "update_ignores_both_timestamps_spread_back_from_get": "HOLDS: update is untouched; expiresAt is recomputed from #now() + SESSION_TTL_MS and record.expiresAt / record.absoluteExpiresAt are ignored.",
+    "hub_session_store_unavailable_error_on_any_throw_in_withSession": "HOLDS: the surrounding try/catch and #unavailable() are unchanged, and the new outcome resolution sits inside it. The three failure-semantics tests still pass.",
+    "createHubSessionStore_discriminated_union_narrowing": "HOLDS: the envelope tags stay 'durable' | 'memory'; only the memory branch's store TYPE narrows to EphemeralHubSessionStore. app-auth.ts:250 still narrows on session.kind === 'durable', and app-auth-bff-memory-path / wiring tests pass unedited."
+  },
+  "commands": {
+    "pnpm --filter @fxl-sales/api test": 0,
+    "pnpm run type-check": 0,
+    "pnpm run lint": 0,
+    "pnpm --filter @fxl-sales/api test:integration": 0
+  },
+  "files_outside_declared_set": [],
+  "tree_restored": true,
+  "house_rules_ok": true,
+  "findings": [
+    "No em dash or en dash on any added line. A codepoint scan of every added line in git diff master...HEAD found ZERO non-ASCII characters at all.",
+    "No package.json, pnpm-lock.yaml or pnpm-workspace.yaml change. @fxl-business/hub-sdk stays ^1.3.1 in both apps/api and apps/web.",
+    "get() survives on the handle as a pure projection of read() and is still exercised by the five pre-existing 'absolute session lifetime' tests, unedited.",
+    "The D5-adopted one-line comment edit at hub-session-store.ts:27 was made: FXL_HUB_SECRET_KEY becomes FXL_HUB_CLIENT_SECRET in the header block.",
+    "No line was REMOVED from either test file; the diff of apps/api/src/auth/__tests__/* contains only additions, so nothing was deleted, skipped, retitled or loosened. No .skip / .only / todo added anywhere.",
+    "Oracle 1 carries its in-test non-vacuity control: the identical liveRow() sealed with the working IKM is run through a second frozenStore and asserted 'found'. It also asserts status is not 'expired' explicitly and tx.recorded.deletes === 0.",
+    "Oracle 6 asserts tx.recorded.deletes per case both from inside the operation and after it, against expectedDeletes 0/1/1/0, so a second lookup or second delete by get() is caught. Confirmed empirically by mutation 3.",
+    "No secret, refresh token, seal, session id payload or HubSessionRecord is logged. The diff adds no console.* or logger call at all.",
+    "No --no-verify and no co-author trailer on any of the three commits.",
+    "Integration suite ran fully green against the local Docker database (25 files, 169 tests), including test/rls/hub-bff-session-store.test.ts and hub-bff-login-supersede.test.ts which call tx.get().",
+    "NOTE, not a defect: the exported type HubSessionStoreKind is declared but has no consumer in this slice. That is deliberate per the plan, so slice 04 can delete the declaration and add the identifier to the SDK import with no rename. Lint and type-check both accept it."
+  ],
+  "summary": "Slice 01 verified. All seven named oracles exist with exact titles and pass (20/20 in hub-session-store.test.ts, 422/422 in the API unit suite). All four required non-vacuity mutations turned their oracle red and the tree was restored to its exact starting state. Every must-not-break invariant holds against the diff, not just the plan. Wave discipline holds: no SDK bump, get() survives, and the diff touches exactly the four declared files plus the D5-adopted comment. All four commands exit 0, integration included. No house rule broken."
+}
