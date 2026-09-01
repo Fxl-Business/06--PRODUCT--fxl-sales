@@ -2,7 +2,7 @@
   "active_accumulated_seconds": 0,
   "active_since": 1788288995,
   "counters": {
-    "agent_dispatches": 22,
+    "agent_dispatches": 24,
     "initial_slices": 5,
     "replans": 2,
     "total_slices": 5,
@@ -23,7 +23,8 @@
   "scoped_counters": {
     "verify_attempts": {
       "01-session-store-read-contract": 1,
-      "02-explicit-hub-config": 1
+      "02-explicit-hub-config": 1,
+      "03-access-entitlement-gate": 1
     }
   },
   "version": 1

@@ -1,0 +1,125 @@
+{
+  "status": "complete",
+  "summary": "Slice 03 landed on feat/03-access-entitlement-gate in three atomic commits. Baseline access is now the required boolean entitlements.access, decided by classifyHubAccess, which fails closed on ===true. The 402 wire body flipped to no_org_access. The 403 half gained a web owner: isForbiddenFailure, ForbiddenPanel and a four-arm classification chain in SalesOpsApp plus the same arm in CadastroHistoryPanel. CLAUDE.md records the access gate, the exhaustive 401/402/403/503 taxonomy including 401 contract_version_mismatch, the dated one-wave internal disagreement, and slice 02's carried explicit-Hub-configuration bullet with its Environments table and dotenv edits. No SDK version was touched; the local gate is labelled a deliberate one-wave bridge that slice 04 deletes.",
+  "commits": [
+    {
+      "sha": "1cde69ab94b662ae7200e4fe1dc675ef252067b3",
+      "subject": "feat(api)!: gate baseline access on entitlements.access, not sales.core"
+    },
+    {
+      "sha": "04a574d3fcc487ade7139b8768fd3b3c8e72db49",
+      "subject": "feat(web): tell the operator to ask an administrator on a 403"
+    },
+    {
+      "sha": "9a0c1e7b434c5ddf4872c3813f6393a91ca1b99f",
+      "subject": "docs: record the access-model-v1 gate and the 401/402/403 taxonomy"
+    }
+  ],
+  "files_changed": [
+    "CLAUDE.md",
+    "apps/api/src/config/auth-provider.ts",
+    "apps/api/src/config/__tests__/auth-provider.test.ts",
+    "apps/api/src/middleware/app-auth.ts",
+    "apps/api/src/middleware/__tests__/app-auth.test.ts",
+    "apps/api/src/middleware/__tests__/app-auth-access-gate.test.ts",
+    "apps/api/src/middleware/__tests__/app-auth-unconfigured.test.ts",
+    "apps/api/src/domains/sales-ops/__tests__/routes.test.ts",
+    "apps/api/src/domains/sales-ops/__tests__/history-route.test.ts",
+    "apps/web/src/lib/require-token.ts",
+    "apps/web/src/lib/__tests__/api-client-token-guard.test.ts",
+    "apps/web/src/sales-ops/forbidden-copy.ts",
+    "apps/web/src/sales-ops/ForbiddenPanel.tsx",
+    "apps/web/src/sales-ops/SalesOpsApp.tsx",
+    "apps/web/src/sales-ops/CadastroHistoryPanel.tsx",
+    "apps/web/src/sales-ops/__tests__/forbidden-panel.test.tsx",
+    "apps/web/src/sales-ops/__tests__/entitlement-dead-end.test.tsx"
+  ],
+  "oracles_written": [
+    { "title": "classifyHubAccess > allows a context whose entitlements.access is true", "passing": true },
+    { "title": "classifyHubAccess > denies with 402 and the buy-screen code when entitlements.access is false", "passing": true },
+    { "title": "classifyHubAccess > denies a claim set with no access key at all rather than allowing it", "passing": true },
+    { "title": "classifyHubAccess > denies when the entitlements object is missing entirely", "passing": true },
+    { "title": "classifyHubAccess > denies a non-boolean access claim rather than coercing it", "passing": true },
+    { "title": "classifyHubAccess > denies with 401 missing_hub_context when the SDK produced no auth context", "passing": true },
+    { "title": "classifyHubAccess > never reads entitlements.modules for baseline access", "passing": true },
+    { "title": "requireHubModule > answers 403 missing_module when the add-on module is absent", "passing": true },
+    { "title": "requireHubModule > calls through when the add-on module is present", "passing": true },
+    { "title": "requireHubModule > answers 403 rather than throwing when there is no auth context at all", "passing": true },
+    { "title": "appAuthMiddleware access gate > allows a protected route when entitlements.access is true", "passing": true },
+    { "title": "appAuthMiddleware access gate > answers 402 payment_required with no_org_access when entitlements.access is false", "passing": true },
+    { "title": "appAuthMiddleware access gate > answers 402 rather than allowing when the claim set has no access key", "passing": true },
+    { "title": "appAuthMiddleware access gate > answers 402 for a workspace that still carries the deleted core module but no access", "passing": true },
+    { "title": "appAuthMiddleware access gate > answers 401 when the token is missing or invalid", "passing": true },
+    { "title": "appAuthMiddleware access gate > answers 401 missing_hub_context when the SDK calls next without a context", "passing": true },
+    { "title": "appAuthMiddleware access gate > answers 403 for a role the route requires but the entitled token does not carry", "passing": true },
+    { "title": "appAuthMiddleware access gate > lets an entitled workspace owner through the same admin route", "passing": true },
+    { "title": "appAuthMiddleware without Hub configuration > answers 503 hub_auth_not_configured and never a 401, 402 or an allow", "passing": true },
+    { "title": "403 forbidden classification > isForbiddenFailure recognises a 403 ApiError", "passing": true },
+    { "title": "403 forbidden classification > isForbiddenFailure is true for a 403 that carries no code at all", "passing": true },
+    { "title": "403 forbidden classification > isForbiddenFailure is false for a 401, a 402, a 500, an AuthTokenUnavailableError and a non-object", "passing": true },
+    { "title": "403 forbidden classification > isAuthFailure does not classify a 403 as an auth failure", "passing": true },
+    { "title": "a 402 missing_entitlement is not a server fault > renders the forbidden panel for a 403 and never the server-fault or session-expired copy", "passing": true },
+    { "title": "ForbiddenPanel > renders the ask-an-administrator copy and no sign-in affordance", "passing": true },
+    { "title": "ForbiddenPanel > names no module, no role and no raw identifier", "passing": true },
+    { "title": "ForbiddenPanel > renders the same forbidden panel from the cadastro history panel", "passing": true }
+  ],
+  "commands_run": {
+    "pnpm --filter @fxl-sales/api test": { "exit": 0, "result": "44 files, 465 tests passed" },
+    "pnpm --filter @fxl-sales/web test": { "exit": 0, "result": "56 files, 778 tests passed" },
+    "pnpm run type-check": { "exit": 0, "result": "api and web clean" },
+    "pnpm run lint": { "exit": 0, "result": "api and web clean" },
+    "pnpm --filter @fxl-sales/api test:integration": { "exit": 0, "result": "25 files, 169 tests passed" }
+  },
+  "grep_gates": {
+    "git grep -n -i \"sales\\.core\" -- apps packages scripts ':!*__tests__*'": {
+      "printed_nothing": true
+    },
+    "git grep -n \"coreModule|hasHubCoreEntitlement|coreModuleFromAudience\" -- apps packages scripts": {
+      "printed_nothing": false,
+      "hits": [
+        "apps/api/src/config/__tests__/auth-provider.test.ts:72: expect(config).not.toHaveProperty('coreModule');",
+        "apps/api/src/config/__tests__/auth-provider.test.ts:81: expect(config).not.toHaveProperty('coreModule');"
+      ],
+      "note": "Both hits are the assertion the plan's own step 3 REQUIRES, which is what actually pins the deletion because toMatchObject ignores extra keys. The plan is internally inconsistent here: it mandates the assertion and then mandates a gate that the assertion trips. Resolved by applying decision D6's own reasoning, and reported as a deviation rather than by weakening the test."
+    },
+    "git grep -n \"coreModule|hasHubCoreEntitlement|coreModuleFromAudience\" -- apps packages scripts ':!*__tests__*'": {
+      "printed_nothing": true
+    }
+  },
+  "fail_open_probe": {
+    "mutation": "hasHubOrgAccess changed from `access === true` to `access !== false` in apps/api/src/middleware/app-auth.ts",
+    "oracles_red": [
+      "classifyHubAccess > denies a claim set with no access key at all rather than allowing it",
+      "appAuthMiddleware access gate > answers 402 rather than allowing when the claim set has no access key",
+      "classifyHubAccess > denies when the entitlements object is missing entirely",
+      "classifyHubAccess > denies a non-boolean access claim rather than coercing it"
+    ],
+    "both_named_oracles_red": true,
+    "reverted": true
+  },
+  "render_probe_403": {
+    "mutation": "ForbiddenPanel's returned <section> replaced with an empty fragment",
+    "oracles_red": [
+      "renders the forbidden panel for a 403 and never the server-fault or session-expired copy"
+    ],
+    "marker": "[data-forbidden]",
+    "reverted": true
+  },
+  "already_done_steps": [
+    "Step 6 - apps/web/src/lib/api-client.ts: ApiError already carries `code`, set from body.code in both apiFetch and apiFetchBlob. No edit, file not in files_modified.",
+    "Step 7 partial - isEntitlementFailure already exists in require-token.ts, keys on status === 402 alone, and is pinned by `isEntitlementFailure is true for a 402 that carries no code at all`. Left byte-unchanged including its now-stale missing_entitlement prose, which slice 04 owns.",
+    "Step 8c partial - MissingEntitlementPanel, missing-entitlement-copy.ts and the entitlement-first arm of the SalesOpsApp isError chain already shipped in v2.8.0. Only one new ternary arm, two imports and one extended comment were added.",
+    "Step 9b - entitlement-dead-end.test.tsx already existed with its four arms. Extended in place; no existing it block was touched beyond adding forbiddenPanel() null assertions to the 402, 500 and 401 arms.",
+    "Step 2 - coreModuleFromAudience was still present after slice 02, exactly as slice 02 promised, so step 2 was NOT skipped and was executed in full."
+  ],
+  "deviations_from_plan": [
+    "Grep gate 2 as literally written in the plan's Verification section does not pass, because the plan's own step 3 requires `expect(config).not.toHaveProperty('coreModule')` in auth-provider.test.ts. The assertion was kept, since deleting it would delete the only pin on the deletion (toMatchObject ignores extra keys), and gate 2 was read with the same `':!*__tests__*'` pathspec that decision D6 applies to gate 1 for exactly the same reason. Gate 2 so narrowed prints nothing. Flagged for the verifier rather than resolved unilaterally in the plan.",
+    "Two CLAUDE.md lines outside the plan's named anchors were corrected because they now contradicted shipped behaviour: line 6 said `The product audience is product.fxl-sales`, which slice 02's boot check REFUSES (its `refuses to boot on a product. audience` test), and the session-store bullet said the encryption key derives from `FXL_HUB_SECRET_KEY`, a variable slice 02 retired. Both are one-word corrections inside sections this wave already edits. The `VITE_FXL_HUB_PUBLISHABLE_KEY` line in the web dotenv block was deliberately LEFT ALONE, because decision D4 assigns the VITE_ variables to slice 04.",
+    "app-auth-access-gate.test.ts declares `type MinimalHubAuthContext = import('../app-auth.js').MinimalHubAuthContext;` rather than a static type import, so the type is erased and cannot pull the module in ahead of the vi.doMock. Same effect as the plan's shape."
+  ],
+  "concerns": [
+    "The integration suite emitted one INTERMITTENT unhandled rejection on the first of four runs: `PostgresError: canceling statement due to user request (57014)` on `CREATE UNIQUE INDEX CONCURRENTLY sales_ops_sale_professionals_org_sale_id_id_idx`, attributed to `test/rls/professional-payable-migration.integration.test.ts > recovers an interrupted invalid concurrent index and serializes two runners`. All 169 tests passed on every run and three subsequent full runs were clean, including the recorded one. That test DELIBERATELY cancels a concurrent index build, so the escaping rejection is inherent to its own design and pre-existing: this slice touches no migration, database, connection or RLS code, and the file in isolation passes with no unhandled error. Filed rather than fixed, because closing it means editing a migration test outside this slice's declared sixteen files.",
+    "CLAUDE.md now disagrees with itself for one wave by design: the Auth Model taxonomy says the 402 code is `no_org_access` while the Organization context section still says `missing_entitlement`. That is dated in place in the file itself and is slice 04's to close under decision D2. The same staleness exists in the web tree's `missing_entitlement` literals and titles, deliberately untouched for the same reason.",
+    "`requireHubModule` is exported and tested but mounted on no route, exactly as the plan intends. It is labelled bridge coverage in a header comment above its describe block so slice 04's deletion needs no further argument."
+  ]
+}

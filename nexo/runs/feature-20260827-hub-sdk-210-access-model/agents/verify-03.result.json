@@ -1,0 +1,150 @@
+{
+  "status": "complete",
+  "verdict": "PASS",
+  "acceptance_criteria": {
+    "access_true_allowed_and_no_core_module_read": "PASS - classifyHubAccess allows only on entitlements.access === true; coreModuleFromAudience and HubAuthConfig.coreModule are deleted; grep gate 1 prints nothing outside __tests__; the deletion is pinned by two expect(config).not.toHaveProperty('coreModule') assertions that toMatchObject alone would not catch.",
+    "access_false_402_buy_screen_never_login": "PASS - app-auth-access-gate.test.ts asserts toEqual 402 {error:'payment_required',code:'no_org_access'}; entitlement-dead-end.test.tsx drives the REAL apiFetch path and asserts the 402 renders [data-missing-entitlement] and neither GENERIC_API_FAULT nor SESSION_EXPIRED. Proven non-vacuous by mutation 4a.",
+    "401_missing_invalid_token_403_lacking_membership_seat_module_role": "PASS - 401 pinned for missing_token/malformed/expired and for missing_hub_context; 403 pinned end to end via requireAdmin (entitled member denied, entitled owner allowed) and via requireHubModule (absent module 403, present module 200, no context 403). Web side: isForbiddenFailure is 403-only and routes to ForbiddenPanel in both hosts."
+  },
+  "mutations": [
+    {
+      "name": "fail-open probe",
+      "file": "apps/api/src/middleware/app-auth.ts",
+      "change": "hasHubOrgAccess: `access === true` -> `access !== false`",
+      "result": "RED",
+      "oracles": [
+        "app-auth.test.ts > classifyHubAccess > denies a claim set with no access key at all rather than allowing it",
+        "app-auth.test.ts > classifyHubAccess > denies when the entitlements object is missing entirely",
+        "app-auth.test.ts > classifyHubAccess > denies a non-boolean access claim rather than coercing it",
+        "app-auth-access-gate.test.ts > appAuthMiddleware access gate > answers 402 rather than allowing when the claim set has no access key"
+      ],
+      "note": "Both plan-named oracles went red, plus two more. 4 failed / 28 passed.",
+      "restored": true
+    },
+    {
+      "name": "403 render probe",
+      "file": "apps/web/src/sales-ops/ForbiddenPanel.tsx",
+      "change": "returned <section> replaced with an empty fragment",
+      "result": "RED",
+      "oracles": [
+        "entitlement-dead-end.test.tsx > renders the forbidden panel for a 403 and never the server-fault or session-expired copy (red on the [data-forbidden] marker)",
+        "forbidden-panel.test.tsx > renders the ask-an-administrator copy and no sign-in affordance",
+        "forbidden-panel.test.tsx > renders the same forbidden panel from the cadastro history panel"
+      ],
+      "note": "The shell oracle went red on the data marker exactly as the plan predicts, so the 403 case cannot pass by rendering nothing. Both hosts also caught it.",
+      "restored": true
+    },
+    {
+      "name": "predicate-to-panel binding probe",
+      "file": "apps/web/src/sales-ops/SalesOpsApp.tsx",
+      "change": "isAuthFailure hoisted to the 402 arm's position while each panel stayed put, so a 401 would render the buy screen and a 402 would render Sessao expirada",
+      "result": "RED",
+      "oracles": [
+        "entitlement-dead-end.test.tsx > renders the entitlement panel for a 402 missing_entitlement",
+        "entitlement-dead-end.test.tsx > still renders Sessao expirada for a 401"
+      ],
+      "note": "This is the probe that actually proves a 402 routes to the buy screen and NEVER to Sessao expirada.",
+      "restored": true
+    },
+    {
+      "name": "pure chain-order probe",
+      "file": "apps/web/src/sales-ops/SalesOpsApp.tsx",
+      "change": "the 403 (predicate, panel) pair hoisted above the 402 pair, each predicate keeping its own panel",
+      "result": "GREEN (no oracle caught it)",
+      "oracles": [],
+      "note": "Expected and inherent, not a defect. The three predicates key on mutually exclusive status equality (401/402/403), so any permutation of the pairs is behaviourally identical and no test can distinguish them without first widening a predicate. The ordering is defended by the source comment and by CLAUDE.md, and the plan states explicitly that the order is insurance against a future widening rather than a live behaviour. Recorded as a finding.",
+      "restored": true
+    }
+  ],
+  "coercion_cases": {
+    "false": "denied 402",
+    "undefined": "denied 402",
+    "string 'true'": "denied 402",
+    "number 1": "denied 402",
+    "missing entitlements object": "denied 402"
+  },
+  "coercion_evidence": "All five are asserted in app-auth.test.ts (the direct false case, the absent-key case, the missing-entitlements case, and a loop over ['true', 1, {}, null]). Independently re-confirmed by a throwaway probe test that printed the verdict for each of the five inputs; every one returned DENIED 402. The probe file was deleted and the tree is clean.",
+  "deviation_verdicts": {
+    "gate2_grep": {
+      "ruling": "PLAN DEFECT WITH A CORRECT IMPLEMENTATION. Not a dodge.",
+      "keeping_the_pin_is_correct": true,
+      "reasoning": "The plan's step 3 mandates `expect(config).not.toHaveProperty('coreModule')` AND a gate 2 that the assertion necessarily trips, so the plan contradicts itself and no implementation can satisfy both as literally written. Dropping the pin would leave the deletion of HubAuthConfig.coreModule entirely unpinned, because toMatchObject ignores extra keys and a re-added field would pass every remaining test; the pin is the only thing making the deletion a tested fact. Applying D6's ':!*__tests__*' exclusion to gate 2 is the right reading of D6's intent: D6's stated principle is that a test occurrence which is the defect inverted is a GOOD oracle that stays verbatim, and that the gate exists to catch a PRODUCTION read. Gate 2's only two hits are assertions that the symbol is ABSENT, which is the strongest possible form of what the gate wants rather than something it should suppress. Verified independently: under the exclusion gate 2 prints nothing, and coreModule, hasHubCoreEntitlement and coreModuleFromAudience are provably gone from all production source. The exclusion hides nothing real. Flagging rather than silently rewriting the plan was the correct call."
+    },
+    "claude_md_lines": {
+      "ruling": "BOTH IN SCOPE AND BOTH ACCURATE.",
+      "product_audience_line": "Correct. 'The product audience is `product.fxl-sales`' was CLAUDE.md's first factual claim and is now false: auth-provider validates the audience as `app.<slug>`, apps/api/.env.example ships FXL_HUB_AUDIENCE=app.fxl-sales, and auth-provider.test.ts asserts audience 'app.fxl-sales'. Slice 02's carried block already mandates the same `product.` -> `app.` correction in the Environments table, so this is the same fact one line earlier, and slice 03 is the sole CLAUDE.md owner in its wave.",
+      "session_store_secret_line": "Correct, and the more important of the two. The bullet named FXL_HUB_SECRET_KEY as the HKDF source for the session sealer; that variable no longer exists anywhere in apps/packages/scripts, and app-auth.ts:304 reads `env.HUB_SESSION_ENCRYPTION_KEY ?? hubAuthConfig.clientSecret`. FXL_HUB_CLIENT_SECRET is the accurate name. Leaving it would have documented a dead variable as the key-derivation source, which is a security-relevant doc error: an operator rotating the documented variable would rotate nothing and an operator rotating the real one would log every user out without warning.",
+      "vite_key_deferral": "Correct to defer. apps/web/src/auth/provider.ts:11 still genuinely reads VITE_FXL_HUB_PUBLISHABLE_KEY, so CLAUDE.md documenting it remains ACCURATE today, and slice 02's own instruction says in terms not to rename the browser variable because the web half is slice 04's."
+    }
+  },
+  "grep_gates": {
+    "gate1_sales_core_excluding_tests": "CLEAN - prints nothing",
+    "gate2_coremodule_as_literally_written": "2 hits, both the plan-mandated not.toHaveProperty('coreModule') assertions in apps/api/src/config/__tests__/auth-provider.test.ts:72 and :81",
+    "gate2_under_D6_exclusion": "CLEAN - prints nothing",
+    "deliberate_fixtures_verbatim": true,
+    "deliberate_fixtures": [
+      "apps/api/src/middleware/__tests__/app-auth.test.ts:180 modules: ['sales.core', 'sales', 'core'] inside 'never reads entitlements.modules for baseline access' - load-bearing: proves a workspace carrying every module string this product ever spelled, with access false, is still denied",
+      "apps/api/src/middleware/__tests__/app-auth-access-gate.test.ts:154 modules: ['sales.core'] inside 'answers 402 for a workspace that still carries the deleted core module but no access' - load-bearing: the end-to-end form of the same claim through appAuthMiddleware"
+    ],
+    "fixtures_are_load_bearing_not_decorative": "Confirmed. Both assert a DENIAL in the presence of the deleted module, which is exactly the defect inverted. Neither is a passive fixture: each is the sole assertion of its test.",
+    "additional_pre_existing_hits": "apps/web/src/auth/__tests__/react.test.tsx:212 and :2062 also spell 'sales.core', but they are PRE-EXISTING on master (verified with git show master:), are inside __tests__ so outside both gates, and are an arbitrary SKU string passed to a mocked client.checkoutUrl in a self-contained harness. Production MissingEntitlementPanel.tsx:105 calls .checkoutUrl() with NO argument, so no production code spells the string. Out of scope for this slice."
+  },
+  "claude_md_debt_closed": true,
+  "claude_md_debt_detail": {
+    "publishable_and_secret_key_removed": "Yes. The Required API vars block now carries FXL_HUB_ENVIRONMENT, FXL_HUB_CLIENT_ID, FXL_HUB_CLIENT_SECRET, FXL_HUB_AUDIENCE=app.fxl-sales and FXL_HUB_HEALTH_TOKEN with every credential EMPTY, and the committed pk_fxl-sales_VzQ9- literal has left that block. This now agrees with apps/api/.env.example.",
+    "carried_text_matches_slice_02_block": "Yes, verbatim against 02-explicit-hub-config.md section 6's fenced block, including the parseAudienceFromPublishableKey deletion, the NODE_ENV non-inference rationale, the FXL_HUB_CONFIG boot-failure rule, the FXL_HUB_REDIRECT_URI rationale, the operator-generated FXL_HUB_HEALTH_TOKEN, and the boot-failure-not-503 paragraph. The Environments table Hub Client column reads app.fxl-sales on all three rows.",
+    "contract_version_mismatch_recorded": "Yes, inside the deny-taxonomy bullet: named as new in 2.1.0, meaning the token's contractVersion is not 1 (an absent one included), and routed to the login screen as a token this app cannot use.",
+    "one_wave_disagreement_dated": "Yes. An explicit bullet reads 'ONE-WAVE INTERNAL DISAGREEMENT, dated 2026-09-01 rather than left to be discovered', names the Organization context section as the disagreeing text, says the SDK-bump slice owns the sweep, and states nothing is broken in the interval because isEntitlementFailure keys on status alone.",
+    "residual": "CLAUDE.md:475 still carries VITE_FXL_HUB_PUBLISHABLE_KEY with the committed pk literal, in the WEB vars block. Correctly deferred to slice 04 per slice 02's explicit instruction not to rename the browser variable, and still accurate because apps/web/src/auth/provider.ts:11 reads it. Minor: the same pk literal was deliberately stripped everywhere else, so slice 04 should blank the value as well as rename the key."
+  },
+  "wave_discipline": {
+    "sdk_version_unchanged": true,
+    "package_json_lock_workspace_untouched": true,
+    "package_evidence": "git diff master...HEAD --name-only shows no package.json, no pnpm-lock.yaml and no pnpm-workspace.yaml. Still @fxl-business/hub-sdk 1.3.1.",
+    "bridge_is_a_clean_bridge": true,
+    "bridge_evidence": "classifyHubAccess, hasHubOrgAccess, hasHubModule, requireHubModule and the 402 branch are contiguous, exported, and each carries a docstring naming its own removal date and the 2.1.0 replacement. The two response bodies are hoisted into MISSING_HUB_CONTEXT and NO_ORG_ACCESS constants that are byte-identical to 2.1.0's, so slice 04 changes no wire contract when it deletes them. requireHubModule is mounted on NO route, so deleting it breaks no caller. app-auth-access-gate.test.ts is a whole separate file slice 04 deletes wholesale, and the requireHubModule describe block carries an explicit BRIDGE COVERAGE header comment. Nothing outside app-auth.ts imports any of the five symbols except the two test files.",
+    "402_wire_body_flipped_to_no_org_access": true,
+    "diff_confined_to_declared_files": true,
+    "files_touched_vs_plan": "Exactly the 17 files in files_modified, no more and no fewer."
+  },
+  "commands": {
+    "pnpm --filter @fxl-sales/api test": {"exit": 0, "detail": "44 files, 465 tests passed"},
+    "pnpm --filter @fxl-sales/web test": {"exit": 0, "detail": "all passed"},
+    "pnpm run type-check": {"exit": 0, "detail": "all 4 projects clean"},
+    "pnpm run lint": {"exit": 0, "detail": "api and web clean"},
+    "pnpm --filter @fxl-sales/api test:integration": {"exit": 1, "detail": "25 files / 169 tests PASSED, 0 test failures. Exit 1 comes solely from the known pre-existing unhandled 57014 'canceling statement' rejection in professional-payable-migration.integration.test.ts on its deliberate concurrent-index cancellation. Failed nothing. The file passes 9/9 clean in isolation. NOT attributable to this slice, which touches no migration, no repository and no database code."}
+  },
+  "house_rules": {
+    "no_em_or_en_dash_on_added_lines": "PASS - codepoint scan of every added line for U+2013 and U+2014 returned no hits",
+    "no_test_deleted_skipped_retitled_or_loosened": "PASS - the only removed describe block is hasHubCoreEntitlement, whose deletion is mandated by plan step 3 row 2 and which is replaced by strictly more coverage (7 classifyHubAccess tests plus 3 requireHubModule tests). No .skip, .only or .todo added. Every pre-existing it in the touched web test files keeps its title and its assertions, and the four existing entitlement-dead-end blocks only GAINED an assertion.",
+    "no_raw_account_or_workspace_id_in_ui": "PASS - ForbiddenPanel names no module, no role and no id, and 'names no module, no role and no raw identifier' pins that missing_module, missing_role, forbidden and 403 are all absent from the rendered text",
+    "no_native_select_option_datalist": "PASS - none added",
+    "no_no_verify": "PASS",
+    "no_co_author_trailer": "PASS - all three commit messages are clean"
+  },
+  "tree_restored": true,
+  "tree_restored_evidence": "git status --porcelain returns to its exact starting state: ' M nexo/runs/.../budget.json', '?? .vscode/', '?? nexo/runs/.../agents/exec-03.result.json'. All four mutations reverted with git checkout --; both throwaway probe files deleted.",
+  "findings": [
+    {
+      "severity": "info",
+      "title": "The chain ORDER is not test-pinned, and cannot be",
+      "detail": "A pure reorder of the (predicate, panel) pairs in SalesOpsApp's isError chain leaves every test green, because isEntitlementFailure, isForbiddenFailure and isAuthFailure key on mutually exclusive status equality. This is inherent rather than a gap: pinning the order would require a predicate that matches two statuses, which is the exact thing the design forbids. What IS pinned, and what actually matters, is the predicate-to-panel binding, proven red by mutation 3. The order is documented as insurance against a future widening in both the source comment and CLAUDE.md. No action needed; recorded so a later reader does not mistake the green for coverage."
+    },
+    {
+      "severity": "info",
+      "title": "The integration flake is more reproducible here than recorded",
+      "detail": "The brief records the 57014 unhandled rejection as appearing on one of four runs. It appeared on BOTH of two full runs on this machine, each time making the command exit 1 while failing zero tests. The file passes 9/9 in isolation. Worth re-rating in the run notes, but it is pre-existing, is a race in a deliberate concurrent-index cancellation, and is untouched by this slice."
+    },
+    {
+      "severity": "info",
+      "title": "CLAUDE.md's 403 code list does not cover requireAdmin's own body",
+      "detail": "The new taxonomy bullet says a 403 comes 'with missing_module or missing_role'. Those are the 2.1.0 SDK codes; this repo's own requireAdmin answers {error: 'forbidden', reason: 'admin_role_required'} using a `reason` key rather than a `code`. Nothing breaks, because isForbiddenFailure keys on status alone and never reads the body, and the ForbiddenPanel renders no code either way. Cosmetic doc imprecision only."
+    },
+    {
+      "severity": "info",
+      "title": "Two pre-existing sales.core literals survive in the web test tree",
+      "detail": "apps/web/src/auth/__tests__/react.test.tsx:212 and :2062 spell 'sales.core' as an arbitrary SKU handed to a mocked client.checkoutUrl. Both are on master, both are inside __tests__ and therefore outside both gates, and production calls .checkoutUrl() with no argument. Not this slice's, but slice 04 may want to sweep them for tidiness."
+    }
+  ],
+  "summary": "PASS. The gate provably fails closed: mutating hasHubOrgAccess from `=== true` to `!== false` turned both plan-named oracles red plus two more, and all five coercion inputs (false, undefined, the string 'true', the number 1, and a missing entitlements object) deny with 402, confirmed both by the committed assertions and by an independent throwaway probe. The 401/402/403 taxonomy holds end to end, with the 402 wire body flipped to no_org_access in this slice and the 403 given a real web owner in two hosts. Emptying ForbiddenPanel turned the shell oracle red on its [data-forbidden] marker, and swapping the predicate-to-panel binding turned the 402 and 401 arms red, so a 402 provably reaches the buy screen and never Sessao expirada or the server-fault copy. Both grep gates are clean under D6's reading, and the two deliberate sales.core fixtures survive verbatim and are load-bearing. The gate-2 grep inconsistency is a plan defect with a correct implementation, not a dodged gate: the plan mandates an assertion that its own gate necessarily trips, dropping the assertion would leave the coreModule deletion unpinned because toMatchObject ignores extra keys, and D6's __tests__ exclusion is the right reading since the only two hits assert the symbol is ABSENT. Both CLAUDE.md corrections outside the named anchors were in scope and accurate, the second materially so, since the old text named a variable the API no longer reads as the session sealer's key source. The CLAUDE.md debt is closed, the carried slice-02 block is verbatim, contract_version_mismatch is recorded and the one-wave missing_entitlement disagreement is dated 2026-09-01 as required. Wave discipline holds: no SDK bump, no package.json, lockfile or workspace change, a cleanly separable one-wave bridge, and a diff confined to the 17 declared files. Four of the five commands exit 0; test:integration exits 1 solely on the known pre-existing 57014 unhandled rejection, which failed zero of 169 tests, passes in isolation, and is untouched by this slice."
+}
