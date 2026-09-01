@@ -14,9 +14,14 @@ vi.hoisted(() => {
   vi.stubEnv('FXL_HUB_CONFIG', '');
 });
 
+import { Hono } from 'hono';
+
 import {
+  classifyHubAccess,
   getHubLegacyAuthContext,
-  hasHubCoreEntitlement,
+  hasHubModule,
+  hasHubOrgAccess,
+  requireHubModule,
   resolveHubPostLoginErrorRedirect,
   resolveHubPostLoginRedirect,
   resolveHubRedirectUri,
@@ -27,7 +32,7 @@ const baseHubAuth: MinimalHubAuthContext = {
   accountId: 'hub-account-1',
   workspaceId: 'org_existing_1',
   claims: {
-    entitlements: { modules: ['sales.core'] },
+    entitlements: { access: true, modules: [] },
     roles: { workspace: 'member' },
   },
 };
@@ -104,21 +109,127 @@ describe('getHubLegacyAuthContext', () => {
   });
 });
 
-describe('hasHubCoreEntitlement', () => {
-  it('accepts the configured core module', () => {
-    expect(hasHubCoreEntitlement(baseHubAuth, 'sales.core')).toBe(true);
+describe('classifyHubAccess', () => {
+  it('allows a context whose entitlements.access is true', () => {
+    expect(classifyHubAccess(baseHubAuth)).toEqual({ allowed: true, auth: baseHubAuth });
   });
 
-  it('rejects workspaces without the configured core module', () => {
+  it('denies with 402 and the buy-screen code when entitlements.access is false', () => {
     expect(
-      hasHubCoreEntitlement(
-        {
-          ...baseHubAuth,
-          claims: { ...baseHubAuth.claims, entitlements: { modules: [] } },
+      classifyHubAccess({
+        ...baseHubAuth,
+        claims: { ...baseHubAuth.claims, entitlements: { access: false, modules: [] } },
+      }),
+    ).toEqual({
+      allowed: false,
+      status: 402,
+      body: { error: 'payment_required', code: 'no_org_access' },
+    });
+  });
+
+  it('denies a claim set with no access key at all rather than allowing it', () => {
+    /*
+      The cast is the point of the test. The TYPE says `access: boolean`, but the
+      value comes off a token, and a Hub or a fixture that omits the key must
+      never be defaulted to true. Absent is a denial.
+    */
+    const noAccessKey = {
+      ...baseHubAuth,
+      claims: { ...baseHubAuth.claims, entitlements: { modules: [] } },
+    } as unknown as MinimalHubAuthContext;
+    expect(classifyHubAccess(noAccessKey).allowed).toBe(false);
+    expect(classifyHubAccess(noAccessKey)).toMatchObject({ status: 402 });
+  });
+
+  it('denies when the entitlements object is missing entirely', () => {
+    const noEntitlements = {
+      ...baseHubAuth,
+      claims: { roles: { workspace: 'member' } },
+    } as unknown as MinimalHubAuthContext;
+    expect(classifyHubAccess(noEntitlements).allowed).toBe(false);
+  });
+
+  it('denies a non-boolean access claim rather than coercing it', () => {
+    for (const access of ['true', 1, {}, null]) {
+      const coerced = {
+        ...baseHubAuth,
+        claims: { ...baseHubAuth.claims, entitlements: { access, modules: [] } },
+      } as unknown as MinimalHubAuthContext;
+      expect(classifyHubAccess(coerced).allowed).toBe(false);
+    }
+  });
+
+  it('denies with 401 missing_hub_context when the SDK produced no auth context', () => {
+    expect(classifyHubAccess(undefined)).toEqual({
+      allowed: false,
+      status: 401,
+      body: { error: 'unauthorized', code: 'missing_hub_context' },
+    });
+  });
+
+  it('never reads entitlements.modules for baseline access', () => {
+    /*
+      The exact shape of the defect, inverted: a workspace carrying every module
+      string this product has ever spelled, and no access, is still denied.
+    */
+    expect(
+      classifyHubAccess({
+        ...baseHubAuth,
+        claims: {
+          ...baseHubAuth.claims,
+          entitlements: { access: false, modules: ['sales.core', 'sales', 'core'] },
         },
-        'sales.core',
-      ),
+      }).allowed,
     ).toBe(false);
+    /* And the mirror: access alone is enough, with no module at all. */
+    expect(hasHubOrgAccess(baseHubAuth)).toBe(true);
+    expect(hasHubModule(baseHubAuth, 'sales.core')).toBe(false);
+  });
+});
+
+/*
+  BRIDGE COVERAGE, with a known removal date. `requireHubModule` exists only while
+  this repo is on 1.3.1, which exports no access gate; slice 04 deletes the function
+  and this whole describe block with it, in favour of `requireHubAuth`'s own
+  `requiredModule` option. It is written anyway because the 403 half of the taxonomy
+  is a feature acceptance criterion and an unexercised deny path is where a wrong
+  status code hides.
+*/
+describe('requireHubModule', () => {
+  function probe(auth: MinimalHubAuthContext | undefined) {
+    const app = new Hono();
+    app.use('/probe', async (c, next) => {
+      if (auth) c.set('hubAuth', auth);
+      await next();
+    });
+    app.use('/probe', requireHubModule('sales.forecasting'));
+    app.get('/probe', (c) => c.json({ ok: true }));
+    return app.request('http://localhost/probe');
+  }
+
+  it('answers 403 missing_module when the add-on module is absent', async () => {
+    const res = await probe(baseHubAuth);
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toEqual({
+      error: 'forbidden',
+      code: 'missing_module',
+      module: 'sales.forecasting',
+    });
+  });
+
+  it('calls through when the add-on module is present', async () => {
+    const res = await probe({
+      ...baseHubAuth,
+      claims: {
+        ...baseHubAuth.claims,
+        entitlements: { access: true, modules: ['sales.forecasting'] },
+      },
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it('answers 403 rather than throwing when there is no auth context at all', async () => {
+    expect((await probe(undefined)).status).toBe(403);
   });
 });
 

@@ -17,9 +17,29 @@ type EnvLike = Record<string, string | undefined>;
 
 export type MinimalHubAuthContext = {
   accountId: string;
+  /**
+   * The active Organization id. The CLAIM is named `workspaceId` and the Hub
+   * will not rename it, so neither does this product; `getHubLegacyAuthContext`
+   * maps it to `orgId` and every tenant query filters by that.
+   */
   workspaceId: string;
   claims: {
     entitlements: {
+      /**
+       * access-model-v1 baseline access. REQUIRED, and declared HERE rather
+       * than imported from the SDK on purpose: through at least 1.3.1 the
+       * SDK re-exports `HubEntitlements` from an unshipped `@fxl-hub/hub-auth`,
+       * so under `skipLibCheck: true` it degrades to `any` and `access !== true`
+       * becomes a branch the compiler no longer checks. The SDK's own
+       * MIGRATION.md section 10 says so.
+       */
+      access: boolean;
+      /**
+       * ADD-ON modules only. The old per-product core module was DELETED from the
+       * Hub's access model, so this array is NEVER read for baseline access - only
+       * by `requireHubModule` for a genuine paid add-on. CLAUDE.md's Auth Model
+       * section records which module string that was and why it is gone.
+       */
       modules: string[];
     };
     roles: {
@@ -112,8 +132,67 @@ export function getHubLegacyAuthContext(auth: MinimalHubAuthContext): {
   };
 }
 
-export function hasHubCoreEntitlement(auth: MinimalHubAuthContext, coreModule: string): boolean {
-  return auth.claims.entitlements.modules.includes(coreModule);
+/** The exact 2.1.0 bodies, so slice 04 changes no contract when it deletes this. */
+const MISSING_HUB_CONTEXT = { error: 'unauthorized', code: 'missing_hub_context' } as const;
+const NO_ORG_ACCESS = { error: 'payment_required', code: 'no_org_access' } as const;
+
+export type HubAccessVerdict =
+  | { allowed: true; auth: MinimalHubAuthContext }
+  | { allowed: false; status: 401 | 402; body: { error: string; code: string } };
+
+/**
+ * Baseline access, and the ONLY question that decides it.
+ *
+ * Fails CLOSED by construction: the comparison is `=== true`, so `false`,
+ * `undefined`, `'true'`, `1` and a missing `entitlements` object all deny. The
+ * optional chaining is not decoration - the type says `access: boolean`, but the
+ * value arrives from a token, and a gate that trusts a claim shape it did not
+ * build is a gate that can be opened by a malformed one.
+ *
+ * `entitlements.modules` is deliberately NOT read here. It carries add-on
+ * modules only; reading it for baseline access is the defect this slice removes.
+ */
+export function hasHubOrgAccess(auth: MinimalHubAuthContext | undefined): boolean {
+  return auth?.claims?.entitlements?.access === true;
+}
+
+/**
+ * The single authority for the 401 and 402 halves of the deny taxonomy.
+ *
+ * Returns a DISCRIMINATED verdict rather than a nullable denial so the allow
+ * path carries the narrowed context and the caller needs no cast: a cast here
+ * would be the one place a future edit could hand an unchecked context to
+ * `getHubLegacyAuthContext`.
+ */
+export function classifyHubAccess(auth: MinimalHubAuthContext | undefined): HubAccessVerdict {
+  if (!auth) {
+    return { allowed: false, status: 401, body: { ...MISSING_HUB_CONTEXT } };
+  }
+  if (!hasHubOrgAccess(auth)) {
+    return { allowed: false, status: 402, body: { ...NO_ORG_ACCESS } };
+  }
+  return { allowed: true, auth };
+}
+
+/**
+ * The ONE seam that may read `entitlements.modules`, for a paid ADD-ON module.
+ * No route mounts it today, because this product sells no add-on yet; it exists
+ * so the 403 half of the taxonomy has a real implementation and a real oracle,
+ * and its body is byte-identical to the 2.1.0 `requiredModule` denial, so slice
+ * 04 replaces it with `requireHubAuth`'s own option and deletes this.
+ */
+export function hasHubModule(auth: MinimalHubAuthContext | undefined, module: string): boolean {
+  const modules = auth?.claims?.entitlements?.modules;
+  return Array.isArray(modules) && modules.includes(module);
+}
+
+export function requireHubModule(module: string): MiddlewareHandler {
+  return async (c, next) => {
+    if (!hasHubModule(c.get('hubAuth'), module)) {
+      return c.json({ error: 'forbidden', code: 'missing_module', module }, 403);
+    }
+    return next();
+  };
 }
 
 /**
@@ -174,18 +253,13 @@ export const appAuthMiddleware: MiddlewareHandler = async (c, next) => {
 
   let blockedResponse: Response | undefined;
   const authResponse = await hubAuthMiddleware(c, async () => {
-    const hubAuth = c.get('hubAuth');
-    if (!hubAuth) {
-      blockedResponse = c.json({ error: 'unauthorized', code: 'missing_hub_context' }, 401);
+    const verdict = classifyHubAccess(c.get('hubAuth'));
+    if (!verdict.allowed) {
+      blockedResponse = c.json(verdict.body, verdict.status);
       return;
     }
 
-    if (!hubAuthConfig || !hasHubCoreEntitlement(hubAuth, hubAuthConfig.coreModule)) {
-      blockedResponse = c.json({ error: 'payment_required', code: 'missing_entitlement' }, 402);
-      return;
-    }
-
-    const legacy = getHubLegacyAuthContext(hubAuth);
+    const legacy = getHubLegacyAuthContext(verdict.auth);
     c.set('userId', legacy.userId);
     c.set('orgId', legacy.orgId);
     c.set('userRole', legacy.userRole);

@@ -51,8 +51,6 @@ export type HubEnvSource = Pick<
 >;
 
 export type HubAuthConfig = HubConfig & {
-  /** Slice 03 deletes this together with the module entitlement gate it feeds. */
-  coreModule: string;
   /**
    * Carried but not yet handed to `createHubBff`: the 1.3.1 SDK has no such
    * option. The SDK bump wires it. It is validated here rather than there so a
@@ -63,12 +61,6 @@ export type HubAuthConfig = HubConfig & {
 
 function isSet(value: string | undefined): value is string {
   return typeof value === 'string' && value !== '';
-}
-
-function coreModuleFromAudience(audience: string): string {
-  // slice 03 deletes this together with the module entitlement gate
-  const slug = audience.replace(/^(?:app|product)\./, '');
-  return `${slug.replace(/^fxl-/, '')}.core`;
 }
 
 /**
@@ -125,11 +117,7 @@ export function loadHubAuthConfig(bag: Record<string, string | undefined>): HubA
     );
   }
 
-  return {
-    ...config,
-    coreModule: coreModuleFromAudience(config.audience),
-    healthToken,
-  };
+  return { ...config, healthToken };
 }
 
 /**

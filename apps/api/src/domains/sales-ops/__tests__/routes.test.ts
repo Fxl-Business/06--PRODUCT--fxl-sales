@@ -85,7 +85,7 @@ function hubAuthContext() {
     accountId: 'verified-account',
     workspaceId: 'verified-org',
     claims: {
-      entitlements: { modules: ['sales.core'] },
+      entitlements: { access: true, modules: [] },
       roles: { workspace: 'admin' },
       ...currentHubClaims,
     },

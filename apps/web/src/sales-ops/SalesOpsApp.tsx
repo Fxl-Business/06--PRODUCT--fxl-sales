@@ -74,7 +74,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { isOrgLabelFallback, orgLabel } from '@/lib/displayNames';
-import { isAuthFailure, isEntitlementFailure } from '@/lib/require-token';
+import { isAuthFailure, isEntitlementFailure, isForbiddenFailure } from '@/lib/require-token';
 import { cn } from '@/lib/utils';
 import {
   useCancelSalesOpsContract,
@@ -127,6 +127,7 @@ import { computeSaleFinancials } from '@fxl-sales/shared-utils/sale-financials';
 */
 import { SPLIT_BP_TOTAL } from '@fxl-sales/shared-utils/professional-split';
 import { CadastroHistorySection } from './CadastroHistoryPanel';
+import { ForbiddenPanel } from './ForbiddenPanel';
 import { MissingEntitlementPanel } from './MissingEntitlementPanel';
 import { ProfessionalSplitPanel } from './ProfessionalSplitPanel';
 import {
@@ -1825,8 +1826,14 @@ export function SalesOpsApp() {
                 widened, and it is what stops a reader from believing the generic panel below
                 is the fallback for "any non-401".
                 The invariant this chain encodes: the "verifique o servidor local" copy is
-                reachable ONLY for an error that is neither an entitlement failure nor an auth
-                failure. `entitlement-dead-end.test.tsx` is the oracle for all three arms.
+                reachable ONLY for an error that is neither an entitlement failure, nor a
+                forbidden failure, nor an auth failure. `entitlement-dead-end.test.tsx` is the
+                oracle for all four arms.
+                The 403 arm sits above `isAuthFailure` for the same reason the 402 arm does:
+                `isAuthFailure` is false for a 403 today, so a later widening of it placed above
+                would silently steal every permission answer into `Sessão expirada` and tell the
+                operator to sign in again to fix a permission they do not hold, which a re-login
+                answers with the same status forever.
 
                 No `onRetry` is passed, deliberately: `setActive` already runs
                 `queryClient.clear()`, which DESTROYS the query, so the mounted observer
@@ -1836,6 +1843,8 @@ export function SalesOpsApp() {
               */
               isEntitlementFailure(bootstrapQuery.error) ? (
                 <MissingEntitlementPanel />
+              ) : isForbiddenFailure(bootstrapQuery.error) ? (
+                <ForbiddenPanel />
               ) : isAuthFailure(bootstrapQuery.error) ? (
                 /*
                   An expired or unrenewable Hub session used to render as the API-fault
