@@ -17,6 +17,7 @@ import type { DurableHubSessionStore, HubLoginContext } from '../hub-session-sto
 function probeStore() {
   const seen: HubLoginContext[] = [];
   const store: DurableHubSessionStore = {
+    kind: 'persistent',
     create: async () => 'session-new',
     withSession: async () => null as never,
     createLoginTransaction: async () => 'login-new',
