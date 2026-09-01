@@ -1,0 +1,86 @@
+{
+  "status": "complete",
+  "verdict": "PASS",
+  "commands": {
+    "pnpm run lint": 0,
+    "pnpm run type-check": 0,
+    "pnpm test": 0,
+    "pnpm run build": 0,
+    "pnpm --filter @fxl-sales/api test:integration": 0
+  },
+  "test_totals": {
+    "shared-utils": 80,
+    "api": 448,
+    "web": 770,
+    "total": 1298,
+    "baseline": 1265,
+    "delta": 33,
+    "note": "Rise is entirely in apps/api (415 -> 448, +33). shared-utils and web unchanged. No package fell. Integration suite separately green at 169 tests across 25 files.",
+    "integration": 169
+  },
+  "integration_effects": {
+    "composed_bff_path": "COHERENT. apps/api/src/middleware/app-auth.ts builds hubAuthConfig = tryLoadHubAuthConfig(hubEnvBag(env)) at module scope, then maps hubAuthConfig.clientId -> HubSdkConfig.publishableKey and hubAuthConfig.clientSecret -> secretKey with an explicit comment that 1.3.1 still names them so and sends them as client_id/client_secret. audience is ALWAYS passed, so the SDK's own derivation is never consulted. createAppAuthBff recomputes hubEnvBag(env) once and feeds all three redirect resolvers from it.",
+    "encryption_ikm": "RESOLVES CORRECTLY. encryptionIkm: env.HUB_SESSION_ENCRYPTION_KEY ?? hubAuthConfig.clientSecret. clientSecret is the renamed carrier of the same Hub client secret the retired FXL_HUB_SECRET_KEY held, so the HKDF input is unchanged in VALUE. env.ts emptyToUndefined still turns a blank override into undefined so the documented default applies. session-crypto.ts header updated to name FXL_HUB_CLIENT_SECRET. OPERATIONAL NOTE, not a defect: any deploy that renames the variable must carry the same value across or every stored session seal stops opening (one re-login per user, by design).",
+    "read_beside_get": "HOLDS. hub-session-store.ts declares read(): Promise<HubSessionReadResult> on the transaction handle and implements get() as a PROJECTION of the same resolved outcome object (const read = async () => outcome; get() awaits read()), never a second lookup, so 1.3.1's BFF still calls a get() that exists and the two accessors cannot drift. The 169-test RLS/integration suite that drives the real Postgres store passes.",
+    "discriminated_union_narrowing": "HOLDS. createHubSessionStore still returns {kind:'durable'; store: DurableHubSessionStore} | {kind:'memory'; store: EphemeralHubSessionStore}, and app-auth.ts mounts createHubLoginSupersedeMiddleware only under if (session.kind === 'durable'). The class-level kind = 'persistent' / 'ephemeral' properties added by slice 01 are a SEPARATE forward-compatibility surface for the 2.x store contract and do not collide with the factory's durable/memory discriminator; type-check exit 0 confirms the narrowing still compiles.",
+    "db_pinning_confirmed": "apps/api/test/rls/setup-env.ts still performs the HARD override process.env.DATABASE_URL = appUrl (plain assignment, not ??=), and apps/api/.env carries TEST_DATABASE_URL=postgresql://fxl_sales_test:...@localhost:5006/fxl_sales while DATABASE_URL points at staging. The suite therefore cannot fall through to staging."
+  },
+  "non_vacuity_probe": {
+    "target": "apps/api/src/config/auth-provider.ts loadHubAuthConfig body wrapped in try/catch returning null",
+    "oracle": "refuses to boot on a product. audience rather than answering 503",
+    "went_red": true,
+    "detail": "Under the mutation apps/api/src/config/__tests__/auth-provider.test.ts went 4 failed | 8 passed (12). The named oracle failed at line 141 with 'expected [Function] to throw an error'. Three further tests fell with it, including 'never leaks the client secret out of the optional loader'.",
+    "restored": true,
+    "restore_detail": "git checkout -- apps/api/src/config/auth-provider.ts; the file re-ran 12 passed (12), and git status --porcelain returned to its exact starting state (' M nexo/runs/.../budget.json' plus untracked '.vscode/'), with no source file modified."
+  },
+  "security": {
+    "fails_open": "NO. appAuthMiddleware still answers 503 {error:'unavailable', code:'hub_auth_not_configured'} when hubSdkConfig or hubAuthMiddleware is absent, 401 missing_hub_context when the verified context is missing, and 402 {error:'payment_required', code:'missing_entitlement'} when hasHubCoreEntitlement is false. Neither gate was widened. tryLoadHubAuthConfig is the ONLY fail-soft door and is narrowed to presence === 'absent' | 'incomplete'; every malformed or contradictory configuration THROWS HubConfigError and stops the boot rather than degrading to 503. Setting FXL_HUB_CONFIG beside a discrete variable is a named boot failure. FXL_HUB_HEALTH_TOKEN is now mandatory outside development.",
+    "credentials_in_tracked_files": "NONE. apps/api/.env.example and apps/api/.env.dev.example ship FXL_HUB_CONFIG=, FXL_HUB_CLIENT_ID=, FXL_HUB_CLIENT_SECRET= and FXL_HUB_HEALTH_TOKEN= all EMPTY, with an explicit 'Never commit a real value' note on the secret. FXL_HUB_AUDIENCE=app.fxl-sales and FXL_HUB_ENVIRONMENT=development are present, which decision D4 expressly permits as public identifiers. No guessed or placeholder-shaped credential value was introduced.",
+    "secret_logging": "NONE. The only added throw touching a secret is HubConfigError('clientSecret', 'FXL_HUB_CLIENT_SECRET is required'), which names the FIELD and never interpolates a value. No added console/logger line carries a secret, refresh token, seal, session id payload or HubSessionRecord. This is positively pinned by the test 'never leaks the client secret out of the optional loader', which itself went red under the section 3 mutation."
+  },
+  "credential_literal_remaining_in": [
+    "apps/web/.env.example:8 (VITE_FXL_HUB_PUBLISHABLE_KEY) - slice 04's to clean",
+    "apps/web/.env.dev.example:11 (VITE_FXL_HUB_PUBLISHABLE_KEY) - slice 04's to clean",
+    "CLAUDE.md:433 (FXL_HUB_PUBLISHABLE_KEY, Required API vars) - the carried finding, slice 03 step 10b",
+    "CLAUDE.md:446 (VITE_FXL_HUB_PUBLISHABLE_KEY, Required web vars) - slice 04's to clean",
+    "apps/api/src/config/__tests__/hub-config.test.ts:205 - DELIBERATE negative fixture, parseClientId returns null for a key with no environment segment",
+    "nexo/plans/20260713-hub-sdk-1-2-reconciliation/00-OVERVIEW.md:9 - historical prior-run plan document",
+    "nexo/plans/20260713-hub-sdk-1-2-reconciliation/01-sdk-contract-baseline.md:182,282 - historical prior-run plan document",
+    "nexo/plans/feature-20260827-hub-sdk-210-access-model/02-explicit-hub-config.md:609 - this run's own plan, describing the negative fixture",
+    "nexo/runs/feature-20260827-hub-sdk-210-access-model/plan-check-round1.md:328,730 and plan-check-round2.md:481 - this run's own check documents",
+    "nexo/runs/feature-20260827-hub-sdk-210-access-model/agents/verify-02.result.json:44 and agents/exec-02.result.json:67 - this run's own agent reports"
+  ],
+  "note_on_literal": "README.md lines 7 and 24 were reported by slice 02's verifier as still carrying the literal. It is NOT there any more: the repo-wide grep returns no README.md hit, so the wave diff's README.md change removed it. That is a small improvement over the reported state, not a regression.",
+  "carried_finding_confirmed": {
+    "contradiction_exists": true,
+    "detail": "CLAUDE.md's 'Required API vars' block at lines 432-433 still reads FXL_HUB_PUBLISHABLE_KEY=pk_fxl-sales_VzQ9-LUONCnlKllxCRLffN3nw6Z9PQl2 and FXL_HUB_SECRET_KEY=<operator-issued-secret>, while apps/api/.env.example and apps/api/src/env.ts now know only FXL_HUB_CONFIG / FXL_HUB_ENVIRONMENT / FXL_HUB_CLIENT_ID / FXL_HUB_CLIENT_SECRET / FXL_HUB_AUDIENCE / FXL_HUB_HEALTH_TOKEN. Neither retired name exists in the env schema any more, so the documented API vars would not boot the API as written.",
+    "fix_is_planned": true,
+    "plan_reference": "nexo/plans/feature-20260827-hub-sdk-210-access-model/03-access-entitlement-gate.md, section '### 10b. Slice 02's explicit-Hub-configuration bullet, carried' (line 1134). It states that slice 02 dropped CLAUDE.md from its files_modified under decision D5 because two slices in one wave declaring one file is a structural merge conflict, and that its documentation bullet lands in slice 03 instead, with verbatim wording taken from 02's plan. Confirmed dated one-wave gap, not a lost edit.",
+    "action_taken": "NONE, as instructed. Not fixed.",
+    "slice_01_did_own_claude_md": "Confirmed: the wave's only CLAUDE.md edit is slice 01's, which rewrote the session-store bullet to document the three-state read() and the get() projection. Slice 02 touched the file zero times, exactly as D5 required."
+  },
+  "house_rules_ok": true,
+  "house_rules_detail": {
+    "no_em_or_en_dash": "PASS. Codepoint scan of every added line in git diff 7b0da2d..master for U+2013 and U+2014 returned no match.",
+    "no_test_lost": "PASS. Exactly three test titles disappear from the diff and all three have plan-sanctioned successors that are at least as strong. 'loads the Hub contract for product.fxl-sales' becomes 'loads the Hub contract for app.fxl-sales from FXL_HUB_CONFIG' plus a second discrete-form case, which is the slice's purpose. 'rejects missing secret keys' becomes 'refuses an incomplete Hub configuration from the strict loader and names the client secret field', strictly stronger because it now pins error.field and the no-leak assertion where the original only regex-matched a message. 'returns null from the optional loader when Hub env is incomplete' SPLITS into the 'absent' and 'incomplete' halves, both preserved. No test file lost a line to deletion in apps/api/src/auth/__tests__.",
+    "no_skip_only_todo": "PASS. No .skip, .only or .todo added to any source or test file in the diff.",
+    "no_no_verify": "PASS. No --no-verify in the diff or in any commit in the range.",
+    "no_co_author_trailer": "PASS. git log 7b0da2d..master with %(trailers) shows an empty trailer block on all ten commits.",
+    "history": "PASS. master is append-only on 7b0da2d, which remains an ancestor and the root of both slice branches. The history contains the two expected Nexo slice merge commits (71a6750 for slice 01, 47cbe75 for slice 02); these are the sanctioned serial-merge shape rather than a linearity violation, and there is no evidence of a rewrite or force-push."
+  },
+  "findings": [
+    {
+      "severity": "carried",
+      "id": "CLAUDE.md documents retired FXL_HUB_PUBLISHABLE_KEY / FXL_HUB_SECRET_KEY",
+      "detail": "Confirmed live at CLAUDE.md:432-433. Contradicts apps/api/.env.example and apps/api/src/env.ts. Owned by slice 03 step 10b in wave 2. Deliberately not fixed in this pass.",
+      "blocking": false
+    },
+    {
+      "severity": "informational",
+      "id": "Deploy-time env rename carries a session-invalidation consequence",
+      "detail": "encryptionIkm now derives from hubAuthConfig.clientSecret (FXL_HUB_CLIENT_SECRET) where it previously derived from FXL_HUB_SECRET_KEY. The value is the same Hub client secret, so seals keep opening PROVIDED the deploy copies the value across under the new name. If a deploy sets a different value, every stored session invalidates and every user re-logs in once. Code is correct; this is a promotion checklist item.",
+      "blocking": false
+    }
+  ],
+  "summary": "PASS. All five gate commands exit 0 on integrated master. Suite is 1298 tests (80 shared-utils, 448 api, 770 web), up 33 from the 1265 baseline with the entire rise in apps/api and no package falling; the API integration suite is separately green at 169 tests over the local Docker database, with setup-env.ts's hard DATABASE_URL override confirmed still in force. The two slices compose coherently: app-auth.ts reads hubEnvBag(env), maps clientId/clientSecret onto 1.3.1's publishableKey/secretKey and always passes the configured audience, encryptionIkm resolves to hubAuthConfig.clientSecret with the blank-override guard intact, slice 01's read() sits beside a get() that is a pure projection of the same outcome so the installed BFF still finds it, and the durable/memory discriminated union still narrows the /auth/callback login-supersede mount. The integration-level non-vacuity probe went red exactly as on slice 02's branch (4 failed of 12, the named oracle among them) and was restored to a byte-identical working tree. Nothing fails open: the 503 unconfigured path, the 401 missing-context path and the 402 entitlement gate are all unchanged, and every malformed configuration now throws at boot rather than degrading. No credential is in a tracked file, no secret is logged or interpolated into an error, and the retired publishable-key literal survives only in slice 04's web env examples, the two CLAUDE.md lines, one deliberate negative test fixture and historical nexo documents. House rules clean. One carried, non-blocking finding confirmed and left for slice 03 step 10b as planned."
+}

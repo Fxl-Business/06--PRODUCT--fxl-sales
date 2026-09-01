@@ -189,3 +189,22 @@ nowhere in `apps/`, and six plus four is right. No action taken.
   client and read the entitlement gate as false, taking the product down. This run ends at
   `master` under every outcome. The cut is coordinated with the Hub deploy and needs new
   Clients issued by hand in the admin.
+
+## PROMOTION HAZARD, found by the wave-1 verifier. Read before any deploy.
+
+Slice 02 renames the environment variable `FXL_HUB_SECRET_KEY` to `FXL_HUB_CLIENT_SECRET`.
+
+The code is correct and every test is green, but the variable is not only a credential: it
+is also the default HKDF input keying material for the session sealer. `createHubSessionStore`
+receives `encryptionIkm: env.HUB_SESSION_ENCRYPTION_KEY ?? hubAuthConfig.clientSecret`, so
+whenever `HUB_SESSION_ENCRYPTION_KEY` is unset the seal key is derived from this value.
+
+Therefore any environment promoted onto this code MUST carry the SAME VALUE across from
+`FXL_HUB_SECRET_KEY` to `FXL_HUB_CLIENT_SECRET`. Setting a new value, or leaving the new name
+unset while the old one still holds the secret, means every stored `hub_bff_sessions` row
+stops unsealing. That is not data loss, because slice 01 makes an unopenable seal report
+`absent` and LEAVE the row rather than delete it, so the cost is exactly one re-login per
+user. But it is a visible, product-wide event and it must be a deliberate choice rather than
+a surprise.
+
+This belongs on the coordinated Hub-deploy checklist alongside the new Clients.

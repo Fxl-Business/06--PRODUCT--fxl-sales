@@ -42,3 +42,22 @@
 - fix: THE REAL FIX for the every-two-minutes logout lives in `16--INTERNAL--fxl-hub`, not here. `packages/hub-sdk/src/server.ts`'s `parseRotatedRefresh` is `/(?:^|[,\s])fxl_hub_session=([^;]+)/`, and the Hub's own auth service sets `__Host-fxl_hub_session` whenever it runs with `NODE_ENV=production` (`apps/auth/src/cookies.ts`, and `apps/auth/Dockerfile` pins that env). The prefix leaves the name preceded by `-`, so the regex cannot match, the BFF silently keeps a spent refresh token and the Hub revokes the family on the second replay. Change the pattern to `(?:^|[,\s])(?:__Host-)?fxl_hub_session=` and iterate `res.headers.getSetCookie()` rather than the single joined header, then publish `1.3.2`. The SDK's own prod-mode test only ever mocks the UNPREFIXED name (`packages/hub-sdk/src/__tests__/bff-prod-mode.test.ts`), which is why this shipped. Every other consumer of this SDK deployed with a split web/API origin has the same bug right now. When it lands, delete `apps/api/src/auth/hub-rotated-cookie.ts` here; its non-vacuity test going red is the signal.
 - chore: `CadastroHistoryPanel.tsx` still classifies its error state as `isAuthFailure ? 'Sessão expirada' : generic`, so it never routes a `402 missing_entitlement` to the entitlement panel the way the shell now does. `feature-20260828-organization-context-escape` slice 04 deliberately left it out on a structural argument rather than a budget one: `CadastroHistorySection` renders at `SalesOpsApp.tsx` inside the `!isLoading && !isError` SUCCESS branch, so it is reachable only after a bootstrap that already passed the entitlement gate, and a 402 fails that bootstrap first. Its generic copy also does not claim the server is broken. Close this the day that panel gains a route that is not behind a successful bootstrap.
 - chore: two of the five `Workspace` to `Painel` display renames from `feature-20260828-organization-context-escape` slice 05 are `aria-label` attributes (`Painel: <nome>` and `Fechar painéis`), and `textContent` cannot see an attribute, so reverting only those two leaves the whole web suite green. The slice 05 verifier recorded this as mutation M5b. The shipped code is correct and the three VISIBLE strings are pinned; this is a test-coverage gap, not a defect. Close it with one `getAttribute('aria-label')` assertion in `shell-organization-switcher.test.tsx`.
+
+## Hub SDK 2.1.0 promotion checklist (open)
+
+The `feature-20260827-hub-sdk-210-access-model` run lands on `master` only. Before any
+promotion, and coordinated with the Hub's own deploy:
+
+- Issue new Hub Clients by hand in the admin. The audience moves from `product.fxl-sales`
+  to `app.fxl-sales` and the old client id has no environment segment, so it is not a valid
+  2.x credential.
+- Carry the SAME VALUE from `FXL_HUB_SECRET_KEY` to the renamed `FXL_HUB_CLIENT_SECRET` in
+  every environment. It is the default HKDF input for the session sealer, so a different
+  value costs every user one re-login. See the run's AUDIT.md.
+- Generate `FXL_HUB_HEALTH_TOKEN`. It is operator-generated, not Hub-issued, and is required
+  outside development.
+- Set `FXL_HUB_ENVIRONMENT` to match the client id's environment segment. A disagreement is
+  now a boot failure by design, checked offline.
+
+Do not promote before the Hub deploys access-model-v1. The production Hub still issues
+`product.*` audiences and the core module, so this code would be refused on arrival.
