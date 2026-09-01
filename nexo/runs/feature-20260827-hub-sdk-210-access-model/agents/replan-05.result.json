@@ -1,0 +1,48 @@
+{
+  "status": "ok",
+  "summary": "Slice 05 rewritten against the real 2.1.0 tarballs. devAuthContext now returns all six HubAuthContext members sourced the way the SDK's own verifier sources them (dist/server.js:221); all ten DevIdentity literals carry the eight required fields including label and exercises; the slice now RE-POINTS slice 04's hub-auth-context-fixture.ts at devHubClaims instead of creating a competing path, so routes.test.ts and history-route.test.ts need no edit and slice 04's module is not orphaned; the emitted-but-unreachable apps/api/dist/auth/__tests__ artifact is recorded and accepted against the real apps/api/tsconfig.json. Escape hatch, the createDevHubClient ban, both rosters under __tests__, the guard script checks 3 and 4, and the T1 reasoning are all kept and re-verified.",
+  "edits_applied": [
+    "frontmatter files_modified: added apps/api/src/auth/__tests__/hub-auth-context-fixture.ts, removed routes.test.ts and history-route.test.ts (no longer instructed to change)",
+    "opening paragraph rewritten and a new 'Handoff with slice 04' subsection added so the two plans agree in writing",
+    "section 1a: DevIdentity's eight required fields enumerated with tarball line numbers; all seven API identities given label and exercises; identity 6's branch corrected from 'access' to 'no_org_access'",
+    "section 1a: identity 1's ids bound to slice 04's fixture defaults with a read-the-file rule, since identity 1 is defaultDevIdentity and becomes hubAuthContext()'s default",
+    "section 1a: devAuthContext rewritten to return all six HubAuthContext members, with a per-member sourcing table and line citations",
+    "section 1a: the 'if it is NOT assignable' hedge deleted and replaced by the resolved six-member shape",
+    "section 1c: all three web identities given label and exercises",
+    "section 2 replaced: 2a is now the re-point of slice 04's fixture (full code block), 2b is the untouchable slice 03 tests, 2c is the T5 addition only",
+    "step 3 check 3: paragraph added accepting the emitted dist artifact, verified against apps/api/tsconfig.json",
+    "sequencing step 3 and commit message 3 updated to the re-point",
+    "T5 expectation changed from baseHubAuth.claims to hubAuthContext().claims and DEV_TOKEN_ISSUER cited",
+    "T1 strengthened with the verbatim REQUIRED_DEV_DENY_BRANCHES value and the required-vs-supported quote",
+    "verifier notes: added MinimalHubAuthContext must-be-absent grep, byte-unchanged check on the two sales-ops test files, signature-unchanged check, six-member check and eight-field check"
+  ],
+  "files_modified": [
+    "package.json",
+    "scripts/dev-only-testing-package.mjs",
+    "apps/api/package.json",
+    "apps/web/package.json",
+    "pnpm-lock.yaml",
+    "apps/api/src/auth/__tests__/dev-roster.ts",
+    "apps/api/src/auth/__tests__/dev-roster.test.ts",
+    "apps/api/src/auth/__tests__/hub-auth-context-fixture.ts",
+    "apps/api/src/middleware/__tests__/app-auth.test.ts",
+    "apps/web/src/auth/__tests__/dev-roster.ts",
+    "apps/web/src/auth/__tests__/claims-hub-contract.test.ts"
+  ],
+  "hub_auth_context_members": ["accountId", "workspaceId", "entitlements", "roles", "aud", "claims"],
+  "roster_identities_fixed": 10,
+  "sdk_facts_corrected": [
+    "DevIdentity spans dist/index.d.ts:54-104 in the testing tarball, not :54-99 as the brief and plan-check stated; the eight required fields are unchanged",
+    "the deny branch reached by access:false is no_org_access, not 'access'; devRosterCoverage computes access as live.some(i => i.access), so 'access' is the ordinary path. Identity 6's exercises string was corrected",
+    "REQUIRED_DEV_DENY_BRANCHES is declared at dist/index.d.ts:135 and its value at dist/index.js:2-7 is ['access','no_org_access','missing_role','super_admin'], confirming the four-branch reasoning",
+    "HubAuthContext confirmed at sdk dist/index.d.ts:118-126; HubEntitlements :45-54; HubRoles :56-61; HubTokenClaims :78-116; DEV_TOKEN_ISSUER :188 and DEV_TOKEN_TTL_SECONDS :178 in the testing tarball",
+    "devHubClaims omits productRoles entirely when the identity declares none, which is the unseated missing_role shape; and derives workspaceId from the RESOLVED organization rather than activeOrganizationId"
+  ],
+  "dash_clean": true,
+  "concerns": [
+    "Identity 1's accountId and activeOrganizationId must equal slice 04's fixture defaults. Slice 04's draft says user_existing_1 / org_existing_1 while today's app-auth.test.ts asserts hub-account-1 / org_existing_1, so slice 04 itself must reconcile that; slice 05 states the roster follows the fixture and names no literal as authoritative.",
+    "The re-point keeps devHubClaims' jti for the default identity even when accountId is overridden, so jti and sub can disagree. Nothing asserts on jti and inventing a second jti encoding would reintroduce hand-rolling. Recorded in the plan.",
+    "Roster identities 2, 4, 5 and 7 add nothing to REQUIRED coverage now that the three consumer files are not rewritten identity-by-identity. They are kept because the brief requires seven and because they document the variants HubAuthOverrides expresses, but a verifier could reasonably call them padding.",
+    "This plan asserts what slice 04 will leave behind (the fixture module, its signature and its defaults). Slice 04 is being edited concurrently, so if its section 7.4 changes shape, section 2a of this plan must be re-read against it before execution."
+  ]
+}

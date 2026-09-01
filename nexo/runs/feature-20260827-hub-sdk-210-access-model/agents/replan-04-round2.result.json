@@ -1,0 +1,45 @@
+{
+  "status": "complete",
+  "summary": "Applied all four round-2 plan-check edits to nexo/plans/feature-20260827-hub-sdk-210-access-model/04-sdk-210-flip.md in place. The blocking B1 defect is closed: section 11's false 'MIGRATION checklist item 12 is a NO-OP' paragraph is replaced by a step that owns the checkoutUrl signature change at MissingEntitlementPanel.tsx:105, its null-active branch, its dependency array, the two react.test.tsx literals, and a declared re-read of missing-entitlement-panel.test.tsx. No frontmatter id, milestone or depends_on changed, no section renumbered, no test weakened, and no added line carries an em dash or en dash.",
+  "edits_applied": [
+    {
+      "section": "11 (plus frontmatter files_modified and section 24)",
+      "blocking": true,
+      "changed": "Deleted the NO-OP paragraph. Replaced it with a step quoting both tarball signatures (1.3.1 dist/client.d.ts:51/:53 versus 2.1.0 :170/:172), naming the TS2554 and the three commands section 21 requires green, and instructing: hoist activeId = active?.id ?? null, call client.checkoutUrl(activeId) with an early return when activeId is null, derive the existing CheckoutState 'failed' member for that case at the checkout computation rather than setState in the effect, move the dep array to [activeId, attempt, client], and keep every added comment dash free for the file's own source oracle. Records the behavioural gain with MIGRATION.md section 14 quoted verbatim, and keeps manageUrl documented as a genuine no-op after re-running git grep manageUrl -- apps. Added missing-entitlement-panel.test.tsx to files_modified, removed it from section 24's does-not-touch list, added a section 24 corrections-table row, and added a paragraph recording that this section's own HEAD sweep missed the arity change because it checked symbols rather than signatures."
+    },
+    {
+      "section": "18, the CLAUDE.md list",
+      "blocking": false,
+      "changed": "Added an access-gate block. Slice 03 step 10a's 'classifyHubAccess in apps/api/src/middleware/app-auth.ts is the single authority' bullet is rewritten to the SDK's requireHubAuth, called with the loaded config and NO options so allowWithoutAccess takes its default of false. The one-wave-bridge bullet is deleted outright, keeping only the requiredModule sentence. The MinimalHubAuthContext / skipLibCheck bullet is re-pointed to what section 7.2 actually establishes (skipLibCheck stays true, 2.1.0 declares the four contract types locally, hub-contract-types.test.ts is the oracle). The no_org_access taxonomy bullets are left to section 23.6."
+    },
+    {
+      "section": "17, the app-auth.test.ts entry",
+      "blocking": false,
+      "changed": "Scoped the 'keeps its titles and only moves onto the fixture' rule to the SURVIVING blocks, then added a bullet stating that section 23.3 deletes describe('classifyHubAccess') and describe('requireHubModule') in the same commit as the code, and a bullet requiring the now-unused imports to go with them because tsconfig.base.json:11 sets noUnusedLocals: true (verified). Names import { Hono } from 'hono' (slice 03 adds it solely for the requireHubModule probe), the four removed ../app-auth.js exports, and MinimalHubAuthContext, with an instruction to grep after the deletions rather than trust the list. Section 23.3's cross-reference to section 17 now resolves and the two ends agree."
+    },
+    {
+      "section": "17, same entry, first legacy-context test",
+      "blocking": false,
+      "changed": "Spelled the override: hubAuthContext({ accountId: 'hub-account-1' }) on 'maps Hub account and workspace ids into the Hono auth context'. Records that the test asserts userId: 'hub-account-1' while section 7.4's fixture defaults accountId to user_existing_1, that the fixture default does NOT move, that the assertion is not edited, that orgId: 'org_existing_1' already matches the fixture's workspaceId default, and that slice 05's roster follows either way."
+    }
+  ],
+  "files_modified_added": [
+    "apps/web/src/sales-ops/__tests__/missing-entitlement-panel.test.tsx"
+  ],
+  "checkout_url_fix": {
+    "argument": "active.id from the useOrganizations() seam the panel already destructures at :68, hoisted as `const activeId = active?.id ?? null;` so the effect reads a primitive",
+    "null_branch": "The existing CheckoutState 'failed' member, derived purely at the `checkout` computation (:79-80) rather than set in the effect body, because react-hooks/set-state-in-effect rejects that and the panel's docstring forbids any branch rendering an anchor whose href is unresolved. CheckoutState's `href` exists only on 'ready', so TypeScript already forbids the alternative and checkoutUrl('') is the banned empty destination. No new state member. The failed branch already renders checkoutFailed copy, a Tentar novamente button and no anchor; retry re-derives to failed, which costs nothing.",
+    "dep_array": "[activeId, attempt, client]. The primitive id and not the `active` object, because useOrganizations() memoizes its value but object identity still moves on every token re-application and a re-run would fire a fresh Hub discovery fetch on the operator's error screen. The file's own comment forbids a ref-based 'already fetched' guard because it would break the retry, so the dep array is the only place this can be solved. exhaustive-deps is satisfied since the effect reads activeId and nothing else off the seam.",
+    "tests_touched": [
+      "apps/web/src/sales-ops/__tests__/missing-entitlement-panel.test.tsx: 'resolves the Hub checkout href through client.checkoutUrl' keeps its title and toHaveBeenCalledTimes(1) and GAINS toHaveBeenCalledWith('org-active'); one new test 'refuses to build a checkout link when no Organization is active, and asks the Hub for none' asserting checkoutFailed copy, a null anchor, and that checkoutUrl was never called; the seam's untyped client stubs at :26 and :66 are left alone; the two existing active: null tests at :167 and :175 are confirmed unchanged because neither reads the checkout block.",
+      "apps/web/src/auth/__tests__/react.test.tsx: the literal at :212 (void client.checkoutUrl('sales.core')) and at :2062 (toHaveBeenCalledWith('sales.core')) both become 'workspace-alpha', the id the surrounding test already mints through profileToken('Alpha', undefined, 'workspace-alpha'). Both still compiled and passed under 2.1.0, so this is a silent-wrong-argument fix, not a red. The it title and the assertion shape are unchanged."
+    ]
+  },
+  "dash_clean": true,
+  "concerns": [
+    "Section 11's mock block instructs adding four members to the three `satisfies HubClient` mocks, and section 24 re-confirms they declare six. At HEAD all three already declare checkoutUrl, manageUrl and getTokenResult (git grep shows react.test.tsx:20-21, session-journey.test.tsx:44-45, session-loss-keeps-route.test.tsx:20-21). The executor should count the members in the tree rather than trust the four-member arithmetic. Outside my four edits, so untouched.",
+    "The new panel test I specify asserts checkoutUrl was never called with active: null. If the executor instead keeps the effect unconditional and passes an empty string, that assertion is the only thing that catches it. It is deliberately the sharpest claim in the step.",
+    "Section 18's access-gate block assumes slice 03 lands step 10a's wording verbatim. I quoted it from 03's step 10a as written today, and the block instructs replacing by meaning rather than by exact string match, so a small drift in 03 does not strand it.",
+    "Plan-check items 5, 6 and 7 target 03-access-entitlement-gate.md and item 8 targets 05-dev-identity-fixtures.md. Those are other agents' edits and I left both files untouched."
+  ]
+}

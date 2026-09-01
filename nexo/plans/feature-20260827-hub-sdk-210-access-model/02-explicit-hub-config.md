@@ -14,10 +14,9 @@ files_modified:
   - apps/api/src/middleware/__tests__/app-auth-bff-wiring.test.ts
   - apps/api/src/middleware/__tests__/app-auth-bff-memory-path.test.ts
   - apps/api/src/auth/session-crypto.ts
-  - apps/api/src/auth/hub-session-store.ts
   - apps/api/.env.example
   - apps/api/.env.dev.example
-  - CLAUDE.md
+  - README.md
 acceptance: "given FXL_HUB_CONFIG carrying an app.<slug> audience and an environment matching the client id segment, when the API boots, then the config validates offline with no network call, while a product.<slug> audience, a NODE_ENV-inferred environment, or FXL_HUB_CONFIG set beside any discrete variable each fail at boot and name the offending field"
 goal: "Make the Hub audience and environment explicit validated configuration and delete the derived-audience logic, on the 1.3.1 SDK, keeping master green"
 must_not_break:
@@ -68,6 +67,31 @@ Nothing else moves.
 What stays ours forever, and therefore does NOT live in the vendored file:
 `hubConfigPresence`, `HUB_DISCRETE_ENV_VARS`, `hubEnvBag`, `HubAuthConfig`,
 `loadHubAuthConfig`, `tryLoadHubAuthConfig`. Those live in `auth-provider.ts`.
+
+### This survives slice 04
+
+Settled by decision D1 in
+`nexo/runs/feature-20260827-hub-sdk-210-access-model/replan-decisions.md`, which is binding.
+This slice's architecture is CONFIRMED and is permanent. Slice 04 replaces only the vendored
+PARSER with the SDK's real `loadHubConfig` and keeps every gate this slice builds around it.
+
+Permanent, and not reopened by slice 04:
+
+- `hubEnvBag`, `hubConfigPresence`, `HUB_DISCRETE_ENV_VARS`, `HubEnvSource` and `HubAuthConfig`.
+- Above all the ABSENCE of any blanket `try/catch` in `auth-provider.ts`. A bad Hub configuration
+  is a BOOT FAILURE and not a 503. Slice 04 does not reinstate `tryLoadHubAuthConfig`'s catch, does
+  not take `EnvLike` again, does not delete `HubAuthConfig`, and does not hand raw `process.env` to
+  `loadHubConfig`. `00-OVERVIEW.md` carries three acceptance criteria that only a throw can satisfy,
+  and a catch-to-null turns all three into a running API that answers 503 to everything.
+- Consequently the named oracle tests 19, 20, 21, 22, 23, 24 and 25 below SURVIVE slice 04
+  UNCHANGED. Slice 04 must not list any of them as an edit. Test 20,
+  `refuses to boot on a product. audience rather than answering 503`, is the oracle that goes red if
+  anyone reinstates the catch, and it must stay able to fail.
+
+The ONE thing that legitimately changes later is `coreModule`: slice 03 deletes it from
+`HubAuthConfig` together with the module gate it feeds, so after wave 2 the type is
+`HubConfig & { healthToken }`. That is slice 03's own planned edit and it is not a reversion of
+anything here.
 
 ## Module layout and exported symbols
 
@@ -185,6 +209,15 @@ DELETE `parseAudienceFromPublishableKey` entirely. KEEP `coreModuleFromAudience`
 slice 03 owns, but widen its prefix strip from `/^product\./` to `/^(?:app|product)\./` so
 that `app.fxl-sales` still yields `sales.core` and every existing 402 test stays green
 unchanged. Add a one line comment saying slice 03 deletes it along with the module gate.
+
+That comment MUST NOT contain the literal string `product.`. This slice's own named test
+24 is a source guard that reads `auth-provider.ts` and asserts it contains no such literal,
+so a prose comment that spells it out would redden this slice's own oracle. The widened
+regex is safe for the same reason the guard is narrow: its source text is
+`/^(?:app|product)\./`, which spells the prefix as `product\.` with a backslash before the
+dot, and the guard's substring search for `product.` does not match that. A comment has no
+such escape, so write it without the literal at all - for example
+`// slice 03 deletes this together with the module entitlement gate`.
 
 ```ts
 import type { Env } from '../env.js'; // type-only: must NOT pull env.ts's side effects in
@@ -365,23 +398,88 @@ vite proxies `/auth` from 8006 to the api on 3006.
 
 ### 5. Comment-only edits
 
-- `apps/api/src/auth/session-crypto.ts:6,10` and `apps/api/src/auth/hub-session-store.ts:27`:
-  `FXL_HUB_SECRET_KEY` becomes `FXL_HUB_CLIENT_SECRET`.
+- `apps/api/src/auth/session-crypto.ts:6,10`: `FXL_HUB_SECRET_KEY` becomes
+  `FXL_HUB_CLIENT_SECRET`.
+- `apps/api/src/auth/hub-session-store.ts:27` carried the same one line comment edit and has
+  MOVED TO SLICE 01, which already rewrites that header block and already declares the file.
+  This slice no longer declares `apps/api/src/auth/hub-session-store.ts` at all. Do not touch it:
+  two wave-1 slices declaring one file is a guaranteed textual merge conflict, and the flow's
+  parallel-build safety rests on the declared file sets being disjoint.
 
-### 6. `CLAUDE.md`
+### 6. Documentation: `CLAUDE.md` is NOT this slice's file
 
-- Auth Model: add a bullet stating that the Hub Audience and environment are EXPLICIT
-  validated configuration read off the validated `env` object through `hubEnvBag`, that the
-  Audience is `app.<slug>` and must equal `app.` plus the Client's slug, that nothing derives
-  it from a key, that the environment must equal the segment inside
-  `pk_<slug>_<environment>_<random>` and is never inferred from `NODE_ENV`, that
-  `FXL_HUB_CONFIG` is this repo's documented form and setting it beside any discrete variable
-  is a boot failure naming the offenders, that `FXL_HUB_REDIRECT_URI` is its own variable
-  because 2.x's `HubConfig` has no `redirectUri` and the `createHubBff` default points at the
-  Hub's origin, and that `FXL_HUB_HEALTH_TOKEN` is operator-generated and required outside
-  development.
-- Environments: replace the `product.fxl-sales` client column with `app.fxl-sales`, and
-  replace the required API vars block with the new names, every credential left EMPTY.
+`CLAUDE.md` has been REMOVED from `files_modified` and this slice makes no edit to it. Slice 01 is
+the sole `CLAUDE.md` owner in wave 1. The reason is structural rather than editorial: both slices
+would be appending bullets into the same Auth Model list, so naming disjoint anchor regions is not
+enough, and the whole parallel-build safety property of the wave is "non-overlapping declared files
+implies no conflict".
+
+This slice's documentation bullet therefore lands in SLICE 03, in wave 2, where 03 is the only slice
+in its wave and already owns a `CLAUDE.md` section. A reader of a wave-1-only tree should understand
+the omission is deliberate and dated, not an oversight: for one wave, `CLAUDE.md` documents variable
+names the API has stopped reading.
+
+Slice 03 carries the following two items VERBATIM. Nothing here is slice 03's to reword.
+
+```
+CLAUDE.md, Auth Model section, ADD one bullet:
+
+- The Hub Audience and the Hub environment are EXPLICIT validated configuration, read off the
+  validated `env` object through `hubEnvBag` in `apps/api/src/config/auth-provider.ts` and never off
+  raw `process.env`.
+  The Audience is `app.<slug>` and must equal `app.` plus the Client id's slug; nothing derives it
+  from a key, and `parseAudienceFromPublishableKey` is deleted.
+  The environment must equal the environment segment inside `pk_<slug>_<environment>_<random>` and
+  is NEVER inferred from `NODE_ENV`: a staging deploy that happens to run with `NODE_ENV=production`
+  would otherwise ask the Hub for the wrong Client, which is a 401 at runtime instead of a refusal
+  to boot, and the agreement is checkable OFFLINE.
+  `FXL_HUB_CONFIG`, one JSON object with `apiUrl`, `environment`, `clientId`, `clientSecret` and
+  `audience`, is this repo's documented form; setting it beside ANY of the five discrete variables
+  is a boot failure whose message names every offender by NAME and never prints a value.
+  `FXL_HUB_REDIRECT_URI` stays its own variable because 2.x's `HubConfig` has no `redirectUri` and
+  `createHubBff`'s default of `${config.apiUrl}/auth/callback` is the HUB's origin, which is always
+  wrong for this app.
+  `FXL_HUB_HEALTH_TOKEN` is generated by the OPERATOR, not issued by the Hub, and is required
+  whenever the environment is not `development`.
+  A bad Hub configuration is a BOOT FAILURE and not a 503: there is no blanket `try/catch` in
+  `auth-provider.ts`, and `tryLoadHubAuthConfig` returns `null` only for the `absent` and
+  `incomplete` presences, which is what keeps `503 hub_auth_not_configured` alive for a machine that
+  has simply not been given credentials yet.
+
+CLAUDE.md, Environments section, EDIT:
+
+- The Hub Client column reads `app.fxl-sales` rather than `product.fxl-sales`.
+- The "Required API vars" dotenv block uses `FXL_HUB_CLIENT_ID`, `FXL_HUB_CLIENT_SECRET`,
+  `FXL_HUB_ENVIRONMENT`, `FXL_HUB_AUDIENCE=app.fxl-sales` and `FXL_HUB_HEALTH_TOKEN` in place of
+  `FXL_HUB_PUBLISHABLE_KEY` and `FXL_HUB_SECRET_KEY`, with every credential value EMPTY. The
+  committed `pk_fxl-sales_VzQ9-...` literal leaves that block.
+```
+
+### 7. `README.md`
+
+`README.md` documents variables this slice stops the API reading, so it goes stale the moment this
+slice lands unless it is corrected here. Nothing else in waves 1 to 3 touches this file, so there is
+no merge hazard, and it is added to `files_modified`.
+
+- `README.md:45-46`, inside the "Hub Environment" API dotenv block: replace
+  `FXL_HUB_PUBLISHABLE_KEY=<the committed pk_fxl-sales_VzQ9... literal>` and
+  `FXL_HUB_SECRET_KEY=<operator-issued-secret>` with the new names, matching the example files
+  exactly in spirit and leaving every credential EMPTY:
+  `FXL_HUB_ENVIRONMENT=development`, `FXL_HUB_CLIENT_ID=`, `FXL_HUB_CLIENT_SECRET=`,
+  `FXL_HUB_AUDIENCE=app.fxl-sales`, `FXL_HUB_HEALTH_TOKEN=`. Do not invent, guess or placehold a
+  credential value.
+- `README.md:58`: the same committed `pk_fxl-sales_VzQ9-...` literal appears on the WEB line
+  `VITE_FXL_HUB_PUBLISHABLE_KEY=`. Delete the LITERAL only and leave the line
+  `VITE_FXL_HUB_PUBLISHABLE_KEY=` with an empty value. Do NOT rename that variable: the browser half
+  is slice 04's, and renaming it here would document a variable the web does not read yet.
+- `README.md:61-62`, the prose "The Hub SDK derives `product.fxl-sales` from the publishable key. /
+  Only set `FXL_HUB_AUDIENCE` when an operator explicitly asks for an override.": replace both
+  sentences with the fact this slice establishes, that the Audience is configured as `app.<slug>`,
+  is validated against the Client id's slug and is never derived from a key.
+- `README.md:7` and `:24` also say `product.fxl-sales`. Leave them: they name the Hub Application
+  audience in prose that slice 04 rewrites together with the web half, and touching them here would
+  put this file in two waves for no gain. Record that as a known one-wave staleness rather than
+  hiding it.
 
 ## Env example files
 
@@ -389,6 +487,16 @@ Both files get the SAME Hub block. Every credential value stays EMPTY. Never wri
 invented value. The old `pk_fxl-sales_VzQ9-...` literal is DELETED from both files: it is not
 a valid 2.x client id (it has no environment segment) and keeping it would make the discrete
 form look complete while failing rule 9.
+
+`FXL_HUB_AUDIENCE=app.fxl-sales` IS written out in full in both example files, and
+`"audience":"app.fxl-sales"` in the JSON-form comment. This is settled by decision D4 and this
+slice's position WINS: the Audience is a PUBLIC IDENTIFIER and not a credential, it is derivable
+from the committed clientId slug so committing it discloses nothing the clientId would not, and
+shipping the field blank would make the example non-working and push every operator into guessing
+the one value the boot check exists to validate. This covers EXAMPLE files ONLY. It licenses no
+Hub-issued CREDENTIAL into any tracked file, and the gitignored `apps/api/.env` is still untouched.
+Slice 04's instruction "do not invent `app.fxl-sales` here" is REVERSED by that decision and is
+being deleted from slice 04's plan; do not restore a blank audience here to match it.
 
 `apps/api/.env.example` and `apps/api/.env.dev.example`, replacing the current
 `FXL_HUB_PUBLISHABLE_KEY` / `FXL_HUB_SECRET_KEY` / `FXL_HUB_AUDIENCE` lines:
@@ -513,9 +621,14 @@ each is IMMUTABLE once written.
 
 The existing three tests are REPLACED, not weakened. `loads the Hub contract for
 product.fxl-sales` asserted the exact behaviour this slice deletes, so it cannot survive; its
-successor asserts the stronger `app.fxl-sales` contract on the same code path. `rejects
-missing secret keys` becomes the `incomplete` case. `returns null from the optional loader
-when Hub env is incomplete` is kept VERBATIM in behaviour as test 17 below.
+successor asserts the stronger `app.fxl-sales` contract on the same code path. `returns null from
+the optional loader when Hub env is incomplete` is kept VERBATIM in behaviour as test 17 below.
+
+`rejects missing secret keys` splits in TWO, and BOTH halves are required. Test 18 below carries the
+soft half, that `tryLoadHubAuthConfig` answers `null` on an incomplete bag. That is a strictly
+WEAKER claim than what exists today, which is that the STRICT loader REFUSES an incomplete
+configuration and names the missing field, so test 18 alone would drop a live claim for two waves.
+Test 18a below carries the strict half and closes that gap inside this slice.
 
 15. `loads the Hub contract for app.fxl-sales from FXL_HUB_CONFIG`
     `loadHubAuthConfig` on the JSON bag gives `audience: 'app.fxl-sales'`,
@@ -526,6 +639,17 @@ when Hub env is incomplete` is kept VERBATIM in behaviour as test 17 below.
 18. `returns null from the optional loader when the discrete form is incomplete`
     Only `FXL_HUB_API_URL` set. `null`, not a throw. This is the 503 path and it is the
     reason a half-configured developer machine can still import `app-auth.ts`.
+18a. `it('refuses an incomplete Hub configuration from the strict loader and names the client secret field')`
+    The direct successor of today's `rejects missing secret keys`, kept so its claim is not dropped.
+    Bag carrying `FXL_HUB_API_URL`, `FXL_HUB_ENVIRONMENT`, `FXL_HUB_CLIENT_ID` and
+    `FXL_HUB_AUDIENCE` but NO `FXL_HUB_CLIENT_SECRET`. Assert that `loadHubAuthConfig(bag)` THROWS,
+    that the thrown error is a `HubConfigError` whose `field === 'clientSecret'`, and, keeping
+    today's strength, that its message mentions `FXL_HUB_CLIENT_SECRET` by name. Also assert the
+    message does not contain any secret VALUE, since the bag has none to leak and a future
+    implementation that echoed the bag would go red here.
+    This is the STRICT loader and it is a different door from test 18: `tryLoadHubAuthConfig`
+    classifies this same bag as `incomplete` and answers `null` without ever calling the strict
+    loader, which is why one test cannot cover both and why 18 alone is not a replacement.
 19. `refuses to boot when FXL_HUB_CONFIG is set beside a discrete variable and names every offender`
     JSON form plus `FXL_HUB_CLIENT_ID` plus `FXL_HUB_AUDIENCE`. Assert the throw comes out of
     `tryLoadHubAuthConfig` (NOT swallowed), that `field === 'FXL_HUB_CONFIG'`, and that the
@@ -557,7 +681,20 @@ when Hub env is incomplete` is kept VERBATIM in behaviour as test 17 below.
 ### CHANGED `apps/api/src/middleware/__tests__/app-auth.test.ts`
 
 The seven `getHubLegacyAuthContext` tests and the two `hasHubCoreEntitlement` tests are
-UNTOUCHED. The four existing `resolveHubRedirectUri` tests are UNTOUCHED. Add two:
+UNTOUCHED. The four existing `resolveHubRedirectUri` tests are UNTOUCHED.
+
+ADD `vi.stubEnv('FXL_HUB_CONFIG', '')` to this file as well, in a `beforeAll` that runs before the
+module import takes effect, matching what the two BFF test files do. Blank reads as unset.
+The reason is specific to this slice: with the blanket `try/catch` gone, `hubConfigPresence` THROWS
+on ambiguity at MODULE SCOPE through `app-auth.ts`'s top-level
+`tryLoadHubAuthConfig(hubEnvBag(env))`, and this file imports `../app-auth.js` at module scope with
+no env stubs at all. `vi.stubEnv` adds to `process.env` rather than clearing it, so a developer
+machine whose `apps/api/.env` carries `FXL_HUB_CONFIG` beside the discrete variables would crash
+this entire file at import rather than fail one test. CI has no `.env` and is already safe, which is
+exactly why this would only ever bite locally and would read as an unrelated breakage.
+No existing assertion or title in this file changes.
+
+Then add two tests:
 
 26. `resolves the redirect to this app's own origin, never the Hub's`
     A bag carrying `FXL_HUB_API_URL: 'http://localhost:9016'`,
@@ -612,7 +749,9 @@ Red then Green then Refactor, three atomic commits.
    Adds `hub-config.ts`, rewrites `auth-provider.ts`, updates `env.ts` and `app-auth.ts`.
    Suite green, `pnpm run type-check`, `pnpm run lint`, `pnpm run build`.
 3. `docs(api): retire the Hub publishable and secret key variables`
-   Both `.env.example` files, `CLAUDE.md`, and the three comment-only source edits.
+   Both `.env.example` files, `README.md`, and the comment-only edit at
+   `apps/api/src/auth/session-crypto.ts:6,10`. NOT `CLAUDE.md`, which slice 01 owns in this wave,
+   and NOT `apps/api/src/auth/hub-session-store.ts`, whose one line comment edit slice 01 adopted.
 
 ## Challenges the executor will actually hit
 
@@ -624,7 +763,8 @@ Red then Green then Refactor, three atomic commits.
 - `vi.stubEnv` ADDS to `process.env`; it does not clear it. `apps/api/.env` on a developer
   machine currently sets `FXL_HUB_API_URL`, `FXL_HUB_PUBLISHABLE_KEY`, `FXL_HUB_SECRET_KEY`
   and `FXL_HUB_REDIRECT_URI`. The retired two are simply no longer read. `FXL_HUB_CONFIG` is
-  the one that can poison a test file, which is why both BFF test files stub it blank.
+  the one that can poison a test file, which is why all THREE middleware test files stub it blank:
+  `app-auth-bff-wiring.test.ts`, `app-auth-bff-memory-path.test.ts` and `app-auth.test.ts`.
 - 1.3.1's `deriveAudience` throws on a client id it cannot parse as `pk_<slug>_<random>`. It
   is never reached, because `hubSdkConfig.audience` is ALWAYS passed and an explicit audience
   short-circuits the derivation. Do not drop that field on the `null` branch tidy-up.
@@ -634,6 +774,9 @@ Red then Green then Refactor, three atomic commits.
 
 ## Explicitly out of scope
 
+- `CLAUDE.md`. Slice 01 owns it in wave 1; this slice's documentation bullet is carried verbatim by
+  slice 03 in wave 2. See section 6.
+- `apps/api/src/auth/hub-session-store.ts`. Slice 01 adopted the `:27` comment edit.
 - `coreModuleFromAudience`, `hasHubCoreEntitlement` and the 402 gate. Slice 03.
 - The SDK bump, `entitlements.access`, `toPublicConfig`, `assertBootConfiguration`, and
   handing `healthToken` to `createHubBff`. Slice 04.

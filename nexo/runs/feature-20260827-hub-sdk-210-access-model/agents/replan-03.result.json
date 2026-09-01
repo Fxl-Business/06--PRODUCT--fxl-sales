@@ -1,0 +1,25 @@
+{
+  "status": "ok",
+  "summary": "Edited nexo/plans/feature-20260827-hub-sdk-210-access-model/03-access-entitlement-gate.md in place; frontmatter id/milestone/depends_on untouched. Applied D2 (bridge framing, incl. slice 04 deleting app-auth-access-gate.test.ts and replacing its live claim with a wiring pin; requireHubModule block KEPT and labelled bridge coverage, argued in the plan), D6 (moved the sales.core literal out of the app-auth.ts doc comment and narrowed the gate to ':!*__tests__*'), D3 (new 403 scope: isForbiddenFailure, forbidden-copy.ts, ForbiddenPanel.tsx, the four-arm SalesOpsApp chain with the generic-copy invariant preserved, the CadastroHistoryPanel host, the extended entitlement-dead-end.test.tsx with the [data-forbidden] mutation, and the wave-2 sole-slice note), U1(c) (401 contract_version_mismatch in the CLAUDE.md taxonomy), D5 (carried slice 02's explicit-Hub-configuration bullet into step 10b with an obvious labelled slot; 02 has no labelled block yet, so the plan says to take it verbatim if present and otherwise gives 02 section 6's wording), and the CadastroHistoryPanel correction (module imports ./hooks, pulling @tanstack/react-query and @/auth/react transitively; copy the @/auth/react and alert-dialog mocks from cadastro-history.test.tsx). GREP GATE REASONING: the narrowed gate is 'git grep -n -i \"sales\\.core\" -- apps packages scripts :!*__tests__*'. Run against the current tree it already prints nothing. After the slice, the only sources instructed to contain that literal are app-auth.test.ts step 5a and app-auth-access-gate.test.ts step 5b, both under __tests__ and both excluded; step 1a's modules doc comment now says the same thing without the literal and points at CLAUDE.md; step 10a's CLAUDE.md prose is outside the pathspec. So the gate passes, and slice 04's precondition 4, narrowed identically, passes too. Also verified: every path named exists or is explicitly created by a step (app-auth-access-gate.test.ts 5b, app-auth-unconfigured.test.ts 5c, forbidden-copy.ts 8a, ForbiddenPanel.tsx 8b, forbidden-panel.test.tsx 9c). No em dash or en dash anywhere in the file.",
+  "edits_applied": [
+    "D2 bridge framing section, in the required words, plus the slice-04 test-deletion note and the kept-and-labelled requireHubModule block with its argument",
+    "D6 (a) sales.core literal removed from the app-auth.ts modules doc comment; (b) Verification gate narrowed to ':!*__tests__*' with the two verbatim test occurrences named and defended",
+    "D3 403 branch: isForbiddenFailure in require-token.ts, forbidden-copy.ts, ForbiddenPanel.tsx, the four-arm SalesOpsApp chain, the CadastroHistoryPanel host, extended entitlement-dead-end.test.tsx, new forbidden-panel.test.tsx, files_modified updated, sole-slice-in-wave note",
+    "U1(c) 401 contract_version_mismatch recorded in the CLAUDE.md taxonomy block",
+    "D5 slice 02's explicit-Hub-configuration bullet carried into step 10b with a labelled verbatim slot",
+    "CadastroHistoryPanel purity claim corrected in step 9c",
+    "Working-tree reconciliation: facts 7/8/9 rewritten, step 6 marked already done, api-client.ts dropped from files_modified, isOrgAccessFailure and the NO_ORG_ACCESS copy retired in favour of the shipped isEntitlementFailure",
+    "Slice 02 relationship section rewritten (step 2 is DO NOT SKIP per plan-check C5), scope count and RED-first expectations updated, commits and does-not-do lists updated"
+  ],
+  "files_modified": [
+    "nexo/plans/feature-20260827-hub-sdk-210-access-model/03-access-entitlement-gate.md"
+  ],
+  "grep_gate_passes": true,
+  "dash_clean": true,
+  "concerns": [
+    "The plan's web steps 6 to 9 were written against a pre-v2.8.0 tree and were STALE: ApiError already carries code, isEntitlementFailure already exists, MissingEntitlementPanel and entitlement-dead-end.test.tsx already ship, and the shell chain is already isEntitlementFailure/isAuthFailure/generic. Following them verbatim would have produced duplicate declarations. I reconciled them to the tree, which is also what makes D2's list of stale missing_entitlement literals owned by slice 04 coherent. Flagging because it is a correction the orchestrator did not explicitly ask for.",
+    "Fact 2 of the plan still says this slice adopts 2.1.0's bodies verbatim so slice 04 changes no web contract. That is true of the API, but the WEB tree still spells missing_entitlement in prose and fixtures until slice 04 corrects it under D2. The plan now says so in step 7 and in the does-not-do list.",
+    "Slice 02 has no clearly labelled CLAUDE.md hand-off block yet (its section 6 still exists and CLAUDE.md is already out of its files_modified). Step 10b gives the executor a labelled slot and a fallback wording; if the concurrent replanner writes a different block, the executor takes 02's wording verbatim as instructed.",
+    "Step 10b also carries 02's Environments-table and dotenv-block edits, since under D5 slice 02 declares no CLAUDE.md at all. If the concurrent replanner instead re-declares CLAUDE.md for 02, that paragraph must be dropped or wave 1 and wave 2 both edit the file."
+  ]
+}

@@ -12,24 +12,27 @@ files_modified:
   - apps/api/src/middleware/__tests__/app-auth-unconfigured.test.ts
   - apps/api/src/domains/sales-ops/__tests__/routes.test.ts
   - apps/api/src/domains/sales-ops/__tests__/history-route.test.ts
-  - apps/web/src/lib/api-client.ts
   - apps/web/src/lib/require-token.ts
   - apps/web/src/lib/__tests__/api-client-token-guard.test.ts
+  - apps/web/src/sales-ops/forbidden-copy.ts
+  - apps/web/src/sales-ops/ForbiddenPanel.tsx
   - apps/web/src/sales-ops/CadastroHistoryPanel.tsx
   - apps/web/src/sales-ops/SalesOpsApp.tsx
-  - apps/web/src/sales-ops/__tests__/no-org-access-panel.test.tsx
+  - apps/web/src/sales-ops/__tests__/forbidden-panel.test.tsx
+  - apps/web/src/sales-ops/__tests__/entitlement-dead-end.test.tsx
   - CLAUDE.md
-acceptance: "given a token whose entitlements.access is true, when a protected route is called, then it is allowed; given access false the answer is 402 with a buy-screen code and the web app shows neither a login screen nor a session-expired panel; given a claim set with no access key at all the answer is a denial and never an allow"
-goal: "Replace the deleted core-module entitlement gate with the required boolean entitlements.access while preserving the 401, 402 and 403 deny taxonomy"
+acceptance: "given a token whose entitlements.access is true, when a protected route is called, then it is allowed; given access false the answer is 402 with a buy-screen code and the web app shows neither a login screen nor a session-expired panel; given a 403 the web app tells the operator to ask an administrator rather than reporting a server fault; given a claim set with no access key at all the answer is a denial and never an allow"
+goal: "Replace the deleted core-module entitlement gate with the required boolean entitlements.access while preserving the 401, 402 and 403 deny taxonomy, and give the 403 half a web owner"
 must_not_break:
   - "the 503 hub_auth_not_configured branch"
   - "orgId remaining the active Hub workspace id and every tenant query filtering by it"
   - "a 401 continuing to reach the login screen"
+  - "the 402 entitlement panel and its dead-end oracle, which landed in v2.8.0"
 rules:
   - "no em dash and no en dash on any added line"
   - "the gate must fail closed: an absent or malformed entitlements shape denies"
   - "entitlements.modules must not be read for baseline access"
-verifier_focus: "that the gate cannot fail open, that a 402 is never rendered as a login or expired-session screen, and that no core module string survives"
+verifier_focus: "that the gate cannot fail open, that a 402 is never rendered as a login or expired-session screen, that a 403 is never rendered as a server fault, and that no core module string survives outside a test fixture"
 ---
 
 # 03 - Gate baseline access on `entitlements.access`
@@ -53,6 +56,44 @@ This slice does NOT bump the SDK. It stays on `@fxl-business/hub-sdk@1.3.1` and
 merges green there. Slice 04 does the flip and can then delete most of what this
 slice adds, because every body written here is byte-identical to the body the
 2.1.0 `requireHubAuth` already returns.
+
+### This slice's API gate is a DELIBERATE ONE-WAVE BRIDGE
+
+Settled by `nexo/runs/feature-20260827-hub-sdk-210-access-model/replan-decisions.md`
+decision D2, which is binding.
+
+`classifyHubAccess`, `hasHubOrgAccess`, `hasHubModule`, `requireHubModule` and the
+402 branch inside `appAuthMiddleware` are a DELIBERATE ONE-WAVE BRIDGE that keeps
+master green on 1.3.1, which exports no access gate at all. This is the same
+device slice 02 uses for its vendored copy of `loadHubConfig`, and it is written
+down for the same reason: a bridge that is not labelled as one gets defended by
+the next reader instead of deleted.
+
+Slice 04 DELETES the bridge and delegates to 2.1.0's `requireHubAuth`, which
+answers `402 payment_required / no_org_access` by default because
+`allowWithoutAccess` defaults to false. After that flip `appAuthMiddleware`
+reaches its own body only through the SDK's `next` callback, so a second local
+gate would be unreachable dead code with a green suite over it. One live gate,
+and it is the SDK's.
+
+Slice 04 also DELETES
+`apps/api/src/middleware/__tests__/app-auth-access-gate.test.ts` and replaces its
+live claim, "a workspace without access gets 402", with a WIRING pin asserting
+that `requireHubAuth` is called with the loaded config and with options that do
+not set `allowWithoutAccess`. That is recorded here so nobody later reads the
+deletion as a weakening: the claims about `classifyHubAccess` die with the
+function they describe, and the one claim that outlives it is carried over by
+name.
+
+The `describe('requireHubModule')` block in step 5a is BRIDGE COVERAGE on code
+with a known removal date, and it is KEPT rather than dropped. The argument for
+keeping it: the 403 half of the taxonomy is a feature acceptance criterion in
+`00-OVERVIEW.md`, this slice is the only place in the whole set where a 403 is
+produced by code this repository owns, and an unexercised deny path is exactly
+the kind of thing that is written wrong and never noticed. It costs three tests
+for one wave, and slice 04 deletes them with the function under D2's
+name-every-claim rule. The block carries a header comment saying it is bridge
+coverage, so its deletion in slice 04 needs no argument beyond that comment.
 
 ### Facts this plan is built on (verified, do not re-derive)
 
@@ -95,42 +136,60 @@ and out of the two recon reports in
 6. `coreModuleFromAudience` is module-private in
    `apps/api/src/config/auth-provider.ts:19-22` and feeds exactly one field,
    `HubAuthConfig.coreModule`.
-7. On the WEB side today a `402` does NOT become a login screen, and that is an
-   accident rather than a decision: `isAuthFailure`
-   (`apps/web/src/lib/require-token.ts:43-48`) matches `status === 401` only, so
-   a `402` falls into the GENERIC panel and the operator is told
-   "A API de vendas nao respondeu corretamente" - the server is broken. That is
-   the misdiagnosis this release exists to remove, one notch over from the
-   session-expired one. It is fixed here, and the correct behaviour is PINNED so
-   a later widening of `isAuthFailure` cannot put a paying question behind a
-   login screen.
-8. `apps/web/src/lib/api-client.ts:18-22` builds `ApiError` from
-   `{error, message, status}` and DROPS `body.code`. So today the web half
-   physically cannot branch on `no_org_access`. `code` has to be carried.
-9. Nothing in `apps/web/src` spells `missing_entitlement`, `402` or
-   `payment_required`, so renaming the code breaks no existing web branch.
+7. The WEB half of the 402 ALREADY LANDED, in v2.8.0's Organization-context work,
+   after this plan was first drafted. Read against the working tree, not against
+   the three superseded facts this plan originally carried here:
+   - `isEntitlementFailure` exists in `apps/web/src/lib/require-token.ts`, keys on
+     `status === 402` ALONE, and is pinned by
+     `isEntitlementFailure is true for a 402 that carries no code at all`.
+   - `ApiError` in `apps/web/src/lib/api-client.ts` ALREADY carries `code`, set
+     from `body.code` in both `apiFetch` and `apiFetchBlob`.
+   - `apps/web/src/sales-ops/MissingEntitlementPanel.tsx` and its
+     `missing-entitlement-copy.ts` render the buy screen, and
+     `SalesOpsApp.tsx`'s `isError` chain is already
+     `isEntitlementFailure`, then `isAuthFailure`, then generic, pinned by
+     `apps/web/src/sales-ops/__tests__/entitlement-dead-end.test.tsx`.
+   So this slice writes NO new 402 web code and renames NO web predicate. The
+   402 web contract is unchanged by this slice, and the stale
+   `missing_entitlement` literals in that web code are corrected by SLICE 04,
+   under decision D2, when the API body actually changes to `no_org_access`.
+   Doing it here would leave the tree documenting a code the API still sends.
+8. What is STILL missing on the web is the 403. A `403` today is neither an
+   entitlement failure nor an auth failure, so it falls into the GENERIC panel and
+   the operator is told "A API de vendas nao respondeu corretamente" - the server
+   is broken. That is the same misdiagnosis the 402 work removed one release ago,
+   one notch over. This slice owns it, under decision D3.
+9. `isAuthFailure` (`apps/web/src/lib/require-token.ts`) matches `status === 401`
+   and the unavailable-token error, and nothing else. It is NOT widened here, and
+   step 9 pins that it keeps refusing a 402 and a 403.
 
-### Assumption about slice 02
+### Relationship to slice 02
 
-At the time this plan was written,
-`nexo/plans/feature-20260827-hub-sdk-210-access-model/02-explicit-hub-config.md`
-did not exist. This plan assumes only what `00-OVERVIEW.md` states about 02: the
-Audience becomes explicit configured input, `parseAudienceFromPublishableKey` is
-deleted, `FXL_HUB_CONFIG` is accepted, and `HubAuthConfig` keeps `apiUrl`,
-`secretKey` and `audience` in some form.
+`02-explicit-hub-config.md` now exists and this slice `depends_on` it, so it runs
+against a tree where 02 has already merged.
 
-Two consequences for the executor:
-
-- If 02 has ALREADY removed `coreModule` and `coreModuleFromAudience` from
-  `apps/api/src/config/auth-provider.ts`, skip step 2 below and do everything
-  else unchanged.
+- 02 explicitly KEEPS `coreModuleFromAudience` alive so that THIS slice deletes it,
+  and widens its prefix strip to `/^(?:app|product)\./` so `app.fxl-sales` does not
+  become `app.fxl-sales.core` in the interim. Step 2 below is therefore DO NOT SKIP.
+  Its own rules list says "coreModuleFromAudience is NOT deleted in this slice".
+- After 02 the field is returned as
+  `return { ...config, coreModule: coreModuleFromAudience(config.audience), healthToken };`
+  rather than from the literal this plan quoted, and `HubAuthConfig` is
+  `HubConfig & { coreModule, healthToken }`. Deleting `coreModule` here leaves it
+  as `HubConfig & { healthToken }`, which is the end state decision D1 records.
 - Wherever this plan says "copy the env stub block", copy it from the file AS IT
   EXISTS IN THE WORKING TREE after 02, never from the literals quoted here. 02
-  may have retired `FXL_HUB_PUBLISHABLE_KEY` and added `FXL_HUB_ENVIRONMENT`.
+  retires `FXL_HUB_PUBLISHABLE_KEY` and adds `FXL_HUB_ENVIRONMENT`,
+  `FXL_HUB_CLIENT_ID`, `FXL_HUB_CLIENT_SECRET`, `FXL_HUB_CONFIG` and
+  `FXL_HUB_HEALTH_TOKEN`.
+- 02 DROPPED `CLAUDE.md` from its `files_modified` under decision D5, because two
+  slices in one wave declaring one file is a structural merge conflict. Its
+  documentation bullet lands HERE instead, in step 10, where this slice is the sole
+  member of its wave.
 
 ## Scope
 
-Fifteen files. Nothing else is touched: not `hub-session-store.ts`, not
+Sixteen files. Nothing else is touched: not `hub-session-store.ts`, not
 `hub-rotated-cookie.ts`, not `hub-bff-origin.ts`, not any `package.json`, not
 `pnpm-lock.yaml`, not any `.env` file, and no SDK version anywhere.
 
@@ -150,9 +209,12 @@ Expected red output before any implementation:
   because a fixture with `access: true` and `modules: []` does not contain
   `sales.core`. That failure IS the defect, reproduced.
 - `apps/web/src/lib/__tests__/api-client-token-guard.test.ts` fails to resolve
-  `isOrgAccessFailure`.
-- `apps/web/src/sales-ops/__tests__/no-org-access-panel.test.tsx` fails because
-  the 402 render still produces the generic panel copy.
+  `isForbiddenFailure`.
+- `apps/web/src/sales-ops/__tests__/forbidden-panel.test.tsx` fails to resolve
+  `../ForbiddenPanel`.
+- the new 403 case in
+  `apps/web/src/sales-ops/__tests__/entitlement-dead-end.test.tsx` fails because
+  the 403 render still produces the generic panel copy.
 
 ---
 
@@ -183,9 +245,10 @@ export type MinimalHubAuthContext = {
        */
       access: boolean;
       /**
-       * ADD-ON modules only. The `sales.core` module was DELETED from the Hub's
-       * access model, so this array is NEVER read for baseline access - only by
-       * `requireHubModule` for a genuine paid add-on.
+       * ADD-ON modules only. The old per-product core module was DELETED from the
+       * Hub's access model, so this array is NEVER read for baseline access - only
+       * by `requireHubModule` for a genuine paid add-on. CLAUDE.md's Auth Model
+       * section records which module string that was and why it is gone.
        */
       modules: string[];
     };
@@ -425,6 +488,14 @@ describe('classifyHubAccess', () => {
   });
 });
 
+/*
+  BRIDGE COVERAGE, with a known removal date. `requireHubModule` exists only while
+  this repo is on 1.3.1, which exports no access gate; slice 04 deletes the function
+  and this whole describe block with it, in favour of `requireHubAuth`'s own
+  `requiredModule` option. It is written anyway because the 403 half of the taxonomy
+  is a feature acceptance criterion and an unexercised deny path is where a wrong
+  status code hides.
+*/
 describe('requireHubModule', () => {
   function probe(auth: MinimalHubAuthContext | undefined) {
     const app = new Hono();
@@ -663,140 +734,321 @@ describe('appAuthMiddleware without Hub configuration', () => {
 });
 ```
 
-## Step 6 - `apps/web/src/lib/api-client.ts`
+## Step 6 - `apps/web/src/lib/api-client.ts` is ALREADY DONE
 
-Carry the server's code. Two three-line edits, nothing else in the file changes.
+No edit. When this plan was first drafted, `ApiError` dropped `body.code` and the
+web half physically could not read a server sub-reason. v2.8.0's
+Organization-context work already added `code?: string` to `ApiError` and sets it
+from `body.code` in BOTH `apiFetch` and `apiFetchBlob`. Verified in the working
+tree. The file is NOT in `files_modified`, and re-adding the field would be a
+duplicate declaration.
 
-```ts
-export type ApiError = {
-  error: string;
-  /**
-   * The server's machine-readable sub-reason, e.g. `no_org_access` on a 402.
-   * Dropped before this change, which is why the web half could not tell a
-   * "your Organization has not bought this" apart from "the API fell over".
-   */
-  code?: string;
-  message?: string;
-  status: number;
-};
-```
-
-and in BOTH `apiFetch` (`:42-46`) and `apiFetchBlob` (`:73-77`), add
-`code: body.code,` beneath `error: body.error ?? 'request_failed',`.
+The 402 predicate, the 402 panel and the 402 branch of the shell's error chain are
+likewise already in the tree (see "Facts this plan is built on" item 7). This slice
+therefore writes NO new 402 web code and renames NO web predicate. The web work
+below is the 403 half, and only that.
 
 ## Step 7 - `apps/web/src/lib/require-token.ts`
 
-This module imports NOTHING and must keep importing nothing. Append below
-`isAuthFailure`:
+This module imports NOTHING and must keep importing nothing: `api-client.ts`
+imports IT, so any import back the other way is a cycle. That is why
+`isAuthFailure` and `isEntitlementFailure` duck-type on `status` instead of
+importing `ApiError`, and the new predicate does the same.
+
+`isAuthFailure` and `isEntitlementFailure` are NOT changed. `isEntitlementFailure`
+keeps its current body and its current docstring verbatim, stale
+`missing_entitlement` prose included. Be clear about WHY, because the obvious reason
+is the wrong one: this slice's own commit 1 already flips the wire body to
+`no_org_access`, through step 1b's `NO_ORG_ACCESS` constant and step 5b's `toEqual`
+assertion, so from this slice onward the API sends `no_org_access` and this docstring
+is stale the moment the commit lands. The prose is nevertheless left alone because
+slice 04 owns the whole `missing_entitlement` literal sweep under decision D2, in one
+pass over a listed set of files, and splitting that sweep across two waves would give
+two slices a claim on the same lines. The division is exactly this: slice 03 flips the
+BODY, slice 04 deletes the local gate that emits it and corrects every literal
+describing it, which is slice 04's section 23.6. `isEntitlementFailure` keys on
+`status === 402` alone and never reads the code, so the one-wave staleness is prose
+only and no predicate, no test and no rendered copy is wrong in the meantime.
+
+Append below `isEntitlementFailure`:
 
 ```ts
 /**
- * The 402 half of the taxonomy, and deliberately NOT part of `isAuthFailure`.
+ * True for the 403 half of the deny taxonomy, and for nothing else.
  *
- * A 402 means the operator is signed in and correctly identified, and their
- * Organization has not bought access. Routing it to `Sessao expirada` or to a
- * login redirect tells them to fix the one thing that is not broken, and a
- * re-login answers it with another 402 forever. It is also not an API fault:
- * before this it fell into the generic panel and read as "the server is down".
+ * A 403 means the token is valid and the operator is correctly identified, and
+ * they do not hold the membership, Seat, module or role the route requires. That
+ * is neither a dead session nor a dead server, so it must reach neither
+ * `Sessao expirada` nor "verifique o servidor local". `@fxl-business/hub-sdk@2.1.0`
+ * answers `403 {error: 'forbidden', code: 'missing_module'}` and
+ * `403 {error: 'forbidden', code: 'missing_role'}`; this repo's own
+ * `requireHubModule` and `requireAdmin` answer 403 today.
  *
- * Keyed on the STATUS. `code: 'no_org_access'` rides along on `ApiError` for
- * copy and for telemetry, but 402 has exactly one producer in this API, and a
- * body that failed to parse must not be able to hide the buy screen.
+ * Keyed on the STATUS ALONE, exactly as `isEntitlementFailure` is, and for the same
+ * asymmetry: `apiFetch` builds its error from `await res.json().catch(() => ({}))`,
+ * so a 403 whose body does not parse - a proxy error page, a truncated response, a
+ * gateway that rewrites the payload - carries no `code` at all. Requiring the code
+ * would classify exactly that response as NOT forbidden and route it back onto the
+ * server-outage copy this predicate exists to remove. Keying on the code fails
+ * CLOSED onto that lie; keying on the status fails OPEN onto a panel that says
+ * "ask an administrator", which is true of every 403 this API can send.
+ *
+ * The predicate stays narrow otherwise: no `>= 400`, no error-string alternative,
+ * strict `===`, and `null` and `undefined` handled by the object guard.
  */
-export function isOrgAccessFailure(error: unknown): boolean {
+export function isForbiddenFailure(error: unknown): boolean {
   return (
-    typeof error === 'object' && error !== null && (error as { status?: unknown }).status === 402
+    typeof error === 'object' && error !== null && (error as { status?: unknown }).status === 403
   );
 }
-
-/**
- * The buy-screen copy, declared here rather than in either panel because both
- * panels must say the same thing and `SalesOpsApp.tsx` imports
- * `CadastroHistoryPanel.tsx`, so a shared constant cannot live in either. No URL
- * is invented: this product does not know the Hub's billing address.
- */
-export const NO_ORG_ACCESS_TITLE = 'Acesso nao contratado';
-export const NO_ORG_ACCESS_TEXT =
-  'Sua organizacao ainda nao tem acesso ao FXL Sales. Fale com quem administra a conta no FXL Hub para contratar o acesso. Voce continua conectado, nao e preciso entrar novamente.';
 ```
 
-NOTE FOR THE EXECUTOR: the two copy strings above are written here without
-Portuguese accents only because this plan file is ASCII. Write them in the
-source file with the correct accents, matching the surrounding pt-BR copy:
-`Acesso nao contratado` becomes the properly accented form, and likewise for the
-body text. Follow the accentuation already used in the neighbouring panels.
+`isAuthFailure` itself is NOT changed. It already matches 401 and the unavailable
+token error only, and step 9 pins that it keeps refusing both a 402 and a 403.
 
-`isAuthFailure` itself is NOT changed. It already matches `401` only, and step 9
-pins that it keeps doing so.
+## Step 8 - the 403 panel and the two hosts that render it
 
-## Step 8 - the two web panels
+### 8a. NEW `apps/web/src/sales-ops/forbidden-copy.ts`
 
-Both get the 402 branch AHEAD of the auth branch. Ahead is not strictly required
-today, since `isAuthFailure` is 401-only, but a paying question must not be
-reachable through a widened auth check, and the order documents the priority.
+Its OWN module, for the same reason `missing-entitlement-copy.ts` is one: the repo
+configures `react-refresh/only-export-components` with `allowConstantExport`, and
+that option covers a primitive literal only, so an exported `as const` OBJECT beside
+a component still trips the rule. Read `missing-entitlement-copy.ts` first and follow
+its header comment, its export shape and its register.
 
-### 8a. `apps/web/src/sales-ops/CadastroHistoryPanel.tsx`
+```ts
+export const FORBIDDEN_COPY = {
+  title: 'Permissao insuficiente',
+  body: 'Voce esta conectado, mas esta conta nao tem a permissao necessaria para esta acao nesta Organizacao. Peca a quem administra a Organizacao no FXL Hub para liberar o seu acesso.',
+  note: 'Voce continua conectado, nao e preciso entrar novamente.',
+} as const;
+```
 
-Import `isOrgAccessFailure`, `NO_ORG_ACCESS_TEXT` and `NO_ORG_ACCESS_TITLE`
-alongside the existing `isAuthFailure` import (`:23`), and change the `isError`
-ternary (`:118-133`) so that the 402 branch is tested FIRST, then the 401 branch
-exactly as it reads today, then the existing generic branch. Keep every existing
-string byte-identical; only the new branch is added.
+NOTE FOR THE EXECUTOR: the strings above are written here without Portuguese
+accents only because this plan file is ASCII. Write them in the source file with
+the correct accents, matching the accentuation of `MISSING_ENTITLEMENT_COPY` in
+the neighbouring module.
 
-### 8b. `apps/web/src/sales-ops/SalesOpsApp.tsx`
+The copy NAMES NO MODULE AND NO ROLE, deliberately. A 403 body is not something
+this app can render trustworthily: the `code` is a machine token, the `module`
+field is a Hub-internal identifier, and the identifier law in `CLAUDE.md` forbids
+putting raw ids in user-facing copy. "Ask an administrator" is the whole of what
+this app actually knows.
 
-Same shape at `:1666-1682`, using `EmptyPanel` and `bootstrapQuery.error`, with
-the rest of the existing ternary and both existing comments preserved verbatim.
-Extend the import at `:75` to bring in `isOrgAccessFailure`,
-`NO_ORG_ACCESS_TEXT` and `NO_ORG_ACCESS_TITLE` from `@/lib/require-token`.
+### 8b. NEW `apps/web/src/sales-ops/ForbiddenPanel.tsx`
 
-Nothing in `apps/web/src/auth/` is touched. `HubProtected`, `SignedOutPanel`,
-`SessionRecoveryPanel`, the revalidation ladder and `requestHubAccessToken` all
-key on `/auth/refresh`'s status and never see a `402` from `/sales-ops`, so a
-402 provably cannot become a login redirect.
+Follow the SHAPE and the REGISTER of
+`apps/web/src/sales-ops/MissingEntitlementPanel.tsx`; read that file first. Take
+from it the local `mutedPanelClass` and `mutedStateClass` style constants with the
+same "intentional local copies" comment, the `<section>` wrapper carrying a data
+marker, and the docstring convention that explains why the panel exists rather
+than what it renders.
+
+Differences from that panel, each deliberate:
+
+- It takes NO props and reads NO hook. `MissingEntitlementPanel` reads
+  `useOrganizations` because it offers a switch; a 403 offers nothing this app can
+  act on, so there is nothing to read and nothing to await. That also makes it
+  renderable with no `QueryClientProvider` and no auth mock, which step 9c relies on.
+- Its marker is `data-forbidden`, the counterpart of the existing
+  `data-missing-entitlement`. Step 9's decisive mutation keys on it, so it is
+  load-bearing and not decoration.
+- No anchor, no checkout, no retry button. There is no URL this product could send
+  the operator to that would grant a role, and a dead affordance on a dead-end screen
+  is the defect class this whole release exists to remove.
+
+```tsx
+export function ForbiddenPanel() {
+  return (
+    <section className={`${mutedPanelClass} flex min-h-[154px] flex-col gap-3 p-6`} data-forbidden>
+      <h3 className="text-sm font-bold text-[#201f24]">{FORBIDDEN_COPY.title}</h3>
+      <p className="text-[13px] leading-5 text-[#57575f]">{FORBIDDEN_COPY.body}</p>
+      <p className={`${mutedStateClass} leading-5`}>{FORBIDDEN_COPY.note}</p>
+    </section>
+  );
+}
+```
+
+### 8c. `apps/web/src/sales-ops/SalesOpsApp.tsx`
+
+The `bootstrapQuery.isError` chain becomes, in this exact order:
+
+1. `isEntitlementFailure` to `MissingEntitlementPanel`, unchanged and STILL FIRST
+2. `isForbiddenFailure` to `ForbiddenPanel`, NEW
+3. `isAuthFailure` to the existing `Sessao expirada` `EmptyPanel`, unchanged
+4. the existing generic `EmptyPanel`, unchanged
+
+Extend the existing import from `@/lib/require-token` to bring in
+`isForbiddenFailure`, and add an import of `./ForbiddenPanel` beside the existing
+`./MissingEntitlementPanel` import.
+
+Every existing string, every existing comment and both existing panels stay
+BYTE-IDENTICAL. The only edits are one new ternary arm, two import lines, and one
+added sentence inside the existing comment block above the chain.
+
+That existing comment block already records the invariant, and it must keep saying
+it after the new arm is inserted: the generic "Verifique o servidor local" copy is
+reachable ONLY for an error that is none of the classified kinds. Extend the
+sentence "reachable ONLY for an error that is neither an entitlement failure nor an
+auth failure" to name the forbidden case too, and extend the sentence naming
+`entitlement-dead-end.test.tsx` as the oracle "for all three arms" to say all four.
+
+The entitlement branch stays FIRST for the reason the comment already gives, and the
+new branch sits above `isAuthFailure` for the same reason: `isAuthFailure` is false
+for a 403 today, so the order is not what makes the branch reachable now, it is what
+keeps it reachable if `isAuthFailure` is ever widened. A widened predicate placed
+above it would silently steal every 403 into `Sessao expirada` and tell the operator
+to sign in again to fix a permission they do not hold.
+
+### 8d. `apps/web/src/sales-ops/CadastroHistoryPanel.tsx`
+
+The same insertion, one arm smaller. Its `isError` ternary today is
+`isAuthFailure(error)` then the generic `Nao foi possivel carregar` block. Add the
+403 branch AHEAD of the 401 branch, rendering `ForbiddenPanel`, and extend the
+import at `:23` to bring in `isForbiddenFailure` beside `isAuthFailure`.
+
+`ForbiddenPanel` renders its own `<section>` rather than the local `MutedBlock`, so
+the marker and the copy are identical in both hosts and a copy edit cannot
+desynchronise them. Importing it here is not a cycle: `ForbiddenPanel.tsx` imports
+only `./forbidden-copy`.
+
+No 402 branch is added here. `CadastroHistoryPanel` renders INSIDE the sales ops
+shell, whose own bootstrap query is behind the same gate and classifies first, so a
+402 already reaches `MissingEntitlementPanel` at the shell level. The 403 branch is
+added anyway because `useCadastroHistory` hits `/sales-ops/history`, which
+`requireAdmin` can 403 on its own while the shell's bootstrap succeeds. That is the
+case this branch exists for, and it has no shell-level equivalent.
 
 ## Step 9 - the web oracles
 
 ### 9a. `apps/web/src/lib/__tests__/api-client-token-guard.test.ts`
 
-Add `isOrgAccessFailure` to the import and append a
-`describe('no-org-access classification')` block with these exact `it` names:
+Add `isForbiddenFailure` to the existing import and append a
+`describe('forbidden classification')` block with these exact `it` names:
 
-- `isAuthFailure does not classify a 402 as an auth failure`
-- `isOrgAccessFailure recognises a 402 ApiError`
-- `isOrgAccessFailure rejects a 401, a 403 and a 500`
-- `apiFetch carries the server code onto ApiError`
+- `isForbiddenFailure recognises a 403 ApiError`
+- `isForbiddenFailure is true for a 403 that carries no code at all`
+- `isForbiddenFailure is false for a 401, a 402, a 500, an AuthTokenUnavailableError and a non-object`
+- `isAuthFailure does not classify a 403 as an auth failure`
 
-The first is the guard on the whole slice: widening `isAuthFailure` to `>= 401`
-would put a billing answer behind a login screen, which is the release's whole
-point.
+The second is the asymmetry pin, and it is the one that fails the day someone makes
+`code === 'missing_module'` mandatory. It is the exact counterpart of the existing
+`isEntitlementFailure is true for a 402 that carries no code at all`, which stays
+verbatim.
 
-### 9b. NEW `apps/web/src/sales-ops/__tests__/no-org-access-panel.test.tsx`
+The fourth is the guard on the whole web half of this slice: widening `isAuthFailure`
+to a range would put a permission answer behind a login screen that answers it with
+another 403 forever.
 
-`CadastroHistoryPanel` is pure and prop-driven, so this needs no
-`QueryClientProvider`, no api mock and no auth mock. Start the file with
-`// @vitest-environment happy-dom`, render with `createRoot` inside `act`, and
-read `container.textContent`.
+Every existing `it` in this file keeps its title and its assertions.
+
+### 9b. `apps/web/src/sales-ops/__tests__/entitlement-dead-end.test.tsx`
+
+EXTEND the existing file. Do not create a parallel one, and do not touch any of its
+four existing `it` blocks: they are the 402, 500, 401 and loading arms and they stay
+verbatim.
+
+Keep the file's existing discipline exactly as it stands, because it is what makes
+the oracle worth having: `../api`, `@/lib/api-client` and `../hooks` stay UNMOCKED,
+so the 403 travels the REAL `apiFetch` error path and the test proves the status
+survives into the `ApiError` the shell classifies rather than merely pinning a
+ternary. Reuse the file's existing `renderApp`, `flushReact`, `text()` and
+`entitlementPanel()` helpers and its `GENERIC_API_FAULT` and `SESSION_EXPIRED`
+constants.
+
+Add beside `entitlementPanel()`:
+
+```ts
+function forbiddenPanel() {
+  return container.querySelector('[data-forbidden]');
+}
+```
+
+Add one `it`, with this exact title:
+
+- `renders the forbidden panel for a 403 and never the server-fault or session-expired copy`
+
+It sets `fetchMock` to
+`{ok: false, status: 403, json: async () => ({error: 'forbidden', code: 'missing_role'})}`,
+renders `/tatico/dashboard`, and asserts:
+
+```ts
+    expect(forbiddenPanel()).not.toBeNull();
+    expect(text()).toContain(FORBIDDEN_COPY.title);
+    expect(text()).not.toContain(GENERIC_API_FAULT);
+    expect(text()).not.toContain(SESSION_EXPIRED);
+    // Keeps the 402 arm non-vacuous in the other direction too.
+    expect(entitlementPanel()).toBeNull();
+```
+
+importing `FORBIDDEN_COPY` from `../forbidden-copy` beside the file's existing
+`MISSING_ENTITLEMENT_COPY` import, so a copy edit moves the assertion with it.
+
+Then add `expect(forbiddenPanel()).toBeNull();` to the existing 402, 500 and 401
+blocks, in the same position their `expect(entitlementPanel()).toBeNull();` lines
+already occupy in the 500 and 401 blocks. That is an added assertion on an existing
+test, never a change to one: no title moves, no existing `expect` is edited or
+removed.
+
+THE DECISIVE MUTATION, which the verifier runs by hand: replace `ForbiddenPanel`'s
+returned `<section>` with an empty fragment. `expect(forbiddenPanel()).not.toBeNull()`
+goes red on the `[data-forbidden]` marker, so the 403 case cannot pass by rendering
+nothing. That is the same shape as the existing 402 case's `[data-missing-entitlement]`
+marker, and it is why the panel carries a data attribute at all. Revert.
+
+### 9c. NEW `apps/web/src/sales-ops/__tests__/forbidden-panel.test.tsx`
+
+The panel-level oracle, covering what 9b's shell-level test cannot reach: the second
+host. Start the file with `// @vitest-environment happy-dom`, render with
+`createRoot` inside `act`, and read `container.textContent`, following
+`apps/web/src/sales-ops/__tests__/missing-entitlement-panel.test.tsx` for the
+harness.
 
 Exact `it` names:
 
-- `renders the buy screen for a 402 and never the login or session-expired copy`
-  asserts the buy-screen title and the "no need to sign in again" sentence are
-  present, and that `Sessao expirada`, `expirou`, `Entrar` and
-  `Nao foi possivel carregar` are all ABSENT (match the accented source strings).
-- `still renders the session-expired panel for a 401`
-- `still renders the generic API-fault panel for a 500`
+- `renders the ask-an-administrator copy and no sign-in affordance`
+  asserts `FORBIDDEN_COPY.title` and `FORBIDDEN_COPY.body` are present and that
+  `Entrar`, `Sessao expirada` and `Nao foi possivel carregar` are all ABSENT (match
+  the accented source strings). The negative on `Entrar` is the one that would fail
+  if a later change routed a 403 into `SignedOutPanel` or `SessionRecoveryPanel`,
+  both of which render an `Entrar` button.
+- `names no module, no role and no raw identifier`
+  asserts the rendered text contains none of `missing_module`, `missing_role`,
+  `forbidden` or `403`. This is the pin on the copy decision in step 8a, and it is
+  what fails the day someone tries to be helpful by interpolating the body's `code`.
+- `renders the same forbidden panel from the cadastro history panel`
+  renders `CadastroHistoryPanel` with `isError` true and a `{status: 403}` error and
+  asserts `container.querySelector('[data-forbidden]')` is not null. This is the
+  second host, and it is what proves the two do not drift apart.
+
+A CORRECTION to what an earlier draft of this plan claimed about that third case.
+It said `CadastroHistoryPanel` "is pure and prop-driven, so this needs no
+`QueryClientProvider`, no api mock and no auth mock". The EXPORTED component really
+is prop-driven, so the claim holds for RENDER. But the MODULE imports `./hooks`,
+which pulls in `@tanstack/react-query` and `@/auth/react` transitively, and the
+existing `apps/web/src/sales-ops/__tests__/cadastro-history.test.tsx` mocks
+`@/auth/react` and `@/components/ui/alert-dialog` for exactly that reason. Copy
+those two `vi.mock` calls from that file. Expect to need at least the alert-dialog
+one. This is a time-sink, not a red, and the executor should not discover it the
+hard way.
 
 `emptyBootstrap` is the minimum `SalesOpsBootstrap` the panel needs; copy the
-smallest existing builder from
-`apps/web/src/sales-ops/__tests__/cadastro-history.test.tsx` rather than
-inventing one, and do not modify that file.
+smallest existing builder from `cadastro-history.test.tsx` rather than inventing
+one, and do not modify that file.
 
-The negative assertion on `Entrar` is the one that would fail if a later change
-routed a 402 into `SignedOutPanel` or `SessionRecoveryPanel`, both of which
-render an `Entrar` button.
+### 9d. this slice is alone in its wave
+
+Slice 03 is the ONLY slice in wave 2, so the web growth in steps 7 through 9
+creates no merge hazard: no other slice in this wave declares any of these files,
+and the wave merges serially to trunk on its own.
 
 ## Step 10 - `CLAUDE.md`
+
+This slice is the wave-2 `CLAUDE.md` owner and the ONLY slice in its wave, so
+every `CLAUDE.md` edit for this wave lands here. That includes slice 02's
+documentation bullet, carried below under decision D5.
+
+### 10a. The access gate and the deny taxonomy
 
 In the `Auth Model` section, replace the two bullets that read
 "Feature gates check `auth.claims.entitlements.modules`." and
@@ -806,7 +1058,9 @@ In the `Auth Model` section, replace the two bullets that read
   nothing else. `entitlements.modules` carries ADD-ON modules only and must NEVER
   be read for baseline access: the `sales.core` module was deleted in the Hub's
   access-model-v1, so the old `modules.includes('sales.core')` gate was false for
-  every user and answered 402 to the entire product.
+  every user and answered 402 to the entire product. This is the ONE place in the
+  tree that still spells that string, deliberately, as the prose record of what was
+  removed; `CLAUDE.md` is outside the grep gate's pathspec for exactly that reason.
 - `classifyHubAccess` in `apps/api/src/middleware/app-auth.ts` is the single
   authority, allows only on `access === true`, and fails CLOSED: absent, false,
   non-boolean, or a missing `entitlements` object all deny.
@@ -814,25 +1068,100 @@ In the `Auth Model` section, replace the two bullets that read
   SDK's `HubEntitlements`, which through at least 1.3.1 is re-exported from an
   unshipped package and degrades to `any` under `skipLibCheck`, making the deny
   branch unreachable at type level. The SDK's own MIGRATION.md section 10 says so.
-- `requireHubModule` is the only seam that may read `modules`, for a paid add-on,
-  and no route mounts it today.
-- The deny taxonomy is exact and the web half branches on it: `401` is a missing
-  or invalid token and reaches the login screen; `402`
-  `{"error":"payment_required","code":"no_org_access"}` is an Organization
-  without access and MUST render the buy screen, never a login screen, never the
-  expired-session panel, and never the generic API-fault panel where it landed
-  before v2.8.0; `403` is authenticated but without the membership, Seat, module
-  or role the route requires; `503`
-  `{"error":"unavailable","code":"hub_auth_not_configured"}` is the API having no
-  Hub configuration at all. Every body is byte-identical to the one
-  `@fxl-business/hub-sdk@2.1.0`'s `requireHubAuth` returns natively, so the SDK
-  flip changes no contract.
-- `isAuthFailure` is 401-only and `isOrgAccessFailure` is 402-only, both in
-  `apps/web/src/lib/require-token.ts`, and both panels branch 402 first. Widening
-  `isAuthFailure` to a range puts a billing answer behind a login screen that
-  answers it with another 402 forever; `isAuthFailure does not classify a 402 as
-  an auth failure` is the test that catches it.
-- `ApiError` in `apps/web/src/lib/api-client.ts` now carries `code`.
+- `classifyHubAccess`, `hasHubOrgAccess`, `hasHubModule`, `requireHubModule` and the
+  402 branch inside `appAuthMiddleware` are a DELIBERATE ONE-WAVE BRIDGE while this
+  repo is on 1.3.1, which exports no access gate at all. The SDK bump deletes them
+  and delegates to 2.1.0's `requireHubAuth`, whose `allowWithoutAccess` defaults to
+  false, because two gates would mean one live gate and one unreachable one with a
+  green suite over it. `requireHubModule` is meanwhile the only seam that may read
+  `modules`, for a paid add-on, and no route mounts it today.
+- The deny taxonomy is exact and EXHAUSTIVE, and the web half branches on it:
+  `401 {"error":"unauthorized"}` is a missing or invalid token and reaches the
+  login screen, which is the correct destination for every one of its codes,
+  `contract_version_mismatch` included - that code is new in
+  `@fxl-business/hub-sdk@2.1.0` and means the token's `contractVersion` is not 1,
+  an absent one included, so it is a token this app cannot use and a fresh login is
+  the only answer; `402 {"error":"payment_required","code":"no_org_access"}` is an
+  Organization without access and MUST render the buy screen, never a login screen,
+  never the expired-session panel, and never the generic API-fault panel where it
+  landed before v2.8.0; `403 {"error":"forbidden"}`, with `missing_module` or
+  `missing_role`, is authenticated but without the membership, Seat, module or role
+  the route requires, and MUST render the ask-an-administrator panel, never the
+  generic API-fault panel; `503 {"error":"unavailable","code":"hub_auth_not_configured"}`
+  is the API having no Hub configuration at all. Every body is byte-identical to the
+  one 2.1.0's `requireHubAuth` returns natively, so the SDK flip changes no contract.
+- `isAuthFailure` is 401-only, `isEntitlementFailure` is 402-only and
+  `isForbiddenFailure` is 403-only, all three in
+  `apps/web/src/lib/require-token.ts`, and all three key on the STATUS ALONE. The
+  402 and 403 predicates deliberately do not also require a `code`: `apiFetch`
+  builds its error from `await res.json().catch(() => ({}))`, so a response whose
+  body does not parse carries no code at all, and requiring one would fail CLOSED
+  back onto the server-outage copy both predicates exist to remove.
+  `isEntitlementFailure is true for a 402 that carries no code at all` and
+  `isForbiddenFailure is true for a 403 that carries no code at all` are the pins.
+  The classification chain in `SalesOpsApp` is `isEntitlementFailure`, then
+  `isForbiddenFailure`, then `isAuthFailure`, then generic, and the INVARIANT is
+  that the generic `Verifique o servidor local` copy is reachable ONLY for an error
+  that is none of the classified kinds. The order matters not because
+  `isAuthFailure` is true for a 402 or a 403 today - it is false for both - but
+  because a later widening of it placed above them would silently steal a billing
+  or a permission answer into `Sessao expirada`, telling the operator to sign in
+  again to fix the one thing that is not broken, and a re-login answers it with the
+  same status forever. `apps/web/src/sales-ops/__tests__/entitlement-dead-end.test.tsx`
+  is the oracle for all four arms, drives the REAL `apiFetch` error path with
+  `../api`, `@/lib/api-client` and `../hooks` unmocked, and its decisive mutations
+  are the `[data-missing-entitlement]` and `[data-forbidden]` markers, so neither
+  panel case can pass by rendering nothing.
+- `ForbiddenPanel` names no module and no role, and its
+  `names no module, no role and no raw identifier` test pins that. A 403 body is not
+  something this app can render trustworthily: the `code` is a machine token and the
+  `module` field is a Hub-internal identifier that the identifier law keeps out of
+  user-facing copy. "Ask an administrator" is the whole of what this app knows.
+
+**A ONE-WAVE INTERNAL DISAGREEMENT INSIDE `CLAUDE.md`, DATED HERE RATHER THAN
+DISCOVERED.** After this slice, the `Auth Model` block above says the 402 body is
+`no_org_access`, while the `Organization context` section further down still says
+`402 {error: 'payment_required', code: 'missing_entitlement'}` and still names
+`apps/api/src/middleware/app-auth.ts` as its producer. The `Auth Model` block calls
+its taxonomy "exact and EXHAUSTIVE", so one file disagreeing with itself is not
+something a later reader may be left to find. It is deliberate and it is bounded:
+slice 04 rewrites the `Organization context` line under its own section 23.6, in the
+same pass that sweeps every other stale `missing_entitlement` literal out of the tree.
+Do NOT fix the `Organization context` section here. It is slice 04's under decision
+D2, and editing it in this slice would make wave 2 a second owner of text slice 04
+also edits. The wave-3 merge closes the gap.
+
+### 10b. Slice 02's explicit-Hub-configuration bullet, carried
+
+Slice 02 dropped `CLAUDE.md` from its own `files_modified` under decision D5,
+because two slices in one wave declaring one file is a structural merge conflict.
+Its documentation bullet lands here instead, appended to the same `Auth Model`
+list, and slice 02's plan says its docs land in wave 2 so a reader of a
+wave-1-only tree does not read the omission as an oversight.
+
+TAKE THE WORDING VERBATIM from the clearly labelled block in
+`nexo/plans/feature-20260827-hub-sdk-210-access-model/02-explicit-hub-config.md`.
+If that plan carries no such labelled block by the time this slice runs, write the
+bullet from 02's section 6, which states the same facts and is what the block is
+drawn from:
+
+- The Hub Audience and environment are EXPLICIT validated configuration, read off
+  the validated `env` object through `hubEnvBag` and never off raw `process.env`.
+  The Audience is `app.<slug>` and must equal `app.` plus the Client's slug;
+  nothing derives it from a key. The environment must equal the segment inside
+  `pk_<slug>_<environment>_<random>` and is never inferred from `NODE_ENV`.
+  `FXL_HUB_CONFIG` is this repo's documented form, and setting it beside any
+  discrete `FXL_HUB_*` variable is a BOOT FAILURE that names the offenders.
+  `FXL_HUB_REDIRECT_URI` is its own variable because 2.x's `HubConfig` has no
+  `redirectUri` and `createHubBff`'s default points at the Hub's origin.
+  `FXL_HUB_HEALTH_TOKEN` is operator-generated and required outside development.
+
+Slice 02 also rewrites the `Environments` table and the required-API-vars dotenv
+block in this same file. Those edits belong to 02's own wave-1 work only if 02
+still declares them; under D5 it does not declare `CLAUDE.md` at all, so carry
+them here too, verbatim from 02's section 6 second bullet: the
+`product.fxl-sales` client column becomes `app.fxl-sales`, and the required API
+vars block takes the new names with every credential left EMPTY.
 
 ## Verification
 
@@ -849,18 +1178,45 @@ pnpm run build
 Then the two grep gates, both of which must print NOTHING:
 
 ```
-git grep -n -i "sales\.core" -- apps packages scripts
+git grep -n -i "sales\.core" -- apps packages scripts ':!*__tests__*'
 git grep -n "coreModule\|hasHubCoreEntitlement\|coreModuleFromAudience" -- apps packages scripts
 ```
 
-`nexo/` and `CLAUDE.md` are excluded from the first gate on purpose: the string
-survives there only as the prose record of what was removed.
+The first gate is NARROWED to exclude `__tests__`, under decision D6, and slice
+04's precondition 4 is narrowed the same way so the two agree. The exclusion is not
+a loophole, it is the point: the two surviving occurrences are both TEST FIXTURES,
+both of them the defect inverted, and both must stay VERBATIM.
+
+- `apps/api/src/middleware/__tests__/app-auth.test.ts`, inside
+  `never reads entitlements.modules for baseline access`:
+  `modules: ['sales.core', 'sales', 'core']`. It proves a workspace carrying every
+  module string this product ever spelled, and no access, is still denied.
+- `apps/api/src/middleware/__tests__/app-auth-access-gate.test.ts`, inside
+  `answers 402 for a workspace that still carries the deleted core module but no access`:
+  `modules: ['sales.core']`.
+
+Deleting either to satisfy a wider gate would delete the only proof that the
+deleted module cannot grant access. Everything the gate is actually for - a
+production read of the string - lives outside `__tests__` and is caught.
+
+`nexo/` and `CLAUDE.md` are outside the pathspec on purpose: the string survives
+there only as the prose record of what was removed, which step 10a requires.
+
+The executor must therefore write NO `sales.core` literal into any non-test source
+file. Step 1a's `modules` doc comment says the same thing without the literal and
+points at `CLAUDE.md` for the string.
 
 Then the fail-open probe, which the verifier runs by hand: temporarily change
 `hasHubOrgAccess` to `auth?.claims?.entitlements?.access !== false` and confirm
 that `denies a claim set with no access key at all rather than allowing it` and
 `answers 402 rather than allowing when the claim set has no access key` BOTH go
 red. Revert. A gate whose fail-open mutation stays green is not a gate.
+
+Then the 403 render probe, also by hand: replace `ForbiddenPanel`'s returned
+`<section>` with an empty fragment and confirm
+`renders the forbidden panel for a 403 and never the server-fault or session-expired copy`
+goes red on the `[data-forbidden]` marker. Revert. A panel case that passes by
+rendering nothing is not a panel case.
 
 ## Commits
 
@@ -872,10 +1228,11 @@ no red commit lands on the branch.
    Steps 1, 2, 3, 5. Breaking-change footer: the 402 code changes from
    `missing_entitlement` to `no_org_access`, and `HubAuthConfig.coreModule` and
    `hasHubCoreEntitlement` are removed.
-2. `feat(web): show a buy screen for a 402 instead of an API fault`
-   Steps 6, 7, 8, 9.
+2. `feat(web): tell the operator to ask an administrator on a 403`
+   Steps 7, 8, 9. Step 6 contributes nothing: the 402 web half already landed in
+   v2.8.0.
 3. `docs: record the access-model-v1 gate and the 401/402/403 taxonomy`
-   Step 10.
+   Step 10, both halves.
 
 ## What this slice deliberately does not do
 
@@ -887,3 +1244,16 @@ no red commit lands on the branch.
   sell yet, and mounting one would be a product decision, not a migration.
 - It does not change tenancy, the session store, the origin shim, the rotated
   cookie wrapper, the renewal timer, the revalidation ladder or the logout intent.
+- It does not rename `isEntitlementFailure`, does not touch
+  `MissingEntitlementPanel.tsx` or `missing-entitlement-copy.ts`, and does not
+  correct the stale `missing_entitlement` literals in the web tree. They go stale in
+  THIS slice, not in slice 04: commit 1 flips the wire body to `no_org_access`. Slice
+  04 still owns them under decision D2, because it deletes the local gate that emits
+  the body and corrects every literal describing it in one listed sweep (its section
+  23.6); doing half of that sweep here would put two slices on the same lines. Nothing
+  breaks in the interval, because `isEntitlementFailure` keys on `status === 402` alone
+  and never reads the code.
+- It does not add a 402 branch to `CadastroHistoryPanel`. The shell's own bootstrap
+  query is behind the same gate and classifies first, so a 402 already reaches
+  `MissingEntitlementPanel` one level up. The 403 branch has no such equivalent,
+  because `requireAdmin` can 403 the history route on its own.

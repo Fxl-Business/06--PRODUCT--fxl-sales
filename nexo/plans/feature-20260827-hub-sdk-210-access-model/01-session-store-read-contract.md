@@ -323,6 +323,27 @@ Also update the file's doc header (`:1-29`) minimally: the sentence pinning the 
 `read()` contract while the dependency is still `1.3.1`, and that `get()` is a projection due for
 deletion in the SDK flip. No line may contain an em dash or an en dash.
 
+### Adopted from slice 02: the header comment at `:27`
+
+This slice ALSO makes the one line edit slice 02 originally planned at
+`apps/api/src/auth/hub-session-store.ts:27`, inside the doc header block this slice is already
+rewriting:
+
+> Rotating `FXL_HUB_SECRET_KEY` invalidates every stored session - see `session-crypto.ts`.
+
+becomes
+
+> Rotating `FXL_HUB_CLIENT_SECRET` invalidates every stored session - see `session-crypto.ts`.
+
+It moved here because `:27` sits inside the header block above and two wave-1 slices declaring one
+file is a guaranteed textual merge conflict; slice 02 has dropped the file from its
+`files_modified` accordingly. Slice 02 renames the actual variable, `FXL_HUB_SECRET_KEY` to
+`FXL_HUB_CLIENT_SECRET` in `apps/api/src/env.ts` and everywhere it is read, in this SAME wave, so
+the comment is correct by the end of wave 1. It is a comment, so it is inert in either merge order
+and nothing in this slice's tests or in slice 02's depends on which lands first.
+Slice 02 keeps its own comment-only edit at `apps/api/src/auth/session-crypto.ts:6,10`; that file
+is not declared here.
+
 ## Tests
 
 RED FIRST. Write the whole new `describe` block below, watch it fail, and only then touch
@@ -395,6 +416,14 @@ The named oracles, verbatim titles:
    Both halves are required: the envelope tag is what `app-auth.ts:250` narrows on to mount the
    login-supersede middleware, and renaming it is how this slice would silently 500 every local
    `/auth/callback`.
+   The three assertions this test writes are, exactly and exhaustively:
+   `expect(frozenStore(db).kind).toBe('persistent')`, `expect(session.kind).toBe('memory')` on the
+   ENVELOPE, and `expect(session.store.kind).toBe('ephemeral')` on the STORE.
+   It writes NO `toBeInstanceOf` assertion of any kind, and in particular none against
+   `EphemeralHubSessionStore` or `InMemoryHubSessionStore`. Slice 04 quotes this test when it
+   retargets the memory branch at 2.1.0's own `InMemoryHubSessionStore`, so it must quote these
+   three property assertions and not an instance check that is not here. This is stated so the
+   quotation cannot drift; it neither adds nor weakens a claim.
 
 Every one of these tests must FAIL before the implementation change, most of them at type-check or
 with `handle.read is not a function`. If any of them passes before the change, the test is wrong.
@@ -437,6 +466,12 @@ Change nothing else in that file. All four of its titles stay as they are.
   bar this slice has to hold.
 
 ## Doctrine
+
+This slice is the SOLE owner of `CLAUDE.md` in wave 1, confirmed. Slice 02 has dropped the file
+from its `files_modified` entirely and its documentation bullet lands in slice 03, in wave 2, where
+03 is the only slice in its wave. So no other wave-1 slice appends into the Auth Model list, and the
+second merge of this wave cannot conflict here. Do not widen this slice's `CLAUDE.md` edit to cover
+slice 02's subject matter; the paragraph below is the whole of it.
 
 `CLAUDE.md`, Auth Model section, the paragraph beginning "`HubSessionStore` is ASYNC and
 TRANSACTIONAL". Replace the single sentence

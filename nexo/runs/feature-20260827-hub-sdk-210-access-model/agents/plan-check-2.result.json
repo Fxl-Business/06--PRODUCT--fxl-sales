@@ -1,0 +1,46 @@
+{
+  "status": "done",
+  "verdict": "PASS WITH REQUIRED EDITS",
+  "blocking_count": 1,
+  "required_edits": [
+    "BLOCKING. 04-sdk-210-flip.md section 11: delete the 'MIGRATION checklist item 12 is a NO-OP here' paragraph, which is false at HEAD 84ac2a3, and own the signature change. 2.1.0 declares checkoutUrl(organizationId: string, sku?: string) and manageUrl(organizationId: string); apps/web/src/sales-ops/MissingEntitlementPanel.tsx:105 calls client.checkoutUrl() with no arguments and fails tsc, so slice 04 lands RED on web type-check and build. The step must pass active.id from the useOrganizations() seam the panel already destructures, say what happens when active is null (the existing CheckoutState failed branch, never an anchor with an empty destination), say what happens to apps/web/src/auth/__tests__/react.test.tsx:212 and :2062 which still compile and pass while passing a module id where an Organization id belongs, and declare apps/web/src/sales-ops/__tests__/missing-entitlement-panel.test.tsx for a re-read, removing it from section 24's does-not-touch list. manageUrl has no production caller and that half really is a no-op.",
+    "04-sdk-210-flip.md section 18: add the access-gate block to the CLAUDE.md list. Slice 03 writes 'classifyHubAccess ... is the single authority' and slice 04 deletes that function, so after wave 3 the doctrine file names code that does not exist.",
+    "04-sdk-210-flip.md section 17, app-auth.test.ts entry: state that section 23.3 deletes the classifyHubAccess and requireHubModule describes and that the now-unused 'import { Hono } from hono' must go with them, because tsconfig.base.json sets noUnusedLocals: true. As written section 17 reads as the opposite instruction and 23.3's cross-reference to it does not resolve.",
+    "04-sdk-210-flip.md section 17, same entry: spell the override on the first test, hubAuthContext({ accountId: 'hub-account-1' }), since that test asserts userId: 'hub-account-1' and the fixture defaults to user_existing_1.",
+    "03-access-entitlement-gate.md step 7 and the does-not-do list: correct the two sentences saying the API still sends missing_entitlement until slice 04. This slice sends no_org_access from its own commit 1. The instruction to leave the web prose alone stays; only the reason changes.",
+    "03-access-entitlement-gate.md step 10a: record that CLAUDE.md's Organization context section still reads missing_entitlement for one wave while the Auth Model block reads no_org_access and claims the taxonomy is exhaustive, and that slice 04 closes it under 23.6.",
+    "02-explicit-hub-config.md section 2: when instructing the one-line comment beside coreModuleFromAudience, say it must not contain the literal 'product.', since this slice's own test 24 greps auth-provider.ts for exactly that string. The widened regex is safe because it spells product backslash dot; a prose comment would not be."
+  ],
+  "nits": [
+    "05-dev-identity-fixtures.md section 1a: devAuthContext has no importer after the D7 rewrite, because section 2a's hubAuthContext calls devHubClaims directly and the four oracles do not use it. Either use it or drop it.",
+    "Slice 03's requireHubModule describe block has a one-wave life by design, argued on both sides. Accepted.",
+    "Slice 05 roster identities 2, 4, 5 add nothing to REQUIRED coverage; identity 7 is not padding because verified-account and verified-org are the ids routes.test.ts and history-route.test.ts assert on.",
+    "README.md:7 and :24 document a product.fxl-sales audience for two waves; recorded in both plans, closed by slice 04.",
+    "Slice 04 section 16.7 loads the real flat ESLint config inside vitest, unproven in this environment, with an explicit drop-rather-than-weaken fallback. Correct shape for an unproven oracle."
+  ],
+  "round1_edits_verdicts": {
+    "1": "APPLIED",
+    "2": "APPLIED",
+    "3": "APPLIED",
+    "4": "APPLIED",
+    "5": "APPLIED",
+    "6": "APPLIED",
+    "7": "APPLIED",
+    "8": "APPLIED",
+    "9": "APPLIED",
+    "10": "APPLIED",
+    "11": "APPLIED",
+    "12": "APPLIED",
+    "13": "APPLIED",
+    "14": "APPLIED",
+    "15": "APPLIED"
+  },
+  "green_at_every_merge": {
+    "01-session-store-read-contract": "true - get() survives on 1.3.1 so the fifteen existing handle.get() tests and the RLS suites stay green; the wave-1 conflict with 02 is gone under D5; oracle 7 now enumerates its three property assertions and adds no claim",
+    "02-explicit-hub-config": "true - the hub-session-store.ts conflict is gone, test 18a restores the dropped strict-loader claim, and both source guards hold (the widened strip spells product backslash dot, not the literal product dot)",
+    "03-access-entitlement-gate": "true - no existing test asserts the API 402 wire body, so flipping it to no_org_access reddens nothing; requireAdmin really answers 403; MiddlewareHandler is already imported in app-auth.ts. Two internal narration contradictions are nits, not reds",
+    "04-sdk-210-flip": "false - MissingEntitlementPanel.tsx:105 calls client.checkoutUrl() with no arguments and 2.1.0 requires organizationId, so web type-check and build fail with no instruction to fix it. Secondary: the leftover unused Hono import in app-auth.test.ts after 23.3's describe deletions fails noUnusedLocals",
+    "05-dev-identity-fixtures": "true - given 04 lands corrected. The roster passes assertDevRoster and reaches all four REQUIRED_DEV_DENY_BRANCHES, devAuthContext returns all six HubAuthContext members, and the fixture re-point keeps hubAuthContext's signature byte-compatible so its three consumers do not move"
+  },
+  "summary": "All fifteen round-1 required edits are APPLIED and decisions D1 through D10 are honoured: slice 04 no longer reverts slice 02's config architecture and slice 02's tests 19 through 25 survive unedited, there is exactly one access gate after slice 04 and it is the SDK's with an honestly bounded wiring pin, the 403 has a web owner in slice 03, wave 1's declared files are disjoint, slice 03's narrowed grep gate passes against what it instructs writing, and slice 05 now type-checks against the real six-member HubAuthContext with all ten roster identities carrying all eight required DevIdentity fields. One BLOCKING defect survives and it is a D10 staleness miss inside the section that claims a full HEAD re-verification: slice 04 asserts MIGRATION checklist item 12 is a no-op with no production caller, which was true at e59f870 and is false at 84ac2a3, because apps/web/src/sales-ops/MissingEntitlementPanel.tsx:105 calls client.checkoutUrl() with no arguments while 2.1.0 requires an organizationId. Six non-blocking edits and eight nits follow. No weakening: slice 04's single test-file deletion is argued claim by claim and its five surviving claims move verbatim into a declared replacement file. Nothing fails open in the request path, no plan writes a credential into a tracked file, no em dash or en dash appears in any plan, --no-verify appears only as a prohibition, and no plan reads or writes the fxl-hub repository."
+}

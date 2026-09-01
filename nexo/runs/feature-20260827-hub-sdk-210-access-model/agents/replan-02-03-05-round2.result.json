@@ -1,0 +1,38 @@
+{
+  "status": "ok",
+  "summary": "Applied round-2 required edits 5, 6, 7 and nit 8 to slices 02, 03 and 05. No other text changed, no test weakened, slice 01 and slice 04 untouched.",
+  "edits_applied": [
+    {
+      "file": "nexo/plans/feature-20260827-hub-sdk-210-access-model/02-explicit-hub-config.md",
+      "section": "2. REWRITTEN apps/api/src/config/auth-provider.ts",
+      "change": "Edit 7. The one line comment beside coreModuleFromAudience must not contain the literal 'product.', because this slice's named test 24 is a source guard over auth-provider.ts asserting that literal is absent. Verified test 24's specification in the same file before asserting it. Explained that the widened regex /^(?:app|product)\\./ is safe because its source text spells the prefix with a backslash before the dot, which the substring guard does not match, while prose has no such escape. Gave a safe example comment."
+    },
+    {
+      "file": "nexo/plans/feature-20260827-hub-sdk-210-access-model/03-access-entitlement-gate.md",
+      "section": "Step 7 - apps/web/src/lib/require-token.ts",
+      "change": "Edit 5a. Corrected the false claim that the API still sends missing_entitlement until slice 04. Read commit 1 (step 1b's NO_ORG_ACCESS constant and step 5b's toEqual) and now states that this slice flips the wire body itself. The instruction to leave the docstring alone is unchanged; the reason is now the D2 single-sweep ownership, and the division is stated as slice 03 flips the body and slice 04 deletes the gate and corrects the literals (its section 23.6)."
+    },
+    {
+      "file": "nexo/plans/feature-20260827-hub-sdk-210-access-model/03-access-entitlement-gate.md",
+      "section": "What this slice deliberately does not do",
+      "change": "Edit 5b. Same correction on the second sentence: the literals go stale in THIS slice, slice 04 still owns them under D2, and nothing breaks in the interval because isEntitlementFailure keys on status alone."
+    },
+    {
+      "file": "nexo/plans/feature-20260827-hub-sdk-210-access-model/03-access-entitlement-gate.md",
+      "section": "Step 10a - The access gate and the deny taxonomy",
+      "change": "Edit 6. Added a dated paragraph recording that after this slice CLAUDE.md's Auth Model block says no_org_access while its Organization context section still says missing_entitlement, that the Auth Model block calls its taxonomy exact and exhaustive so the one-wave disagreement must be dated rather than discovered, and that slice 04 closes it under section 23.6. Explicitly forbids fixing the Organization context section here, since that would make wave 2 a second owner of text slice 04 edits under D2."
+    },
+    {
+      "file": "nexo/plans/feature-20260827-hub-sdk-210-access-model/05-dev-identity-fixtures.md",
+      "section": "1a (roster module) plus the Verification checklist",
+      "change": "Nit 8. Dropped the devAuthContext export, keeping only FIXTURE_NOW_SECONDS from that block, and added a paragraph arguing the drop. Re-pointed the six-member mapping prose at hubAuthContext (section 2a), fixed 'mapping above' to 'mapping below', changed the verification bullet to confirm hubAuthContext's six-member return literal, and added a bullet requiring git grep devAuthContext to return nothing."
+    }
+  ],
+  "dev_auth_context_decision": "dropped - it had no importer and could have none: section 2a's hubAuthContext is the single API context builder and calls devHubClaims directly because it must also layer HubAuthOverrides, and all four section 1b oracles use devHubClaims, assertDevRoster and missingDevDenyBranches. An exported builder with no caller is dead code no lint rule catches, and leaving two context builders for one fixture is the same defect finding C3 already names. D7's six-member requirement is satisfied by hubAuthContext's return literal, and the plan still shows the full member-by-member sourcing table.",
+  "dash_clean": true,
+  "concerns": [
+    "Section 2a of slice 05 still carries the historical sentence about an earlier draft creating a competing devAuthContext(...) call at three sites. It is now consistent with the drop and reads as the rationale, so I left it rather than widen the edit surface.",
+    "Edit 5's corrected text asserts the division against slice 04 section 23.5 and 23.6 as they read now; another agent is editing slice 04 concurrently, so a final cross-read of 03 step 7 against 04 section 23 is worth one pass before execution.",
+    "Edits 1 through 4 (slice 04, including the blocking checkoutUrl arity defect B1) are not mine and are unverified here."
+  ]
+}

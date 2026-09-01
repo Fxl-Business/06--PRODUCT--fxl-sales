@@ -3,7 +3,7 @@ id: 04-sdk-210-flip
 milestone: v2.8.0
 status: todo
 depends_on: [01-session-store-read-contract, 02-explicit-hub-config, 03-access-entitlement-gate]
-files_modified: [apps/api/package.json, apps/web/package.json, pnpm-lock.yaml, apps/api/src/env.ts, apps/api/src/config/auth-provider.ts, apps/api/src/config/hub-config.ts, apps/api/src/config/__tests__/hub-config.test.ts, apps/api/src/middleware/app-auth.ts, apps/api/src/auth/hub-session-store.ts, apps/api/src/auth/hub-rotated-cookie.ts, apps/api/src/auth/hub-bff-origin.ts, apps/api/src/auth/hub-login-scope.ts, apps/api/src/config/__tests__/auth-provider.test.ts, apps/api/src/middleware/__tests__/app-auth.test.ts, apps/api/src/middleware/__tests__/app-auth-bff-wiring.test.ts, apps/api/src/middleware/__tests__/app-auth-bff-memory-path.test.ts, apps/api/src/middleware/__tests__/app-auth-bff-production-boot.test.ts, apps/api/src/auth/__tests__/hub-session-store.test.ts, apps/api/src/auth/__tests__/hub-bff-origin.test.ts, apps/api/src/auth/__tests__/hub-login-scope.test.ts, apps/api/src/auth/__tests__/hub-contract-types.test.ts, apps/api/src/auth/__tests__/hub-auth-context-fixture.ts, apps/api/src/domains/sales-ops/__tests__/routes.test.ts, apps/api/src/domains/sales-ops/__tests__/history-route.test.ts, apps/api/test/rls/hub-bff-session-store.test.ts, apps/api/test/rls/hub-bff-login-supersede.test.ts, apps/api/.env.example, apps/api/.env.dev.example, apps/web/src/auth/provider.ts, apps/web/src/auth/react.tsx, apps/web/src/auth/__tests__/provider.test.ts, apps/web/src/auth/__tests__/react.test.tsx, apps/web/src/__tests__/session-journey.test.tsx, apps/web/src/__tests__/route-error-and-auth-context.test.tsx, apps/web/src/sales-ops/__tests__/session-loss-keeps-route.test.tsx, apps/web/.env.example, apps/web/.env.dev.example, packages/shared-types/src/env.ts, CLAUDE.md, README.md, nexo/ROADMAP.md]
+files_modified: [apps/api/package.json, apps/web/package.json, pnpm-lock.yaml, apps/api/src/env.ts, apps/api/src/config/auth-provider.ts, apps/api/src/config/hub-config.ts, apps/api/src/config/__tests__/hub-config.test.ts, apps/api/src/middleware/app-auth.ts, apps/api/src/auth/hub-session-store.ts, apps/api/src/auth/hub-rotated-cookie.ts, apps/api/src/auth/hub-bff-origin.ts, apps/api/src/auth/hub-login-scope.ts, apps/api/src/config/__tests__/auth-provider.test.ts, apps/api/src/middleware/__tests__/app-auth.test.ts, apps/api/src/middleware/__tests__/app-auth-bff-wiring.test.ts, apps/api/src/middleware/__tests__/app-auth-bff-memory-path.test.ts, apps/api/src/middleware/__tests__/app-auth-bff-production-boot.test.ts, apps/api/src/middleware/__tests__/app-auth-access-gate.test.ts, apps/api/src/middleware/__tests__/app-auth-sdk-gate-wiring.test.ts, apps/api/src/auth/__tests__/hub-session-store.test.ts, apps/api/src/auth/__tests__/hub-bff-origin.test.ts, apps/api/src/auth/__tests__/hub-login-scope.test.ts, apps/api/src/auth/__tests__/hub-contract-types.test.ts, apps/api/src/auth/__tests__/hub-auth-context-fixture.ts, apps/api/src/domains/sales-ops/__tests__/routes.test.ts, apps/api/src/domains/sales-ops/__tests__/history-route.test.ts, apps/api/test/rls/hub-bff-session-store.test.ts, apps/api/test/rls/hub-bff-login-supersede.test.ts, apps/api/.env.example, apps/api/.env.dev.example, apps/web/src/auth/provider.ts, apps/web/src/auth/react.tsx, apps/web/src/auth/__tests__/provider.test.ts, apps/web/src/auth/__tests__/react.test.tsx, apps/web/src/__tests__/session-journey.test.tsx, apps/web/src/__tests__/route-error-and-auth-context.test.tsx, apps/web/src/sales-ops/__tests__/session-loss-keeps-route.test.tsx, apps/web/src/lib/api-client.ts, apps/web/src/lib/require-token.ts, apps/web/src/lib/__tests__/api-client-token-guard.test.ts, apps/web/src/sales-ops/MissingEntitlementPanel.tsx, apps/web/src/sales-ops/SalesOpsApp.tsx, apps/web/src/sales-ops/__tests__/entitlement-dead-end.test.tsx, apps/web/src/sales-ops/__tests__/missing-entitlement-panel.test.tsx, apps/web/.env.example, apps/web/.env.dev.example, packages/shared-types/src/env.ts, CLAUDE.md, README.md, nexo/ROADMAP.md]
 acceptance: "given both apps resolve @fxl-business/hub-sdk 2.1.0, when the full suite, lint, type-check and a real build run, then all are green, the BFF boots with a required session store and an explicit redirect URI on this app's own origin, the rotated-cookie wrapper and the origin shim are both still exercised and green, and no test was weakened"
 goal: "Bump both apps to hub-sdk 2.1.0 and honour every 2.x contract in one atomic slice"
 must_not_break:
@@ -35,8 +35,8 @@ deletes the adapters they left behind:
 - 01 gave the store transaction a `read()` beside its `get()` and put `kind` on the store
   object. This slice DELETES `get()`.
 - 02 made the Audience and the environment explicit configuration and accepted
-  `FXL_HUB_CONFIG`. This slice DELETES 02's hand-rolled parser and calls the SDK's
-  `loadHubConfig` / `parseHubConfig` instead.
+  `FXL_HUB_CONFIG`. This slice deletes 02's VENDORED PARSER and calls the SDK's
+  `loadHubConfig` instead. Everything 02 built around that parser survives; see section 2.0.
 - 03 replaced the `<slug>.core` module gate with `entitlements.access`. This slice moves the
   four contract types onto the SDK's own declarations so that gate is type-checked rather
   than typed `any`.
@@ -59,8 +59,9 @@ grep -n 'read: async\|read()' apps/api/src/auth/hub-session-store.ts
 # 3. Slice 01 put kind on the store object, not only on the factory envelope.
 grep -n "readonly kind" apps/api/src/auth/hub-session-store.ts
 
-# 4. Slice 03 removed every core-module read.
-grep -rn 'coreModule\|sales\.core' apps/api/src apps/web/src   # must be empty
+# 4. Slice 03 removed every core-module read from PRODUCTION source.
+git grep -n -i "sales\.core" -- apps packages scripts ':!*__tests__*'   # must print nothing
+git grep -n "coreModule" -- apps packages scripts ':!*__tests__*'       # must print nothing
 
 # 5. Slice 02 renamed the discrete env vars to the SDK's names.
 grep -n 'FXL_HUB_CLIENT_ID\|FXL_HUB_CLIENT_SECRET\|FXL_HUB_ENVIRONMENT' apps/api/src/env.ts
@@ -68,6 +69,12 @@ grep -n 'FXL_HUB_CLIENT_ID\|FXL_HUB_CLIENT_SECRET\|FXL_HUB_ENVIRONMENT' apps/api
 # 6. The suite is green on master before the bump.
 pnpm run lint && pnpm run type-check && pnpm test && pnpm run build
 ```
+
+Precondition 4 excludes `__tests__` deliberately, and that exclusion is not laziness. Slice 03
+keeps exactly two `sales.core` literals in TEST fixtures on purpose - they are the defect
+INVERTED, proving that a token still carrying the retired module is not thereby granted access -
+and slice 03's own gate carries the same exclusion. A gate that failed on those two would make
+this slice stop on its predecessor's best oracle.
 
 If step 5 comes back empty, slice 02 kept `FXL_HUB_PUBLISHABLE_KEY` / `FXL_HUB_SECRET_KEY`.
 In that case this slice performs the rename as part of section 2 below, exactly as written;
@@ -140,70 +147,100 @@ copies. That is not needed for 2.1.0.
 
 ---
 
-## 2. The config parser: delete this repo's own, use the SDK's
+## 2. The config parser: delete this repo's VENDORED copy, keep every gate around it
 
-### 2.1 `apps/api/src/config/auth-provider.ts` - final shape
+### 2.0 What this section does and does NOT do
 
-Delete every hand-rolled parse. Whatever slice 02 left in this file that duplicates
-`parseHubConfig` goes, including any local audience derivation, any local `pk_` regex, any
-local `required()` helper and any local `HubAuthConfig` type. The file becomes a thin,
-named boundary over the SDK loader and nothing else:
+This slice delegates ONE thing to the SDK: the PARSER. Slice 02 hand-wrote a backport of
+`parseHubConfig` / `loadHubConfig` / `HubConfigError` in `apps/api/src/config/hub-config.ts`
+precisely so it could ship its architecture on `1.3.1`, and it said in its own words that
+slice 04 swaps that module for the real one. That swap is one import line.
+
+Everything slice 02 built AROUND the parser SURVIVES this slice untouched:
+`hubEnvBag`, `hubConfigPresence`, `HUB_DISCRETE_ENV_VARS`, `HubEnvSource`, `HubAuthConfig`,
+and above all the ABSENCE of any blanket `try/catch` in `auth-provider.ts`.
+
+That is not a preference, it is an acceptance criterion. `00-OVERVIEW.md` accepts on
+"the API refuses to boot and names the offenders" and "the API refuses to boot, offline".
+A blanket catch that turns a `HubConfigError` into `null` turns both of those into a running
+API answering `503` to everything, and it is exactly the plausible-looking fallback the SDK's
+own `assertBootConfiguration` docstring says the 2.x release exists to remove.
+
+So, explicitly, this slice:
+
+- does NOT reinstate a blanket `try/catch` in `auth-provider.ts`;
+- does NOT re-introduce an `EnvLike` parameter on the loaders;
+- does NOT hand raw `process.env` to `loadHubConfig`, and does NOT spell
+  `resolveHubRedirectUri(process.env)`. Raw `process.env` stays out of that file, exactly as
+  slice 02 left it;
+- does NOT delete `HubAuthConfig`.
+
+Consequently slice 02's named tests 19, 20, 21, 22, 23, 24 and 25 all SURVIVE this slice
+unchanged, and section 17 below lists none of them as an edit. Test 20,
+`refuses to boot on a product. audience rather than answering 503`, is the oracle that fails
+the moment anyone reinstates the catch, and it must still be ABLE to fail after this slice.
+
+### 2.1 `apps/api/src/config/auth-provider.ts` - the ONE line that changes
+
+Slice 02 left the file importing its own backport:
+
+```ts
+import { type HubConfig, HubConfigError, loadHubConfig } from './hub-config.js';
+```
+
+Change it to the real thing, and nothing else in the file:
 
 ```ts
 import { HubConfigError, loadHubConfig, type HubConfig } from '@fxl-business/hub-sdk';
-
-type EnvLike = Record<string, string | undefined>;
-
-/**
- * The Hub configuration, parsed by the SDK and by nothing else.
- *
- * `loadHubConfig` reads FXL_HUB_CONFIG as a single JSON object, or the five discrete
- * variables FXL_HUB_API_URL, FXL_HUB_ENVIRONMENT, FXL_HUB_CLIENT_ID,
- * FXL_HUB_CLIENT_SECRET and FXL_HUB_AUDIENCE, and refuses both at once. It also
- * enforces the agreements this repo used to derive: the clientId's environment segment
- * must equal `environment`, the clientSecret's slug and environment must equal the
- * clientId's, and the audience must be exactly `app.<slug>`. Deriving any of that here
- * again would be a second source of truth for the one value that has to match what the
- * Hub minted.
- */
-export function loadHubAuthConfig(env: EnvLike): HubConfig {
-  return loadHubConfig(env);
-}
-
-/**
- * The optional form the middleware boots through. A HubConfigError means the operator has
- * not finished wiring the Hub yet, and `appAuthMiddleware` answers 503
- * `hub_auth_not_configured` rather than crashing the process. Any OTHER throw is a
- * programming error and is re-thrown: swallowing it would boot an API that can never
- * authenticate anyone and never say why.
- *
- * The message is deliberately not logged here. It names field values, and this repo's rule
- * is that no credential value reaches a log.
- */
-export function tryLoadHubAuthConfig(env: EnvLike): HubConfig | null {
-  try {
-    return loadHubConfig(env);
-  } catch (err) {
-    if (err instanceof HubConfigError) {
-      return null;
-    }
-    throw err;
-  }
-}
 ```
 
-Exported symbols after this edit: `loadHubAuthConfig`, `tryLoadHubAuthConfig`. Nothing else.
-The names are unchanged on purpose, so `apps/api/src/middleware/app-auth.ts:13` keeps its
-import line and the diff stays inside this file.
+`HubConfigError`, `loadHubConfig` and `HubConfig` all exist on the 2.1.0 root subpath
+(`dist/index.d.ts` re-exports them from `dist/config-CxunTdjI.d.ts`, where `loadHubConfig` is
+declared at `:67`, `parseHubConfig` at `:52` and `HubConfigError` at `:35`). Slice 02 chose
+the backport's names to be byte-identical to the SDK's for exactly this moment.
 
-`HubAuthConfig` is DELETED. Recon confirms it has zero external importers.
+The file's exported surface after this slice is UNCHANGED from slice 02 plus slice 03's
+`coreModule` deletion:
+
+```ts
+export const HUB_DISCRETE_ENV_VARS: readonly string[];
+export type HubEnvSource = Pick<Env, ...>;
+export type HubAuthConfig = HubConfig & { healthToken: string | undefined };
+export function hubEnvBag(source: HubEnvSource): Record<string, string | undefined>;
+export function hubConfigPresence(bag: Record<string, string | undefined>): HubConfigPresence;
+export function loadHubAuthConfig(bag: Record<string, string | undefined>): HubAuthConfig;
+export function tryLoadHubAuthConfig(bag: Record<string, string | undefined>): HubAuthConfig | null;
+```
+
+`loadHubAuthConfig`'s body keeps its `FXL_HUB_HEALTH_TOKEN` gate and its
+`return { ...config, healthToken };`. `tryLoadHubAuthConfig` keeps its three lines and its
+comment: `hubConfigPresence` may THROW on ambiguity and is not caught, `absent` and
+`incomplete` return `null`, and `loadHubAuthConfig` may THROW and is not caught.
+
+Two things the executor must check while making this one-line change, because both are
+places the SDK could differ from the backport in a way that only shows up at runtime:
+
+- `HubConfigError` must still expose the `field` property slice 02's tests assert on. The
+  SDK declares it at `dist/config-CxunTdjI.d.ts:35`; if the shape differs, the tests are
+  right and the adapter is wrong - do not loosen an assertion to fit.
+- `loadHubConfig` reads ONLY the five discrete names plus `FXL_HUB_CONFIG`, so
+  `hubEnvBag`'s twelve-key projection is a strict superset and passing it whole is correct.
+  The extra seven keys are ignored by the SDK and are what `resolveHubRedirectUri` and the
+  health-token gate read out of the same bag.
+
+There is a real behavioural overlap here and it is deliberate: the SDK's own `loadHubConfig`
+also refuses `FXL_HUB_CONFIG` beside a discrete variable. `hubConfigPresence` keeps its own
+check anyway, ahead of the SDK's, because it is the check that runs on the `incomplete`
+discrete bag too, where `loadHubConfig` is never reached. Slice 02's test 19 asserts the
+error names every offender; if the SDK's message and the local one ever disagree, the LOCAL
+one wins because it fires first, and that is what the test pins.
 
 ### 2.2 `apps/api/src/env.ts` - the declared surface
 
-The Hub block of the zod schema becomes exactly this. Every entry stays
-`emptyToUndefined` / `emptyToUndefinedUrl` and NOTHING here re-validates the Hub shape: the
-SDK's `parseHubConfig` is the single authority, and a second validator would give two
-different error messages for one mistake.
+The Hub block of the zod schema is what slice 02 left, plus `FXL_HUB_HEALTH_TOKEN` if slice
+02 did not already add it. Every entry stays `emptyToUndefined` / `emptyToUndefinedUrl` and
+NOTHING here re-validates the Hub shape: the SDK's `parseHubConfig` is the single authority,
+and a second validator would give two different error messages for one mistake.
 
 ```ts
   FXL_HUB_CONFIG: emptyToUndefined,
@@ -219,21 +256,20 @@ different error messages for one mistake.
   HUB_SESSION_ENCRYPTION_KEY: emptyToUndefined,
 ```
 
-DELETE `FXL_HUB_PUBLISHABLE_KEY` and `FXL_HUB_SECRET_KEY` from the schema if slice 02 left
-them. `FXL_HUB_HEALTH_TOKEN` is NEW in this slice, see section 9.
+If `FXL_HUB_PUBLISHABLE_KEY` or `FXL_HUB_SECRET_KEY` somehow survived slice 02, DELETE them
+here. If slice 02 already declared `FXL_HUB_HEALTH_TOKEN`, this block is a no-op and that is
+the expected outcome; verify rather than re-add.
 
-Note for the executor, because it is easy to get wrong: `env.ts`'s `emptyToUndefined` does
-NOT mutate `process.env`, and `app-auth.ts` hands `process.env` to `loadHubConfig`. So an
-empty `FXL_HUB_AUDIENCE=` reaches the SDK as `''`. That is correct and wanted: `parseHubConfig`
-refuses it with a `HubConfigError` naming the field, and `tryLoadHubAuthConfig` turns that into
-the existing 503. The SDK's own `presentDiscreteVars` also treats `''` as absent, so a
-`.env.dev.example` that ships `FXL_HUB_CONFIG=` blank next to the discrete variables does NOT
-trip the ambiguity error.
+`env.ts`'s `emptyToUndefined` normalises `''` to `undefined` on the VALIDATED object, and
+`hubEnvBag` projects off that validated object, so a blank `FXL_HUB_AUDIENCE=` never reaches
+the SDK as `''` - it reaches `hubConfigPresence` as absent and yields `incomplete`, which is
+the 503 an unconfigured machine already gets. A hand-built test bag that spells `''`
+literally is handled by `hubConfigPresence`'s own `isSet` check.
 
 The dotenv ordering invariant stays: `apps/api/src/middleware/app-auth.ts` must keep its
 `import { env } from '../env.js';` line, because that import is what runs dotenv before the
-module-top-level `tryLoadHubAuthConfig(process.env)` call. Do not remove it even if `env` is
-otherwise unused in a future edit.
+module-top-level `tryLoadHubAuthConfig(hubEnvBag(env))` call, and because `env` is now the
+SOURCE of that bag rather than merely a side effect.
 
 ---
 
@@ -255,7 +291,7 @@ There are two different predicates and they must not be collapsed:
 Write it as:
 
 ```ts
-  const hubConfig = hubAuthConfig;                      // HubConfig, already non-null here
+  const hubConfig = hubAuthConfig;                      // HubAuthConfig, already non-null here
   const isHubDevelopment = hubConfig.environment === 'development';
   // ONE boolean still drives both the SDK's cookie name and our own cookie read, but it is
   // now derived from the Hub environment rather than from NODE_ENV, because 2.1.0's
@@ -271,6 +307,11 @@ once, here, at the single producer.
 ### 3.2 The call
 
 ```ts
+  // Slice 02's twelve-key projection, taken off the VALIDATED env object. It already exists
+  // in this function after slice 02; it is repeated here so the call below reads whole. Raw
+  // `process.env` does not appear in it. See section 2.0.
+  const hubEnv = hubEnvBag(env);
+
   const session = createHubSessionStore({
     databaseUrlPresent: Boolean(env.DATABASE_URL),
     nodeEnv: process.env.NODE_ENV ?? 'development',
@@ -287,6 +328,10 @@ once, here, at the single producer.
     // REPLACES secureCookies and is INVERTED. Passed only when true: 2.1.0 refuses
     // `insecureCookies: true` outside development, and passing `false` explicitly outside
     // development is legal but says nothing, so the key is simply absent there.
+    // WRITTEN AS A SPREAD ON PURPOSE, and section 16.2's oracle
+    // `expect('insecureCookies' in (bffOptions ?? {})).toBe(false)` depends on it. Simplifying
+    // this to `insecureCookies: isHubDevelopment` makes the KEY present-and-false outside
+    // development, reddens that test, and reads like a test bug when it is not one.
     ...(isHubDevelopment ? { insecureCookies: true } : {}),
     // REQUIRED outside development. Operator-generated, never Hub-issued. See section 9.
     ...(env.FXL_HUB_HEALTH_TOKEN !== undefined ? { healthToken: env.FXL_HUB_HEALTH_TOKEN } : {}),
@@ -299,13 +344,20 @@ once, here, at the single producer.
     // EXPLICIT, never defaulted. 2.1.0 defaults redirectUri to `${config.apiUrl}/auth/callback`,
     // which is the HUB's origin, so the callback would point at the wrong host and the Hub
     // would refuse an unregistered redirect_uri.
-    redirectUri: resolveHubRedirectUri(process.env),
-    postLoginRedirect: resolveHubPostLoginRedirect(process.env),
-    postLoginErrorRedirect: resolveHubPostLoginErrorRedirect(process.env),
+    redirectUri: resolveHubRedirectUri(hubEnv),
+    postLoginRedirect: resolveHubPostLoginRedirect(hubEnv),
+    postLoginErrorRedirect: resolveHubPostLoginErrorRedirect(hubEnv),
   });
 ```
 
 `now` is still not passed. `postLoginRedirect` and `postLoginErrorRedirect` are unchanged.
+
+One scoping note, because the two rules look like they collide and do not. The
+no-raw-`process.env` rule from section 2.0 is scoped to `auth-provider.ts`, which is where the
+Hub CONFIG is parsed. `createHubSessionStore`'s `nodeEnv` argument is about THIS deployment's
+mode rather than about the Hub, and `hubEnvBag` carries `NODE_ENV` too, so either spelling is
+correct there: keep whichever one slice 02 left in place and do not churn it. What must not
+happen is a Hub CONFIG field being read off raw `process.env`.
 
 ### 3.3 `resolveHubRedirectUri` tightening
 
@@ -315,8 +367,11 @@ loose type is the only thing that would let a future edit hand `undefined` to `c
 and silently take the Hub-origin default.
 
 ```ts
-export function resolveHubRedirectUri(envBag: EnvLike): string {
+export function resolveHubRedirectUri(envBag: Record<string, string | undefined>): string {
 ```
+
+Keep whatever parameter TYPE slice 02 left on this function; only the RETURN type moves. The three resolvers live in `app-auth.ts` and slice 02 already
+feeds them `hubEnvBag(env)`; do not change them back to reading `process.env`.
 
 Leave the body exactly as it is. The development fallback
 `${CORS_ORIGIN}/auth/callback` is this app's own origin, which is the invariant.
@@ -341,6 +396,32 @@ tidy-up.
 Delete any `get` that slice 01 left on `DurableHubSessionStore`'s type or on
 `PostgresHubSessionStore`. The store class keeps only what `HubSessionStore` declares plus
 `withLoginContext`.
+
+**Delete slice 01's three local type declarations and import the SDK's.** Slice 01 declared
+`HubSessionStoreKind`, `HubSessionReadResult` and a local `HubSessionTransaction` in this
+file, spelled byte-for-byte like 2.1.0's, and its own plan says slice 04 deletes them and adds
+the identifiers to the import. Doing that is not optional tidying: without it the tree carries
+TWO definitions of `HubSessionReadResult`, it compiles, nothing goes red, and slice 01's stated
+end state is never reached.
+
+- DELETE `export type HubSessionStoreKind = 'ephemeral' | 'persistent';`
+- DELETE `export type HubSessionReadResult = ...` (the three-member union).
+- DELETE `export interface HubSessionTransaction extends SdkHubSessionTransaction { read(): ... }`
+  and the `type HubSessionTransaction as SdkHubSessionTransaction` alias in the import block
+  that existed only to write that `extends`.
+- Import all three from the SDK root subpath instead. 2.1.0 exports
+  `HubSessionReadResult` and `HubSessionStoreKind` from `dist/index.d.ts:3` and
+  `HubSessionTransaction` from `dist/index.d.ts:305`; the declarations themselves are at
+  `dist/session-store-DOWOoBx8.d.ts:17`, `:30` and `:38`.
+- `DurableHubSessionStore` keeps `readonly kind: 'persistent'`, its narrowed `withSession`
+  and `withLoginContext`. Those are this repo's own narrowing, not a duplicate of an SDK type.
+
+If any repo module imported one of the three names from `../auth/hub-session-store.js`,
+re-point it at `@fxl-business/hub-sdk`. Grep before assuming:
+
+```bash
+grep -rn 'HubSessionReadResult\|HubSessionStoreKind\|HubSessionTransaction' apps/api/src apps/api/test
+```
 
 Update the file's doc header: it is pinned to `@fxl-business/hub-sdk@1.3.0` today. Re-pin
 every version reference to `2.1.0` and re-quote the two behaviour lines it names, which in
@@ -438,6 +519,13 @@ and did not fix it. Required content, in the file's own voice:
   must prove that rotation survives an Organization switch. Name the test that does it, whose
   new title is given in section 16.
 
+HOUSE RULE, and this is the section where it is most likely to be broken: the SDK's own
+shipped `.d.ts` files contain an em dash (the `session-store` docblock's "a `pg` Pool, a
+Drizzle instance ... - anything"). Re-quoting a line number is fine; copying vendor prose is
+not. NO line added to a repo file by this slice may carry an em dash or an en dash, and no
+vendor comment may be pasted verbatim. Re-word it in this repo's own voice with a plain
+hyphen. The same warning applies to section 6.2.
+
 Do not add a claim about what the live Hub sends. The tarball cannot answer whether the Hub
 prefixes the rotation cookie; the regex's inability to match it is what is provable and what
 the file already says.
@@ -485,6 +573,8 @@ Update the header so it names 2.1.0:
 - The opening sentence becomes: the guard was added in `1.3.x`, is STILL present and STILL
   hardcoded in `@fxl-business/hub-sdk@2.1.0` at `dist/server.js:421-432`, and 2.1.0 adds no
   configuration escape. Quote the current line numbers.
+- Same house rule as section 5.2: re-quote the line numbers, never the vendor's prose. No
+  added line may carry an em dash or an en dash.
 - Keep the whole "why a shim and not a deployment change" paragraph. It is still the correct
   reasoning.
 - Update the delete-signal sentence and `nexo/ROADMAP.md:12` alongside it: this module can be
@@ -633,7 +723,9 @@ import type { HubAuthContext, HubTokenClaims, HubWorkspaceRole } from '@fxl-busi
  * `any` cannot pass unnoticed through a fixture.
  *
  * Slice 05 re-points the claims half of this at `devHubClaims` from
- * `@fxl-business/hub-sdk-testing`. Until then the literals live here.
+ * `@fxl-business/hub-sdk-testing`, EDITING this file rather than replacing it, and declares
+ * it in its own files_modified. That handoff is agreed on both sides: this module is not
+ * created here and orphaned one wave later.
  */
 export type HubAuthOverrides = {
   accountId?: string;
@@ -686,6 +778,79 @@ module gate pass by accident.
 
 `entitlements.modules` on `HubTokenClaims` and on `HubAuthContext` are the same object here,
 matching the SDK's own `toHubTokenClaims` behaviour.
+
+**Handoff to slice 05, stated on both sides.** Slice 05 (wave 4) EDITS this file: it replaces
+the hand-written `claims` literal with `devHubClaims` from `@fxl-business/hub-sdk-testing` and
+keeps the `hubAuthContext(overrides)` signature, so the four consumers named in section 17 do
+not move again. Slice 05's plan declares
+`apps/api/src/auth/__tests__/hub-auth-context-fixture.ts` in its own `files_modified`. Wave 3
+and wave 4 are serial, so that overlap is legal and intentional, not a conflict. If slice 05
+ever chooses to own the whole thing instead, it must DELETE this module in the same commit;
+what is forbidden is leaving it here with no importer.
+
+---
+
+### 7.5 `hubSdkConfig`, `getHubSdkConfig` and `requireHubAuth`'s deleted `audience` option
+
+Three more compile breaks live in `apps/api/src/middleware/app-auth.ts`, all caused by the
+1.3.1 type `HubSdkConfig`, which DOES NOT EXIST in 2.1.0. The file cannot type-check until all
+three are gone, and section 19 step 8 declares it type-checks clean, so they are owned here.
+
+1. **`:1`** - `import type { HubSdkConfig } from '@fxl-business/hub-sdk';` is DELETED. It is
+   replaced by the contract-type import in section 7.1 plus `import type { HubConfig }` if the
+   file needs to spell the type; after slice 02 `hubAuthConfig` is already a
+   `HubAuthConfig | null`, which IS a `HubConfig`, so an explicit annotation is usually
+   unnecessary.
+2. **`:85-92`** - the `const hubSdkConfig: HubSdkConfig | null = hubAuthConfig ? { apiUrl,
+   publishableKey, secretKey, audience } : null;` adapter is DELETED WHOLE. It existed only to
+   translate this repo's field names into 1.3.1's `publishableKey` / `secretKey`. 2.1.0's
+   `HubConfig` is `{apiUrl, environment, clientId, clientSecret, audience}`
+   (`dist/config-CxunTdjI.d.ts:4-20`), which is exactly what `loadHubConfig` returns, so there
+   is nothing left to translate.
+3. **`:149-151`** - `export function getHubSdkConfig() { return hubSdkConfig; }` is DELETED.
+
+Then re-point every reader at the loaded config. The readers, all in this same file, are:
+
+- `:154-156`, the `hubAuthMiddleware` construction. It becomes:
+  ```ts
+  const hubAuthMiddleware = hubAuthConfig ? requireHubAuth(hubAuthConfig) : null;
+  ```
+  The `{ audience: ... }` option is GONE. 2.1.0's `RequireHubAuthOptions`
+  (`dist/server.d.ts:85-93`) has exactly four members - `fetchImpl`, `allowWithoutAccess`,
+  `requiredModule`, `requiredRoles` - and no `audience`. The SDK's own docblock on
+  `requireHubAuth` gives the reason, and it is the same reason section 2.1 gives for not
+  re-deriving the audience: "The audience comes from `config.audience`, which is required and
+  validated, so there is no override: an override would be a second source of truth for the
+  one value that must match what the Hub minted."
+  Do NOT pass `allowWithoutAccess` here. Its default is `false`, and that default is what
+  makes the SDK answer the 402 this repo used to answer itself. See section 23.
+- `:159`, `appAuthMiddleware`'s unconfigured guard. It becomes
+  `if (!hubAuthMiddleware || !hubAuthConfig) { ... 503 ... }`. The 503 body and status are
+  unchanged; only the second operand moves.
+- `:198`, `createAppAuthBff`'s early return. It becomes `if (!hubAuthConfig) return null;`.
+- `:218`, the `createHubBff` call. Section 3.2 already spells it `createHubBff(hubConfig, ...)`
+  where `hubConfig` is the non-null `hubAuthConfig`.
+
+**Every other reader of `getHubSdkConfig` across the repo.** Grep, do not assume:
+
+```bash
+git grep -n "getHubSdkConfig\|hubSdkConfig\|HubSdkConfig" -- apps packages scripts
+```
+
+Recon at the time of writing finds exactly two OTHER files, both tests, both already owned by
+section 17 - so this deletion adds no file to `files_modified`:
+
+- `apps/api/src/middleware/__tests__/app-auth-bff-wiring.test.ts:23,346,391,756` - the
+  `HubSdkConfig` type import and three inline config literals, all replaced by the 2.x
+  `HubConfig` literal section 17 gives.
+- `apps/api/test/rls/hub-bff-login-supersede.test.ts:28,54` - `import type { HubSdkConfig }`
+  and `const HUB_CONFIG: HubSdkConfig`, both replaced by `HubConfig` per section 17.
+
+`apps/api/dist/middleware/app-auth.d.ts` also names it. That is BUILD OUTPUT, it is not
+tracked source, and it is regenerated by `pnpm run build`. Do not hand-edit it.
+
+Nothing outside `apps/api` imports `getHubSdkConfig`, so no route module and nothing in
+`apps/web` is affected by its removal.
 
 ---
 
@@ -841,6 +1006,15 @@ export function getHubBffBasePath(env: EnvLike): string {
 }
 ```
 
+**Why this is hand-written when the SDK ships `loadHubPublicConfig` and `toPublicConfig`**
+(`dist/config-CxunTdjI.d.ts:77` and `:58`): both read the SERVER variable names, `FXL_HUB_*`,
+and the browser bag has only `VITE_FXL_HUB_*`, so neither can be handed `import.meta.env`
+without first renaming every key - which is the whole function. `toPublicConfig` additionally
+takes a full `HubConfig`, which the browser must never hold because it carries `clientSecret`.
+The RESULT type is still the SDK's `HubPublicConfig`, so the contract is shared even though
+the reader is not. This paragraph exists so a later reader does not "simplify" this back to
+the SDK loader and silently read three variables that do not exist in a Vite bundle.
+
 `BrowserHubConfig` is DELETED; `HubPublicConfig` replaces it. `getHubBffBasePath` is
 UNCHANGED, including its `??` rather than `||`, which is load-bearing for the shipped
 `VITE_AUTH_BFF_BASE_PATH=` empty declaration and is pinned by
@@ -910,14 +1084,156 @@ Apply the SAME block to all three, keeping each file's existing style:
 the only thing that turns a future member change into a compile error rather than a runtime
 surprise.
 
-### 11.1 Keeping `react.test.tsx:368` meaningful
+**MIGRATION checklist item 12 is NOT a no-op. It has a production caller, and this slice owns
+it.** A previous revision of this plan asserted the opposite. That assertion was true when this
+plan was parked at `e59f870` and the `feature-20260828-organization-context-escape` run made it
+false the next day; section 24 records the miss. Read off the two tarballs:
+
+```
+1.3.1  dist/client.d.ts:51   checkoutUrl(sku?: string): Promise<string>;
+1.3.1  dist/client.d.ts:53   manageUrl(): Promise<string>;
+2.1.0  dist/client.d.ts:170  checkoutUrl(organizationId: string, sku?: string): Promise<string>;
+2.1.0  dist/client.d.ts:172  manageUrl(organizationId: string): Promise<string>;
+```
+
+`organizationId` is REQUIRED and it is FIRST, so a call that passes only a sku is not merely
+mis-scoped, it does not compile. At HEAD `84ac2a3`,
+`apps/web/src/sales-ops/MissingEntitlementPanel.tsx:105` calls `.checkoutUrl()` with NO
+arguments, inside a `useEffect`, in a shipped component. Under 2.1.0 that is
+`TS2554: Expected 1-2 arguments, but got 0`, which fails
+`pnpm --filter @fxl-sales/web type-check`, `pnpm run type-check` and `pnpm run build`, all
+three of which section 21 requires green.
+
+**This is a correctness fix and not only an arity fix**, which is why it belongs to this panel
+rather than to a mechanical sweep. MIGRATION.md section 14 says, verbatim: "Both take the
+Organization now. A link that did not name one would land the user on their Primary
+Organization, which is not necessarily the one they were looking at when they clicked."
+`MissingEntitlementPanel` NAMES the active Organization on screen, in
+`MISSING_ENTITLEMENT_COPY.activePrefix` and the `[data-active-organization]` span, and its
+`checkoutBody` says the purchase "vale para a Organização ativa". Today that link would send
+the operator to checkout for their PRIMARY Organization instead. Scoping the call makes the
+link match the sentence above it.
+
+**The edit, at `apps/web/src/sales-ops/MissingEntitlementPanel.tsx`.** Re-read the file before
+writing; the line numbers below are HEAD `84ac2a3`.
+
+1. The panel already destructures `active` from `useOrganizations()` at `:68`, so nothing new
+   is read. Hoist one primitive above the effect, beside the existing derived values:
+
+   ```ts
+   const activeId = active?.id ?? null;
+   ```
+
+2. The effect at `:101-115` becomes, keeping its whole existing comment block and its
+   `cancelled` flag:
+
+   ```ts
+   useEffect(() => {
+     if (activeId === null) return;
+     let cancelled = false;
+     client
+       .checkoutUrl(activeId)
+       .then((href) => {
+         if (!cancelled) setResolved({ attempt, state: { status: 'ready', href } });
+       })
+       .catch(() => {
+         if (!cancelled) setResolved({ attempt, state: { status: 'failed' } });
+       });
+     return () => {
+       cancelled = true;
+     };
+   }, [activeId, attempt, client]);
+   ```
+
+3. **The null-`active` branch is the EXISTING `CheckoutState` `failed` member.** No new state is
+   invented. `useOrganizations()` documents `active` as nullable for the degenerate token that
+   carries no `workspaceId` claim, and this panel's own docstring forbids any branch rendering
+   "an anchor whose href is unresolved". `CheckoutState` is a discriminated union whose `href`
+   exists only on `ready`, so TypeScript already forbids the alternative, and `checkoutUrl('')`
+   is exactly the empty destination the docstring bans. Express it as pure derivation, at the
+   `checkout` computation on `:79-80`, NOT as a `setResolved` in the effect body, which
+   `react-hooks/set-state-in-effect` rejects for the reason the comment above `resolved`
+   already gives:
+
+   ```ts
+   const checkout: CheckoutState =
+     activeId === null
+       ? { status: 'failed' }
+       : resolved && resolved.attempt === attempt
+         ? resolved.state
+         : { status: 'loading' };
+   ```
+
+   The `failed` branch already renders `MISSING_ENTITLEMENT_COPY.checkoutFailed` and a
+   `Tentar novamente` button and no anchor, which is the honest screen: the panel cannot name
+   an Organization to buy for. `Tentar novamente` stays reachable and simply re-derives to
+   `failed`, which costs nothing and needs no extra state.
+
+4. **The dependency array becomes `[activeId, attempt, client]`.** It is the primitive id and
+   not the `active` OBJECT, deliberately: `useOrganizations()` memoizes its value but the
+   object identity still moves whenever the token is re-applied, and a re-run per token
+   re-application would fire a fresh Hub discovery fetch on a screen that is already the
+   operator's error state. The file's own comment forbids the usual escape ("Do NOT add a ref
+   based 'already fetched' guard: it would break the retry"), so the dep array is the only
+   place this can be solved. `attempt` stays for the same reason it is there now, so
+   `Tentar novamente` really re-runs. `react-hooks/exhaustive-deps` is satisfied because the
+   effect body reads `activeId` and nothing else off the seam.
+
+5. Any comment line added here must contain no em dash and no en dash: the file's own oracle
+   `contains no page reload, no native picker and no dash characters in its source` reads the
+   source and matches `new RegExp('[\\u2014\\u2013]')`.
+
+**`apps/web/src/sales-ops/__tests__/missing-entitlement-panel.test.tsx` is DECLARED in
+`files_modified` for this, and is no longer on section 24's "does NOT touch" list.** Concretely,
+after re-reading it:
+
+- `:26` and `:66` type the seam's client as `{ checkoutUrl: ReturnType<typeof vi.fn> }` and stub
+  it untyped, so the added argument is not a compile break in this file. Leave both alone.
+- `resolves the Hub checkout href through client.checkoutUrl` (`:323`) keeps its title, keeps
+  `toHaveBeenCalledTimes(1)`, and GAINS
+  `expect(seam.client.checkoutUrl).toHaveBeenCalledWith('org-active')`. That is a
+  strengthening: `orgAtiva.id` is `org-active`, and without it the file cannot tell a correctly
+  scoped link from one scoped to the wrong Organization.
+- ADD one test to `describe('MissingEntitlementPanel - the Hub checkout')`, titled
+  `refuses to build a checkout link when no Organization is active, and asks the Hub for none`.
+  It sets `seam = makeSeam({ active: null, activeName: 'Acme Holding' })`, renders, and asserts
+  `sectionText()` contains `MISSING_ENTITLEMENT_COPY.checkoutFailed`, that `checkoutAnchor()` is
+  `null`, and that `seam.client.checkoutUrl` was never called. The last assertion is the one
+  that matters: it is what forbids a future `checkoutUrl('')`.
+- The two EXISTING `active: null` tests at `:167` and `:175` still pass unchanged, because both
+  assert only on the Organization-naming copy and neither reads the checkout block. Confirm
+  that rather than assume it; do not edit either one.
+
+**`apps/web/src/auth/__tests__/react.test.tsx` is already declared, and two lines move.** `:212`
+calls `void client.checkoutUrl('sales.core')` inside the `renderOrganizations` harness button
+and `:2062` asserts `toHaveBeenCalledWith('sales.core')`. Under 2.1.0 both still COMPILE and
+still PASS, because one string is now a positionally valid `organizationId`, so this is a
+silent-wrong-argument hazard rather than a red: the file would be documenting a MODULE id being
+handed to a parameter that means an Organization. Change the literal in BOTH places to
+`'workspace-alpha'`, which is the id the surrounding test already mints through
+`profileToken('Alpha', undefined, 'workspace-alpha')`. The `it` title
+`hands back the Hub client so a later slice can build the checkout link` and the assertion
+shape are both unchanged; only the literal moves, and it moves from meaningless to correct.
+
+**`manageUrl` really is a no-op, and this sentence is the audit trail for that half.**
+`git grep manageUrl -- apps` at HEAD returns four lines and no production caller: the three
+`satisfies HubClient` mocks above (`react.test.tsx:21`, `session-journey.test.tsx:45`,
+`session-loss-keeps-route.test.tsx:21`), all of which take their signature from
+`HubClient['manageUrl']` and so absorb the change for free, plus one
+`mockResolvedValue` at `react.test.tsx:445`. No component builds a billing link. Nothing is owed
+for that half of checklist item 12. Re-run the grep before relying on this.
+
+### 11.1 Keeping the `getToken` non-call assertions meaningful
 
 `getToken` still exists on `HubClient` in 2.1.0, so
 `expect(mocks.client.getToken).not.toHaveBeenCalled()` still compiles and still means
 something. But 2.x also adds `getTokenResult`, which is the reader a well-meaning future edit
 would reach for instead, and the assertion as written would not see it.
 
-Strengthen, do not replace. In the test
+Strengthen, do not replace. There are exactly TWO such assertions in the file, verified at
+HEAD `84ac2a3` (`react.test.tsx:478` and `:539`, both inside
+`describe('AppAuthProvider token cache wiring')`). Find them by grep, not by line number. In
+the test
 `hydrates the provider through the token cache instead of the SDK client`, and again in
 `clears browser token state before SDK logout`, keep the existing line and add one beside it:
 
@@ -968,7 +1284,9 @@ independent renewal loops would be driving the same BFF endpoint with two differ
 
 Two defences, both required.
 
-FIRST, turn the SDK loop off at the source. In `apps/web/src/auth/react.tsx`:
+FIRST, turn the SDK loop off at the source. In `apps/web/src/auth/react.tsx`, at the
+`createHubClient` call inside the provider (`:234` at HEAD `84ac2a3`, currently
+`() => createHubClient(loadHubBrowserConfig(import.meta.env), { bffBasePath })`):
 
 ```tsx
   const client = useMemo(
@@ -1017,11 +1335,16 @@ Both are pinned by named tests in section 16.
 
 ### 12.4 What must stay untouched
 
-The nine tests in `describe('proactive token renewal')` in `react.test.tsx:1151-1403` are
-about THIS app's timer and must all stay green, unmodified. Same for the whole
-`describe('session preservation and route restore')` block, the whole
-`describe('explicit logout intent')` block and the whole
-`describe('identity-scoped query cache')` block. Same for all seven tests in
+`describe('proactive token renewal')` in `react.test.tsx` is about THIS app's timer and must
+stay green, unmodified. Same for the whole `describe('session preservation and route restore')`
+block, the whole `describe('live session loss')` block, the whole
+`describe('explicit logout intent')` block, the whole `describe('identity-scoped query cache')`
+block, and the whole `describe('active organization and the useOrganizations seam')` block -
+that last one did not exist when this plan was written and arrived with
+`feature-20260828-organization-context-escape`; it is untouched by this slice except for the
+`SetActiveResult` literals inside it. At HEAD `84ac2a3` the file's seven top-level describes
+start at `:465`, `:658`, `:1071`, `:1259`, `:1513`, `:1709` and `:1972`; do not trust an older
+line range. Same for all seven tests in
 `apps/web/src/auth/__tests__/refresh.test.ts` and all fourteen in
 `apps/web/src/auth/__tests__/token.test.ts`. None of those files is edited by this slice.
 
@@ -1066,15 +1389,26 @@ The THIRD field was renamed from `workspaceId` (1.3.1) to `organizationId` (2.x)
 because of that: only the mock literals in the three test files. `react.tsx` never reads the
 third field. Update the literals:
 
-`apps/web/src/auth/__tests__/react.test.tsx` at lines 412, 485, 525, 539, 1647, 1690, 1726,
-1738, 1755 - `workspaceId: 'workspace-beta'` becomes `organizationId: 'workspace-beta'`, and
-`workspaceId: 'workspace-gamma'` becomes `organizationId: 'workspace-gamma'`. Keep the VALUES
-exactly as they are: they are the ids the surrounding assertions and the `profileToken`
-fixture at `:114-115` use, and changing them would decouple the mock from the fixture.
+In `apps/web/src/auth/__tests__/react.test.tsx`, `workspaceId: 'workspace-beta'` becomes
+`organizationId: 'workspace-beta'` and `workspaceId: 'workspace-gamma'` becomes
+`organizationId: 'workspace-gamma'` in every `SetActiveResult` literal. Keep the VALUES exactly
+as they are: they are the ids the surrounding assertions and the `profileToken` fixture use,
+and changing them would decouple the mock from the fixture.
 
-The `workspaceId` keys at `react.test.tsx:114-115` are inside the JWT `workspaces` claim
-fixture, NOT inside `SetActiveResult`. They stay `workspaceId`, because that is the claim
-name and `readWorkspaces` reads `workspace.workspaceId ?? workspace.id`.
+FIND THEM BY SHAPE, NOT BY LINE NUMBER. At HEAD `84ac2a3` there are TEN, not the nine this plan
+was written against, because the organization-context feature added an eleventh describe block.
+The reliable discriminator is the two sibling keys: a `SetActiveResult` literal is the one that
+sits beside `accessToken` and `expiresIn`.
+
+```bash
+grep -n -B3 "workspaceId: 'workspace-" apps/web/src/auth/__tests__/react.test.tsx
+```
+
+Every hit whose preceding lines are `accessToken:` and `expiresIn:` is a `SetActiveResult` and
+is renamed. Every other hit is a JWT `workspaces` CLAIM entry - the `profileToken` fixtures and
+the `useOrganizations` seam's fixtures - and STAYS `workspaceId`, because that is the claim
+name and `readWorkspaces` reads `workspace.workspaceId ?? workspace.id`. Getting this backwards
+silently breaks the workspace preview rather than failing to compile, so do the grep.
 
 Record the invariant in a comment above `setActive` in `react.tsx`, so the next rename costs
 three literals and not a search:
@@ -1108,8 +1442,10 @@ VITE_AUTH_BFF_BASE_PATH=
 VITE_FXL_HUB_API_URL=http://localhost:9016
 VITE_FXL_HUB_ENVIRONMENT=development
 # REQUIRED. The Audience the Hub mints for this application, of the form app.<slug>.
-# Hub-issued: ask the Hub admin for the exact value and leave this empty until then.
-VITE_FXL_HUB_AUDIENCE=
+# A PUBLIC identifier, not a credential: it is derivable from the committed clientId slug, so
+# committing it discloses nothing. Shipping it blank would make the example non-working and
+# push every operator into guessing the one value the boot check exists to validate.
+VITE_FXL_HUB_AUDIENCE=app.fxl-sales
 
 # --- Observability (optional) ---
 VITE_SENTRY_DSN=
@@ -1125,8 +1461,13 @@ spacing.
 
 - The `VITE_FXL_HUB_PUBLISHABLE_KEY=pk_fxl-sales_VzQ9...` line is DELETED from both files.
   That also removes a committed Hub key from the tree, which is a straight improvement.
-- `VITE_FXL_HUB_AUDIENCE` stays EMPTY with the comment above it. It is Hub-issued. Do not
-  invent `app.fxl-sales` here; the operator confirms it.
+- `VITE_FXL_HUB_AUDIENCE=app.fxl-sales` is WRITTEN OUT in both files. The Audience is a public
+  identifier, not a credential, and it is derivable from the committed clientId slug, so
+  committing it discloses nothing that the clientId would not. This matches
+  `apps/api/.env*.example`, which slice 02 ships the same way, so the two halves of one
+  deployment do not disagree about the one value that must match on both sides. This licenses
+  no CREDENTIAL anywhere: `FXL_HUB_CLIENT_ID`, `FXL_HUB_CLIENT_SECRET` and
+  `FXL_HUB_HEALTH_TOKEN` all still ship EMPTY.
 - `VITE_FXL_HUB_ENVIRONMENT=development` is NOT a Hub-issued value. It is a deployment fact,
   both files are local-development templates, and `development` is the only correct value for
   a template pointing at `http://localhost:9016`. Setting it is allowed and required.
@@ -1144,8 +1485,10 @@ FXL_HUB_ENVIRONMENT=development
 # Hub-issued. Shown once by the Hub admin panel. Never commit a real value.
 FXL_HUB_CLIENT_ID=
 FXL_HUB_CLIENT_SECRET=
-# Hub-issued. The Audience the Hub mints for this application, of the form app.<slug>.
-FXL_HUB_AUDIENCE=
+# The Audience the Hub mints for this application, of the form app.<slug>. PUBLIC, not a
+# credential, and derivable from the clientId slug - so it is written out here rather than
+# left blank. Slice 02 already ships it this way; verify rather than re-add.
+FXL_HUB_AUDIENCE=app.fxl-sales
 # Operator-generated, NOT Hub-issued. Authenticates GET /auth/_health, which reports the
 # resolved Audience, the session store kind and the cookie flags. Required outside
 # development; the API refuses to boot without it there. Generate one with
@@ -1161,6 +1504,9 @@ FXL_HUB_POST_LOGIN_ERROR_REDIRECT=
 FXL_HUB_CONFIG=
 HUB_SESSION_ENCRYPTION_KEY=
 ```
+
+If the JSON-form comment shows an `FXL_HUB_CONFIG` example object, its `"audience"` member is
+`"app.fxl-sales"` for the same reason.
 
 If either file still carries a real `FXL_HUB_PUBLISHABLE_KEY=pk_fxl-sales_...` value, DELETE
 the line; it does not carry over to `FXL_HUB_CLIENT_ID`, which stays empty.
@@ -1180,12 +1526,12 @@ plus the Hub-issued `FXL_HUB_AUDIENCE`, before the API will boot again locally.
 "LogicalExpression[operator='??'] > AwaitExpression.left > CallExpression[callee.name='getToken']"
 ```
 
-The app-level reader at `apps/web/src/auth/react.tsx:470` MUST stay named `getToken` and MUST
+The app-level reader at `apps/web/src/auth/react.tsx:501` (verified at HEAD `84ac2a3`) MUST stay named `getToken` and MUST
 keep its `Promise<string | null>` signature. Renaming it to `getTokenResult`, or reshaping
 `useAccessToken()` to hand back a result object, silently disarms the rule and breaks the
 ~119 call sites that reach it through `useAccessToken()` / `requireToken(getToken)`.
 
-This slice does not touch `react.tsx:464-474`, `apps/web/src/lib/require-token.ts` or
+This slice does not touch that `useCallback`, `apps/web/src/lib/require-token.ts`'s predicates or
 `apps/web/eslint.config.js`. It adds a source-pin test so a future rename fails loudly rather
 than quietly. See section 16.
 
@@ -1247,6 +1593,11 @@ Tests:
 - `passes a health token to createHubBff when the Hub environment is not development`
 - `never passes insecureCookies outside development`
   (`expect('insecureCookies' in (bffOptions ?? {})).toBe(false)`)
+  This asserts the KEY IS ABSENT, not that it is false, and it is only non-vacuous because
+  section 3.2 writes the option as a spread. If an executor "simplifies" that to
+  `insecureCookies: isHubDevelopment`, the key becomes present-and-false and this test goes
+  red - and it will look like a test bug when the bug is in the source. The test is right;
+  restore the spread.
 - `never passes allowEphemeralSessionStore outside development`
 - `passes an explicit redirectUri on this app's own origin, never the Hub's`
   Asserts `new URL(bffOptions.redirectUri).origin === 'https://sales.example.test'` and
@@ -1319,14 +1670,35 @@ Added to `describe('AppAuthProvider token cache wiring')`.
 
 ### 16.7 `apps/web/src/__tests__/route-error-and-auth-context.test.tsx` - new test
 
-Added to `describe('dev-race regression contract')`, in the same source-reading style as the
-tests already there.
+The first draft of this section asserted that `src/auth/react.tsx` contains the literal
+`const getToken = useCallback(` and that `eslint.config.js` contains `callee.name='getToken'`.
+That is a string match on FORMATTING, not on behaviour: splitting the declaration across two
+lines reddens it while the rule is perfectly intact, and any other spelling the selector also
+matches would pass it while telling us nothing. It is dropped and REPLACED by a test that
+exercises the rule itself. A test that can go red for a reason unrelated to its claim is worse
+than no test, because it trains the next reader to edit the test.
 
-- `the app-level token reader is still named getToken, so the eslint auth rule keeps matching`
-  Reads `src/auth/react.tsx` and asserts it contains `const getToken = useCallback(`; reads
-  `eslint.config.js` and asserts it contains `callee.name='getToken'`. A comment records that
-  the selector matches the literal callee name, so a rename to `getTokenResult` disarms the
-  rule silently and reopens the `(await getToken()) ?? ''` anonymous-request bug.
+- `the no-defaulted-token lint rule still fires on (await getToken()) ?? ""`
+  Loads the REAL web flat config (`eslint.config.js`, already in this package) through
+  ESLint's Node API and lints two in-memory source strings, so nothing depends on how the
+  reader is formatted:
+  - a violating one, `const t = (await getToken()) ?? '';` inside an async function, which
+    must report exactly one `no-restricted-syntax` message whose text names
+    `requireToken(getToken)`;
+  - a control, the same expression with the callee renamed, which must report none.
+  The control is what makes the first assertion mean "the SELECTOR matched" rather than "some
+  rule fired". A comment records the stakes: the selector keys on the literal callee name, so
+  renaming the app-level reader to `getTokenResult`, or reshaping `useAccessToken()` to hand
+  back a result object, disarms the rule silently and reopens the
+  `(await getToken()) ?? ''` anonymous-request bug across the ~119 call sites that reach it.
+
+`eslint` is already a devDependency of `@fxl-sales/web` (`apps/web/package.json`), so this
+adds no dependency. If loading the flat config inside vitest proves impractical in this
+environment, DROP the test entirely and say so in the run notes; do NOT fall back to the
+source-string match, which is the thing this section replaced.
+
+Section 15's rule stands either way, and `apps/web/eslint.config.js` is still not edited by
+this slice.
 
 ---
 
@@ -1338,32 +1710,71 @@ loosened. Where a title names a renamed symbol, the title changes and the assert
 ### API
 
 **`apps/api/src/config/__tests__/auth-provider.test.ts`**
-- `loads the Hub contract for product.fxl-sales` - RETITLE to
-  `loads the Hub contract through the SDK loader, with an explicit app.fxl-sales audience`.
-  The env bag becomes the five discrete SDK names; the assertion becomes `toMatchObject({ audience: 'app.fxl-sales', environment: 'development', clientId: ..., apiUrl: ... })`.
-  `coreModule` is gone (deleted by slice 03).
-- `rejects missing secret keys` - RETITLE to `rejects a missing client secret` and assert
-  `toThrow(/clientSecret/)`, which is the field `HubConfigError` names.
-- `returns null from the optional loader when Hub env is incomplete` - UNCHANGED.
-- If slice 02 already added tests for the `FXL_HUB_CONFIG` JSON form and for the
-  ambiguity refusal, keep them and only re-point them at the SDK's error field name
-  (`FXL_HUB_CONFIG`). If it did not, ADD:
-  `accepts the FXL_HUB_CONFIG single JSON form` and
-  `refuses FXL_HUB_CONFIG alongside a discrete FXL_HUB_ variable and names the offenders`.
+
+Slice 02 rewrote this file and slice 03 removed its `coreModule` assertions. Slice 04 changes
+NOTHING in it, and that is the point: the parser underneath is swapped for the SDK's and every
+one of slice 02's claims must still hold, unedited, on the real implementation. In particular
+slice 02's named tests 19, 20, 21, 22, 23, 24 and 25 are NOT touched here:
+
+- 19 `refuses to boot when FXL_HUB_CONFIG is set beside a discrete variable and names every offender`
+- 20 `refuses to boot on a product. audience rather than answering 503`
+- 21 `requires FXL_HUB_HEALTH_TOKEN outside development`
+- 22 `does not require FXL_HUB_HEALTH_TOKEN in development`
+- 23 `projects exactly the Hub variables off the validated env object`
+- 24 `no API module derives the Hub audience from a key`
+- 25 `never leaks the client secret out of the optional loader`
+
+Test 20 is the one to watch: it asserts `tryLoadHubAuthConfig` THROWS. If the executor finds
+themselves wanting to change it, the source is wrong, not the test - see section 2.0.
+
+Test 24 is a SOURCE-GUARD test and it needs a re-point, because it reads
+`apps/api/src/config/hub-config.ts`, which section 22.1 deletes. Its CLAIM - no API module
+derives the Hub audience from a key - does not die with that file. Re-point it at
+`apps/api/src/config/auth-provider.ts` and `apps/api/src/middleware/app-auth.ts`, the two
+modules that could plausibly reintroduce a derivation, asserting neither contains
+`publishableKey`, `PUBLISHABLE_KEY` or a `pk_` slug regex. The title is unchanged and the
+claim is unchanged; only the file list it reads moves, because the file it named is gone.
+
+The two tests section 22.2 MOVES here out of `hub-config.test.ts` arrive with their titles and
+assertions unchanged. If slice 02 already spelled the same claim in this file, keep ONE copy
+and say in the run notes which duplicate was dropped and why the surviving one is identical.
 
 **`apps/api/src/middleware/__tests__/app-auth.test.ts`**
 - The `baseHubAuth` fixture at `:11-18` is REPLACED by `hubAuthContext()` from
   `../../auth/__tests__/hub-auth-context-fixture.js`. Every one of the six
   `getHubLegacyAuthContext` tests keeps its title and its assertion and only changes how the
   input is built, using the overrides:
-  `maps Hub account and workspace ids into the Hono auth context`,
+  `maps Hub account and workspace ids into the Hono auth context`
+  (`hubAuthContext({ accountId: 'hub-account-1' })`; that test asserts `userId: 'hub-account-1'`
+  while section 7.4's fixture defaults `accountId` to `user_existing_1`, and the fixture default
+  does NOT move, so the override is spelled at the call site. The assertion is not edited. Its
+  `orgId: 'org_existing_1'` already matches the fixture's `workspaceId` default, so nothing else
+  is overridden. Slice 05 states that its roster follows whatever this slice leaves, so it
+  accommodates this either way),
   `maps Hub super-admins to the existing admin guard role` (`{ isSuperAdmin: true }`),
   `maps workspace owners and admins to the existing admin guard role` (`{ workspaceRole: 'owner' }` / `'admin'`),
   `maps product admin roles to the existing admin guard role` (`{ productRoles: ['admin'] }`),
   `preserves multiple product roles for downstream app authorization`,
   `does not invent a role for ordinary members without product roles`.
 - Whatever slice 03 left in place of the two `hasHubCoreEntitlement` tests keeps its titles
-  and only moves onto the fixture.
+  and only moves onto the fixture. That rule covers the SURVIVING blocks. It does NOT cover the
+  two blocks section 23.3 deletes, and the next bullet is the other end of 23.3's
+  cross-reference, so the two now agree.
+- DELETED here, by section 23.3, in the same commit that deletes the code they test:
+  `describe('classifyHubAccess')` and `describe('requireHubModule')`, both added to this file by
+  slice 03 step 5a. 23.3 walks their claims one at a time and states which die with
+  `classifyHubAccess` and which are MOVED unchanged into
+  `app-auth-sdk-gate-wiring.test.ts` (section 23.4). Do not delete anything here that 23.3 does
+  not name.
+- The IMPORTS those two blocks left behind go with them, because `tsconfig.base.json` sets
+  `"noUnusedLocals": true` (verified at HEAD, `:11`), so a leftover import is a `type-check`
+  failure and not a lint nit. Concretely: slice 03 adds `import { Hono } from 'hono'` to this
+  file solely for the `requireHubModule` probe, and it has no other reader, so it goes.
+  `classifyHubAccess`, `hasHubOrgAccess`, `hasHubModule` and `requireHubModule` are removed from
+  the `../app-auth.js` import list, since section 23.2 deletes all four exports. The
+  `MinimalHubAuthContext` type import goes too once the fixture replaces `baseHubAuth`, unless
+  a surviving block still annotates with it: grep the file after the deletions and remove every
+  import with no remaining reader, rather than deciding from this list.
 - The four `resolveHubRedirectUri` tests and the two `resolveHubPostLogin*` tests are
   UNCHANGED in title and assertion. Their signature change (`string` instead of
   `string | undefined`) does not affect them.
@@ -1539,10 +1950,11 @@ Titles and assertions UNCHANGED.
 - `wires the token cache to the BFF refresh endpoint at the same base path as the SDK client`
   - UNCHANGED. Its `expect.objectContaining({ bffBasePath: ... })` still passes with the added
   `autoRenew: false` key, which is exactly what `objectContaining` is for.
-- Every other test in the file, all five remaining describes, is UNCHANGED. In particular the
-  nine `proactive token renewal` tests, the eight `live session loss` tests, the eight
-  `explicit logout intent` tests and the seven `identity-scoped query cache` tests keep every
-  title and every assertion.
+- Every other test in the file, all six remaining top-level describes, is UNCHANGED. In
+  particular `proactive token renewal`, `session preservation and route restore`,
+  `live session loss`, `explicit logout intent`, `identity-scoped query cache` and
+  `active organization and the useOrganizations seam` keep every title and every assertion.
+  The last of those arrived after this plan was written; see section 24.
 
 **`apps/web/src/__tests__/session-journey.test.tsx`**
 - The `client` mock gains the four new members.
@@ -1609,6 +2021,33 @@ describing 1.3.1:
 - The feature-gate lines: `Feature gates check auth.claims.entitlements.modules` and
   `The core module for this product is sales.core` were replaced by slice 03. Verify they are
   gone; if slice 03 left them, delete them here.
+- The ACCESS-GATE block slice 03 wrote in that same replacement. Slice 03 step 10a lands two
+  bullets naming code this slice deletes under D2, so after wave 3 the doctrine file would
+  describe functions that do not exist. Both must be rewritten here, in the same commit that
+  deletes them (section 23.2), and the surrounding access-model bullets stay:
+  - `` `classifyHubAccess` in `apps/api/src/middleware/app-auth.ts` is the single authority,
+    allows only on `access === true`, and fails CLOSED `` becomes: the SDK's `requireHubAuth`
+    is the single authority. It is called with the loaded config and NO options, so
+    `allowWithoutAccess` takes its default of `false` and baseline access is enforced inside a
+    verified-token path this repo does not own. There is exactly one gate; a local second one
+    would mean one live gate and one unreachable one with a green suite over it.
+  - The bullet beginning `` `classifyHubAccess`, `hasHubOrgAccess`, `hasHubModule`,
+    `requireHubModule` and the 402 branch inside `appAuthMiddleware` are a DELIBERATE ONE-WAVE
+    BRIDGE `` is DELETED outright: the bridge is over, the functions are gone, and a doctrine
+    file is not a changelog. What survives from it, as one sentence in the replacement above,
+    is that a paid add-on module is `requireHubAuth`'s own `requiredModule` option and that no
+    route passes one today.
+  - The `MinimalHubAuthContext` bullet about `HubEntitlements` degrading to `any` under
+    `skipLibCheck` is NOT deleted, but re-point it to what section 7.2 establishes: this repo
+    still sets `skipLibCheck: true`, and what changed is that 2.1.0 DECLARES the four contract
+    types locally inside `dist/index.d.ts` instead of re-exporting them from an unshipped
+    package, so they resolve and `entitlements.access` is genuinely `boolean`. The local
+    `MinimalHubAuthContext` is therefore deleted, the types are imported from
+    `@fxl-business/hub-sdk` (section 7.1), and the compile-time oracle
+    `apps/api/src/auth/__tests__/hub-contract-types.test.ts` is what fails if the degradation
+    ever returns.
+  - The `no_org_access` deny taxonomy bullets are already correct at 2.1.0 and are left alone
+    apart from the `missing_entitlement` literals section 23.6 lists.
 - The Environments section: the "Required API vars" and "Required web vars" dotenv blocks must
   match section 14 exactly, with every Hub-issued value shown EMPTY. Remove the committed
   publishable key value from both blocks.
@@ -1617,15 +2056,29 @@ describing 1.3.1:
   outside development, that this repo 404s it when no token is configured so it can never be
   anonymous, and that its body must never be logged.
 
-**`README.md`**
-- `:6` keep the sentence, it is still true.
-- `:44-48` and `:54-58` dotenv blocks: match section 14. Remove the committed publishable key.
+**`README.md`** (line numbers verified at HEAD `84ac2a3`; slice 02 edits this file first, so
+re-read it before trusting any of them)
+- `:5` keep the sentence, it is still true.
+- `:7` `The product audience is \`product.fxl-sales\`.` becomes `app.fxl-sales`. Slice 02
+  leaves this one for this slice.
+- `:24` `A registered FXL Hub OAuth client for \`product.fxl-sales\`.` becomes `app.fxl-sales`.
+  Same handoff.
+- The API dotenv block (`:43-49`) and the web dotenv block (`:53-59`): match section 14.
+  `FXL_HUB_PUBLISHABLE_KEY` becomes `FXL_HUB_CLIENT_ID`, `FXL_HUB_SECRET_KEY` becomes
+  `FXL_HUB_CLIENT_SECRET`, and `FXL_HUB_ENVIRONMENT` plus `FXL_HUB_AUDIENCE` are added.
+  `VITE_FXL_HUB_PUBLISHABLE_KEY` is REMOVED and replaced by `VITE_FXL_HUB_ENVIRONMENT` and
+  `VITE_FXL_HUB_AUDIENCE`. Slice 02 has already emptied the committed
+  `pk_fxl-sales_VzQ9-...` value on the API side and left the web line's variable NAME for this
+  slice to rename, so expect the literal to be gone before you arrive; if it is still there,
+  delete it here and say so in the run notes.
+- `:61` "The Hub SDK derives `product.fxl-sales` from the publishable key" is now FALSE twice
+  over: nothing derives an audience and there is no publishable key. Delete the sentence.
 - `:62` "Only set FXL_HUB_AUDIENCE when an operator explicitly asks for an override" is now
-  WRONG: the Audience is required, explicit and validated. Replace it with a line saying the
-  Audience is required on both sides, has the form `app.<slug>`, and is issued by the Hub.
+  WRONG: the Audience is required, explicit and validated. Replace both lines with one saying
+  the Audience is required on both sides, has the form `app.<slug>`, and is issued by the Hub.
 - `:66` remove `/auth/switch` from the route list; the routes are `/auth/login`,
   `/auth/callback`, `/auth/refresh`, `/auth/logout` and `/auth/_health`.
-- `:79` unchanged.
+- The Development section below is unchanged.
 
 **`nexo/ROADMAP.md`**
 - The `trustedOrigins` item (`:12`): update to record that 2.1.0 still has no allowed-origins
@@ -1755,8 +2208,21 @@ is a different entity. Nothing else may match.
 - The SDK's proactive renewal is not adopted: `autoRenew: false`, `client.stop()` at unmount,
   `start()` never called, and `refresh.ts` / `token.ts` untouched.
 - Every Hub-issued value in every committed file is EMPTY, with a comment saying who issues it.
-- No test was deleted, skipped, retitled to a weaker claim, or had an assertion loosened. The
-  suite count is the pre-slice 1213 plus the new oracles in section 16, and every one is green.
+- The API has exactly ONE access gate and it is `requireHubAuth`'s. `hasHubOrgAccess`,
+  `hasHubModule`, `requireHubModule`, `classifyHubAccess` and the local 402 branch are gone;
+  `requireHubAuth` is called with the loaded config and no options; the wiring pin in section
+  23.4 is green; and no tracked file still documents `missing_entitlement` as a code this API
+  sends.
+- `HubSdkConfig`, `hubSdkConfig` and `getHubSdkConfig` no longer appear in any tracked source,
+  and `git grep -n "HubSdkConfig\|getHubSdkConfig" -- apps packages scripts` prints nothing.
+- No test was deleted, skipped, retitled to a weaker claim, or had an assertion loosened, with
+  ONE named exception that is argued in full: `app-auth-access-gate.test.ts` is deleted, its
+  three dead 402-classification claims die with `classifyHubAccess`, and its five surviving
+  claims move verbatim into `app-auth-sdk-gate-wiring.test.ts` (section 23.3). Section 16.7's
+  formatting-string test was replaced by a stronger one before it was ever written, so nothing
+  in the tree was weakened by that either. Slice 02's tests 19 through 25 are untouched.
+  The suite count is the pre-slice count plus the new oracles in section 16 and section 23.4,
+  minus the three retired claims, and every one is green.
 - `pnpm run lint`, `pnpm run type-check`, `pnpm test` and `pnpm run build` are all green, with
   no guard bypassed and no `--no-verify`.
 
@@ -1800,11 +2266,13 @@ its contents in three:
   regexes): DELETE with the module. They tested a backport of a dependency; after the bump they
   would be testing the dependency itself, which this repo does not do.
 - **Tests that pin THIS repo's boundary behaviour**: MOVE, unchanged in title and assertion,
-  into `apps/api/src/config/__tests__/auth-provider.test.ts`. That is at minimum:
-  the `tryLoad` form returning `null` on a `HubConfigError`, the `tryLoad` form RE-THROWING any
-  other error, and any source guard test slice 02 wrote over `../auth-provider.ts`. Re-point a
-  source guard that reads `../hub-config.ts` at the SDK-backed `auth-provider.ts` instead, or
-  delete it if its only claim was about the deleted file's contents.
+  into `apps/api/src/config/__tests__/auth-provider.test.ts`. That is at minimum: the
+  `tryLoad` form returning `null` for an ABSENT or INCOMPLETE bag (which is the only thing it
+  returns `null` for - it does not swallow a `HubConfigError`, see section 2.0), and the
+  `HubConfigError.field` shape those tests assert on.
+  Slice 02's test 24, `no API module derives the Hub audience from a key`, is the one source
+  guard that reads `../hub-config.ts`. It is NOT deleted: its claim is about the API's
+  modules, not about that file's contents. Section 17 says exactly where it is re-pointed.
 - **Tests that encode this FEATURE's acceptance criteria**: KEEP them, moved into
   `auth-provider.test.ts`, because they are the regression net for the next SDK bump and they
   are named in `00-OVERVIEW.md`'s acceptance list. That is at minimum:
@@ -1847,14 +2315,21 @@ Do this:
    repo's own member and `app-auth.ts` still narrows on it before mounting the supersede
    middleware. That narrowing must keep working; it is what stops a local machine without
    `DATABASE_URL` from 500ing every `/auth/callback`.
-4. In `apps/api/src/auth/__tests__/hub-session-store.test.ts`, slice 01's
-   `toBeInstanceOf(EphemeralHubSessionStore)` assertion becomes
-   `toBeInstanceOf(InMemoryHubSessionStore)` and the store's `kind` assertion stays:
+4. In `apps/api/src/auth/__tests__/hub-session-store.test.ts`, slice 01's oracle 7,
+   `declares kind persistent on the durable store and ephemeral on the in-process fallback,
+   without moving the factory envelope tags`, writes exactly three assertions and NO
+   `toBeInstanceOf` of any kind. Slice 01's plan states that exhaustively so this quotation
+   cannot drift. They are:
    ```ts
-   expect(result.store.kind).toBe('ephemeral');
+   expect(frozenStore(db).kind).toBe('persistent');   // the durable store
+   expect(session.kind).toBe('memory');               // the factory ENVELOPE tag
+   expect(session.store.kind).toBe('ephemeral');      // the STORE's own tag
    ```
-   Keep BOTH assertions. The `kind` one is the contract; the `instanceof` one is what proves we
-   stopped shipping a local subclass.
+   All three stay, byte for byte, after `EphemeralHubSessionStore` is deleted, because 2.1.0's
+   `InMemoryHubSessionStore` declares `readonly kind: "ephemeral"` itself and the envelope tag
+   is this repo's own. Do NOT add an `instanceof` assertion here to "prove" the subclass is
+   gone: the class being deleted is proven by it not existing, and slice 01 deliberately kept
+   this test property-based so that swapping the implementation class is not a test edit.
 5. Slice 01 also flagged one comment in that file whose wording says `absent` where the 2.x
    contract says `expired`. Fix that wording now, as slice 01's plan hands it to this slice. The
    rule to write down is the one the SDK acts on: a row past EITHER expiry is deleted in the same
@@ -1875,3 +2350,273 @@ After the deletion, run the section 16.4 oracle
 and confirm it is the test that catches a stray `get` rather than a type error alone, because a
 handle built through a helper rather than an object literal would not trip excess-property
 checking.
+
+---
+
+## 23. Reconciliation with slice 03: the API keeps ONE access gate, and it is the SDK's
+
+Sections 22.1 to 22.4 delete the backports slices 01 and 02 left. Slice 03 left one too, and
+its own comments say so: `requireHubModule`'s docblock reads "slice 04 replaces it with
+`requireHubAuth`'s own option and deletes this". This section is that deletion.
+
+### 23.1 Why the local gate must GO rather than stay as belt and braces
+
+Verified against the 2.1.0 tarball, `dist/server.d.ts:95-113`. `requireHubAuth`'s taxonomy
+table includes:
+
+```
+| no Effective Access, without allowWithoutAccess | 402 payment_required / no_org_access |
+| requiredModule absent                           | 403 forbidden / missing_module        |
+| requiredRoles unmatched                         | 403 forbidden / missing_role          |
+```
+
+and `RequireHubAuthOptions.allowWithoutAccess` (`:89`) is documented as "Reach this route even
+without Effective Access, for the buy screen. Default false."
+
+Now read the control flow in `apps/api/src/middleware/app-auth.ts`. `appAuthMiddleware` does
+not run BESIDE `requireHubAuth`; it runs INSIDE it:
+
+```ts
+const authResponse = await hubAuthMiddleware(c, async () => {
+  /* the repo's own body - reached ONLY through the next callback */
+});
+return blockedResponse ?? authResponse;
+```
+
+So once `requireHubAuth` denies, the callback is never invoked and the repo's own gate never
+executes. After the bump the local 402 is not a second line of defence; it is DEAD CODE with a
+green test suite over it, because the file that tests it STUBS `requireHubAuth` and therefore
+never sees the SDK gate fire at all. That is the worst of both worlds: a gate nobody runs and
+an oracle that cannot tell.
+
+### 23.2 What is deleted from `apps/api/src/middleware/app-auth.ts`
+
+DELETE, in full:
+
+- `hasHubOrgAccess`
+- `hasHubModule`
+- `requireHubModule`
+- `classifyHubAccess`, and the `HubAccessVerdict` type
+- the `NO_ORG_ACCESS` constant
+- the 402 branch inside `appAuthMiddleware`
+
+KEEP:
+
+- the `!hubAuth` 401 guard, with its `MISSING_HUB_CONTEXT` body. It is not redundant: it fires
+  when the SDK calls `next()` without setting a context, which the SDK's own contract does not
+  forbid, and answering 401 there is the fail-closed answer.
+- the legacy-context assignment: `getHubLegacyAuthContext`, the four `c.set` calls, and
+  `await next()`.
+- the `503 hub_auth_not_configured` early return, unchanged.
+
+The middleware body becomes, in full:
+
+```ts
+  const authResponse = await hubAuthMiddleware(c, async () => {
+    const hubAuth = c.get('hubAuth');
+    if (!hubAuth) {
+      blockedResponse = c.json({ error: 'unauthorized', code: 'missing_hub_context' }, 401);
+      return;
+    }
+    const legacy = getHubLegacyAuthContext(hubAuth);
+    c.set('userId', legacy.userId);
+    c.set('orgId', legacy.orgId);
+    c.set('userRole', legacy.userRole);
+    c.set('userRoles', legacy.userRoles);
+    await next();
+  });
+```
+
+`requireHubAuth(hubAuthConfig)` is called with NO options (section 7.5). Passing
+`allowWithoutAccess` at all - even `false` - is forbidden here: the default is what carries the
+402, and spelling it explicitly invites a future edit to flip it while reading as harmless.
+
+`hasHubOrgAccess`'s fail-closed `=== true` comparison is not lost. It moves INTO the SDK, whose
+own gate is documented "All fail closed" on the same table above, and this repo stops owning a
+copy of a decision it does not make.
+
+### 23.3 Deleting `apps/api/src/middleware/__tests__/app-auth-access-gate.test.ts`
+
+Deleting a whole test file is a weakening unless the code under test is gone AND every claim
+those tests made is still made somewhere. Section 22.2 states that rule; here it is applied
+claim by claim. Slice 03 wrote eight `it` blocks in this file.
+
+**Claims that DIE with the code they test.** All three are about the LOCAL 402, which no
+longer exists and can no longer be reached even if it did:
+
+- `answers 402 payment_required with no_org_access when entitlements.access is false`
+- `answers 402 rather than allowing when the claim set has no access key`
+- `answers 402 for a workspace that still carries the deleted core module but no access`
+
+Their subject was `classifyHubAccess`'s treatment of a claim shape. That function is deleted,
+and the equivalent decision now happens inside a verified-token path this repo does not own.
+The `describe('classifyHubAccess')` and `describe('requireHubModule')` blocks slice 03 added to
+`apps/api/src/middleware/__tests__/app-auth.test.ts` are deleted for the same reason and in the
+same commit; see section 17's entry for that file.
+
+**Claims that DO NOT die.** Five of the eight are about middleware glue that survives intact,
+and they are MOVED, unchanged in title and in assertion, into the new file named in 23.4:
+
+- `allows a protected route when entitlements.access is true` - it also pins that `orgId` is
+  the `workspaceId` claim and `userId` the `accountId`, which is this repo's tenancy contract
+  and has nothing to do with the gate.
+- `answers 401 when the token is missing or invalid`
+- `answers 401 missing_hub_context when the SDK calls next without a context`
+- `answers 403 for a role the route requires but the entitled token does not carry`
+- `lets an entitled workspace owner through the same admin route`
+
+The last two are `requireAdmin` claims riding on `appAuthMiddleware`; the app-level role
+mapping is untouched by this slice.
+
+**The claim "a workspace without access gets 402" does NOT die either.** It becomes a WIRING
+pin, written next.
+
+### 23.4 NEW file: `apps/api/src/middleware/__tests__/app-auth-sdk-gate-wiring.test.ts`
+
+Same module graph as the file it replaces: `vi.resetModules()`, the Hub env stubbed whole,
+`vi.doMock('@fxl-business/hub-sdk/server', ...)` capturing the arguments, then
+`await import('../app-auth.js')` in `beforeAll`. Carry the five surviving `it` blocks above
+into it verbatim.
+
+Then add the wiring pin, whose two `it` names are:
+
+- `hands requireHubAuth the loaded Hub config, so the SDK verifies against the configured audience`
+  Asserts the captured first argument to `requireHubAuth` `toEqual`s the five-member
+  `HubConfig` the stubbed environment produces, `audience` included. `toEqual` and not
+  `toMatchObject`, so an extra smuggled member fails.
+- `never lets the API reach a route without Effective Access, by leaving allowWithoutAccess unset`
+  Asserts the captured SECOND argument is `undefined`, or, if a future edit passes options for
+  another reason, that `'allowWithoutAccess' in options === false`. A comment quotes
+  `dist/server.d.ts:89` - the option defaults to false and the default is what produces the
+  `402 payment_required / no_org_access` this product relies on.
+
+**Say plainly what this pin does and does not prove, in the file, in a comment.** It proves the
+WIRING: that the SDK gate is constructed with the right config and is not opted out of. It does
+NOT prove that a 402 comes back, because the real `requireHubAuth` calls `discover()` over HTTP
+on its first request and this run makes no network call to the Hub - which is exactly why slice
+03's suite stubbed it in the first place. A wiring pin is the honest CEILING for an offline
+test here. The end-to-end proof is the deployed `curl` in section 19 step 18's operator
+handoff, and it is not claimed by any test in this repo. Do not write a comment or a title that
+implies otherwise.
+
+### 23.5 The response body changes, and why the web is safe
+
+The 402 body goes from `{error: 'payment_required', code: 'missing_entitlement'}` (pre-slice-03)
+through `{error: 'payment_required', code: 'no_org_access'}` (slice 03's local gate) to the
+SDK's own `{error: 'payment_required', code: 'no_org_access'}`. Slice 03 already moved the
+literal deliberately so that this slice changes no contract when it deletes the local gate.
+
+NO WEB PREDICATE CHANGES, and the reason is a rule this repo already wrote down:
+`isEntitlementFailure` in `apps/web/src/lib/require-token.ts` keys on `status === 402` ALONE and
+deliberately never reads the code. `CLAUDE.md` pins it, and so does the test
+`isEntitlementFailure is true for a 402 that carries no code at all` in
+`apps/web/src/lib/__tests__/api-client-token-guard.test.ts`. That test MUST SURVIVE VERBATIM.
+It is not incidental coverage: it is the single assertion that makes this body change safe, and
+if it is ever weakened to require a code, this migration silently routes every entitlement 402
+back onto the `Verifique o servidor local` copy the previous release existed to remove.
+
+### 23.6 The stale `missing_entitlement` literals this slice must correct
+
+The code is no longer sent, so the tree must stop documenting it. These are COMMENT, DOC and
+FIXTURE edits only. No `it(...)` title may lose a claim, no assertion may loosen, and no
+predicate may gain a `code` read.
+
+| file:line | what it is | what to do |
+|---|---|---|
+| `apps/web/src/lib/api-client.ts:22` | `ApiError.code` docblock: "the only one that matters is `missing_entitlement` on a 402" | say `no_org_access`. Keep the whole rest of the comment, including "classification therefore keys on `status`, never on this field", which is now more load-bearing than before, not less. |
+| `apps/web/src/lib/require-token.ts:54` | `isEntitlementFailure`'s docblock quoting the API's exact body | quote `402 {error: 'payment_required', code: 'no_org_access'}` and name the SDK's `requireHubAuth` as the producer rather than `app-auth.ts`, since after this slice the repo no longer writes that body. The FUNCTION BODY is byte-unchanged. |
+| `apps/web/src/sales-ops/MissingEntitlementPanel.tsx:14,41` | two prose mentions of `402 missing_entitlement` | say `402 no_org_access`. No rendered copy changes: the panel's visible pt-BR strings never named the code. |
+| `apps/web/src/sales-ops/SalesOpsApp.tsx:1819` | the classification-order comment in the `isError` branch | say `402 no_org_access`. The rest of that comment, including why the entitlement branch stays FIRST, is unchanged and is still correct. |
+| `apps/web/src/lib/__tests__/api-client-token-guard.test.ts:66,67,71,91,94,102,106,115,119` | one `describe` title, two `it` titles and four fixture bodies carrying the code | rename the code in the FIXTURES and in the titles that quote it. Each test keeps its assertion exactly. The `describe('402 missing_entitlement classification')` becomes `describe('402 no_org_access classification')`; `isEntitlementFailure recognises the 402 missing_entitlement ApiError` and `isAuthFailure is false for the 402 missing_entitlement ApiError` follow it. The test asserting a 402 with NO code at all is untouched - see 23.5. |
+| `apps/web/src/sales-ops/__tests__/entitlement-dead-end.test.tsx:86,156,157` | the mocked 402 body and two titles quoting the code | same rename, same rule. |
+| `CLAUDE.md`, Organization context section, the `402 {error: 'payment_required', code: 'missing_entitlement'}` line | doctrine | rewrite the body to `no_org_access` and change the producer from `apps/api/src/middleware/app-auth.ts` to `requireHubAuth` in `@fxl-business/hub-sdk`. The paragraph immediately below it, about `isEntitlementFailure` keying on the status alone, is unchanged and stays exactly as it is; add one clause recording that the code moved once and the predicate did not notice, which is the point of keying on the status. |
+
+**These two files are shared with slice 03 and the edits here are ADDITIVE, not a rewrite.**
+Slice 03 (wave 2) adds an `isForbiddenFailure` predicate to
+`apps/web/src/lib/require-token.ts` and a fifth 403 case to
+`apps/web/src/sales-ops/__tests__/entitlement-dead-end.test.tsx`. Slice 04 is wave 3 and lands
+on top of that. Read the post-03 file before editing, keep the 403 branch and its test, and
+change only the `missing_entitlement` literals listed above. If a 403 docblock also names a
+code, leave it alone: 2.1.0's 403 codes are `missing_module` and `missing_role`, which slice 03
+already wrote against.
+
+Nothing in `apps/web/src/sales-ops/MissingEntitlementPanel.tsx` changes behaviourally, and the
+`[data-missing-entitlement]` marker that `entitlement-dead-end.test.tsx`'s decisive mutation
+keys on KEEPS ITS NAME. It is a test hook, not a wire code; renaming it would redden a test for
+no gain and lose the mutation oracle's target.
+
+---
+
+## 24. Re-verification against HEAD, and what was stale
+
+This plan was written and parked at `e59f870` on 2026-08-27. The
+`feature-20260828-organization-context-escape` run then landed on `master` between that commit
+and today's head `84ac2a3`, touching the exact web surface this slice declares. Every section
+above has been re-read against the tree at `84ac2a3`. Anything this plan quotes about the web
+auth or web error-classification files was re-derived from the tree, not carried over.
+
+**Already shipped, so this slice must NOT create them.** All of these exist at HEAD and any
+step that reads as "add" is a cross-reference, not work:
+
+- `ApiError.code` on `apps/web/src/lib/api-client.ts` - shipped, with its own docblock.
+- `isEntitlementFailure` in `apps/web/src/lib/require-token.ts` - shipped, keyed on
+  `status === 402` alone.
+- `apps/web/src/sales-ops/MissingEntitlementPanel.tsx` and
+  `apps/web/src/sales-ops/missing-entitlement-copy.ts` - shipped.
+- `apps/web/src/sales-ops/__tests__/entitlement-dead-end.test.tsx` and
+  `apps/web/src/sales-ops/__tests__/missing-entitlement-panel.test.tsx` - shipped.
+- The `useOrganizations` seam in `apps/web/src/auth/react.tsx` (`:1078`) and its
+  `describe('active organization and the useOrganizations seam')` block in `react.test.tsx`
+  (`:1972`) - shipped, and untouched by this slice apart from the `SetActiveResult` literals.
+
+**Corrections made to this plan as a result:**
+
+| where | was | now |
+|---|---|---|
+| 11 | "MIGRATION checklist item 12 is a NO-OP here", true at `e59f870`, false at `84ac2a3` | a step owning `MissingEntitlementPanel.tsx:105`, its null-`active` branch, the dep array, the two `react.test.tsx` literals and a declared `missing-entitlement-panel.test.tsx`; `manageUrl` stays a no-op and says why |
+| 11.1 | headed `Keeping react.test.tsx:368 meaningful`; there is no such assertion at `:368` | headed by what it does; the two assertions are at `:478` and `:539` and are found by grep |
+| 12.3 | did not say where the `createHubClient` call is | names `react.tsx:234` and quotes the current call |
+| 12.4 | `nine tests in describe('proactive token renewal') at react.test.tsx:1151-1403`, and "four describes" | the seven current top-level describes with their current start lines, including the new organization one |
+| 13.2 | nine `SetActiveResult` literals at nine named line numbers | TEN literals at HEAD, found by shape with a grep recipe that separates them from the claim fixtures |
+| 15 | the reader is at `react.tsx:470` | `react.tsx:501` |
+| 17, `react.test.tsx` | "all five remaining describes" | six, naming the new one |
+| 18, `README.md` | `:6`, `:44-48`, `:54-58`, `:62`, `:66`, `:79` | `:5`, `:7`, `:24`, `:43-49`, `:53-59`, `:61`, `:62`, `:66`, and the handoff from slice 02 on the committed key literal |
+| 23.6 | (new section) | its whole table was derived from a grep at HEAD, not from the parked plan |
+
+**One file the D2 cleanup does NOT touch, checked rather than assumed.**
+`apps/web/src/sales-ops/missing-entitlement-copy.ts` was named as a candidate. It does not
+carry the wire code `missing_entitlement` anywhere: the only matches are the MODULE NAME
+`missing-entitlement-copy` and the DOM marker `[data-missing-entitlement]`, and both of those
+are deliberately left alone (section 23.6's last paragraph explains why the marker keeps its
+name). That file is not in `files_modified`.
+
+`apps/web/src/sales-ops/__tests__/missing-entitlement-panel.test.tsx` was on this list too, and
+that was WRONG. It is untouched by the D2 literal cleanup, which is all this paragraph ever
+checked, but it IS touched by the `checkoutUrl` signature change in section 11, so it is now
+declared in `files_modified` and section 11 says exactly what changes in it.
+
+**A correction this section itself owed, recorded rather than hidden.** The round-1 edit that
+landed the "MIGRATION checklist item 12 is a NO-OP" paragraph in section 11 was checked against
+this section's own HEAD sweep and passed it, because the sweep looked for SYMBOLS that had
+moved and not for ARITIES that had changed. `checkoutUrl` existed at `e59f870` and still exists
+at `84ac2a3`, so nothing here flagged it; what changed is that
+`feature-20260828-organization-context-escape` gave it a production caller at
+`apps/web/src/sales-ops/MissingEntitlementPanel.tsx:105`, and 2.1.0 gave it a required first
+parameter. The claim was false at HEAD and would have landed slice 04 red on three commands
+section 21 requires green. Section 11 now owns the change. When re-running this section's HEAD
+check, compare SIGNATURES against the tarball and not only symbol existence.
+
+**Unchanged and re-confirmed at HEAD, so the plan's steps still apply verbatim:**
+
+- All three `satisfies HubClient` mocks still declare exactly the same six members
+  (`login`, `getToken`, `setActive`, `logout`, `checkoutUrl`, `manageUrl`), so section 11's
+  four-member addition is still exactly right, and there is no fourth mock site: the new
+  `shell-organization-switcher.test.tsx` declares none.
+- `apps/web/src/auth/provider.ts` still exports `BrowserHubConfig` and reads
+  `VITE_FXL_HUB_PUBLISHABLE_KEY`, so section 10.1 rewrites the file it expects.
+- `apps/web/eslint.config.js`'s `callee.name='getToken'` selector is unchanged.
+- `apps/api/src/middleware/app-auth.ts` is byte-unchanged since `e59f870`, so sections 3, 7.5
+  and 23 quote a live file.
+
+The executor re-runs this check before starting. If anything above has moved again, the tree
+is right and this plan is stale; report it rather than adapting silently.

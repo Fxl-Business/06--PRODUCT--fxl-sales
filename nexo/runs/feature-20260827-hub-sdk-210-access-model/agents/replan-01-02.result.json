@@ -1,0 +1,50 @@
+{
+  "status": "done",
+  "summary": "Applied every instructed edit to the two wave-1 plans and nothing beyond them. Slice 01 is confirmed as the sole wave-1 owner of CLAUDE.md (a note in its Doctrine section says so and says why), it adopts slice 02's one-line comment edit at apps/api/src/auth/hub-session-store.ts:27 with a sentence recording that slice 02 renames the variable itself in the same wave so the comment is correct by the end of wave 1, its promise that slice 04 deletes the local HubSessionStoreKind, HubSessionReadResult and HubSessionTransaction declarations is left untouched, and oracle 7 now spells its three property assertions verbatim and states explicitly that it writes no toBeInstanceOf of any kind so slice 04 cannot misquote it. Slice 02 gains a 'This survives slice 04' section recording D1 (hubEnvBag, hubConfigPresence, HUB_DISCRETE_ENV_VARS, HubEnvSource, HubAuthConfig and above all the absence of any blanket try/catch are permanent, slice 04 replaces only the vendored parser, tests 19 to 25 survive unchanged, and only slice 03's deletion of coreModule legitimately changes later); drops CLAUDE.md and hub-session-store.ts from files_modified with a labelled verbatim block carrying its documentation bullet for slice 03 to lift; adds README.md with a section covering :45-46, :58 and the :61-62 prose; records D4's reasoning for committing FXL_HUB_AUDIENCE=app.fxl-sales to the example files only; adds named oracle test 18a asserting loadHubAuthConfig throws a HubConfigError with field === 'clientSecret'; and instructs stubbing FXL_HUB_CONFIG blank in app-auth.test.ts with the module-scope-throw reason. The two files_modified lists are now disjoint, every declared path exists or is declared NEW, and neither file gained an em dash or an en dash.",
+  "edits_applied": [
+    "01: Doctrine section states slice 01 is the sole wave-1 CLAUDE.md owner and why",
+    "01: new subsection adopting slice 02's hub-session-store.ts:27 comment edit, noting slice 02 renames the variable in the same wave",
+    "01: oracle 7 now names its three exact property assertions and states it writes no toBeInstanceOf",
+    "01: slice-04 deletion promise for the three local types left unchanged, as instructed",
+    "02: files_modified drops CLAUDE.md and apps/api/src/auth/hub-session-store.ts, adds README.md",
+    "02: new 'This survives slice 04' section recording D1 and naming tests 19 to 25 as surviving unchanged",
+    "02: section 5 records that the :27 comment edit moved to slice 01",
+    "02: section 6 replaced by a statement that the docs bullet lands in slice 03 in wave 2, plus a labelled verbatim block of the exact CLAUDE.md text slice 03 must carry",
+    "02: new section 7 covering README.md:45-46, :58 and the :61-62 prose, leaving :7 and :24 to slice 04",
+    "02: D4 paragraph in 'Env example files' recording that the audience is a public identifier, derivable from the committed clientId slug, example files only",
+    "02: named oracle test 18a asserting loadHubAuthConfig throws with field === 'clientSecret' on an incomplete bag",
+    "02: app-auth.test.ts instructed to stub FXL_HUB_CONFIG blank, with the module-scope-throw reason",
+    "02: sequencing commit 3 and the 'Challenges' bullet updated to match the new file set",
+    "02: 'Explicitly out of scope' now lists CLAUDE.md and hub-session-store.ts"
+  ],
+  "files_modified_01": [
+    "apps/api/src/auth/hub-session-store.ts",
+    "apps/api/src/auth/__tests__/hub-session-store.test.ts",
+    "apps/api/src/auth/__tests__/hub-login-scope.test.ts",
+    "CLAUDE.md"
+  ],
+  "files_modified_02": [
+    "apps/api/src/config/hub-config.ts",
+    "apps/api/src/config/auth-provider.ts",
+    "apps/api/src/config/__tests__/hub-config.test.ts",
+    "apps/api/src/config/__tests__/auth-provider.test.ts",
+    "apps/api/src/env.ts",
+    "apps/api/src/middleware/app-auth.ts",
+    "apps/api/src/middleware/__tests__/app-auth.test.ts",
+    "apps/api/src/middleware/__tests__/app-auth-bff-wiring.test.ts",
+    "apps/api/src/middleware/__tests__/app-auth-bff-memory-path.test.ts",
+    "apps/api/src/auth/session-crypto.ts",
+    "apps/api/.env.example",
+    "apps/api/.env.dev.example",
+    "README.md"
+  ],
+  "disjoint": true,
+  "dash_clean": true,
+  "concerns": [
+    "README.md:58 is the WEB variable VITE_FXL_HUB_PUBLISHABLE_KEY, and slice 02 otherwise scopes the browser half out and hands it to slice 04. D9 edit 12 named :58 anyway, so slice 02 is now instructed to delete the committed key LITERAL there while leaving the variable NAME alone. Slice 04's replanner should be told its README pass will find that literal already gone, so its section 18 must not assert it is still present.",
+    "README.md:7 and :24 still say product.fxl-sales after slice 02. Left to slice 04 deliberately, to keep README.md in exactly one wave for the credential edit, but it means README documents a product. audience for two waves. Recorded in the plan rather than hidden.",
+    "Slice 02's oracle test 24 is a source guard banning the literal 'product.' in hub-config.ts, auth-provider.ts and app-auth.ts only, so the surviving README prose does not trip it. Confirmed, not a defect, but a wider grep gate added later would.",
+    "The decision record did not say where slice 02's docs bullet text should physically live so slice 03 can carry it verbatim. I put it in a fenced, clearly labelled block inside slice 02 section 6. Slice 03's replanner must be pointed at that block by the orchestrator, because nothing in slice 03's own plan currently references it.",
+    "Slice 01's commit 2 message covers the header comment edit already, so the adopted :27 line needs no new commit. Worth confirming when slice 01 executes that the header rewrite and the :27 rename land in the same commit rather than in the docs commit."
+  ]
+}
