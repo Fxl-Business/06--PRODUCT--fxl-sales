@@ -3,7 +3,7 @@
 ## Product
 
 FXL Sales is the affiliate and referral product for FXL.
-The product audience is `product.fxl-sales`.
+The product audience is `app.fxl-sales`.
 Keep the repository folder name unchanged until the editor session can safely move.
 
 ## Stack
@@ -21,8 +21,34 @@ Keep the repository folder name unchanged until the editor session can safely mo
 - `requireHubAuth` verifies access tokens and exposes `c.get('hubAuth')`.
 - `userId` is the Hub account id.
 - `orgId` is the active Hub workspace id.
-- Feature gates check `auth.claims.entitlements.modules`.
-- The core module for this product is `sales.core`.
+- Baseline access is the REQUIRED boolean `auth.claims.entitlements.access`, and nothing else.
+  `entitlements.modules` carries ADD-ON modules only and must NEVER be read for baseline access: the `sales.core` module was deleted in the Hub's access-model-v1, so the old `modules.includes('sales.core')` gate was false for every user and answered 402 to the entire product.
+  This is the ONE place in the tree that still spells that string, deliberately, as the prose record of what was removed; `CLAUDE.md` is outside the grep gate's pathspec for exactly that reason.
+- `classifyHubAccess` in `apps/api/src/middleware/app-auth.ts` is the single authority, allows only on `access === true`, and fails CLOSED: absent, false, non-boolean, or a missing `entitlements` object all deny.
+- `MinimalHubAuthContext` declares `access: boolean` LOCALLY and never imports the SDK's `HubEntitlements`, which through at least 1.3.1 is re-exported from an unshipped package and degrades to `any` under `skipLibCheck`, making the deny branch unreachable at type level. The SDK's own MIGRATION.md section 10 says so.
+- `classifyHubAccess`, `hasHubOrgAccess`, `hasHubModule`, `requireHubModule` and the 402 branch inside `appAuthMiddleware` are a DELIBERATE ONE-WAVE BRIDGE while this repo is on `@fxl-business/hub-sdk@1.3.1`, which exports no access gate at all.
+  The SDK bump deletes them and delegates to 2.1.0's `requireHubAuth`, whose `allowWithoutAccess` defaults to false, because two gates would mean one live gate and one unreachable one with a green suite over it.
+  `requireHubModule` is meanwhile the only seam that may read `modules`, for a paid add-on, and no route mounts it today.
+- The deny taxonomy is exact and EXHAUSTIVE, and the web half branches on it: `401 {"error":"unauthorized"}` is a missing or invalid token and reaches the login screen, which is the correct destination for every one of its codes, `contract_version_mismatch` included - that code is new in `@fxl-business/hub-sdk@2.1.0` and means the token's `contractVersion` is not 1, an absent one included, so it is a token this app cannot use and a fresh login is the only answer; `402 {"error":"payment_required","code":"no_org_access"}` is an Organization without access and MUST render the buy screen, never a login screen, never the expired-session panel, and never the generic API-fault panel where it landed before v2.8.0; `403 {"error":"forbidden"}`, with `missing_module` or `missing_role`, is authenticated but without the membership, Seat, module or role the route requires, and MUST render the ask-an-administrator panel, never the generic API-fault panel; `503 {"error":"unavailable","code":"hub_auth_not_configured"}` is the API having no Hub configuration at all.
+  Every body is byte-identical to the one 2.1.0's `requireHubAuth` returns natively, so the SDK flip changes no contract.
+- `isAuthFailure` is 401-only, `isEntitlementFailure` is 402-only and `isForbiddenFailure` is 403-only, all three in `apps/web/src/lib/require-token.ts`, and all three key on the STATUS ALONE.
+  The 402 and 403 predicates deliberately do not also require a `code`: `apiFetch` builds its error from `await res.json().catch(() => ({}))`, so a response whose body does not parse carries no code at all, and requiring one would fail CLOSED back onto the server-outage copy both predicates exist to remove.
+  `isEntitlementFailure is true for a 402 that carries no code at all` and `isForbiddenFailure is true for a 403 that carries no code at all` are the pins.
+  The classification chain in `SalesOpsApp` is `isEntitlementFailure`, then `isForbiddenFailure`, then `isAuthFailure`, then generic, and the INVARIANT is that the generic `Verifique o servidor local` copy is reachable ONLY for an error that is none of the classified kinds.
+  The order matters not because `isAuthFailure` is true for a 402 or a 403 today - it is false for both - but because a later widening of it placed above them would silently steal a billing or a permission answer into `Sessão expirada`, telling the operator to sign in again to fix the one thing that is not broken, and a re-login answers it with the same status forever.
+  `apps/web/src/sales-ops/__tests__/entitlement-dead-end.test.tsx` is the oracle for all four arms, drives the REAL `apiFetch` error path with `../api`, `@/lib/api-client` and `../hooks` unmocked, and its decisive mutations are the `[data-missing-entitlement]` and `[data-forbidden]` markers, so neither panel case can pass by rendering nothing.
+- `ForbiddenPanel` names no module and no role, and its `names no module, no role and no raw identifier` test pins that.
+  A 403 body is not something this app can render trustworthily: the `code` is a machine token and the `module` field is a Hub-internal identifier that the identifier law keeps out of user-facing copy. "Peça a quem administra" is the whole of what this app knows.
+- ONE-WAVE INTERNAL DISAGREEMENT, dated 2026-09-01 rather than left to be discovered. The taxonomy above says the 402 body is `no_org_access`, while the `Organization context` section below still says `402 {error: 'payment_required', code: 'missing_entitlement'}` and still names `apps/api/src/middleware/app-auth.ts` as its producer.
+  It is deliberate and it is bounded: the SDK-bump slice rewrites that line in the same pass that sweeps every other stale `missing_entitlement` literal out of the tree, and splitting the sweep across two waves would give two slices a claim on the same lines.
+  Nothing is broken in the interval, because `isEntitlementFailure` keys on `status === 402` alone and never reads the code.
+- The Hub Audience and the Hub environment are EXPLICIT validated configuration, read off the validated `env` object through `hubEnvBag` in `apps/api/src/config/auth-provider.ts` and never off raw `process.env`.
+  The Audience is `app.<slug>` and must equal `app.` plus the Client id's slug; nothing derives it from a key, and `parseAudienceFromPublishableKey` is deleted.
+  The environment must equal the environment segment inside `pk_<slug>_<environment>_<random>` and is NEVER inferred from `NODE_ENV`: a staging deploy that happens to run with `NODE_ENV=production` would otherwise ask the Hub for the wrong Client, which is a 401 at runtime instead of a refusal to boot, and the agreement is checkable OFFLINE.
+  `FXL_HUB_CONFIG`, one JSON object with `apiUrl`, `environment`, `clientId`, `clientSecret` and `audience`, is this repo's documented form; setting it beside ANY of the five discrete variables is a boot failure whose message names every offender by NAME and never prints a value.
+  `FXL_HUB_REDIRECT_URI` stays its own variable because 2.x's `HubConfig` has no `redirectUri` and `createHubBff`'s default of `${config.apiUrl}/auth/callback` is the HUB's origin, which is always wrong for this app.
+  `FXL_HUB_HEALTH_TOKEN` is generated by the OPERATOR, not issued by the Hub, and is required whenever the environment is not `development`.
+  A bad Hub configuration is a BOOT FAILURE and not a 503: there is no blanket `try/catch` in `auth-provider.ts`, and `tryLoadHubAuthConfig` returns `null` only for the `absent` and `incomplete` presences, which is what keeps `503 hub_auth_not_configured` alive for a machine that has simply not been given credentials yet.
 - Browser Hub access tokens are memory-only, cached until JWT `exp` minus 30 seconds, and concurrent `getToken()` calls share one in-flight refresh per provider; logout and workspace generation guards reject late responses.
 - A missing access token is never defaulted.
   `requireToken(getToken)` in `apps/web/src/lib/require-token.ts` throws `AuthTokenUnavailableError`, and `apiFetch` / `apiFetchBlob` take a REQUIRED non-empty `token` and assert it before calling `fetch`, so a null token can never become an anonymous request that reads as a server outage.
@@ -66,7 +92,7 @@ Keep the repository folder name unchanged until the editor session can safely mo
   `hono` is pinned to `4.12.28` by a `pnpm-workspace.yaml` OVERRIDE, not only by `apps/api/package.json`: the SDK peer-requires `>= 4.12.28` and `.npmrc` sets `strict-peer-dependencies=false`, so without moving the override the workspace resolves a second Hono copy and the BFF's `Context` stops being the one `server.ts` composes with.
 - `hub_bff_sessions` and `hub_bff_login_txns` are global, non-tenant tables and cannot be otherwise: a session row is written at `/auth/callback`, before any workspace is known, so there is no `org_id` to key a tenant policy on.
   Both carry FORCE RLS with only the `app.fxl_admin` policy, so the ordinary `getDb()` connection sees zero rows; the store goes through `getAdminDb()`.
-  Refresh tokens and PKCE verifiers are AES-256-GCM sealed with the row id as AEAD additional data, keyed by HKDF-SHA256 from `FXL_HUB_SECRET_KEY` unless `HUB_SESSION_ENCRYPTION_KEY` overrides it, so rotating either one logs every user out.
+  Refresh tokens and PKCE verifiers are AES-256-GCM sealed with the row id as AEAD additional data, keyed by HKDF-SHA256 from `FXL_HUB_CLIENT_SECRET` unless `HUB_SESSION_ENCRYPTION_KEY` overrides it, so rotating either one logs every user out.
   Read that override through the validated `env` object, never `process.env`: `.env.dev.example` ships it blank and `??` does not catch `''`, which fails the 32-char floor and stops the API booting.
 - A login SUPERSEDES the session id the browser presented at `/auth/callback`, deleting that row in the SAME transaction that inserts the new one, so a re-login cannot orphan a live rotatable refresh token.
   The key is deliberately the prior SESSION ID and not the account id.
@@ -422,16 +448,19 @@ Keep the repository folder name unchanged until the editor session can safely mo
 
 | Level | Hub Client | Postgres | Secrets |
 | --- | --- | --- | --- |
-| local | `product.fxl-sales` local client | Local Docker | `.env.dev.example` copied to `.env` |
-| staging | `product.fxl-sales` staging client | Coolify staging DB | Infisical `staging` env |
-| production | `product.fxl-sales` production client | Coolify prod DB | Infisical `prod` env |
+| local | `app.fxl-sales` local client | Local Docker | `.env.dev.example` copied to `.env` |
+| staging | `app.fxl-sales` staging client | Coolify staging DB | Infisical `staging` env |
+| production | `app.fxl-sales` production client | Coolify prod DB | Infisical `prod` env |
 
 Required API vars:
 
 ```dotenv
 FXL_HUB_API_URL=http://localhost:9016
-FXL_HUB_PUBLISHABLE_KEY=pk_fxl-sales_VzQ9-LUONCnlKllxCRLffN3nw6Z9PQl2
-FXL_HUB_SECRET_KEY=<operator-issued-secret>
+FXL_HUB_ENVIRONMENT=development
+FXL_HUB_CLIENT_ID=
+FXL_HUB_CLIENT_SECRET=
+FXL_HUB_AUDIENCE=app.fxl-sales
+FXL_HUB_HEALTH_TOKEN=
 FXL_HUB_REDIRECT_URI=http://localhost:8006/auth/callback
 PUBLIC_LINK_BASE_URL=http://localhost:3006
 ```
