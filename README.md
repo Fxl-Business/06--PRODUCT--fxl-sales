@@ -42,8 +42,11 @@ API:
 
 ```dotenv
 FXL_HUB_API_URL=http://localhost:9016
-FXL_HUB_PUBLISHABLE_KEY=pk_fxl-sales_VzQ9-LUONCnlKllxCRLffN3nw6Z9PQl2
-FXL_HUB_SECRET_KEY=<operator-issued-secret>
+FXL_HUB_ENVIRONMENT=development
+FXL_HUB_CLIENT_ID=
+FXL_HUB_CLIENT_SECRET=
+FXL_HUB_AUDIENCE=app.fxl-sales
+FXL_HUB_HEALTH_TOKEN=
 FXL_HUB_REDIRECT_URI=http://localhost:8006/auth/callback
 PUBLIC_LINK_BASE_URL=http://localhost:3006
 ```
@@ -55,11 +58,12 @@ VITE_API_URL=http://localhost:3006
 VITE_AUTH_PROXY_TARGET=http://localhost:3006
 VITE_AUTH_BFF_BASE_PATH=
 VITE_FXL_HUB_API_URL=http://localhost:9016
-VITE_FXL_HUB_PUBLISHABLE_KEY=pk_fxl-sales_VzQ9-LUONCnlKllxCRLffN3nw6Z9PQl2
+VITE_FXL_HUB_PUBLISHABLE_KEY=
 ```
 
-The Hub SDK derives `product.fxl-sales` from the publishable key.
-Only set `FXL_HUB_AUDIENCE` when an operator explicitly asks for an override.
+The Hub audience is configured as `app.<slug>`, never derived from a key.
+`FXL_HUB_AUDIENCE` is required, must equal `app.` plus the slug inside `FXL_HUB_CLIENT_ID`, and a mismatch stops the API booting.
+`FXL_HUB_ENVIRONMENT` is likewise explicit, must equal the environment segment inside `FXL_HUB_CLIENT_ID`, and is never inferred from `NODE_ENV`.
 Local browser auth uses same-origin `/auth/*` routes on `http://localhost:8006`.
 Vite proxies those routes to `http://localhost:3006`, so the registered Hub redirect URI is `http://localhost:8006/auth/callback`.
 The API owns public referral redirects at `/r/:code`, so `PUBLIC_LINK_BASE_URL` should point to the API public origin.
