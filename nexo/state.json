@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "current_milestone_id": "v2.8.0",
+  "current_milestone_id": "v2.9.0",
   "delivery": {
     "mode": "promotion",
     "trunk": "master",
@@ -28,12 +28,12 @@
     "note": "User selected Autopilot at the front door, and pre-answered the one design fork that mattered: keep our own session store, do not adopt SqlHubSessionStore. Six slices in three waves upgrade @fxl-business/hub-sdk to ^1.3.0, port the store to the async transactional withSession contract, add an absolute session lifetime, consume the new refresh-failure classification, and close the logout leak as a defect. Gate 2 remains mandatory per slice and per wave. Gate 3 remains human-gated; this run stops at master."
   },
   "gate3": {
-    "release": "v2.7.2",
-    "commit": "d1f395921957416b9a2717f75ce61a31faf949c7",
-    "flow": "ship-prod-ready",
-    "decision": "approved-in-invocation",
-    "decided_at": "2026-08-10",
-    "note": "User invoked /nexo-ship-prod-ready --auto. Release-verify PASS including a clean-clone deploy simulation and an explicit deployment-topology analysis, prompted by v2.7.0 having passed every test before taking production down. Web-only release: no migration and no apps/api source change, so rollback to v2.7.1 is a pure code revert - that is what made promoting straight through safe. No staging web deployment exists (Vercel builds web from production only), so the real-browser check ran after promotion; production confirmed serving bundle index-BBrPAEYT.js with /tatico/dashboard loaded signed-in. master == staging == production == d1f3959."
+    "release": "v2.8.0",
+    "commit": "0f048adad86247bca1c89f3bc4dd450623d20a85",
+    "flow": "ship",
+    "decision": "approved-staging",
+    "decided_at": "2026-09-01",
+    "note": "Gate 3a was approved explicitly in-session after a separate Verify agent returned PASS on the exact release commit 0f048ad: 1265 tests across 99 files (80 shared-utils, 415 api, 770 web), full lint, type-check and a real pnpm run build, all exit 0, plus a security review of e59f870..0f048ad with no findings. Integration was NOT run and this is recorded rather than glossed: the local Docker test DB 06--product--fxl-sales-db-1 had been Exited (0) for two weeks and port 5006 was closed, so the suite was deliberately skipped rather than allowed to fall through to the staging database that apps/api/.env points DATABASE_URL at. The gap is narrow because the release diff carries zero server, schema and migration changes. Tag v2.8.0 pushed to 0f048ad and staging fast-forwarded d1f3959..0f048ad, which is also the resync closing the 2026-08-28 direct-to-production hotfix push that deliberately skipped staging to stop an active incident. Of the 53 commits in v2.7.2..v2.8.0, 35 were already live in production from that push and had never been tagged; v2.8.0 is the first tag covering them."
   },
   "gate3_hotfix": {
     "release": "v2.7.1",
@@ -52,12 +52,12 @@
     "note": "Gate 3a was approved explicitly. Tag v2.4.0 was pushed and staging fast-forwarded to the exact verified candidate. Production remains at v2.3.1 pending in-environment staging validation and a separate Gate 3b approval."
   },
   "gate3_production": {
-    "release": "v2.4.0",
-    "commit": "a32b1a04fabbc63b5bb67ad411e23e90615e744d",
+    "release": "v2.8.0",
+    "commit": "0f048adad86247bca1c89f3bc4dd450623d20a85",
     "flow": "ship",
     "decision": "approved-production",
-    "decided_at": "2026-08-05",
-    "note": "Gate 3b was approved explicitly after staging schema validation. Production fast-forwarded to v2.4.0, staging and production match the release tag, and the Vercel production deployment completed successfully."
+    "decided_at": "2026-09-01",
+    "note": "Gate 3b was approved explicitly in-session. Production fast-forwarded e59f870..0f048ad, and master, staging and production are all at 0f048ad == v2.8.0. The validate pause bought no signal by topology rather than by shortcut: Vercel builds apps/web from the production branch only, so the staging push produced no web deployment to test, and the API diff is empty so any API redeploy is a no-op. The evidence backing this gate was the release-verify plus the absence of any migration, apps/api source or config change, which makes rollback a pure code revert. Same reasoning as recorded for v2.7.2. Web-only release: 13 files, MissingEntitlementPanel, the useOrganizations seam, the 402 missing_entitlement classification and the Organization switcher in the sales-ops account dropdown. This closes the need for the manual access grant made in the Hub admin to unblock use."
   },
   "gate1_followups": {
     "feature": "batch-20260813-session-followups",
