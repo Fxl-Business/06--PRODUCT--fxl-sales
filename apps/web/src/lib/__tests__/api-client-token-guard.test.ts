@@ -4,6 +4,7 @@ import {
   AuthTokenUnavailableError,
   isAuthFailure,
   isEntitlementFailure,
+  isForbiddenFailure,
   requireToken,
 } from '../require-token';
 
@@ -119,5 +120,40 @@ describe('402 missing_entitlement classification', () => {
       code: 'missing_entitlement',
       status: 402,
     });
+  });
+});
+
+describe('403 forbidden classification', () => {
+  it('isForbiddenFailure recognises a 403 ApiError', () => {
+    expect(isForbiddenFailure({ error: 'forbidden', code: 'missing_module', status: 403 })).toBe(
+      true,
+    );
+    expect(isForbiddenFailure({ error: 'forbidden', code: 'missing_role', status: 403 })).toBe(
+      true,
+    );
+  });
+
+  it('isForbiddenFailure is true for a 403 that carries no code at all', () => {
+    // The asymmetry pin. A proxy error page or a truncated body carries no code,
+    // and requiring one would route exactly that back onto the server-fault copy.
+    expect(isForbiddenFailure({ error: 'forbidden', status: 403 })).toBe(true);
+  });
+
+  it('isForbiddenFailure is false for a 401, a 402, a 500, an AuthTokenUnavailableError and a non-object', () => {
+    expect(isForbiddenFailure({ error: 'unauthorized', status: 401 })).toBe(false);
+    expect(isForbiddenFailure({ error: 'payment_required', status: 402 })).toBe(false);
+    expect(isForbiddenFailure({ error: 'request_failed', status: 500 })).toBe(false);
+    expect(isForbiddenFailure(new AuthTokenUnavailableError())).toBe(false);
+    expect(isForbiddenFailure(null)).toBe(false);
+    expect(isForbiddenFailure(undefined)).toBe(false);
+    // A string pins that the check is `===` and never a coercion.
+    expect(isForbiddenFailure('403')).toBe(false);
+  });
+
+  it('isAuthFailure does not classify a 403 as an auth failure', () => {
+    // Widening isAuthFailure to a range would put a permission answer behind a
+    // login screen that answers it with another 403 forever.
+    expect(isAuthFailure({ error: 'forbidden', code: 'missing_role', status: 403 })).toBe(false);
+    expect(isEntitlementFailure({ error: 'forbidden', status: 403 })).toBe(false);
   });
 });

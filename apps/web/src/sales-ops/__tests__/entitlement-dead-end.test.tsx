@@ -6,6 +6,7 @@ import type { HTMLAttributes } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { FORBIDDEN_COPY } from '../forbidden-copy';
 import { MISSING_ENTITLEMENT_COPY } from '../missing-entitlement-copy';
 
 const mocks = vi.hoisted(() => ({
@@ -149,6 +150,10 @@ function entitlementPanel() {
   return container.querySelector('[data-missing-entitlement]');
 }
 
+function forbiddenPanel() {
+  return container.querySelector('[data-forbidden]');
+}
+
 function text() {
   return container.textContent ?? '';
 }
@@ -167,6 +172,7 @@ describe('a 402 missing_entitlement is not a server fault', () => {
     expect(text()).not.toContain(GENERIC_API_FAULT);
     // And a future collapse of the two error branches into one is caught here too.
     expect(text()).not.toContain(SESSION_EXPIRED);
+    expect(forbiddenPanel()).toBeNull();
   });
 
   it('still renders the generic API fault for a 500', async () => {
@@ -182,6 +188,7 @@ describe('a 402 missing_entitlement is not a server fault', () => {
     expect(text()).toContain(GENERIC_API_FAULT);
     // Keeps the case above non-vacuous: the panel really is 402-only.
     expect(entitlementPanel()).toBeNull();
+    expect(forbiddenPanel()).toBeNull();
   });
 
   it('still renders Sessão expirada for a 401', async () => {
@@ -198,6 +205,7 @@ describe('a 402 missing_entitlement is not a server fault', () => {
     expect(text()).toContain(SESSION_EXPIRED);
     expect(text()).not.toContain(GENERIC_API_FAULT);
     expect(entitlementPanel()).toBeNull();
+    expect(forbiddenPanel()).toBeNull();
   });
 
   it('renders the skeleton and no error panel while the bootstrap is loading', async () => {
@@ -210,5 +218,23 @@ describe('a 402 missing_entitlement is not a server fault', () => {
     expect(entitlementPanel()).toBeNull();
     expect(text()).not.toContain(SESSION_EXPIRED);
     expect(text()).not.toContain(GENERIC_API_FAULT);
+  });
+
+  it('renders the forbidden panel for a 403 and never the server-fault or session-expired copy', async () => {
+    mocks.getToken.mockResolvedValue('hub-access-token');
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 403,
+      json: async () => ({ error: 'forbidden', code: 'missing_role' }),
+    });
+
+    await renderApp('/tatico/dashboard');
+
+    expect(forbiddenPanel()).not.toBeNull();
+    expect(text()).toContain(FORBIDDEN_COPY.title);
+    expect(text()).not.toContain(GENERIC_API_FAULT);
+    expect(text()).not.toContain(SESSION_EXPIRED);
+    // Keeps the 402 arm non-vacuous in the other direction too.
+    expect(entitlementPanel()).toBeNull();
   });
 });

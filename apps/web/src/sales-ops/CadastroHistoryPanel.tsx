@@ -20,7 +20,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { userLabel } from '@/lib/displayNames';
-import { isAuthFailure } from '@/lib/require-token';
+import { isAuthFailure, isForbiddenFailure } from '@/lib/require-token';
 import {
   formatLedgerTimestampBr,
   purgedEntityIds,
@@ -28,6 +28,7 @@ import {
   type CadastroHistoryRow,
   type ResolvedHistoryRow,
 } from './cadastro-history';
+import { ForbiddenPanel } from './ForbiddenPanel';
 import { useCadastroHistory, useSetSalesOpsCadastroStatus } from './hooks';
 import type { SetCadastroStatusPayload } from './api';
 import type { SalesOpsBootstrap } from './types';
@@ -119,9 +120,19 @@ export function CadastroHistoryPanel({
       ) : isError ? (
         /*
           The same split the bootstrap panel makes: an expired or unrenewable Hub
-          session must never read as "the server is broken".
+          session must never read as "the server is broken", and neither must a
+          permission the operator does not hold.
+          The 403 arm has no shell-level equivalent: `requireAdmin` can 403
+          `/sales-ops/history` on its own while the shell's bootstrap succeeds. There is
+          deliberately no 402 arm here, because the shell's own bootstrap query is behind
+          the same gate and classifies a 402 one level up.
+          `ForbiddenPanel` renders its own `<section>` rather than the local `MutedBlock`,
+          so the marker and the copy are identical in both hosts and a copy edit cannot
+          desynchronise them.
         */
-        isAuthFailure(error) ? (
+        isForbiddenFailure(error) ? (
+          <ForbiddenPanel />
+        ) : isAuthFailure(error) ? (
           <MutedBlock
             text="Sua sessão do FXL Hub expirou ou não pôde ser renovada. Atualize a página para entrar novamente."
             title="Sessão expirada"

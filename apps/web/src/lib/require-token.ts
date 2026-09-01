@@ -72,6 +72,35 @@ export function isEntitlementFailure(error: unknown): boolean {
   );
 }
 
+/**
+ * True for the 403 half of the deny taxonomy, and for nothing else.
+ *
+ * A 403 means the token is valid and the operator is correctly identified, and
+ * they do not hold the membership, Seat, module or role the route requires. That
+ * is neither a dead session nor a dead server, so it must reach neither
+ * `Sessão expirada` nor "verifique o servidor local". `@fxl-business/hub-sdk@2.1.0`
+ * answers `403 {error: 'forbidden', code: 'missing_module'}` and
+ * `403 {error: 'forbidden', code: 'missing_role'}`; this repo's own
+ * `requireHubModule` and `requireAdmin` answer 403 today.
+ *
+ * Keyed on the STATUS ALONE, exactly as `isEntitlementFailure` is, and for the same
+ * asymmetry: `apiFetch` builds its error from `await res.json().catch(() => ({}))`,
+ * so a 403 whose body does not parse - a proxy error page, a truncated response, a
+ * gateway that rewrites the payload - carries no `code` at all. Requiring the code
+ * would classify exactly that response as NOT forbidden and route it back onto the
+ * server-outage copy this predicate exists to remove. Keying on the code fails
+ * CLOSED onto that lie; keying on the status fails OPEN onto a panel that says
+ * "peça a quem administra", which is true of every 403 this API can send.
+ *
+ * The predicate stays narrow otherwise: no `>= 400`, no error-string alternative,
+ * strict `===`, and `null` and `undefined` handled by the object guard.
+ */
+export function isForbiddenFailure(error: unknown): boolean {
+  return (
+    typeof error === 'object' && error !== null && (error as { status?: unknown }).status === 403
+  );
+}
+
 /** TypeScript cannot express "non-empty string", so emptiness is a runtime check. */
 export function assertBearerToken(token: unknown): asserts token is string {
   if (typeof token !== 'string' || token.trim() === '') {
