@@ -1,0 +1,97 @@
+{
+  "status": "complete",
+  "verdict": "PASS",
+  "boot_failure_invariant": {
+    "holds": true,
+    "proof": "apps/api/src/config/auth-provider.ts contains no try/catch at all (grep for 'try'/'catch' matches only the header comment and the tryLoadHubAuthConfig identifier at line 139). tryLoadHubAuthConfig calls hubConfigPresence first and returns null ONLY for 'absent' and 'incomplete'; every other presence falls through to loadHubAuthConfig, whose throws propagate. hubConfigPresence checks the two-forms ambiguity BEFORE the absent/incomplete verdict, so FXL_HUB_CONFIG beside a discrete variable throws even when the discrete side is incomplete, which is what keeps that acceptance case a boot failure. 503 hub_auth_not_configured stays alive for the absent case, pinned by 'returns null from the optional loader when no Hub configuration is present at all'. Raw process.env has left auth-provider.ts entirely: the only 'process' occurrences are two prose comments, and the module reads a Record bag built by hubEnvBag off the type-only Env projection. app-auth.ts now calls tryLoadHubAuthConfig(hubEnvBag(env)) and every resolver reads that bag rather than process.env; env.NODE_ENV replaced the three process.env.NODE_ENV reads."
+  },
+  "mutations": [
+    {
+      "mutation": "wrapped loadHubAuthConfig's body in try/catch returning null (the D1 reversion)",
+      "oracle": "tryLoadHubAuthConfig > refuses to boot on a product. audience rather than answering 503",
+      "went_red": true,
+      "collateral": "3 further oracles also went red: 'refuses an incomplete Hub configuration from the strict loader and names the client secret field', 'requires FXL_HUB_HEALTH_TOKEN outside development', 'never leaks the client secret out of the optional loader' (4 failed / 8 passed)"
+    },
+    {
+      "mutation": "disabled the client-id environment agreement check in hub-config.ts (if (false && parsedClientId.environment !== environment))",
+      "oracle": "loadHubConfig > refuses an environment that disagrees with the client id segment, and reaches no network",
+      "went_red": true,
+      "collateral": "'never puts the client secret in an error message or a log line' also went red (2 failed / 12 passed)"
+    },
+    {
+      "mutation": "disabled the two-forms ambiguity check in hubConfigPresence (if (false && jsonSet && discreteSet.length > 0))",
+      "oracle": "tryLoadHubAuthConfig > refuses to boot when FXL_HUB_CONFIG is set beside a discrete variable and names every offender",
+      "went_red": true,
+      "collateral": "'never leaks the client secret out of the optional loader' also went red (2 failed / 10 passed)"
+    },
+    {
+      "mutation": "weakened the strict loader so it returns null instead of throwing on an incomplete bag (early return on hubConfigPresence(bag) === 'incomplete' inside loadHubAuthConfig)",
+      "oracle": "loadHubAuthConfig > refuses an incomplete Hub configuration from the strict loader and names the client secret field",
+      "went_red": true,
+      "collateral": "exactly 1 failed / 11 passed, so this oracle is the sole and precise catcher of the regression round 1 found had been silently dropped for two waves"
+    }
+  ],
+  "offline_oracle": {
+    "genuinely_offline": true,
+    "detail": "'refuses an environment that disagrees with the client id segment, and reaches no network' installs vi.stubGlobal('fetch', vi.fn(() => { throw new Error('the Hub config validator must never reach the network'); })) and asserts not.toHaveBeenCalled(). The stub THROWS if called, so it proves offline-ness rather than merely asserting on a returned result. afterEach calls vi.unstubAllGlobals(). No network call was made by any command run in this verification."
+  },
+  "secret_hygiene": {
+    "no_input_value_interpolated": true,
+    "error_construction_review": "Every HubConfigError message in hub-config.ts names the FIELD and the RULE. The only three interpolations are HUB_ENVIRONMENTS.join(', ') (a closed set of three words), `${environment} but the client id names ${parsedClientId.environment}` (both members of that same closed set), and `app.${parsedClientId.slug}` (the expected audience computed from the client id slug, a public identifier). clientId and clientSecret are never interpolated. auth-provider.ts interpolates only discreteSet.join(', '), which is variable NAMES from the HUB_DISCRETE_ENV_VARS literal, never values.",
+    "leak_oracle_exists_and_passes": true,
+    "leak_oracle_detail": "hub-config.test.ts 'never puts the client secret in an error message or a log line' drives six invalid bags and asserts String(error), error.message and String(error.stack) contain neither HUB_CLIENT_SECRET nor STAGING_CLIENT_SECRET, then asserts the console.error and console.warn spies were NOT CALLED AT ALL. auth-provider.test.ts 'never leaks the client secret out of the optional loader' repeats the String/message/stack assertions over the optional door.",
+    "tracked_credentials": "No real or guessed credential is written to any tracked file. apps/api/.env.example and apps/api/.env.dev.example ship FXL_HUB_CONFIG=, FXL_HUB_CLIENT_ID=, FXL_HUB_CLIENT_SECRET= and FXL_HUB_HEALTH_TOKEN= all EMPTY. FXL_HUB_AUDIENCE=app.fxl-sales and FXL_HUB_ENVIRONMENT=development are the only non-empty values, both permitted by D4 as public derivable identifiers. README.md's API block matches. Test fixtures are the obviously synthetic pk_/sk_fxl-sales_<env>_unit-test-only-... shapes.",
+    "retired_literal": "pk_fxl-sales_VzQ9-LUONCnlKllxCRLffN3nw6Z9PQl2 is GONE from every file this slice declares. It survives only in apps/web/.env.example, apps/web/.env.dev.example and README.md lines 7 and 24 prose (all slice 04's), as the deliberate negative fixture in hub-config.test.ts 'returns null for a key with no environment segment', in CLAUDE.md (which D5 forbids this slice to touch), and in prior-run nexo plan and check documents."
+  },
+  "wave_discipline": {
+    "sdk_version_unchanged": true,
+    "sdk_detail": "apps/api/package.json and apps/web/package.json both still declare @fxl-business/hub-sdk ^1.3.1. No package.json, pnpm-lock.yaml or pnpm-workspace.yaml appears in git diff master...HEAD --name-only.",
+    "d5_respected": true,
+    "d5_detail": "The diff touches neither CLAUDE.md nor apps/api/src/auth/hub-session-store.ts.",
+    "files_match_plan": true,
+    "files_detail": "The 13 changed files are exactly the plan's files_modified list, in both directions. Nothing outside it."
+  },
+  "deviation_verdict": "ACCEPTED as a plan correction, not a defect. The implementer's reasoning is correct and I proved it empirically. app-auth.test.ts carries a static `import { ... } from '../app-auth.js'`, and app-auth.ts calls tryLoadHubAuthConfig(hubEnvBag(env)) at its own module top level with no blanket try/catch behind it any more. ESM evaluates that import before any vitest hook body, so a beforeAll stub is provably too late. Proof: with a conflicting FXL_HUB_CONFIG plus FXL_HUB_CLIENT_ID exported into the environment, (A) the file as committed passes 16/16; (B) with the stub rewritten to beforeAll it dies with `HubConfigError: FXL_HUB_CONFIG is set alongside FXL_HUB_API_URL, FXL_HUB_CLIENT_ID` and reports 'no tests'; (C) with the stub deleted entirely it fails identically. Case B is indistinguishable from case C, so the beforeAll the plan names would have bought nothing. The vi.hoisted placement achieves exactly the purpose the plan states for the stub, and the plan's wording is what is wrong. Both mutations were restored.",
+  "commands": {
+    "pnpm --filter @fxl-sales/api test": {
+      "exit": 0,
+      "result": "42 test files, 448 tests passed"
+    },
+    "pnpm run type-check": {
+      "exit": 0,
+      "result": "shared-types, shared-utils, apps/api, apps/web all clean"
+    },
+    "pnpm run lint": {
+      "exit": 0,
+      "result": "apps/api and apps/web eslint clean"
+    },
+    "pnpm --filter @fxl-sales/api test:integration": {
+      "exit": 0,
+      "result": "25 test files, 169 tests passed against the local Docker database on localhost:5006"
+    }
+  },
+  "house_rules": {
+    "no_em_or_en_dash_on_added_lines": true,
+    "dash_scan_detail": "git diff master...HEAD -U0 filtered to added lines and grepped by codepoint for U+2013 and U+2014: no matches.",
+    "no_test_deleted_skipped_or_loosened": true,
+    "test_rename_detail": "Exactly three test titles disappear from the diff, and all three are plan-sanctioned successors, not losses. 'loads the Hub contract for product.fxl-sales' becomes the app. equivalent, which is the slice's entire purpose. 'rejects missing secret keys' SPLITS in two exactly as the plan mandates at its lines 627 and 643, and the strict half is strictly stronger (it now pins error.field, the named variable, and the no-leak assertion, where the original only regex-matched a message). 'returns null from the optional loader when Hub env is incomplete' splits into the 'absent' and 'incomplete' halves, both preserved. No .skip, no .todo, no .only anywhere in the diff. Test count on this branch is 448, up from master's baseline.",
+    "no_no_verify": true,
+    "no_coauthor_trailer": true
+  },
+  "tree_restored": true,
+  "findings": [
+    {
+      "severity": "observation",
+      "text": "CLAUDE.md lines 433 and 446 still document FXL_HUB_PUBLISHABLE_KEY / FXL_HUB_SECRET_KEY and still carry the retired pk_fxl-sales_VzQ9-... literal, so the project instructions now contradict apps/api/.env.example. This is NOT a slice 02 defect: decision D5 explicitly forbids this slice from touching CLAUDE.md, and slice 01 owns that file. Recording it so a later slice in this run picks it up rather than leaving master's documentation stale at the end of the feature."
+    },
+    {
+      "severity": "observation",
+      "text": "app-auth-bff-wiring.test.ts still builds three raw HubSdkConfig fixtures with audience: 'product.fxl-sales' and publishableKey: 'pk_fxl-sales_unit-test-publishable-key'. These are handed straight to the real 1.3.1 createHubBff and never pass through the new validator, so they are legitimate SDK-contract fixtures rather than a leak of the retired shape. The 'no API module derives the Hub audience from a key' guard deliberately scans only the three src modules, not the tests, which is the correct scope. Worth revisiting at the SDK bump when those fixtures must move to app.<slug> anyway."
+    },
+    {
+      "severity": "observation",
+      "text": "loadHubAuthConfig validates FXL_HUB_HEALTH_TOKEN and HubAuthConfig carries it, but the 1.3.1 createHubBff is never given it. The file says so explicitly and the SDK bump wires it. Validating at boot rather than at use is the right call and is pinned by 'requires FXL_HUB_HEALTH_TOKEN outside development'. No action."
+    }
+  ],
+  "summary": "PASS. The boot-failure invariant of decision D1 holds and is proven non-vacuous: auth-provider.ts has no try/catch, tryLoadHubAuthConfig fails soft only for 'absent' and 'incomplete', 503 hub_auth_not_configured survives for a machine with no credentials, and raw process.env has left both config modules and the middleware's Hub reads. All four required mutations turned their named oracles red, and the fourth turned exactly one test red, which is the precise catcher for the claim round 1 found had been silently dropped. The offline oracle stubs fetch with a throwing spy rather than asserting on a result. No error path interpolates an input value, the leak oracle asserts stack and message and that no console spy was called at all, and every actual credential in every tracked file is empty. Wave discipline holds: hub-sdk stays at ^1.3.1, no manifest or lockfile moved, neither CLAUDE.md nor hub-session-store.ts is touched, and the 13 changed files are exactly the plan's files_modified. All four commands exit 0. The one declared deviation, vi.hoisted rather than beforeAll for the blank FXL_HUB_CONFIG stub, is correct and is recorded as a plan correction: I proved a beforeAll stub is byte-for-byte as useless as no stub at all against a static import. The working tree is restored to its exact starting state."
+}

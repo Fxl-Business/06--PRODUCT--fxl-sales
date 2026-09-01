@@ -1,0 +1,71 @@
+{
+  "status": "done",
+  "summary": "The Hub Audience and the Hub environment are now explicit validated configuration on hub-sdk 1.3.1. A vendored 2.1.0 config validator lands at apps/api/src/config/hub-config.ts; auth-provider.ts is rewritten around hubEnvBag / hubConfigPresence / loadHubAuthConfig / tryLoadHubAuthConfig with NO blanket try/catch, so a bad Hub configuration is a boot failure and only the absent and incomplete presences fail soft into the existing 503. parseAudienceFromPublishableKey is deleted, coreModuleFromAudience keeps working through a widened prefix strip, env.ts drops FXL_HUB_PUBLISHABLE_KEY / FXL_HUB_SECRET_KEY and gains the five new keys, and raw process.env has left app-auth.ts entirely. The SDK was NOT bumped and nothing was installed.",
+  "commits": [
+    {"sha": "0a7c536", "subject": "test(api): pin explicit Hub config, offline environment agreement and no NODE_ENV inference"},
+    {"sha": "ebf64e4", "subject": "feat(api): make the Hub audience and environment explicit validated configuration"},
+    {"sha": "a75ce8f", "subject": "docs(api): retire the Hub publishable and secret key variables"}
+  ],
+  "files_changed": [
+    "README.md",
+    "apps/api/.env.dev.example",
+    "apps/api/.env.example",
+    "apps/api/src/auth/session-crypto.ts",
+    "apps/api/src/config/__tests__/auth-provider.test.ts",
+    "apps/api/src/config/__tests__/hub-config.test.ts",
+    "apps/api/src/config/auth-provider.ts",
+    "apps/api/src/config/hub-config.ts",
+    "apps/api/src/env.ts",
+    "apps/api/src/middleware/__tests__/app-auth-bff-memory-path.test.ts",
+    "apps/api/src/middleware/__tests__/app-auth-bff-wiring.test.ts",
+    "apps/api/src/middleware/__tests__/app-auth.test.ts",
+    "apps/api/src/middleware/app-auth.ts"
+  ],
+  "oracles_written": [
+    {"title": "accepts a single FXL_HUB_CONFIG JSON object as this repo's documented form", "passing": true},
+    {"title": "accepts the five discrete variables when FXL_HUB_CONFIG is absent", "passing": true},
+    {"title": "trims trailing slashes off apiUrl", "passing": true},
+    {"title": "refuses a plain http apiUrl outside development", "passing": true},
+    {"title": "refuses a product. audience at boot and names the audience field", "passing": true},
+    {"title": "refuses an audience that is not app. plus the client id slug", "passing": true},
+    {"title": "refuses an environment that disagrees with the client id segment, and reaches no network", "passing": true},
+    {"title": "never consults NODE_ENV to decide the environment", "passing": true},
+    {"title": "refuses a client secret whose slug or environment disagrees with the client id", "passing": true},
+    {"title": "refuses FXL_HUB_CONFIG that is not valid JSON", "passing": true},
+    {"title": "never puts the client secret in an error message or a log line", "passing": true},
+    {"title": "parses pk_<slug>_<environment>_<random> and keeps underscores inside the random segment", "passing": true},
+    {"title": "returns null for a key with no environment segment", "passing": true},
+    {"title": "does not read NODE_ENV anywhere in the Hub config module", "passing": true},
+    {"title": "loads the Hub contract for app.fxl-sales from FXL_HUB_CONFIG", "passing": true},
+    {"title": "loads the same contract from the five discrete variables", "passing": true},
+    {"title": "returns null from the optional loader when no Hub configuration is present at all", "passing": true},
+    {"title": "returns null from the optional loader when the discrete form is incomplete", "passing": true},
+    {"title": "refuses an incomplete Hub configuration from the strict loader and names the client secret field", "passing": true},
+    {"title": "refuses to boot when FXL_HUB_CONFIG is set beside a discrete variable and names every offender", "passing": true},
+    {"title": "refuses to boot on a product. audience rather than answering 503", "passing": true},
+    {"title": "requires FXL_HUB_HEALTH_TOKEN outside development", "passing": true},
+    {"title": "does not require FXL_HUB_HEALTH_TOKEN in development", "passing": true},
+    {"title": "projects exactly the Hub variables off the validated env object", "passing": true},
+    {"title": "no API module derives the Hub audience from a key", "passing": true},
+    {"title": "never leaks the client secret out of the optional loader", "passing": true},
+    {"title": "resolves the redirect to this app's own origin, never the Hub's", "passing": true},
+    {"title": "keeps the redirect on this app origin when the Hub api url and the web origin differ", "passing": true},
+    {"title": "points the BFF callback at this app's own origin rather than the Hub's", "passing": true}
+  ],
+  "commands_run": {
+    "pnpm --filter @fxl-sales/api test": 0,
+    "pnpm run type-check": 0,
+    "pnpm run lint": 0,
+    "pnpm --filter @fxl-sales/api test:integration": 0
+  },
+  "no_blanket_catch": true,
+  "no_blanket_catch_proof": "grep -n 'try\\b|catch' apps/api/src/config/auth-provider.ts returns exactly one line, the header comment on line 9 explaining why there is none; there is no try or catch keyword anywhere in the file body.",
+  "deviations_from_plan": [
+    "app-auth.test.ts: the FXL_HUB_CONFIG blank stub is placed in a vi.hoisted() block rather than the beforeAll the plan names. That file imports ../app-auth.js with a STATIC import, which ESM evaluates before any beforeAll runs, so a beforeAll stub would be a no-op against the module-scope throw it exists to prevent. vi.hoisted runs before the imports and achieves exactly the stated purpose. No existing assertion or title in that file changed."
+  ],
+  "concerns": [
+    "The committed publishable-key literal pk_fxl-sales_VzQ9-LUONCnlKllxCRLffN3nw6Z9PQl2 now appears only in apps/web/.env.example, apps/web/.env.dev.example and README.md lines 7 and 24 prose, all of which the plan explicitly leaves to slice 04. It is also present, deliberately, as the negative fixture in the plan's named test 'returns null for a key with no environment segment'.",
+    "For one wave CLAUDE.md documents FXL_HUB_PUBLISHABLE_KEY / FXL_HUB_SECRET_KEY, which the API has stopped reading. This is the deliberate consequence of decision D5, and slice 03 carries the correcting bullet verbatim in wave 2.",
+    "healthToken is validated and carried on HubAuthConfig but is not yet handed to createHubBff, because the 1.3.1 SDK has no such option. A comment in auth-provider.ts says so; slice 04 wires it."
+  ]
+}
