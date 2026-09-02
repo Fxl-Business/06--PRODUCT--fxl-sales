@@ -8,7 +8,10 @@
     "total_slices": 5,
     "wave_recoveries": 0
   },
-  "exhausted": null,
+  "exhausted": {
+    "at": 1788363571,
+    "reason": "max_active_seconds:14400"
+  },
   "limits": {
     "agent_result_timeout_seconds": 600,
     "max_active_seconds": 14400,

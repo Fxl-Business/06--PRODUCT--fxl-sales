@@ -1,7 +1,7 @@
 ---
 id: 05-dev-identity-fixtures
 milestone: v2.8.0
-status: todo
+status: parked
 depends_on: [04-sdk-210-flip]
 files_modified: [package.json, scripts/dev-only-testing-package.mjs, apps/api/package.json, apps/web/package.json, pnpm-lock.yaml, apps/api/src/auth/__tests__/dev-roster.ts, apps/api/src/auth/__tests__/dev-roster.test.ts, apps/api/src/auth/__tests__/hub-auth-context-fixture.ts, apps/api/src/middleware/__tests__/app-auth.test.ts, apps/web/src/auth/__tests__/dev-roster.ts, apps/web/src/auth/__tests__/claims-hub-contract.test.ts]
 acceptance: "given @fxl-business/hub-sdk-testing is installed, when the dependency graph is inspected, then it appears only under devDependencies and a guard fails if it ever moves, and the Hub-shaped claim fixtures it emits flow through this app's own claim translation rather than around it"

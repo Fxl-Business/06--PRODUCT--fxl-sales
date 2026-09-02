@@ -1,7 +1,7 @@
 ---
 id: 03-access-entitlement-gate
 milestone: v2.8.0
-status: todo
+status: done
 depends_on: [02-explicit-hub-config]
 files_modified:
   - apps/api/src/config/auth-provider.ts

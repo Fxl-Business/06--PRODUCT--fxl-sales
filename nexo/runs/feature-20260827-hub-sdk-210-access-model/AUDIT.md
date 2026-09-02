@@ -208,3 +208,116 @@ user. But it is a visible, product-wide event and it must be a deliberate choice
 a surprise.
 
 This belongs on the coordinated Hub-deploy checklist alongside the new Clients.
+
+## Runtime budget exhausted
+
+Reason: `max_active_seconds:14400`.
+
+Unfinished work must be parked and the run must finish without extending the budget.
+
+---
+
+# PARKED at the runtime budget, 2026-09-02
+
+`nexo-policy.py check` returned `{"reason": "max_active_seconds:14400"}` after wave 2
+merged. The budget was NOT expanded a second time. It was reset ONCE at the start of this
+resume, and that reset is recorded above with its reason: a stale five-day clock left
+running on a parked run. Resetting it again mid-execution to keep working would be exactly
+the budget expansion the finite runtime policy forbids, so the run stops here instead.
+
+## What shipped, all on `master`, all verified
+
+Three of five slices, two of four waves.
+
+| slice | status | Gate 2 |
+|---|---|---|
+| 01 session-store-read-contract | done | PASS, separate agent, 4 mutations red |
+| 02 explicit-hub-config | done | PASS, separate agent, 4 mutations red |
+| 03 access-entitlement-gate | done | PASS, separate agent, 3 mutations red, 5 coercion cases denied |
+| 04 sdk-210-flip | PARKED, not started | none |
+| 05 dev-identity-fixtures | PARKED, not started | none |
+
+Wave 1 also passed a full integrated wave-verify by a separate agent: lint, type-check,
+the full suite, a real build and the RLS integration suite, all exit 0, 1298 tests.
+
+## What is deliberately NOT true yet
+
+`master` is NOT migrated. The SDK is still pinned to `@fxl-business/hub-sdk@^1.3.1` in both
+apps, by design: slices 01, 02 and 03 were shaped to land on 1.3.1 and keep the trunk green,
+and slice 04 is the single atomic version flip. So the tree today has:
+
+- the 2.x three-state `read()` contract implemented BESIDE the 1.3.1 `get()` the current BFF
+  still calls
+- explicit validated Hub configuration, with a bad configuration now a BOOT FAILURE rather
+  than a 503
+- `entitlements.access` as the access gate and the `<slug>.core` module gone from production
+  source, with the local 402 that slice 04 was to delete and delegate to `requireHubAuth`
+- the 401 / 402 / 403 taxonomy complete on the web, including the new 403 branch
+
+That is a coherent, shippable state on 1.3.1. It is not the migration.
+
+## The wave-2 integrated verify was NOT run by a separate agent
+
+Slice 03's own Gate 2 passed by a separate agent and covered the api suite, the web suite,
+type-check, lint and the RLS integration suite. What a wave-2 verify would have added on top
+is `pnpm test` across the whole monorepo and a real `pnpm run build`, plus a security review
+of the integrated diff. Those two commands were run by the ORCHESTRATOR inline before parking,
+which is weaker than the contract asks for and is recorded here as a gap rather than presented
+as a pass. The security review of the wave-2 diff did not happen at all.
+
+## Flake fixed along the way
+
+`professional-payable-migration.integration.test.ts` created a `CREATE INDEX CONCURRENTLY`
+promise up to five seconds before anything attached a rejection handler, and
+`pg_cancel_backend` made it reject inside that window. It failed no test but exited the runner
+NONZERO, which reads as a red integration gate for a suite in which all 169 tests passed.
+
+Honest limits on the evidence: four consecutive runs on an idle machine did NOT reproduce it,
+while a Verify agent hit it on both of two runs with other agents working. The diagnosis is by
+inspection and the load-dependence is a hypothesis, not a measurement. It was fixed anyway
+because the defect is visible in the source and had already produced a nonzero gate exit.
+
+The fix attaches the handler at creation and settles into a tagged outcome rather than
+swallowing with a bare `.catch(() => {})`, so the claim is unchanged. Proven by mutation:
+expecting code `00000` instead of `57014` turns the test red.
+
+## Resuming: what the next run must do
+
+The plan set is READY. It passed a clean round-3 plan-check with zero blocking findings and
+`execution_ready: true`, and slices 04 and 05 are `status: parked` with their content intact.
+The next run does NOT need to replan. It should:
+
+1. Reset the run clock, recording the reason, exactly as this run did.
+2. Execute wave 3, slice 04, `04-sdk-210-flip.md`. It is the atomic SDK bump, about 2400
+   plan lines over 49 declared files, and it is the only slice that carries real risk. It
+   deletes slice 03's one-wave 402 bridge, deletes `hubSdkConfig`, deletes slice 01's local
+   type declarations, flips both apps to 2.1.0 and owns the `checkoutUrl(organizationId)`
+   fix that round 2 caught.
+3. Execute wave 4, slice 05, `05-dev-identity-fixtures.md`.
+4. Run the feature-boundary gate, and run the wave-2 and wave-3 integrated verifies that
+   this run did not.
+
+One replan unit of three remains unspent.
+
+## Still NOT promoted, and it must stay that way for now
+
+`master` only. No `staging`, no `production`. The Hub in production still runs the OLD access
+model, and the promotion checklist in `nexo/ROADMAP.md` lists what has to be true first,
+including the `FXL_HUB_SECRET_KEY` to `FXL_HUB_CLIENT_SECRET` value carry-over that would
+otherwise cost every user one re-login.
+
+## `master` at park time, measured
+
+Run by the orchestrator inline on `d56b27e`, each command once, non-watching:
+
+```
+pnpm run lint                             exit 0
+pnpm run type-check                       exit 0
+pnpm test                                 exit 0   1323 tests (80 shared-utils, 465 api, 778 web)
+pnpm run build                            exit 0
+pnpm --filter @fxl-sales/api test:integration  exit 0   169 tests, 25 files
+```
+
+1323 is up from the 1265 baseline at `7b0da2d`, a rise of 58, entirely in `apps/api` (415 to
+465) and `apps/web` (770 to 778). No package fell. The integration suite exits 0 cleanly,
+which it did not before the flake fix.

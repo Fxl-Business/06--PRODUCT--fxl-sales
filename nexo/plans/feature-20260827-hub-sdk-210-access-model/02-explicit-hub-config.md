@@ -1,7 +1,7 @@
 ---
 id: 02-explicit-hub-config
 milestone: v2.8.0
-status: todo
+status: done
 depends_on: []
 files_modified:
   - apps/api/src/config/hub-config.ts
