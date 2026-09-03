@@ -20,7 +20,7 @@
  * `createAppAuthBff()` at module top level - so the API would not boot at all.
  */
 import type {
-  HubSdkConfig,
+  HubConfig,
   HubSessionRecord,
   HubSessionStore,
   HubSessionTransaction,
@@ -74,6 +74,20 @@ let sessionStoreKind: string | undefined;
 let durableStore: DurableHubSessionStore | undefined;
 let encryptionIkm: string | undefined;
 let authBff: Hono | null = null;
+
+/**
+ * The fake Hub currently in play, or null for "no test has installed one".
+ *
+ * It is a MUTABLE indirection rather than a per-test `vi.stubGlobal`, and that is
+ * forced by the SDK: `createHubBff` binds `options.fetchImpl ?? fetch` ONCE at
+ * construction, and construction happens in `beforeAll`. While this app passed a
+ * `fetchImpl` wrapper the binding was resolved per call, so a later stub reached
+ * it; with the wrapper deleted in favour of 2.2.0's own parser, a later stub
+ * would never be seen and every request would escape to whatever
+ * `FXL_HUB_API_URL` names. So the global is stubbed ONCE, before construction,
+ * and each test swaps the handler behind it.
+ */
+let hubHandler: typeof fetch | null = null;
 let closeDb: (() => Promise<void>) | undefined;
 /**
  * Taken from the module graph `app-auth.ts` itself loaded, NOT from a top-level
@@ -147,6 +161,15 @@ beforeAll(async () => {
   const appAuth = await import('../app-auth.js');
   // If Blocker A were unfixed this line would THROW, exactly as server.ts does.
   // So would a store that still had the pre-1.3.0 synchronous shape.
+  // BEFORE construction, so the SDK's one-time `fetchImpl ?? fetch` binding
+  // captures this indirection rather than the real global.
+  vi.stubGlobal('fetch', ((...args: Parameters<typeof fetch>) => {
+    if (hubHandler === null) {
+      return Promise.reject(new Error('no fake Hub installed for this test'));
+    }
+    return hubHandler(...args);
+  }) as typeof fetch);
+
   authBff = appAuth.createAppAuthBff() as Hono | null;
 });
 
@@ -180,7 +203,7 @@ const HUB_SWITCH_BODY = {
   workspace: { id: 'ws-2', name: 'Segunda' },
 };
 
-type RecordedCall = { op: 'get' | 'update' | 'delete'; token?: string };
+type RecordedCall = { op: 'read' | 'update' | 'delete'; token?: string };
 
 /**
  * A recording, in-memory stand-in for ONE durable transaction. It honours the
@@ -196,9 +219,9 @@ function recordingSession(initialToken = 'RT1') {
     absoluteExpiresAt: new Date(Date.now() + 3_600_000).toISOString(),
   };
   const tx: HubSessionTransaction = {
-    get: async () => {
-      calls.push({ op: 'get' });
-      return record;
+    read: async () => {
+      calls.push({ op: 'read' });
+      return record === null ? { status: 'absent' as const } : { status: 'found' as const, record };
     },
     update: async (next) => {
       calls.push({ op: 'update', token: next.hubRefreshToken });
@@ -233,13 +256,12 @@ function fakeHubFetch(setCookies: readonly string[], body: unknown, status = 200
 }
 
 /**
- * Installs that fake Hub as the ambient global fetch. The wrapper resolves
- * `globalThis.fetch` at CALL time, which is what makes stubbing it here - long
- * after `createAppAuthBff()` ran in beforeAll - reach the real production wiring.
+ * Points the already-installed global stub at a fresh fake Hub. See `hubHandler`
+ * for why this cannot be a `vi.stubGlobal` of its own.
  */
 function stubHub(setCookies: readonly string[], body: unknown, status = 200) {
   const { impl, seen } = fakeHubFetch(setCookies, body, status);
-  vi.stubGlobal('fetch', impl);
+  hubHandler = impl as unknown as typeof fetch;
   return seen;
 }
 
@@ -355,6 +377,7 @@ describe('createAppAuthBff cookie routing, against the real SDK', () => {
     );
     const seen: string[] = [];
     const probe: HubSessionStore = {
+      kind: 'persistent',
       create: async () => 'probe-session',
       withSession: async (sessionId) => {
         seen.push(sessionId);
@@ -363,16 +386,16 @@ describe('createAppAuthBff cookie routing, against the real SDK', () => {
       createLoginTransaction: async () => 'probe-login',
       consumeLoginTransaction: async () => null,
     };
-    const config: HubSdkConfig = {
+    const config: HubConfig = {
       apiUrl: 'http://localhost:9016',
-      publishableKey: 'pk_fxl-sales_unit-test-publishable-key',
-      secretKey: HUB_CLIENT_SECRET,
-      audience: 'product.fxl-sales',
+      environment: 'development',
+      clientId: 'pk_fxl-sales_development_unit-test-client-id',
+      clientSecret: HUB_CLIENT_SECRET,
+      audience: 'app.fxl-sales',
     };
 
     const bff = actual.createHubBff(config, {
       sessionStore: probe,
-      secureCookies: true,
       fetchImpl: (() => {
         throw new Error('the probe short-circuits before any Hub call');
       }) as unknown as typeof fetch,
@@ -408,11 +431,12 @@ describe('the SDK BFF route contract apps/web/src/auth/refresh.ts is coupled to'
     const actual = await vi.importActual<typeof import('@fxl-business/hub-sdk/server')>(
       '@fxl-business/hub-sdk/server',
     );
-    const config: HubSdkConfig = {
+    const config: HubConfig = {
       apiUrl: 'http://localhost:9016',
-      publishableKey: 'pk_fxl-sales_unit-test-publishable-key',
-      secretKey: HUB_CLIENT_SECRET,
-      audience: 'product.fxl-sales',
+      environment: 'development',
+      clientId: 'pk_fxl-sales_development_unit-test-client-id',
+      clientSecret: HUB_CLIENT_SECRET,
+      audience: 'app.fxl-sales',
     };
     return actual.createHubBff(config, {
       sessionStore: new InMemoryHubSessionStore(),
@@ -490,12 +514,12 @@ describe('createAppAuthBff login supersede', () => {
 describe('createAppAuthBff trusted-origin mount', () => {
   it('does not 403 a cross-origin refresh from CORS_ORIGIN, through the real mount', async () => {
     /*
-      The oracle for the 2026-08-10 production outage, and specifically for the
-      MOUNT rather than the shim. `hub-bff-origin.test.ts` proves the shim works;
-      this proves `createAppAuthBff` actually uses it. Reverting the mount to
-      `router.route('', bff)` left all 391 API tests green while reproducing the
-      outage exactly, so without this a future "simplify back to route()" cleanup
-      re-breaks production with a green suite.
+      The oracle for the 2026-08-10 production outage. This app once carried a
+      hand-rolled origin shim for it; 2.2.0 makes the guard configurable, so the
+      protection now rides `createHubBff`'s own `trustedOrigins` option and this
+      test proves `createAppAuthBff` actually passes it. Dropping that option
+      leaves the rest of the API suite green while reproducing the outage
+      exactly, which is why this test keeps its title across the change.
 
       CORS_ORIGIN is stubbed to http://localhost:8006 in this file's setup, and
       the request is issued from http://localhost - a DIFFERENT origin, which is
@@ -564,8 +588,21 @@ describe('createAppAuthBff store outage', () => {
       errorLog.mockRestore();
     }
 
+    /*
+      The two LOAD-BEARING properties are unchanged and are why this test exists:
+      a store outage answers 503 rather than the 401 that would read as "no
+      session", and it clears no cookie. A 401 here logs every user out over a
+      brief database blip.
+
+      The BODY changed with the bump, and that is upstream rather than a
+      regression. 2.2.0 catches the store failure itself and answers
+      `{error:'session_store_unavailable'}` with `clear: false`, so it never
+      reaches this repo's `hubBffErrorHandler` on this path. Nothing in apps/web
+      reads this body: `requestHubAccessToken` classifies on the STATUS, and only
+      a 401 ends the session.
+    */
     expect(res.status).toBe(503);
-    expect(await res.json()).toEqual({ error: 'unavailable', code: 'session_store_unavailable' });
+    expect(await res.json()).toEqual({ error: 'session_store_unavailable' });
     expect(res.headers.get('set-cookie')).toBeNull();
   });
 });
@@ -575,12 +612,14 @@ describe('createAppAuthBff store outage', () => {
  * three minutes after login.
  *
  * The Hub runs with `NODE_ENV=production` and rotates the session cookie as
- * `__Host-fxl_hub_session=`, which the SDK's `parseRotatedRefresh`
- * (`dist/server.js:301`) cannot match. `tx.update` was therefore never called on
- * the rotation path, Postgres kept the refresh token that had just been spent,
- * the BFF still answered 200, and the Hub revoked the whole token family on the
- * second replay. `apps/api/src/auth/hub-rotated-cookie.ts` is the fix, wired
- * through `createHubBff`'s documented `fetchImpl` option.
+ * `__Host-fxl_hub_session=`, which `parseRotatedRefresh` could not match through
+ * 1.3.1. `tx.update` was therefore never called on the rotation path, Postgres
+ * kept the refresh token that had just been spent, the BFF still answered 200,
+ * and the Hub revoked the whole token family on the second replay, measured in
+ * production on 2026-08-12. This app bridged it at the `fetchImpl` seam for one
+ * wave; `@fxl-business/hub-sdk@2.2.0` fixes it upstream (`dist/server.js:307-316`,
+ * the `__Host-` name tried first and the plain name as fallback), so the bridge
+ * is deleted and these tests now prove the SDK's OWN parser.
  *
  * Until now nothing in this repository had ever executed the SDK's real refresh
  * handler: every test here stubbed `withSession` to return a canned `REFRESH_OK`,
@@ -598,10 +637,9 @@ describe('createAppAuthBff store outage', () => {
  */
 describe('createAppAuthBff rotated Hub session cookie, against the real SDK handlers', () => {
   it('persists the rotated refresh token when the Hub rotates __Host-fxl_hub_session on /auth/refresh', async () => {
-    // THE oracle. Without `fetchImpl: createHubRotatedCookieFetch()` in
-    // app-auth.ts the SDK's regex misses, `calls` is [{ op: 'get' }], the stored
-    // token stays 'RT1' and the route still answers 200 - the production symptom,
-    // reproduced.
+    // THE oracle. Through 1.3.1 the SDK's regex missed, `calls` was
+    // [{ op: 'read' }], the stored token stayed 'RT1' and the route still
+    // answered 200 - the production symptom. On 2.2.0 the update must land.
     const session = recordingSession();
     const spy = useRecordingSession(session);
     const seen = stubHub([HUB_UNRELATED, HUB_ROTATION_PROD], HUB_REFRESH_BODY);
@@ -613,60 +651,67 @@ describe('createAppAuthBff rotated Hub session cookie, against the real SDK hand
       });
     } finally {
       spy.mockRestore();
-      vi.unstubAllGlobals();
+      hubHandler = null;
     }
 
-    expect(session.calls).toEqual([{ op: 'get' }, { op: 'update', token: 'RT2' }]);
+    // TWO updates, and that is 2.2.0 behaviour rather than a double write of the
+    // token: the first carries the rotated refresh token, the second re-writes
+    // the record to slide `expiresAt` forward. This store ignores both
+    // timestamps by design, so the second is inert here; what matters is that the
+    // rotation landed and that the last word is still RT2.
+    expect(session.calls).toEqual([
+      { op: 'read' },
+      { op: 'update', token: 'RT2' },
+      { op: 'update', token: 'RT2' },
+    ]);
     expect(session.stored()).toBe('RT2');
     expect(seen).toHaveLength(1);
     expect(seen[0]).toContain('/auth/refresh');
   });
 
-  it('persists the rotated refresh token when the Hub rotates __Host-fxl_hub_session on /auth/switch', async () => {
-    // A workspace switch that loses its rotation kills the session exactly like a
-    // refresh that does, and the SDK repeats the same two lines at
-    // dist/server.js:518-519. Both routes must be pinned.
+  it('persists the rotated refresh token when the Hub rotates __Host-fxl_hub_session on an Organization switch', async () => {
+    // `POST /auth/switch` was DELETED in 2.0.0. An Organization switch now rides
+    // `POST /auth/refresh` with an `organizationId` body, so it goes through the
+    // SAME handler and the SAME parseRotatedRefresh call as an ordinary renewal.
+    // A switch that loses its rotation kills the session exactly like a refresh
+    // that does, so the case is still pinned - it just no longer needs a second
+    // route to pin it.
     const session = recordingSession();
     const spy = useRecordingSession(session);
     const seen = stubHub([HUB_UNRELATED, HUB_ROTATION_PROD], HUB_SWITCH_BODY);
 
     let res: Response | undefined;
     try {
-      res = await authBff?.request('http://localhost/auth/switch', {
+      res = await authBff?.request('http://localhost/auth/refresh', {
         method: 'POST',
         headers: { cookie: 'fxl_hub_session=session-alpha', 'content-type': 'application/json' },
-        body: JSON.stringify({ workspaceId: 'ws-2' }),
+        body: JSON.stringify({ organizationId: 'ws-2' }),
       });
     } finally {
       spy.mockRestore();
-      vi.unstubAllGlobals();
+      hubHandler = null;
     }
 
     expect(res?.status).toBe(200);
-    expect(session.calls).toEqual([{ op: 'get' }, { op: 'update', token: 'RT2' }]);
     expect(session.stored()).toBe('RT2');
+    expect(session.calls.filter((call) => call.op === 'update')).toContainEqual({
+      op: 'update',
+      token: 'RT2',
+    });
     expect(seen).toHaveLength(1);
-    expect(seen[0]).toContain('/auth/switch');
+    expect(seen[0]).toContain('/auth/refresh');
   });
 
   it('still persists the rotated refresh token when the Hub sends the unprefixed fxl_hub_session', async () => {
-    // The local-development path, which always worked. The wrapper must not have
-    // broken it on the way past.
+    // The local-development path, which always worked: 2.2.0 tries the `__Host-`
+    // name first and falls back to this one, so both shapes rotate.
     //
-    // Read this one carefully before drawing a conclusion from it, because two
-    // reviewers have now had to re-derive the same thing: deleting `fetchImpl`
-    // from app-auth.ts ALSO turns this test red, and that is a HARNESS artifact
-    // rather than evidence that local development needs the wrapper. Without the
-    // wrapper, `createHubBff` binds `options.fetchImpl ?? fetch` ONCE at
-    // construction, and construction happened back in `beforeAll`; `stubHub`'s
-    // later `vi.stubGlobal('fetch', ...)` therefore never reaches the SDK, the
-    // request escapes to whatever `FXL_HUB_API_URL` points at, and no rotation is
-    // ever seen. What goes red is the stub not being reached, not the unprefixed
-    // parse failing.
-    //
-    // The oracle for the real defect is the `__Host-` case above, which is the
-    // one that fails with the stub fully in play. The unprefixed cookie is
-    // matched by the SDK's own `parseRotatedRefresh` and always was.
+    // The harness note that used to sit here is gone with the wrapper. It warned
+    // that deleting `fetchImpl` would redden this test for a harness reason
+    // rather than a real one, because `createHubBff` binds `fetchImpl ?? fetch`
+    // once at construction. That is still true of the SDK, and it is now handled
+    // where it belongs: the global stub is installed BEFORE construction and each
+    // test swaps the handler behind it. See `hubHandler`.
     const session = recordingSession();
     const spy = useRecordingSession(session);
     stubHub([HUB_ROTATION_DEV], HUB_REFRESH_BODY);
@@ -678,14 +723,18 @@ describe('createAppAuthBff rotated Hub session cookie, against the real SDK hand
       });
     } finally {
       spy.mockRestore();
-      vi.unstubAllGlobals();
+      hubHandler = null;
     }
 
-    expect(session.calls).toEqual([{ op: 'get' }, { op: 'update', token: 'RT2' }]);
+    expect(session.calls).toEqual([
+      { op: 'read' },
+      { op: 'update', token: 'RT2' },
+      { op: 'update', token: 'RT2' },
+    ]);
     expect(session.stored()).toBe('RT2');
   });
 
-  it('does not write to the session when the Hub sends no Set-Cookie at all', async () => {
+  it('does not rotate the stored token when the Hub sends no Set-Cookie at all', async () => {
     const session = recordingSession();
     const spy = useRecordingSession(session);
     stubHub([], HUB_REFRESH_BODY);
@@ -698,15 +747,30 @@ describe('createAppAuthBff rotated Hub session cookie, against the real SDK hand
       });
     } finally {
       spy.mockRestore();
-      vi.unstubAllGlobals();
+      hubHandler = null;
     }
 
     expect(res?.status).toBe(200);
-    expect(session.calls).toEqual([{ op: 'get' }]);
+    /*
+      Through 1.3.1 this asserted `calls === [{op:'read'}]`, because no
+      Set-Cookie meant no write at all. 2.2.0 still writes the record back to
+      slide `expiresAt`, so the shape changed while the RULE did not: no
+      Set-Cookie must never invent a new refresh token.
+
+      The session is READ and the token is unchanged, asserted positively. An
+      earlier version of this looped over `calls` checking each update carried
+      RT1, which passes vacuously when there are no calls at all and would have
+      gone green on a regression that stopped touching the store entirely.
+    */
     expect(session.stored()).toBe('RT1');
+    expect(session.calls[0]).toEqual({ op: 'read' });
+    expect(session.calls.filter((call) => call.op === 'update')).toEqual([
+      { op: 'update', token: 'RT1' },
+    ]);
+    expect(session.calls.some((call) => call.op === 'delete')).toBe(false);
   });
 
-  it('answers the accessToken and status the SDK produced, unchanged by the wrapper', async () => {
+  it('answers the accessToken and status the SDK produced', async () => {
     const session = recordingSession();
     const spy = useRecordingSession(session);
     stubHub([HUB_UNRELATED, HUB_ROTATION_PROD], HUB_REFRESH_BODY);
@@ -719,7 +783,7 @@ describe('createAppAuthBff rotated Hub session cookie, against the real SDK hand
       });
     } finally {
       spy.mockRestore();
-      vi.unstubAllGlobals();
+      hubHandler = null;
     }
 
     expect(res?.status).toBe(200);
@@ -741,60 +805,32 @@ describe('createAppAuthBff rotated Hub session cookie, against the real SDK hand
       });
     } finally {
       spy.mockRestore();
-      vi.unstubAllGlobals();
+      hubHandler = null;
     }
 
-    expect(res?.headers.getSetCookie()).toEqual([]);
+    const setCookies = res?.headers.getSetCookie() ?? [];
+
+    // The Hub's rotated refresh token must NEVER reach the browser. That is the
+    // property, and it is asserted directly on the value rather than on the
+    // header being empty.
+    for (const cookie of setCookies) {
+      expect(cookie).not.toContain('RT2');
+      expect(cookie).not.toContain('hub_edge');
+    }
+
+    // What the browser legitimately receives is the BFF's OWN session cookie,
+    // carrying the session ID and not a token, re-issued with a fresh Max-Age
+    // because 2.2.0's session lifetime slides on every refresh. 1.3.1 set no
+    // cookie on this path at all, which is why this assertion changed shape.
+    expect(setCookies).toHaveLength(1);
+    expect(setCookies[0]).toContain('fxl_hub_session=session-alpha');
+    expect(setCookies[0]).toContain('HttpOnly');
   });
 
-  it('hands createHubBff a wrapped fetchImpl rather than the bare global fetch', () => {
-    // Weak on its own, deliberately kept: deleting the option fails here with a
-    // one-line diagnosis before it fails the oracle above with a longer one.
-    expect(bffOptions?.fetchImpl).toBeDefined();
-    expect(bffOptions?.fetchImpl).not.toBe(globalThis.fetch);
-  });
-});
-
-/**
- * The non-vacuity control, following the
- * `proves the guard is real by 403ing that same request without the shim`
- * precedent in `hub-bff-origin.test.ts`.
- */
-describe('the SDK rotation defect this wrapper exists for', () => {
-  it('proves the rotation is genuinely lost without the wrapper, through the same real SDK handler', async () => {
-    const actual = await vi.importActual<typeof import('@fxl-business/hub-sdk/server')>(
-      '@fxl-business/hub-sdk/server',
-    );
-    const session = recordingSession();
-    const probe: HubSessionStore = {
-      create: async () => 'probe-session',
-      withSession: ((_id: string, operation: (tx: HubSessionTransaction) => Promise<unknown>) =>
-        operation(session.tx)) as never,
-      createLoginTransaction: async () => 'probe-login',
-      consumeLoginTransaction: async () => null,
-    };
-    const config: HubSdkConfig = {
-      apiUrl: 'http://localhost:9016',
-      publishableKey: 'pk_fxl-sales_unit-test-publishable-key',
-      secretKey: HUB_CLIENT_SECRET,
-      audience: 'product.fxl-sales',
-    };
-    const hub = fakeHubFetch([HUB_UNRELATED, HUB_ROTATION_PROD], HUB_REFRESH_BODY);
-
-    // The UNWRAPPED fake Hub, which is exactly what production ran before this
-    // slice: the SDK's own `options.fetchImpl ?? fetch`.
-    const bff = actual.createHubBff(config, { sessionStore: probe, fetchImpl: hub.impl });
-
-    const res = await bff.request('http://localhost/auth/refresh', {
-      method: 'POST',
-      headers: { cookie: 'fxl_hub_session=session-alpha' },
-    });
-
-    // 200 with no update: the silent write loss, verbatim. If this ever goes
-    // green with an `update`, the SDK was fixed upstream and
-    // apps/api/src/auth/hub-rotated-cookie.ts can be deleted.
-    expect(res.status).toBe(200);
-    expect(session.calls).toEqual([{ op: 'get' }]);
-    expect(session.stored()).toBe('RT1');
+  it('passes no fetchImpl, so the rotation parser that runs is the SDK own one', () => {
+    // 2.2.0 matches `__Host-fxl_hub_session` natively, so this app hands the BFF
+    // nothing and the SDK falls back to the global `fetch`. The rotation itself
+    // is proven by the tests above, through the real handler.
+    expect(bffOptions?.fetchImpl).toBeUndefined();
   });
 });

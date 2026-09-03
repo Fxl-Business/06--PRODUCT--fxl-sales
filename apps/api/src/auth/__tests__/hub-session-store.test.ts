@@ -275,9 +275,10 @@ describe('absolute session lifetime', () => {
 
     let spread: HubSessionRecord | null = null;
     await frozenStore(db).withSession(SESSION_ID, async (handle) => {
-      // EXACTLY what dist/server.js:464 does: the record spread back with only
-      // hubRefreshToken replaced.
-      spread = await handle.get();
+      // EXACTLY what the SDK does on the rotation path: the record it just read,
+      // spread back with only hubRefreshToken replaced.
+      const observed = await handle.read();
+      spread = observed.status === 'found' ? observed.record : null;
       await handle.update({ ...spread!, hubRefreshToken: 'rotated' });
     });
 
@@ -305,9 +306,9 @@ describe('absolute session lifetime', () => {
 
     let deletesWhenObserved = -1;
     const seen = await frozenStore(db).withSession(SESSION_ID, async (handle) => {
-      const record = await handle.get();
+      const observed = await handle.read();
       deletesWhenObserved = tx.recorded.deletes;
-      return record;
+      return observed.status === 'found' ? observed.record : null;
     });
 
     expect(seen).toBeNull();
@@ -326,9 +327,9 @@ describe('absolute session lifetime', () => {
 
     let deletesWhenObserved = -1;
     const seen = await frozenStore(db).withSession(SESSION_ID, async (handle) => {
-      const record = await handle.get();
+      const observed = await handle.read();
       deletesWhenObserved = tx.recorded.deletes;
-      return record;
+      return observed.status === 'found' ? observed.record : null;
     });
 
     expect(seen).toBeNull();
@@ -344,7 +345,10 @@ describe('absolute session lifetime', () => {
     const tx = fakeTx([row]);
     const { db } = fakeDb(tx);
 
-    const seen = await frozenStore(db).withSession(SESSION_ID, async (handle) => handle.get());
+    const seen = await frozenStore(db).withSession(SESSION_ID, async (handle) => {
+      const observed = await handle.read();
+      return observed.status === 'found' ? observed.record : null;
+    });
 
     expect(seen?.hubRefreshToken).toBe('token-old');
     expect(tx.recorded.deletes).toBe(0);
@@ -360,7 +364,10 @@ describe('absolute session lifetime', () => {
     const absoluteExpiresAt = new Date(FROZEN.getTime() + 60 * DAY_MS);
     const { db } = fakeDb(fakeTx([sessionRow({ expiresAt, absoluteExpiresAt })]));
 
-    const record = await frozenStore(db).withSession(SESSION_ID, async (handle) => handle.get());
+    const record = await frozenStore(db).withSession(SESSION_ID, async (handle) => {
+      const observed = await handle.read();
+      return observed.status === 'found' ? observed.record : null;
+    });
 
     expect(typeof record?.expiresAt).toBe('string');
     expect(typeof record?.absoluteExpiresAt).toBe('string');
@@ -513,16 +520,17 @@ describe('the three-state read contract', () => {
       const { db } = fakeDb(tx);
 
       const observed = await frozenStore(db).withSession(SESSION_ID, async (handle) => {
+        // Called TWICE on purpose. The 1.3.1-era `get()` projection is gone, but
+        // the invariant it was here to protect is not: the lookup happens ONCE,
+        // under the lock, before the operation runs, so a second read inside the
+        // same transaction re-serves that answer and can never delete again.
         const result: HubSessionReadResult = await handle.read();
-        const legacy = await handle.get();
-        return { result, legacy, deletes: tx.recorded.deletes };
+        const again: HubSessionReadResult = await handle.read();
+        return { result, again, deletes: tx.recorded.deletes };
       });
 
-      expect(observed.legacy === null, testCase.label).toBe(observed.result.status !== 'found');
-      if (observed.result.status === 'found') {
-        expect(observed.legacy, testCase.label).toEqual(observed.result.record);
-      }
-      // Unchanged by the extra `get()`: no second lookup and no second delete.
+      expect(observed.again, testCase.label).toEqual(observed.result);
+      // Unchanged by the second read: no second lookup and no second delete.
       expect(observed.deletes, testCase.label).toBe(testCase.expectedDeletes);
       expect(tx.recorded.deletes, testCase.label).toBe(testCase.expectedDeletes);
     }

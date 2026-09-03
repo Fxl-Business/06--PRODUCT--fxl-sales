@@ -4,11 +4,11 @@ milestone: v2.8.0
 status: parked
 depends_on: [01-session-store-read-contract, 02-explicit-hub-config, 03-access-entitlement-gate]
 files_modified: [apps/api/package.json, apps/web/package.json, pnpm-lock.yaml, apps/api/src/env.ts, apps/api/src/config/auth-provider.ts, apps/api/src/config/hub-config.ts, apps/api/src/config/__tests__/hub-config.test.ts, apps/api/src/middleware/app-auth.ts, apps/api/src/auth/hub-session-store.ts, apps/api/src/auth/hub-rotated-cookie.ts, apps/api/src/auth/hub-bff-origin.ts, apps/api/src/auth/hub-login-scope.ts, apps/api/src/config/__tests__/auth-provider.test.ts, apps/api/src/middleware/__tests__/app-auth.test.ts, apps/api/src/middleware/__tests__/app-auth-bff-wiring.test.ts, apps/api/src/middleware/__tests__/app-auth-bff-memory-path.test.ts, apps/api/src/middleware/__tests__/app-auth-bff-production-boot.test.ts, apps/api/src/middleware/__tests__/app-auth-access-gate.test.ts, apps/api/src/middleware/__tests__/app-auth-sdk-gate-wiring.test.ts, apps/api/src/auth/__tests__/hub-session-store.test.ts, apps/api/src/auth/__tests__/hub-bff-origin.test.ts, apps/api/src/auth/__tests__/hub-login-scope.test.ts, apps/api/src/auth/__tests__/hub-contract-types.test.ts, apps/api/src/auth/__tests__/hub-auth-context-fixture.ts, apps/api/src/domains/sales-ops/__tests__/routes.test.ts, apps/api/src/domains/sales-ops/__tests__/history-route.test.ts, apps/api/test/rls/hub-bff-session-store.test.ts, apps/api/test/rls/hub-bff-login-supersede.test.ts, apps/api/.env.example, apps/api/.env.dev.example, apps/web/src/auth/provider.ts, apps/web/src/auth/react.tsx, apps/web/src/auth/__tests__/provider.test.ts, apps/web/src/auth/__tests__/react.test.tsx, apps/web/src/__tests__/session-journey.test.tsx, apps/web/src/__tests__/route-error-and-auth-context.test.tsx, apps/web/src/sales-ops/__tests__/session-loss-keeps-route.test.tsx, apps/web/src/lib/api-client.ts, apps/web/src/lib/require-token.ts, apps/web/src/lib/__tests__/api-client-token-guard.test.ts, apps/web/src/sales-ops/MissingEntitlementPanel.tsx, apps/web/src/sales-ops/SalesOpsApp.tsx, apps/web/src/sales-ops/__tests__/entitlement-dead-end.test.tsx, apps/web/src/sales-ops/__tests__/missing-entitlement-panel.test.tsx, apps/web/.env.example, apps/web/.env.dev.example, packages/shared-types/src/env.ts, CLAUDE.md, README.md, nexo/ROADMAP.md]
-acceptance: "given both apps resolve @fxl-business/hub-sdk 2.1.0, when the full suite, lint, type-check and a real build run, then all are green, the BFF boots with a required session store and an explicit redirect URI on this app's own origin, the rotated-cookie wrapper and the origin shim are both still exercised and green, and no test was weakened"
-goal: "Bump both apps to hub-sdk 2.1.0 and honour every 2.x contract in one atomic slice"
+acceptance: "given both apps resolve @fxl-business/hub-sdk 2.2.0, when the full suite, lint, type-check and a real build run, then all are green, the BFF boots with a required session store, an explicit redirect URI on this app's own origin and trustedOrigins carrying CORS_ORIGIN, both vendored shims are deleted only after their non-vacuity oracles went red, and no surviving test was weakened"
+goal: "Bump both apps to hub-sdk 2.2.0, delete the two shims it makes redundant, and honour every 2.x contract in one atomic slice"
 must_not_break:
-  - "createHubRotatedCookieFetch and its non-vacuity oracle, since 2.1.0 did not fix the regex"
-  - "createHubBffOriginShim and its CSRF bypass tests, since the guard is still hardcoded"
+  - "end-to-end proof that a __Host- prefixed rotation is persisted, now through the SDK's own parser"
+  - "the two mount tests proving CORS_ORIGIN is admitted and an untrusted origin is 403ed, now through trustedOrigins"
   - "the app's own renewal timer, revalidation ladder, logout intent and queryClient flush rules"
   - "FXL_HUB_REDIRECT_URI resolving to this app's own origin, never the Hub's"
   - "the hono 4.12.28 workspace override that keeps a single Hono copy"
@@ -25,7 +25,7 @@ verifier_focus: "that nothing was weakened to make the bump compile, that the ro
 ## What this slice is
 
 One atomic commit that moves both apps from `@fxl-business/hub-sdk@^1.3.1` to
-`@fxl-business/hub-sdk@2.1.0` and honours every 2.x contract. It is atomic because the
+`@fxl-business/hub-sdk@2.2.0` and honours every 2.x contract. It is atomic because the
 version bump breaks `apps/api` and `apps/web` compilation at the same instant: there is no
 intermediate state where `master` is green.
 
@@ -90,19 +90,19 @@ do not leave the old names, because `loadHubConfig` reads only the five names in
 `apps/api/package.json` dependencies:
 
 ```json
-"@fxl-business/hub-sdk": "2.1.0",
+"@fxl-business/hub-sdk": "2.2.0",
 ```
 
 `apps/web/package.json` dependencies:
 
 ```json
-"@fxl-business/hub-sdk": "2.1.0",
+"@fxl-business/hub-sdk": "2.2.0",
 ```
 
-EXACT, not `^2.1.0`. Two reasons, both concrete. The acceptance line for this feature says
-"both apps resolve `@fxl-business/hub-sdk` 2.1.0", and an exact pin is the only spelling
+EXACT, not `^2.2.0`. Two reasons, both concrete. The acceptance line for this feature says
+"both apps resolve `@fxl-business/hub-sdk` 2.2.0", and an exact pin is the only spelling
 that keeps that true after an unrelated `pnpm install`. And the sibling package taken in
-slice 05, `@fxl-business/hub-sdk-testing@2.1.0`, peer-requires the SDK at an EXACT `2.1.0`,
+slice 05, `@fxl-business/hub-sdk-testing@2.2.0`, peer-requires the SDK at an EXACT `2.2.0`,
 so a caret range here would make slice 05 an unsatisfiable peer the moment 2.2.0 publishes.
 
 Then:
@@ -115,7 +115,7 @@ pnpm install
 
 ### 1.2 The hono peer range: NO CHANGE, and here is the arithmetic
 
-The 2.1.0 tarball declares:
+The 2.2.0 tarball declares:
 
 ```json
 "peerDependencies": { "hono": ">=4.12.28" }
@@ -127,7 +127,7 @@ Open ended, no upper bound. `pnpm-workspace.yaml` carries `overrides: { hono: 4.
 Therefore: DO NOT touch the `hono: 4.12.28` override, and DO NOT touch
 `apps/api/package.json`'s `hono` entry.
 
-CLAUDE.md explains why the override exists and it is unchanged by 2.1.0: `.npmrc` sets
+CLAUDE.md explains why the override exists and it is unchanged by 2.2.0: `.npmrc` sets
 `strict-peer-dependencies=false`, so without the override pnpm is free to resolve a SECOND
 Hono copy under the SDK, and the BFF's `Context` then stops being the one `apps/api/src/server.ts`
 composes with. `c.set('userId', ...)` in one copy is invisible to `c.get('userId')` in the other.
@@ -137,13 +137,13 @@ Assert it after install:
 ```bash
 pnpm why hono | grep -c '4\.12\.28'          # every hono line is 4.12.28
 pnpm ls --depth=Infinity 2>/dev/null | grep -c 'hono 4\.' # no second major
-node -e "console.log(require('@fxl-business/hub-sdk/package.json').version)" # 2.1.0
+node -e "console.log(require('@fxl-business/hub-sdk/package.json').version)" # 2.2.0
 ```
 
 If a future SDK ever raises the floor above `4.12.28`, the correct change is to raise BOTH
 the `overrides` entry in `pnpm-workspace.yaml` AND `apps/api/package.json`'s `hono` to the
 same exact version in the same commit. Raising one and not the other reintroduces the two
-copies. That is not needed for 2.1.0.
+copies. That is not needed for 2.2.0.
 
 ---
 
@@ -194,7 +194,7 @@ Change it to the real thing, and nothing else in the file:
 import { HubConfigError, loadHubConfig, type HubConfig } from '@fxl-business/hub-sdk';
 ```
 
-`HubConfigError`, `loadHubConfig` and `HubConfig` all exist on the 2.1.0 root subpath
+`HubConfigError`, `loadHubConfig` and `HubConfig` all exist on the 2.2.0 root subpath
 (`dist/index.d.ts` re-exports them from `dist/config-CxunTdjI.d.ts`, where `loadHubConfig` is
 declared at `:67`, `parseHubConfig` at `:52` and `HubConfigError` at `:35`). Slice 02 chose
 the backport's names to be byte-identical to the SDK's for exactly this moment.
@@ -294,7 +294,7 @@ Write it as:
   const hubConfig = hubAuthConfig;                      // HubAuthConfig, already non-null here
   const isHubDevelopment = hubConfig.environment === 'development';
   // ONE boolean still drives both the SDK's cookie name and our own cookie read, but it is
-  // now derived from the Hub environment rather than from NODE_ENV, because 2.1.0's
+  // now derived from the Hub environment rather than from NODE_ENV, because 2.2.0's
   // assertBootConfiguration refuses `insecureCookies` outside `environment === 'development'`.
   const secureCookies = !isHubDevelopment;
 ```
@@ -325,7 +325,7 @@ once, here, at the single producer.
     // development. It is passed as a pair with the memory branch so a production deploy
     // that loses DATABASE_URL fails at boot instead of silently going per-process.
     ...(isHubDevelopment && session.kind === 'memory' ? { allowEphemeralSessionStore: true } : {}),
-    // REPLACES secureCookies and is INVERTED. Passed only when true: 2.1.0 refuses
+    // REPLACES secureCookies and is INVERTED. Passed only when true: 2.2.0 refuses
     // `insecureCookies: true` outside development, and passing `false` explicitly outside
     // development is legal but says nothing, so the key is simply absent there.
     // WRITTEN AS A SPREAD ON PURPOSE, and section 16.2's oracle
@@ -335,13 +335,18 @@ once, here, at the single producer.
     ...(isHubDevelopment ? { insecureCookies: true } : {}),
     // REQUIRED outside development. Operator-generated, never Hub-issued. See section 9.
     ...(env.FXL_HUB_HEALTH_TOKEN !== undefined ? { healthToken: env.FXL_HUB_HEALTH_TOKEN } : {}),
-    // The BACKCHANNEL fetch. Still needed: 2.1.0's parseRotatedRefresh regex is
-    // byte-identical to 1.3.1's and still cannot match `__Host-fxl_hub_session`.
-    fetchImpl: createHubRotatedCookieFetch(),
+    // Origins allowed to POST beyond the request's own origin. REQUIRED for this
+    // deployment: the web app is on sales.fxlbusiness.com and the API on
+    // sales-api.fxlbusiness.com, which are different origins, so the SDK's own-origin
+    // computation alone does not admit the browser's POST. See section 6.2.
+    trustedOrigins: [env.CORS_ORIGIN],
+    // NO fetchImpl. 2.2.0's parseRotatedRefresh matches `__Host-fxl_hub_session` natively
+    // (dist/server.js:307-316), so the wrapper this app carried is deleted in section 5 and
+    // fetchImpl falls back to the SDK's default of the global `fetch`.
     timeoutMs: HUB_BFF_TIMEOUT_MS,
     sessionTtlSeconds: SESSION_TTL_MS / 1000,
     sessionAbsoluteTtlSeconds: SESSION_ABSOLUTE_TTL_MS / 1000,
-    // EXPLICIT, never defaulted. 2.1.0 defaults redirectUri to `${config.apiUrl}/auth/callback`,
+    // EXPLICIT, never defaulted. 2.2.0 defaults redirectUri to `${config.apiUrl}/auth/callback`,
     // which is the HUB's origin, so the callback would point at the wrong host and the Hub
     // would refuse an unregistered redirect_uri.
     redirectUri: resolveHubRedirectUri(hubEnv),
@@ -389,7 +394,7 @@ call would only duplicate the failure message.
 
 Slice 01 added `read()`. Delete the `get:` member from the `handle` object literal inside
 `withSession`, so the literal has exactly three members: `read`, `update`, `delete`. Under
-`HubSessionTransaction` from 2.1.0 an object literal carrying an extra `get` is an excess
+`HubSessionTransaction` from 2.2.0 an object literal carrying an extra `get` is an excess
 property error, so this is a compile failure the moment the bump lands, not an optional
 tidy-up.
 
@@ -399,7 +404,7 @@ Delete any `get` that slice 01 left on `DurableHubSessionStore`'s type or on
 
 **Delete slice 01's three local type declarations and import the SDK's.** Slice 01 declared
 `HubSessionStoreKind`, `HubSessionReadResult` and a local `HubSessionTransaction` in this
-file, spelled byte-for-byte like 2.1.0's, and its own plan says slice 04 deletes them and adds
+file, spelled byte-for-byte like 2.2.0's, and its own plan says slice 04 deletes them and adds
 the identifiers to the import. Doing that is not optional tidying: without it the tree carries
 TWO definitions of `HubSessionReadResult`, it compiles, nothing goes red, and slice 01's stated
 end state is never reached.
@@ -409,7 +414,7 @@ end state is never reached.
 - DELETE `export interface HubSessionTransaction extends SdkHubSessionTransaction { read(): ... }`
   and the `type HubSessionTransaction as SdkHubSessionTransaction` alias in the import block
   that existed only to write that `extends`.
-- Import all three from the SDK root subpath instead. 2.1.0 exports
+- Import all three from the SDK root subpath instead. 2.2.0 exports
   `HubSessionReadResult` and `HubSessionStoreKind` from `dist/index.d.ts:3` and
   `HubSessionTransaction` from `dist/index.d.ts:305`; the declarations themselves are at
   `dist/session-store-DOWOoBx8.d.ts:17`, `:30` and `:38`.
@@ -424,8 +429,8 @@ grep -rn 'HubSessionReadResult\|HubSessionStoreKind\|HubSessionTransaction' apps
 ```
 
 Update the file's doc header: it is pinned to `@fxl-business/hub-sdk@1.3.0` today. Re-pin
-every version reference to `2.1.0` and re-quote the two behaviour lines it names, which in
-2.1.0's `dist/server.js` are:
+every version reference to `2.2.0` and re-quote the two behaviour lines it names, which in
+2.2.0's `dist/server.js` are:
 
 ```js
 const read = await tx.read();
@@ -469,131 +474,159 @@ weakening. There must be no place where an assertion is loosened to `expect.arra
 or where a `toEqual` becomes a `toMatchObject`.
 
 Also update the `probe: HubSessionStore` literal in the non-vacuity test at the end of the
-file: add `kind: 'ephemeral' as const` (2.1.0 requires `kind` and
+file: add `kind: 'ephemeral' as const` (2.2.0 requires `kind` and
 `assertConformantSessionStore` throws without it), and the `session.tx` it hands out is the
 new three-member handle above.
 
 ---
 
-## 5. KEEP `createHubRotatedCookieFetch`
+## 5. DELETE `createHubRotatedCookieFetch`
 
-2.1.0's `dist/server.js` still reads:
+2.2.0 FIXED the parser. `dist/server.js:307-316` now reads:
 
 ```js
+var SESSION_COOKIE_SECURE = "__Host-fxl_hub_session";
+var SECURE_NAME_PATTERN = /(?:^|[,\s])__Host-fxl_hub_session=([^;,\s]+)/;
+var PLAIN_NAME_PATTERN = /(?:^|[,\s])fxl_hub_session=([^;,\s]+)/;
 function parseRotatedRefresh(setCookieHeader) {
   if (!setCookieHeader) return void 0;
-  const match = /(?:^|[,\s])fxl_hub_session=([^;]+)/.exec(setCookieHeader);
-  return match?.[1];
+  const secure = SECURE_NAME_PATTERN.exec(setCookieHeader);
+  if (secure?.[1]) return secure[1];
+  const plain = PLAIN_NAME_PATTERN.exec(setCookieHeader);
+  return plain?.[1];
 }
 ```
 
-Byte-identical to the 1.3.1 regex the wrapper was written for. It still cannot match a
-`__Host-` prefixed name, because the character before `fxl_hub_session=` is `-`, which is
-neither start of string nor a member of `[,\s]`.
+The secure name is tried FIRST and the plain name is the fallback, so both the production
+`__Host-` prefixed cookie and the development unprefixed one rotate. That is exactly what
+this repo's wrapper was built to do, upstream, which makes the wrapper redundant.
 
-### 5.1 Code changes: none
+Upstream commit: `b301b98`, `fix(hub-sdk): recognize __Host- prefixed session cookie in
+refresh-rotation parser`.
 
-`apps/api/src/auth/hub-rotated-cookie.ts` keeps its behaviour byte for byte:
-`assertSetCookieSupport` still runs unconditionally at module load, `readSetCookies` still
-throws rather than degrading, the response is still rebuilt rather than mutated, and the
-original `Response` is still returned by identity when nothing matched. There is still no
-silent fallback.
+### 5.1 The delete is GATED on the non-vacuity oracle going RED
 
-### 5.2 Docstring changes
+Do NOT delete anything until this has been observed, in this order:
 
-Rewrite the header's version-specific paragraphs so a reader learns that 2.1.0 was checked
-and did not fix it. Required content, in the file's own voice:
+1. Bump to 2.2.0 and install (section 1) with the wrapper still mounted.
+2. Run the non-vacuity test in `apps/api/src/middleware/__tests__/app-auth-bff-wiring.test.ts`,
+   `proves the rotation is genuinely lost without the wrapper, through the same real SDK handler`.
+3. It MUST be RED. Red means the SDK now rotates on its own, so the test's premise (rotation
+   is lost without the wrapper) is false, which is the documented delete-signal this module
+   has carried since it was written.
+4. If it is GREEN, STOP and report. Green means the defect survives and the wrapper is still
+   load-bearing; deleting it would reinstate one dead session per user every one to three
+   minutes in production, with a green suite over it.
 
-- Re-pin the quoted regex to `@fxl-business/hub-sdk@2.1.0`, `dist/server.js:355-359`.
-- State plainly: "2.1.0 did NOT fix this. The regex is byte-identical to 1.3.1's, verified
-  against the shipped tarball, so this module stays."
-- The delete-signal is UNCHANGED: the non-vacuity test named
-  `proves the rotation is genuinely lost without the wrapper, through the same real SDK handler`
-  going RED is still the one and only signal that this module has become redundant. Say so
-  explicitly, so nobody re-derives it at the next bump.
-- REMOVE the now-dead `/auth/switch` sentence at line 11. Replace it with the route that
-  actually carries the same defect now: `POST /auth/switch` was deleted in 2.0.0, and
-  `setActive` rides `POST /auth/refresh` with `{ organizationId }`. Both an ordinary renewal
-  and an Organization switch therefore go through the SAME handler and the SAME
-  `parseRotatedRefresh` call, so the rotation pin moves onto `/auth/refresh` with a body and
-  must prove that rotation survives an Organization switch. Name the test that does it, whose
-  new title is given in section 16.
+### 5.2 What to delete
 
-HOUSE RULE, and this is the section where it is most likely to be broken: the SDK's own
-shipped `.d.ts` files contain an em dash (the `session-store` docblock's "a `pg` Pool, a
-Drizzle instance ... - anything"). Re-quoting a line number is fine; copying vendor prose is
-not. NO line added to a repo file by this slice may carry an em dash or an en dash, and no
-vendor comment may be pasted verbatim. Re-word it in this repo's own voice with a plain
-hyphen. The same warning applies to section 6.2.
+- `apps/api/src/auth/hub-rotated-cookie.ts`.
+- `apps/api/src/auth/__tests__/hub-rotated-cookie.test.ts` (15 tests), in full. Every test in
+  it is about the wrapper's own behaviour and none of it survives the module.
+- The `fetchImpl: createHubRotatedCookieFetch()` line from the `createHubBff` options in
+  `apps/api/src/middleware/app-auth.ts`, and the import above it. `fetchImpl` then falls back
+  to the SDK's own default of the global `fetch`, which is what this app wants.
+- The non-vacuity test from `app-auth-bff-wiring.test.ts`, together with the wrapper. Its
+  premise is now false, so keeping it means keeping a red test that asserts a fixed bug.
 
-Do not add a claim about what the live Hub sends. The tarball cannot answer whether the Hub
-prefixes the rotation cookie; the regex's inability to match it is what is provable and what
-the file already says.
+### 5.3 What must STAY
 
-### 5.3 Tests
+The rotation must still be proven end to end, just without the wrapper. The wiring test's
+OTHER rotation assertions stay, with the same titles and the same assertions, and they now
+prove the SDK's own parser: they drive the REAL `createHubBff` handler against a fake Hub
+that answers with a `__Host-` prefixed `Set-Cookie` and assert the store persisted the
+rotated token. That is the coverage that matters and it is not allowed to weaken.
 
-`apps/api/src/auth/__tests__/hub-rotated-cookie.test.ts` (15 tests) is pure fetch-wrapper
-behaviour with no SDK config and no transaction. It needs NO change and must stay green,
-including `stays correct if the SDK parser is fixed to accept both names`.
+Note that `POST /auth/switch` no longer exists; `setActive` rides `POST /auth/refresh` with
+`{ organizationId }`, so both an ordinary renewal and an Organization switch go through the
+same handler and the same `parseRotatedRefresh` call. One pin on `/auth/refresh` with a body
+therefore covers what used to need two.
 
-The non-vacuity oracle in `app-auth-bff-wiring.test.ts` must stay GREEN, which is the whole
-point: green means the defect is still there and the wrapper is still load-bearing. Its only
-edits are the `probe` literal (`kind`, `read`) and the inline config literal (section 12).
+### 5.4 CLAUDE.md
+
+The `createHubRotatedCookieFetch` paragraph in the Auth Model section describes a module that
+no longer exists. Replace it with a short record that the defect was real, was measured in
+production on 2026-08-12, was bridged here for one wave, and was fixed upstream in 2.2.0 by
+`b301b98`. Keep the measurement; delete the mechanism. Also drop `nexo/ROADMAP.md`'s entry
+asking for the upstream one-line fix, which has landed.
 
 ---
 
-## 6. KEEP `createHubBffOriginShim`
+## 6. DELETE `createHubBffOriginShim`
 
-2.1.0's `dist/server.js` still installs a router-wide `app.use('*')` CSRF origin guard:
+2.2.0 made the CSRF guard configurable AND made it compute its own origin correctly behind a
+TLS-terminating proxy. `dist/server.js:434-438` and `466-482`:
 
 ```js
-if (site && site === "cross-site" || origin && origin !== new URL(c.req.url).origin) {
-  return c.json({ error: "forbidden" }, 403);
+function requestOwnOrigin(c) {
+  const url = new URL(c.req.url);
+  const proto = firstForwardedProto(c.req.header("x-forwarded-proto")) ?? url.protocol.replace(/:$/, "");
+  return new URL(`${proto}://${url.host}`).origin;
 }
 ```
 
-`CreateHubBffOptions` in 2.1.0 has NO `origin`, `allowedOrigins`, `trustedOrigins`, `csrf`,
-`cookieDomain`, `cookieName` or `sameSite` key. There is no configuration escape. The guard
-reads nothing from `config` and nothing from `options`.
+```js
+const listed = origin !== void 0 && trustedOrigins.has(origin);
+if (origin !== void 0 && !listed && origin !== requestOwnOrigin(c)) {
+  return c.json({ error: "forbidden", code: "origin_not_trusted" }, 403);
+}
+if (site === "cross-site" && !listed) {
+  return c.json({ error: "forbidden", code: "origin_not_trusted" }, 403);
+}
+```
 
-Production still serves the web app on `sales.fxlbusiness.com` and the API on
-`sales-api.fxlbusiness.com`. Even `Sec-Fetch-Site: same-site` does not save that topology,
-because the second clause still fires on the Origin string inequality. The shim is therefore
-still what keeps the deployment alive.
+`CreateHubBffOptions` now declares `trustedOrigins?: readonly string[]`, normalized to
+`.origin` at CONSTRUCTION, with a non-absolute or non-http(s) entry throwing `HubConfigError`
+there rather than becoming a mystery 403 in production. Both clauses consult it, which is
+what the shim was hand-rolling.
 
-### 6.1 Code changes: none
+Upstream commit: `1cc4812`, `fix(hub-sdk): compute BFF CSRF origin behind a TLS-terminating
+proxy`.
 
-`apps/api/src/auth/hub-bff-origin.ts` is unchanged. The mount stays
-`router.all('/auth/*', createHubBffOriginShim(bff, { trustedOrigins: [env.CORS_ORIGIN] }))`.
+### 6.1 What to delete
 
-### 6.2 Docstring changes
+- `apps/api/src/auth/hub-bff-origin.ts`.
+- `apps/api/src/auth/__tests__/hub-bff-origin.test.ts` (10 tests), in full.
+- The import in `apps/api/src/middleware/app-auth.ts`.
 
-Update the header so it names 2.1.0:
+### 6.2 The mount becomes ordinary
 
-- The opening sentence becomes: the guard was added in `1.3.x`, is STILL present and STILL
-  hardcoded in `@fxl-business/hub-sdk@2.1.0` at `dist/server.js:421-432`, and 2.1.0 adds no
-  configuration escape. Quote the current line numbers.
-- Same house rule as section 5.2: re-quote the line numbers, never the vendor's prose. No
-  added line may carry an em dash or an en dash.
-- Keep the whole "why a shim and not a deployment change" paragraph. It is still the correct
-  reasoning.
-- Update the delete-signal sentence and `nexo/ROADMAP.md:12` alongside it: this module can be
-  deleted when `CreateHubBffOptions` gains an allowed-origins key, and the signal is the
-  non-vacuity test `proves the guard is real by 403ing that same request without the shim`
-  going RED.
+```ts
+router.route('', bff);
+```
+
+and `createHubBff`'s options gain:
+
+```ts
+trustedOrigins: [env.CORS_ORIGIN],
+```
+
+This is still REQUIRED for this deployment and is not optional cleanup. Production serves the
+web app on `sales.fxlbusiness.com` and the API on `sales-api.fxlbusiness.com`. Those are
+different origins, so `requestOwnOrigin` alone does not admit the browser's POST: the first
+clause fires on the Origin string inequality and the second on `Sec-Fetch-Site: same-site`
+being absent from the trusted set. `CORS_ORIGIN` is the web origin and is already validated
+env, so it is the one correct value.
 
 ### 6.3 Tests
 
-All 10 tests in `apps/api/src/auth/__tests__/hub-bff-origin.test.ts` stay, with the same
-titles and the same assertions. The only edit is `buildBff()`'s config literal (section 12).
-The `as Parameters<typeof createHubBff>[0]` cast is DELETED: 2.1.0's `HubConfig` is fully
-required, and a real literal that type-checks is strictly better than a cast that hides a
-shape mismatch.
+The two mount tests in `app-auth-bff-wiring.test.ts` STAY, with the same titles and the same
+assertions, now proving the native option rather than the shim:
 
-The two trusted-origin mount tests in `app-auth-bff-wiring.test.ts` also stay unchanged in
-title and assertion:
-`does not 403 a cross-origin refresh from CORS_ORIGIN, through the real mount` and
-`still 403s a cross-origin refresh from an origin that is not CORS_ORIGIN`.
+- `does not 403 a cross-origin refresh from CORS_ORIGIN, through the real mount`
+- `still 403s a cross-origin refresh from an origin that is not CORS_ORIGIN`
+
+Keeping the titles is deliberate. The behaviour under test did not change, only its
+implementation, and a renamed test would hide that the protection is continuous across the
+bump.
+
+### 6.4 One web-side check
+
+2.2.0 adds `code: 'origin_not_trusted'` to the 403 body, which was previously bare
+`{"error":"forbidden"}`. Confirm that `isForbiddenFailure` in
+`apps/web/src/lib/require-token.ts` still keys on the STATUS alone. It does, by the rule
+recorded in CLAUDE.md, so nothing in `apps/web` changes. Verify rather than assume, and if any
+consumer is found matching on the body shape, that is a defect to fix in this slice.
 
 ---
 
@@ -648,7 +681,7 @@ unresolved specifier does not error; the types silently become `any`. That is pr
 this repo hand-declared `MinimalHubAuthContext` instead, and it is what would happen to
 slice 03's gate if anyone imported the types from the old place.
 
-Under 2.1.0 the four types are DECLARED LOCALLY inside `dist/index.d.ts`, so they resolve and
+Under 2.2.0 the four types are DECLARED LOCALLY inside `dist/index.d.ts`, so they resolve and
 do not degrade. Concretely for the access gate's deny branch:
 
 - `auth.entitlements.access` is genuinely `boolean`, so `auth.entitlements.access !== true`
@@ -793,7 +826,7 @@ what is forbidden is leaving it here with no importer.
 ### 7.5 `hubSdkConfig`, `getHubSdkConfig` and `requireHubAuth`'s deleted `audience` option
 
 Three more compile breaks live in `apps/api/src/middleware/app-auth.ts`, all caused by the
-1.3.1 type `HubSdkConfig`, which DOES NOT EXIST in 2.1.0. The file cannot type-check until all
+1.3.1 type `HubSdkConfig`, which DOES NOT EXIST in 2.2.0. The file cannot type-check until all
 three are gone, and section 19 step 8 declares it type-checks clean, so they are owned here.
 
 1. **`:1`** - `import type { HubSdkConfig } from '@fxl-business/hub-sdk';` is DELETED. It is
@@ -803,7 +836,7 @@ three are gone, and section 19 step 8 declares it type-checks clean, so they are
    unnecessary.
 2. **`:85-92`** - the `const hubSdkConfig: HubSdkConfig | null = hubAuthConfig ? { apiUrl,
    publishableKey, secretKey, audience } : null;` adapter is DELETED WHOLE. It existed only to
-   translate this repo's field names into 1.3.1's `publishableKey` / `secretKey`. 2.1.0's
+   translate this repo's field names into 1.3.1's `publishableKey` / `secretKey`. 2.2.0's
    `HubConfig` is `{apiUrl, environment, clientId, clientSecret, audience}`
    (`dist/config-CxunTdjI.d.ts:4-20`), which is exactly what `loadHubConfig` returns, so there
    is nothing left to translate.
@@ -815,7 +848,7 @@ Then re-point every reader at the loaded config. The readers, all in this same f
   ```ts
   const hubAuthMiddleware = hubAuthConfig ? requireHubAuth(hubAuthConfig) : null;
   ```
-  The `{ audience: ... }` option is GONE. 2.1.0's `RequireHubAuthOptions`
+  The `{ audience: ... }` option is GONE. 2.2.0's `RequireHubAuthOptions`
   (`dist/server.d.ts:85-93`) has exactly four members - `fetchImpl`, `allowWithoutAccess`,
   `requiredModule`, `requiredRoles` - and no `audience`. The SDK's own docblock on
   `requireHubAuth` gives the reason, and it is the same reason section 2.1 gives for not
@@ -861,10 +894,9 @@ MIGRATION.md section 13 warns against `app.route('/auth', createHubBff(...))`, w
 
 What this repo does, verified in recon:
 
-- `apps/api/src/middleware/app-auth.ts`:
-  `router.all('/auth/*', createHubBffOriginShim(bff, { trustedOrigins: [env.CORS_ORIGIN] }))`.
-  The BFF is invoked through its own `fetch`, not mounted with `route()`, and the shim passes
-  the request path through untouched.
+- `apps/api/src/middleware/app-auth.ts`: after section 6 the shim is gone and the mount is
+  the ordinary `router.route('', bff)`, with the allowed origin passed to `createHubBff` as
+  `trustedOrigins: [env.CORS_ORIGIN]` rather than wrapped around it.
 - `apps/api/src/server.ts:33`: `app.route('', authBff)`.
 
 Composing those gives `/auth/login`, `/auth/callback`, `/auth/refresh`, `/auth/logout` and now
@@ -873,7 +905,7 @@ Composing those gives `/auth/login`, `/auth/callback`, `/auth/refresh`, `/auth/l
 Recon found no test that pins the composition itself, only tests that exercise individual
 routes. Add one. See section 16, the two new tests
 `mounts every BFF route under a single /auth prefix, never /auth/auth`
-and `does not route POST /auth/switch, since 2.1.0 deleted it`.
+and `does not route POST /auth/switch, since 2.2.0 deleted it`.
 
 ---
 
@@ -910,7 +942,7 @@ inside `createAppAuthBff()`:
 
 ```ts
   const router = new Hono();
-  // 2.1.0's /auth/_health is anonymous when no healthToken is configured, which is legal only
+  // 2.2.0's /auth/_health is anonymous when no healthToken is configured, which is legal only
   // in development and is still an information disclosure there (it reports the Audience, the
   // clientId and the store class). Registered BEFORE the catch-all below, so it short-circuits:
   // if no token is configured the endpoint does not exist at all.
@@ -1049,7 +1081,7 @@ carry a secret even when the environment bag does. Named in section 16 as
 
 ## 11. The three `satisfies HubClient` mock objects
 
-2.1.0's `HubClient` has TEN members:
+2.2.0's `HubClient` has TEN members:
 
 ```ts
 login, loginWithPopup, getToken, getTokenResult, setActive, logout, start, stop,
@@ -1092,14 +1124,14 @@ false the next day; section 24 records the miss. Read off the two tarballs:
 ```
 1.3.1  dist/client.d.ts:51   checkoutUrl(sku?: string): Promise<string>;
 1.3.1  dist/client.d.ts:53   manageUrl(): Promise<string>;
-2.1.0  dist/client.d.ts:170  checkoutUrl(organizationId: string, sku?: string): Promise<string>;
-2.1.0  dist/client.d.ts:172  manageUrl(organizationId: string): Promise<string>;
+2.2.0  dist/client.d.ts:170  checkoutUrl(organizationId: string, sku?: string): Promise<string>;
+2.2.0  dist/client.d.ts:172  manageUrl(organizationId: string): Promise<string>;
 ```
 
 `organizationId` is REQUIRED and it is FIRST, so a call that passes only a sku is not merely
 mis-scoped, it does not compile. At HEAD `84ac2a3`,
 `apps/web/src/sales-ops/MissingEntitlementPanel.tsx:105` calls `.checkoutUrl()` with NO
-arguments, inside a `useEffect`, in a shipped component. Under 2.1.0 that is
+arguments, inside a `useEffect`, in a shipped component. Under 2.2.0 that is
 `TS2554: Expected 1-2 arguments, but got 0`, which fails
 `pnpm --filter @fxl-sales/web type-check`, `pnpm run type-check` and `pnpm run build`, all
 three of which section 21 requires green.
@@ -1206,7 +1238,7 @@ after re-reading it:
 
 **`apps/web/src/auth/__tests__/react.test.tsx` is already declared, and two lines move.** `:212`
 calls `void client.checkoutUrl('sales.core')` inside the `renderOrganizations` harness button
-and `:2062` asserts `toHaveBeenCalledWith('sales.core')`. Under 2.1.0 both still COMPILE and
+and `:2062` asserts `toHaveBeenCalledWith('sales.core')`. Under 2.2.0 both still COMPILE and
 still PASS, because one string is now a positionally valid `organizationId`, so this is a
 silent-wrong-argument hazard rather than a red: the file would be documenting a MODULE id being
 handed to a parameter that means an Organization. Change the literal in BOTH places to
@@ -1225,7 +1257,7 @@ for that half of checklist item 12. Re-run the grep before relying on this.
 
 ### 11.1 Keeping the `getToken` non-call assertions meaningful
 
-`getToken` still exists on `HubClient` in 2.1.0, so
+`getToken` still exists on `HubClient` in 2.2.0, so
 `expect(mocks.client.getToken).not.toHaveBeenCalled()` still compiles and still means
 something. But 2.x also adds `getTokenResult`, which is the reader a well-meaning future edit
 would reach for instead, and the assertion as written would not see it.
@@ -1368,7 +1400,7 @@ of them.
 
 ### 13.2 `SetActiveResult`
 
-2.1.0 ships:
+2.2.0 ships:
 
 ```ts
 interface SetActiveResult {
@@ -1560,7 +1592,7 @@ types degrade, and both are also asserted at runtime so `noUnusedLocals` is sati
   `ctx.claims.workspaceId` are the same non-empty string, and that
   `'organizationId' in ctx.claims === false`.
 - `pins the SDK version this repo is written against`
-  `expect(HUB_SDK_VERSION).toBe('2.1.0')` and `expect(HUB_TOKEN_CONTRACT_VERSION).toBe(1)`.
+  `expect(HUB_SDK_VERSION).toBe('2.2.0')` and `expect(HUB_TOKEN_CONTRACT_VERSION).toBe(1)`.
   This is the tripwire for the next bump: it goes red on install, before any behaviour does.
 
 ### 16.2 NEW file: `apps/api/src/middleware/__tests__/app-auth-bff-production-boot.test.ts`
@@ -1616,7 +1648,7 @@ Added beside the existing ones, in the existing development-shaped module graph.
 - `mounts every BFF route under a single /auth prefix, never /auth/auth`
   Drives the real mount: `GET /auth/login` does not answer 404, and `GET /auth/auth/login`
   answers 404. This is the MIGRATION.md section 13 pin the repo did not have.
-- `does not route POST /auth/switch, since 2.1.0 deleted it`
+- `does not route POST /auth/switch, since 2.2.0 deleted it`
   `POST /auth/switch` answers 404 through `app.route('', authBff)`.
 - `refuses to hand createHubBff the SDK ephemeral default, in any environment`
   Asserts `bffOptions.sessionStore` is defined and is the durable store instance, which is the
@@ -1871,24 +1903,10 @@ and say in the run notes which duplicate was dropped and why the surviving one i
 - The `createHubSessionStore` union tests, the three `withSession failure semantics` tests and
   the two TTL tests are UNCHANGED.
 
-**`apps/api/src/auth/__tests__/hub-bff-origin.test.ts`**
-- `buildBff()`: replace the cast literal with a real 2.x `HubConfig`:
-  ```ts
-  {
-    apiUrl: 'https://hub.example.test',
-    environment: 'development',
-    clientId: 'pk_fxl-sales_development_originshimtest',
-    clientSecret: 'sk_fxl-sales_development_originshimtest',
-    audience: 'app.fxl-sales',
-  }
-  ```
-  Delete the `as Parameters<typeof createHubBff>[0]` cast. The options object is unchanged:
-  `{ sessionStore: new InMemoryHubSessionStore(), fetchImpl: ... }`. `InMemoryHubSessionStore`
-  declares `kind: 'ephemeral'` itself, and `environment === 'development'` makes that legal,
-  so no `allowEphemeralSessionStore` is needed.
-- All ten titles and all ten assertions are UNCHANGED, including
-  `does not 403 a refresh from the trusted web origin on a different host` and
-  `proves the guard is real by 403ing that same request without the shim`.
+**`apps/api/src/auth/__tests__/hub-bff-origin.test.ts`** - DELETED in full, with the module
+it tests (section 6.1). All ten tests are about the shim's own behaviour and none of them
+survives it. The protection they covered does not disappear: it moves to the two mount tests
+in `app-auth-bff-wiring.test.ts`, which keep their titles and now exercise `trustedOrigins`.
 
 **`apps/api/src/auth/__tests__/hub-login-scope.test.ts`**
 - All four titles are UNCHANGED, including
@@ -1896,9 +1914,10 @@ and say in the run notes which duplicate was dropped and why the surviving one i
   `secureCookies: boolean` option and its polarity, because the inversion happens once at the
   producer in `app-auth.ts`. Only the comment at `:78` is re-pinned from
   `@fxl-business/hub-sdk@1.3.0 dist/server.js:275-277` to
-  `@fxl-business/hub-sdk@2.1.0 dist/server.js:412-413`.
+  `@fxl-business/hub-sdk@2.2.0 dist/server.js:412-413`.
 
-**`apps/api/src/auth/__tests__/hub-rotated-cookie.test.ts`** - all 15 tests UNCHANGED.
+**`apps/api/src/auth/__tests__/hub-rotated-cookie.test.ts`** - DELETED in full, with the
+module it tests (section 5.2), and only after the non-vacuity oracle was observed RED.
 
 **`apps/api/src/auth/__tests__/hub-bff-errors.test.ts`** - all 5 tests UNCHANGED.
 
@@ -1975,7 +1994,7 @@ is the proof that section 12's "not adopted" rule was honoured.
 **`apps/web/src/auth/__tests__/token.test.ts`** - all 14 tests UNCHANGED, same reason.
 
 **`apps/web/src/auth/__tests__/claims.test.ts`** - all 9 tests UNCHANGED. `roles.workspace` is
-still the claim in 2.1.0.
+still the claim in 2.2.0.
 
 **`apps/web/src/auth/__tests__/session-recovery.test.ts`** - UNCHANGED.
 
@@ -2001,14 +2020,17 @@ describing 1.3.1:
 - The `HubSessionStore` paragraph: `get()` is `read()` and returns
   `{status:'found'|'expired'|'absent'}`. Say why the distinction is load-bearing: `expired`
   clears the cookie, `absent` never does, so a database blip costs a retry instead of a logout.
-  Re-pin the `dist/server.js` line references to 2.1.0.
-- The `createHubRotatedCookieFetch` paragraph: 2.1.0 did NOT fix the regex, it is
-  byte-identical; `/auth/switch` is DELETED and the second pinned route is now the
-  Organization switch riding `POST /auth/refresh` with `{organizationId}`. Delete the
-  `dist/server.js:518` reference.
-- The version-floor paragraph: the floor is now `@fxl-business/hub-sdk@2.1.0`, pinned EXACTLY
+  Re-pin the `dist/server.js` line references to 2.2.0.
+- The `createHubRotatedCookieFetch` paragraph: the module is DELETED. Replace it with a
+  short record that the defect was real and measured in production on 2026-08-12, that it was
+  bridged in this repo for one wave, and that 2.2.0 fixed it upstream in `b301b98`
+  (`dist/server.js:307-316`, secure name tried first, plain name as fallback). Keep the
+  measurement and the reason it was invisible locally; delete the mechanism. Note also that
+  `/auth/switch` no longer exists and an Organization switch rides `POST /auth/refresh` with
+  `{organizationId}`, through the same parser.
+- The version-floor paragraph: the floor is now `@fxl-business/hub-sdk@2.2.0`, pinned EXACTLY
   in both apps. Keep the whole `hono 4.12.28` override paragraph; add one line recording that
-  2.1.0's peer is `>=4.12.28` and that `4.12.28` satisfies it, so the override did not move.
+  2.2.0's peer is `>=4.12.28` and that `4.12.28` satisfies it, so the override did not move.
 - The browser-refresh paragraph: keep the whole "reads /auth/refresh itself" rule. Update the
   reason: 2.x's `getTokenResult()` DOES carry status, so the reason is no longer that the SDK
   discards it; the reason is now that this app's classification, ladder, logout intent and
@@ -2039,14 +2061,14 @@ describing 1.3.1:
     route passes one today.
   - The `MinimalHubAuthContext` bullet about `HubEntitlements` degrading to `any` under
     `skipLibCheck` is NOT deleted, but re-point it to what section 7.2 establishes: this repo
-    still sets `skipLibCheck: true`, and what changed is that 2.1.0 DECLARES the four contract
+    still sets `skipLibCheck: true`, and what changed is that 2.2.0 DECLARES the four contract
     types locally inside `dist/index.d.ts` instead of re-exporting them from an unshipped
     package, so they resolve and `entitlements.access` is genuinely `boolean`. The local
     `MinimalHubAuthContext` is therefore deleted, the types are imported from
     `@fxl-business/hub-sdk` (section 7.1), and the compile-time oracle
     `apps/api/src/auth/__tests__/hub-contract-types.test.ts` is what fails if the degradation
     ever returns.
-  - The `no_org_access` deny taxonomy bullets are already correct at 2.1.0 and are left alone
+  - The `no_org_access` deny taxonomy bullets are already correct at 2.2.0 and are left alone
     apart from the `missing_entitlement` literals section 23.6 lists.
 - The Environments section: the "Required API vars" and "Required web vars" dotenv blocks must
   match section 14 exactly, with every Hub-issued value shown EMPTY. Remove the committed
@@ -2081,10 +2103,10 @@ re-read it before trusting any of them)
 - The Development section below is unchanged.
 
 **`nexo/ROADMAP.md`**
-- The `trustedOrigins` item (`:12`): update to record that 2.1.0 still has no allowed-origins
-  key, so `hub-bff-origin.ts` stays.
-- The rotated-cookie item (`:42`): update to record that 2.1.0 did not fix the regex, so
-  `hub-rotated-cookie.ts` stays, and that the delete-signal is unchanged.
+- The `trustedOrigins` item (`:12`): DELETE it. 2.2.0 added the key and `hub-bff-origin.ts`
+  is gone, so the item is closed.
+- The rotated-cookie item (`:42`): DELETE it. 2.2.0 fixed the regex upstream and
+  `hub-rotated-cookie.ts` is gone, so the item is closed.
 - Add an item: adopt the SDK's proactive browser renewal, deliberately deferred, with a
   pointer to the CLAUDE.md paragraph that says why.
 
@@ -2101,7 +2123,7 @@ simultaneously broken things smallest and makes every failure legible. Do not re
 3. **RED, tests only, before any source change.** Write every NEW test from section 16 and
    apply every test edit from section 17. Run `pnpm test`. Expect a large red wall, most of it
    `tsc`-level once step 4 lands. Commit nothing yet.
-4. **The bump.** Edit both `package.json` files to `"2.1.0"`, run `pnpm install`, run the three
+4. **The bump.** Edit both `package.json` files to `"2.2.0"`, run `pnpm install`, run the three
    hono assertions from section 1.2. From here nothing compiles until step 10.
 5. **Config.** `apps/api/src/env.ts` then `apps/api/src/config/auth-provider.ts` (sections 2.1,
    2.2). These have no dependants that are not already broken.
@@ -2119,14 +2141,14 @@ simultaneously broken things smallest and makes every failure legible. Do not re
     unmount, the `setActive` comment (sections 12, 13).
 12. **Web green.** `pnpm --filter @fxl-sales/web type-check` then
     `pnpm --filter @fxl-sales/web test`.
-13. **Docstrings.** `hub-rotated-cookie.ts` and `hub-bff-origin.ts` headers (sections 5.2, 6.2),
-    and `hub-login-scope.ts`'s re-pinned comment.
+13. **Docstrings.** `hub-login-scope.ts`'s re-pinned comment. The two shim headers are gone
+    with their modules (sections 5, 6).
 14. **Env examples.** The four committed `.env*.example` files (section 14). The two gitignored
     `.env` files are NOT touched.
 15. **Docs.** `CLAUDE.md`, `README.md`, `nexo/ROADMAP.md` (section 18).
 16. **Full verification.** Section 20.
 17. **Commit.** One atomic Conventional Commit:
-    `feat(auth)!: migrate both apps to @fxl-business/hub-sdk 2.1.0`
+    `feat(auth)!: migrate both apps to @fxl-business/hub-sdk 2.2.0`
     with a body naming the five contract moves (`read()`, required `sessionStore`,
     `insecureCookies`, `healthToken`, explicit `redirectUri`), the two shims that stay and why,
     and the two retired environment variables. No `--no-verify`.
@@ -2165,7 +2187,7 @@ pnpm --filter @fxl-sales/api test:integration
 Supplementary assertions, all offline:
 
 ```bash
-# The SDK really is 2.1.0 in both apps, and there is exactly one copy.
+# The SDK really is 2.2.0 in both apps, and there is exactly one copy.
 pnpm why @fxl-business/hub-sdk
 
 # Exactly one Hono.
@@ -2188,17 +2210,19 @@ is a different entity. Nothing else may match.
 
 ## 21. Definition of done
 
-- Both apps resolve `@fxl-business/hub-sdk` at exactly `2.1.0`; `pnpm-lock.yaml` is in the
+- Both apps resolve `@fxl-business/hub-sdk` at exactly `2.2.0`; `pnpm-lock.yaml` is in the
   commit; the `hono: 4.12.28` override is untouched and there is one Hono copy.
 - The BFF boots with `sessionStore` in every environment, `healthToken` outside development,
   `insecureCookies` only in development, and an explicit `redirectUri` on this app's own
   origin.
 - `HubSessionTransaction` on this repo's store has exactly `read`, `update`, `delete`.
-- `createHubRotatedCookieFetch` still exists, is still wired as `fetchImpl`, and its
-  non-vacuity oracle is still GREEN. Its docstring names 2.1.0 and the Organization switch on
-  `POST /auth/refresh`.
-- `createHubBffOriginShim` still exists, is still the mount, and both its bypass tests and its
-  non-vacuity test are GREEN. Its docstring names 2.1.0.
+- `createHubRotatedCookieFetch` and its test file are DELETED, and the deletion was gated on
+  its non-vacuity oracle being observed RED against 2.2.0 first. No `fetchImpl` is passed.
+  Rotation is still proven end to end through the real SDK handler against a `__Host-`
+  prefixed `Set-Cookie`.
+- `createHubBffOriginShim` and its test file are DELETED. The mount is `router.route('', bff)`
+  and `trustedOrigins: [env.CORS_ORIGIN]` is passed to `createHubBff`. Both mount tests keep
+  their titles and assertions and are GREEN.
 - The four contract types come from `@fxl-business/hub-sdk`, this repo keeps its own
   `hubAuth` augmentation in `apps/api/src/middleware/app-auth.ts`, and a compile-time oracle
   fails if `entitlements.access` ever degrades to `any`.
@@ -2296,7 +2320,7 @@ class EphemeralHubSessionStore extends InMemoryHubSessionStore {
 ```
 
 It exists only because the INSTALLED `1.3.1` `InMemoryHubSessionStore` has no `kind` and the
-2.x contract requires one. `2.1.0`'s `InMemoryHubSessionStore` declares
+2.x contract requires one. `2.2.0`'s `InMemoryHubSessionStore` declares
 `readonly kind: "ephemeral"` itself, so the subclass is now pure duplication and its own plan
 says slice 04 deletes it.
 
@@ -2325,7 +2349,7 @@ Do this:
    expect(session.kind).toBe('memory');               // the factory ENVELOPE tag
    expect(session.store.kind).toBe('ephemeral');      // the STORE's own tag
    ```
-   All three stay, byte for byte, after `EphemeralHubSessionStore` is deleted, because 2.1.0's
+   All three stay, byte for byte, after `EphemeralHubSessionStore` is deleted, because 2.2.0's
    `InMemoryHubSessionStore` declares `readonly kind: "ephemeral"` itself and the envelope tag
    is this repo's own. Do NOT add an `instanceof` assertion here to "prove" the subclass is
    gone: the class being deleted is proven by it not existing, and slice 01 deliberately kept
@@ -2361,7 +2385,7 @@ its own comments say so: `requireHubModule`'s docblock reads "slice 04 replaces 
 
 ### 23.1 Why the local gate must GO rather than stay as belt and braces
 
-Verified against the 2.1.0 tarball, `dist/server.d.ts:95-113`. `requireHubAuth`'s taxonomy
+Verified against the 2.2.0 tarball, `dist/server.d.ts:95-113`. `requireHubAuth`'s taxonomy
 table includes:
 
 ```
@@ -2537,7 +2561,7 @@ Slice 03 (wave 2) adds an `isForbiddenFailure` predicate to
 `apps/web/src/sales-ops/__tests__/entitlement-dead-end.test.tsx`. Slice 04 is wave 3 and lands
 on top of that. Read the post-03 file before editing, keep the 403 branch and its test, and
 change only the `missing_entitlement` literals listed above. If a 403 docblock also names a
-code, leave it alone: 2.1.0's 403 codes are `missing_module` and `missing_role`, which slice 03
+code, leave it alone: 2.2.0's 403 codes are `missing_module` and `missing_role`, which slice 03
 already wrote against.
 
 Nothing in `apps/web/src/sales-ops/MissingEntitlementPanel.tsx` changes behaviourally, and the
@@ -2601,7 +2625,7 @@ this section's own HEAD sweep and passed it, because the sweep looked for SYMBOL
 moved and not for ARITIES that had changed. `checkoutUrl` existed at `e59f870` and still exists
 at `84ac2a3`, so nothing here flagged it; what changed is that
 `feature-20260828-organization-context-escape` gave it a production caller at
-`apps/web/src/sales-ops/MissingEntitlementPanel.tsx:105`, and 2.1.0 gave it a required first
+`apps/web/src/sales-ops/MissingEntitlementPanel.tsx:105`, and 2.2.0 gave it a required first
 parameter. The claim was false at HEAD and would have landed slice 04 red on three commands
 section 21 requires green. Section 11 now owns the change. When re-running this section's HEAD
 check, compare SIGNATURES against the tarball and not only symbol existence.

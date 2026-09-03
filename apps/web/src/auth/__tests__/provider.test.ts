@@ -6,17 +6,43 @@ describe('loadHubBrowserConfig', () => {
     expect(
       loadHubBrowserConfig({
         VITE_FXL_HUB_API_URL: 'http://localhost:9016',
-        VITE_FXL_HUB_PUBLISHABLE_KEY: 'pk_fxl-sales_test',
+        VITE_FXL_HUB_ENVIRONMENT: 'development',
+        VITE_FXL_HUB_AUDIENCE: 'app.fxl-sales',
       }),
     ).toEqual({
       apiUrl: 'http://localhost:9016',
-      publishableKey: 'pk_fxl-sales_test',
-      audience: undefined,
+      environment: 'development',
+      audience: 'app.fxl-sales',
     });
   });
 
   it('requires the Hub browser vars', () => {
     expect(() => loadHubBrowserConfig({})).toThrow(/VITE_FXL_HUB_API_URL/);
+  });
+
+  it('carries no key or secret, so the browser half cannot hold a credential', () => {
+    /*
+      The 2.2.0 contract: the Client is named by audience plus environment, and
+      `createHubClient` THROWS on an object carrying `clientSecret`. This pins the
+      shape so a future edit cannot reintroduce a key into the bundle.
+    */
+    const config = loadHubBrowserConfig({
+      VITE_FXL_HUB_API_URL: 'http://localhost:9016',
+      VITE_FXL_HUB_ENVIRONMENT: 'development',
+      VITE_FXL_HUB_AUDIENCE: 'app.fxl-sales',
+    });
+    expect(Object.keys(config).sort()).toEqual(['apiUrl', 'audience', 'environment']);
+  });
+
+  it('refuses an environment it was not explicitly given, rather than inferring one', () => {
+    // A staging bundle that guessed would ask the Hub for the wrong Client and
+    // fail as a 401 at runtime instead of refusing to build.
+    expect(() =>
+      loadHubBrowserConfig({
+        VITE_FXL_HUB_API_URL: 'http://localhost:9016',
+        VITE_FXL_HUB_AUDIENCE: 'app.fxl-sales',
+      }),
+    ).toThrow(/VITE_FXL_HUB_ENVIRONMENT/);
   });
 });
 

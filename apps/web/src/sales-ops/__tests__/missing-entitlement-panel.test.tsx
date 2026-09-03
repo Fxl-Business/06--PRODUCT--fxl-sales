@@ -328,6 +328,36 @@ describe('MissingEntitlementPanel - the Hub checkout', () => {
     expect(seam.client.checkoutUrl).toHaveBeenCalledTimes(1);
   });
 
+  it('buys for the ACTIVE Organization, naming it explicitly rather than letting the Hub choose', async () => {
+    /*
+      2.x requires the Organization the checkout is for, and on this screen the
+      right answer is the ACTIVE one: the panel exists precisely because the
+      Organization this session is anchored to has no access. Passing the wrong
+      id would sell an entitlement for an Organization the operator is not in,
+      and the call-count assertion above would not notice.
+    */
+    await renderPanel();
+    expect(seam.client.checkoutUrl).toHaveBeenCalledWith(orgAtiva.id);
+  });
+
+  it('offers no checkout at all when no Organization is active, rather than a dead link', async () => {
+    /*
+      The degenerate token: no `workspaceId` claim and no matching preview entry,
+      so the seam cannot say where the operator is. There is then nothing honest
+      to sell, and the block must NOT sit in its skeleton forever waiting for a
+      resolution that can never come.
+
+      The switcher above it is unaffected and is what the operator uses to get
+      out, which is why this is a degraded checkout rather than a degraded panel.
+    */
+    seam = makeSeam({ active: null, activeName: undefined });
+    await renderPanel();
+
+    expect(seam.client.checkoutUrl).not.toHaveBeenCalled();
+    expect(checkoutAnchor()).toBeNull();
+    expect(sectionText()).toContain(MISSING_ENTITLEMENT_COPY.checkoutFailed);
+  });
+
   it('renders a skeleton, never an empty state, while the Hub checkout link is resolving', async () => {
     let resolveHref: (href: string) => void = () => {};
     const deferred = new Promise<string>((resolve) => {

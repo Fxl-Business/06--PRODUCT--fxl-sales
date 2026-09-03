@@ -14,9 +14,15 @@ const act = (
 const mocks = vi.hoisted(() => {
   const client = {
     login: vi.fn<HubClient['login']>(),
+    loginWithPopup: vi.fn<HubClient['loginWithPopup']>(),
     getToken: vi.fn<HubClient['getToken']>(),
+    getTokenResult: vi.fn<HubClient['getTokenResult']>(),
     setActive: vi.fn<HubClient['setActive']>(),
     logout: vi.fn<HubClient['logout']>(),
+    // 2.x owns a renewal scheduler this app does not use. `start` is never
+    // called; `stop` is, from the provider's unmount cleanup.
+    start: vi.fn<HubClient['start']>(),
+    stop: vi.fn<HubClient['stop']>(),
     checkoutUrl: vi.fn<HubClient['checkoutUrl']>(),
     manageUrl: vi.fn<HubClient['manageUrl']>(),
   } satisfies HubClient;
@@ -427,7 +433,8 @@ beforeEach(() => {
   probeRenders = 0;
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   vi.stubEnv('VITE_FXL_HUB_API_URL', 'http://hub.test');
-  vi.stubEnv('VITE_FXL_HUB_PUBLISHABLE_KEY', 'pk_fxl-sales_test');
+  vi.stubEnv('VITE_FXL_HUB_ENVIRONMENT', 'development');
+  vi.stubEnv('VITE_FXL_HUB_AUDIENCE', 'app.fxl-sales');
   mocks.createHubClient.mockReturnValue(mocks.client);
   mocks.createHubAccessTokenCache.mockReturnValue(mocks.cache);
   /*
@@ -510,6 +517,50 @@ describe('AppAuthProvider token cache wiring', () => {
     );
   });
 
+  it('refuses the SDK proactive renewal, because this file owns renewal itself', async () => {
+    /*
+      `autoRenew` DEFAULTS TO TRUE in 2.x, so this has to be passed explicitly and
+      has to be pinned. Everything about renewal in this app is specified here and
+      oracled here: renewal at `exp - SESSION_RENEWAL_LEAD_MS` but only while the
+      document is visible, a synchronous renew on `visibilitychange`, the bounded
+      revalidation ladder and its consecutive-failure budget, the durable logout
+      intent, and the queryClient flush rules.
+
+      A second loop inside the SDK would renew against the same session on its own
+      schedule, race every one of those oracles, and keep a hidden tab alive that
+      this product deliberately lets idle. Adopting it is a separate migration
+      with its own decisions, not a side effect of a version bump.
+    */
+    mocks.cache.getToken.mockResolvedValue(ok(profileToken('Alpha')));
+    ({ container, root } = renderProvider());
+
+    await flushReact();
+
+    expect(mocks.createHubClient).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ autoRenew: false }),
+    );
+    // The other half of the same rule: nothing in this app ever starts it.
+    expect(mocks.client.start).not.toHaveBeenCalled();
+  });
+
+  it('stops the SDK client scheduler when the provider unmounts', async () => {
+    // Even with `autoRenew: false` the client owns a scheduler, and an unmounted
+    // provider must not leave one armed.
+    mocks.cache.getToken.mockResolvedValue(ok(profileToken('Alpha')));
+    ({ container, root } = renderProvider());
+
+    await flushReact();
+    expect(mocks.client.stop).not.toHaveBeenCalled();
+
+    await act(async () => {
+      root?.unmount();
+    });
+    root = null;
+
+    expect(mocks.client.stop).toHaveBeenCalledTimes(1);
+  });
+
   it('seeds the workspace-switch token before exposing the switched profile', async () => {
     const observeWorkspace = vi.fn<(workspaceName?: string) => void>();
     const switchedToken = profileToken('Beta');
@@ -517,7 +568,7 @@ describe('AppAuthProvider token cache wiring', () => {
     mocks.client.setActive.mockResolvedValue({
       accessToken: switchedToken,
       expiresIn: 120,
-      workspaceId: 'workspace-beta',
+      organizationId: 'workspace-beta',
     });
     ({ container, root } = renderProvider(observeWorkspace));
     await flushReact();
@@ -590,7 +641,7 @@ describe('AppAuthProvider token cache wiring', () => {
     switchRequest.resolve({
       accessToken: switchedToken,
       expiresIn: 120,
-      workspaceId: 'workspace-beta',
+      organizationId: 'workspace-beta',
     });
     await flushReact();
     expect(mocks.cache.seed).not.toHaveBeenCalled();
@@ -630,7 +681,7 @@ describe('AppAuthProvider token cache wiring', () => {
     gammaSwitch.resolve({
       accessToken: gammaToken,
       expiresIn: 120,
-      workspaceId: 'workspace-gamma',
+      organizationId: 'workspace-gamma',
     });
     await flushReact();
     expect(mocks.cache.seed).toHaveBeenCalledTimes(1);
@@ -644,7 +695,7 @@ describe('AppAuthProvider token cache wiring', () => {
     betaSwitch.resolve({
       accessToken: betaToken,
       expiresIn: 120,
-      workspaceId: 'workspace-beta',
+      organizationId: 'workspace-beta',
     });
     await flushReact();
     expect(mocks.cache.seed).toHaveBeenCalledTimes(1);
@@ -1752,7 +1803,7 @@ describe('identity-scoped query cache', () => {
     mocks.client.setActive.mockResolvedValue({
       accessToken: profileToken('Beta'),
       expiresIn: 120,
-      workspaceId: 'workspace-beta',
+      organizationId: 'workspace-beta',
     });
     ({ container, root } = renderProvider());
     await flushReact();
@@ -1795,7 +1846,7 @@ describe('identity-scoped query cache', () => {
     switchRequest.resolve({
       accessToken: profileToken('Beta'),
       expiresIn: 120,
-      workspaceId: 'workspace-beta',
+      organizationId: 'workspace-beta',
     });
     await flushReact();
     expect(profileText(container)).toBe('signed-in:Beta');
@@ -1831,7 +1882,7 @@ describe('identity-scoped query cache', () => {
     gammaSwitch.resolve({
       accessToken: profileToken('Gamma', workspaces),
       expiresIn: 120,
-      workspaceId: 'workspace-gamma',
+      organizationId: 'workspace-gamma',
     });
     await flushReact();
     expect(profileText(container)).toBe('signed-in:Gamma');
@@ -1843,7 +1894,7 @@ describe('identity-scoped query cache', () => {
     betaSwitch.resolve({
       accessToken: profileToken('Beta', workspaces),
       expiresIn: 120,
-      workspaceId: 'workspace-beta',
+      organizationId: 'workspace-beta',
     });
     await flushReact();
 
@@ -1860,7 +1911,7 @@ describe('identity-scoped query cache', () => {
     mocks.client.setActive.mockResolvedValue({
       accessToken: profileToken('Beta'),
       expiresIn: 120,
-      workspaceId: 'workspace-beta',
+      organizationId: 'workspace-beta',
     });
     ({ container, root } = renderProvider());
     await flushReact();
@@ -2030,7 +2081,7 @@ describe('active organization and the useOrganizations seam', () => {
     mocks.client.setActive.mockResolvedValue({
       accessToken: profileToken('Beta', undefined, 'workspace-beta'),
       expiresIn: 120,
-      workspaceId: 'workspace-beta',
+      organizationId: 'workspace-beta',
     });
 
     ({ container, root } = renderOrganizations());

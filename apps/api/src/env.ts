@@ -38,7 +38,7 @@ const schema = z.object({
   // process.exit(1) with its own flattened field errors and the operator would
   // never see the named HubConfigError. The environment verdict, and its
   // agreement with the environment segment inside the client id, belong to
-  // config/hub-config.ts.
+  // the SDK's own parser, reached through config/auth-provider.ts.
   FXL_HUB_ENVIRONMENT: emptyToUndefined,
   FXL_HUB_CLIENT_ID: emptyToUndefined,
   FXL_HUB_CLIENT_SECRET: emptyToUndefined,

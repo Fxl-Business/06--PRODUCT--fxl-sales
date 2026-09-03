@@ -38,9 +38,15 @@ const act = (
 const mocks = vi.hoisted(() => {
   const client = {
     login: vi.fn<HubClient['login']>(),
+    loginWithPopup: vi.fn<HubClient['loginWithPopup']>(),
     getToken: vi.fn<HubClient['getToken']>(),
+    getTokenResult: vi.fn<HubClient['getTokenResult']>(),
     setActive: vi.fn<HubClient['setActive']>(),
     logout: vi.fn<HubClient['logout']>(),
+    // 2.x owns a renewal scheduler this app does not use. `start` is never
+    // called; `stop` is, from the provider's unmount cleanup.
+    start: vi.fn<HubClient['start']>(),
+    stop: vi.fn<HubClient['stop']>(),
     checkoutUrl: vi.fn<HubClient['checkoutUrl']>(),
     manageUrl: vi.fn<HubClient['manageUrl']>(),
   } satisfies HubClient;
@@ -373,7 +379,8 @@ beforeEach(() => {
   sessionStorage.clear();
   visited = [];
   vi.stubEnv('VITE_FXL_HUB_API_URL', 'http://hub.test');
-  vi.stubEnv('VITE_FXL_HUB_PUBLISHABLE_KEY', 'pk_fxl-sales_test');
+  vi.stubEnv('VITE_FXL_HUB_ENVIRONMENT', 'development');
+  vi.stubEnv('VITE_FXL_HUB_AUDIENCE', 'app.fxl-sales');
   mocks.createHubClient.mockReturnValue(mocks.client);
   mocks.createHubAccessTokenCache.mockReturnValue(mocks.cache);
   /*

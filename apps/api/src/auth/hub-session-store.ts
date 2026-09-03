@@ -7,7 +7,8 @@
  * replica a session created on A was invisible on B.
  *
  * `HubSessionStore` is ASYNC and TRANSACTIONAL as of
- * `@fxl-business/hub-sdk@1.3.0`, and the STORE owns the lock. `withSession(id,
+ * `@fxl-business/hub-sdk@1.3.0` and unchanged through 2.2.0, and the STORE owns
+ * the lock. `withSession(id,
  * op)` opens ONE `db.transaction`, takes `SELECT ... FOR UPDATE` on the session
  * row BEFORE `op` runs, and holds it until commit - so two concurrent refreshes
  * of one session id serialize at Postgres and a rotated refresh token cannot be
@@ -27,22 +28,30 @@
  * Rotating `FXL_HUB_CLIENT_SECRET` invalidates every stored session - see
  * `session-crypto.ts`.
  *
- * The transaction handle already speaks the 2.x `read()` contract while the
- * dependency is still `@fxl-business/hub-sdk@1.3.1`: `read()` answers a
- * three-state `found | expired | absent` result, because `expired` clears the
- * browser's session cookie and `absent` never does. `get()` survives only until
- * the SDK flip, which is the one thing the installed BFF still calls, and it is a
- * PROJECTION of `read()` rather than a second lookup.
+ * The transaction handle speaks the 2.x contract and nothing else: `read()`,
+ * `update()`, `delete()`. `read()` answers a three-state
+ * `found | expired | absent` result, because `expired` clears the browser's
+ * session cookie and `absent` never does. The 1.3.1-era `get()` projection is
+ * GONE with the bump to `@fxl-business/hub-sdk@2.2.0`, whose
+ * `HubSessionTransaction` declares no such member; the three contract types are
+ * imported from the SDK rather than redeclared here.
  */
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomBytes } from 'node:crypto';
 import {
   InMemoryHubSessionStore,
   type HubLoginTransaction,
+  type HubSessionReadResult,
   type HubSessionRecord,
   type HubSessionStore,
-  type HubSessionTransaction as SdkHubSessionTransaction,
+  type HubSessionTransaction,
 } from '@fxl-business/hub-sdk';
+
+/**
+ * Re-exported because this module's own tests assert on it and importing it
+ * from here keeps them pointed at the contract this store implements.
+ */
+export type { HubSessionReadResult };
 import { eq, lte, or } from 'drizzle-orm';
 import { getAdminDb } from '../db/client.js';
 import { hubBffLoginTxns, hubBffSessions } from '../db/schema.js';
@@ -70,7 +79,7 @@ export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
  */
 export const SESSION_ABSOLUTE_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 
-/** Matches the SDK's LOGIN_TX_MAX_AGE_SECONDS = 600 (1.3.0 dist/server.js:279). */
+/** Matches the SDK's LOGIN_TX_MAX_AGE_SECONDS = 600 (2.2.0 dist/server.js:300). */
 export const LOGIN_TX_TTL_MS = 10 * 60 * 1000;
 
 /**
@@ -109,44 +118,6 @@ export class HubSessionStoreUnavailableError extends Error {
 function newId(): string {
   // 256 bits, above the interface's documented 128-bit floor.
   return randomBytes(32).toString('base64url');
-}
-
-/**
- * The 2.x session contract, declared HERE while the dependency is still 1.3.1.
- *
- * These three names are byte-for-byte the SDK 2.1.0 names
- * (dist/session-store-DOWOoBx8.d.ts:17-43). Slice 04 deletes these declarations and
- * adds the identifiers to the import above; nothing else in the repo changes, which
- * is the whole reason they are spelled the same.
- */
-export type HubSessionStoreKind = 'ephemeral' | 'persistent';
-
-/**
- * Why this is not `HubSessionRecord | null`.
- *
- * Under `null`, a session that had EXPIRED and one that simply is not here looked
- * identical, so the BFF treated both as definitive and deleted the session cookie: a
- * database blip logged the operator out with no way back. With the status
- * discriminated, `expired` clears and `absent` never does.
- *
- * The asymmetry is the design rule for this file. `absent` costs a retry; `expired`
- * costs a logout. Anything this store cannot positively prove is expiry is therefore
- * reported `absent`.
- */
-export type HubSessionReadResult =
-  | { status: 'found'; record: HubSessionRecord }
-  | { status: 'expired' }
-  | { status: 'absent' };
-
-/**
- * The 2.x handle, plus the 1.3.1 `get()` the INSTALLED SDK still calls
- * (dist/server.js:464). Slice 04 deletes this interface, imports
- * `HubSessionTransaction` from the SDK, and deletes `get` from the handle literal.
- * Until then `get()` is implemented in terms of `read()` and never as a second
- * lookup.
- */
-export interface HubSessionTransaction extends SdkHubSessionTransaction {
-  read(): Promise<HubSessionReadResult>;
 }
 
 /**
@@ -249,7 +220,7 @@ class PostgresHubSessionStore implements DurableHubSessionStore {
         await tx.insert(hubBffSessions).values({
           id,
           hubRefreshTokenEnc: this.#sealer.seal(data.hubRefreshToken, id),
-          // ALWAYS NULL under 1.3.0 - the BFF never supplies it. See the column
+          // ALWAYS NULL through 2.2.0 - the BFF never supplies it. See the column
           // comment in db/schema.ts before building anything on it.
           accountId: data.accountId ?? null,
           // `data.expiresAt` and `data.absoluteExpiresAt` are deliberately IGNORED.
@@ -280,7 +251,7 @@ class PostgresHubSessionStore implements DurableHubSessionStore {
     try {
       return await this.#db.transaction(async (tx) => {
         // The lock is taken FIRST, before `operation` runs, and is held until
-        // this transaction commits. That is the whole point of the 1.3.0
+        // this transaction commits. That is the whole point of the 1.3.0+
         // contract: the Hub round trip the operation makes happens under it.
         const rows = await tx
           .select()
@@ -293,8 +264,8 @@ class PostgresHubSessionStore implements DurableHubSessionStore {
         const row = rows[0] ?? null;
 
         // ONE lookup, resolved here, under the lock, BEFORE `operation` runs, and
-        // never recomputed. `read()` hands this value back and `get()` projects it,
-        // so the two accessors cannot disagree and `get()` cannot re-delete.
+        // never recomputed. `read()` hands this exact value back, so a second call
+        // inside the same transaction can never re-delete or disagree.
         //
         // The order is deliberate and is the safety rule of this whole file:
         // `expired` clears the browser's session cookie and `absent` does not, so
@@ -337,13 +308,6 @@ class PostgresHubSessionStore implements DurableHubSessionStore {
 
         const handle: HubSessionTransaction = {
           read,
-          // The 1.3.1 BFF still calls this (dist/server.js:464). It is a PROJECTION of
-          // `read()` and never a second lookup, so the two cannot drift while both
-          // exist. Slice 04 deletes it with the SDK bump.
-          get: async () => {
-            const result = await read();
-            return result.status === 'found' ? result.record : null;
-          },
           update: async (record) => {
             await tx
               .update(hubBffSessions)
@@ -351,8 +315,8 @@ class PostgresHubSessionStore implements DurableHubSessionStore {
                 hubRefreshTokenEnc: this.#sealer.seal(record.hubRefreshToken, sessionId),
                 accountId: record.accountId ?? null,
                 // SLIDING, deliberately ignoring `record.expiresAt`: the SDK
-                // spreads back the value it got from `get()` (dist/server.js:464),
-                // so honouring it would freeze the TTL at 30 days from login.
+                // spreads back the value it read a moment earlier, so honouring it
+                // would freeze the TTL at 30 days from login.
                 expiresAt: new Date(this.#now().getTime() + SESSION_TTL_MS),
                 // `absoluteExpiresAt` is ABSENT from this object ON PURPOSE, and
                 // `record.absoluteExpiresAt` is ignored for the mirror-image
@@ -443,16 +407,6 @@ export function createDurableHubSessionStore(deps: {
 }
 
 /**
- * The in-process fallback, with the `kind` the installed 1.3.1
- * `InMemoryHubSessionStore` does not have yet. 2.1.0's own class declares
- * `kind = 'ephemeral'`, so slice 04 deletes this class and uses the SDK's directly.
- * The subclass adds a property and overrides no behaviour.
- */
-class EphemeralHubSessionStore extends InMemoryHubSessionStore {
-  readonly kind = 'ephemeral' as const;
-}
-
-/**
  * Env-reading factory used by app-auth. `kind` is what the wiring test asserts
  * to prove the durable path was taken, and what drives the memory-fallback warning.
  *
@@ -468,7 +422,7 @@ export function createHubSessionStore(deps: {
   encryptionIkm: string;
 }):
   | { kind: 'durable'; store: DurableHubSessionStore }
-  | { kind: 'memory'; store: EphemeralHubSessionStore } {
+  | { kind: 'memory'; store: InMemoryHubSessionStore } {
   if (deps.databaseUrlPresent) {
     // getAdminDb() is reached only from inside this factory, never at module
     // import time, and postgres-js builds the pool without opening a socket
@@ -489,7 +443,7 @@ export function createHubSessionStore(deps: {
   console.warn(
     '[hub-session-store] DATABASE_URL is not set - falling back to the in-process session store; sessions will NOT survive a restart',
   );
-  return { kind: 'memory', store: new EphemeralHubSessionStore() };
+  return { kind: 'memory', store: new InMemoryHubSessionStore() };
 }
 
 /** Cleanup, called by the nightly scheduler. Returns rows removed. */

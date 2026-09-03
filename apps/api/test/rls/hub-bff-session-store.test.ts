@@ -1,3 +1,4 @@
+import type { HubSessionRecord, HubSessionTransaction } from '@fxl-business/hub-sdk';
 /**
  * Durable Hub BFF session store, integration coverage.
  *
@@ -27,6 +28,22 @@ import {
 } from '../../src/auth/hub-session-store.js';
 import { createSessionSealer } from '../../src/auth/session-crypto.js';
 import * as schema from '../../src/db/schema.js';
+
+/**
+ * The 1.3.1 `tx.get()` projection in one place.
+ *
+ * 2.2.0's `HubSessionTransaction` has `read()` returning a three-state
+ * `found | expired | absent` result and no `get`. These tests only ever asked
+ * "the record, or null", so the projection lives here rather than being spelled
+ * out at every call site. `expired` and `absent` both read as null, exactly as
+ * `get()` did; the tests that care about the DIFFERENCE assert on `read()`
+ * directly in `src/auth/__tests__/hub-session-store.test.ts`.
+ */
+async function readRecord(tx: HubSessionTransaction): Promise<HubSessionRecord | null> {
+  const observed = await tx.read();
+  return observed.status === 'found' ? observed.record : null;
+}
+
 
 const APP_DB_URL =
   process.env.TEST_DATABASE_URL ??
@@ -78,7 +95,7 @@ describe('durable Hub BFF session store', () => {
 
   /** Reads a session through a fresh store instance, outside any lock. */
   async function readToken(store: DurableHubSessionStore, sessionId: string) {
-    return store.withSession(sessionId, async (tx) => (await tx.get())?.hubRefreshToken ?? null);
+    return store.withSession(sessionId, async (tx) => (await readRecord(tx))?.hubRefreshToken ?? null);
   }
 
   beforeAll(() => {
@@ -125,7 +142,7 @@ describe('durable Hub BFF session store', () => {
     const sid = trackSession(await storeA.create({ hubRefreshToken: 'refresh-token-alpha' }));
 
     await storeB.withSession(sid, async (tx) => {
-      const record = await tx.get();
+      const record = await readRecord(tx);
       expect(record?.hubRefreshToken).toBe('refresh-token-alpha');
       await tx.update({ ...record!, hubRefreshToken: 'refresh-token-beta' });
     });
@@ -150,7 +167,7 @@ describe('durable Hub BFF session store', () => {
     const started: Promise<unknown>[] = [];
     try {
       const aPromise = storeA.withSession(sessionId, async (tx) => {
-        aSaw = (await tx.get())?.hubRefreshToken ?? null;
+        aSaw = (await readRecord(tx))?.hubRefreshToken ?? null;
         aHoldsLock.resolve();
         await releaseA.promise;
         await tx.update({ hubRefreshToken: 'token-a' });
@@ -160,7 +177,7 @@ describe('durable Hub BFF session store', () => {
 
       const bPromise = storeB.withSession(sessionId, async (tx) => {
         bEntered.resolve();
-        bSaw = (await tx.get())?.hubRefreshToken ?? null;
+        bSaw = (await readRecord(tx))?.hubRefreshToken ?? null;
         await releaseB.promise;
         await tx.update({ hubRefreshToken: 'token-b' });
       });
@@ -204,7 +221,7 @@ describe('durable Hub BFF session store', () => {
     const started: Promise<unknown>[] = [];
     try {
       const aPromise = storeA.withSession(lockedId, async (tx) => {
-        await tx.get();
+        await readRecord(tx);
         aHoldsLock.resolve();
         await releaseA.promise;
       });
@@ -278,7 +295,7 @@ describe('durable Hub BFF session store', () => {
     const later = new Date(Date.now() + 24 * 60 * 60 * 1000);
     const laterStore = newStore(() => later);
     await laterStore.withSession(sid, async (tx) => {
-      const record = await tx.get();
+      const record = await readRecord(tx);
       // EXACTLY what dist/server.js:464 does - the record spread back with only
       // hubRefreshToken replaced, expiresAt untouched.
       await tx.update({ ...record!, hubRefreshToken: 'token-new' });
@@ -318,7 +335,7 @@ describe('durable Hub BFF session store', () => {
 
     const later = new Date(Date.now() + 24 * 60 * 60 * 1000);
     await newStore(() => later).withSession(sid, async (tx) => {
-      const record = await tx.get();
+      const record = await readRecord(tx);
       // dist/server.js:464 verbatim - the record spread back with only
       // hubRefreshToken replaced, BOTH expiries untouched by the SDK.
       await tx.update({ ...record!, hubRefreshToken: 'token-new' });
@@ -511,7 +528,7 @@ describe('durable Hub BFF session store', () => {
         ),
       );
 
-      expect(await store.withSession(priorId, async (tx) => tx.get())).toBeNull();
+      expect(await store.withSession(priorId, async (tx) => readRecord(tx))).toBeNull();
     });
 
     it('keeps the prior session when the new insert fails', async () => {

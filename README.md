@@ -58,7 +58,8 @@ VITE_API_URL=http://localhost:3006
 VITE_AUTH_PROXY_TARGET=http://localhost:3006
 VITE_AUTH_BFF_BASE_PATH=
 VITE_FXL_HUB_API_URL=http://localhost:9016
-VITE_FXL_HUB_PUBLISHABLE_KEY=
+VITE_FXL_HUB_ENVIRONMENT=development
+VITE_FXL_HUB_AUDIENCE=app.fxl-sales
 ```
 
 The Hub audience is configured as `app.<slug>`, never derived from a key.

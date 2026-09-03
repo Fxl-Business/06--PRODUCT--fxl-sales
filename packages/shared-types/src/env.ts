@@ -12,8 +12,10 @@ export const sharedServerEnv = z.object({
 
 export const sharedClientEnv = z.object({
   VITE_FXL_HUB_API_URL: z.string().url().optional(),
-  VITE_FXL_HUB_PUBLISHABLE_KEY: z.string().min(1).optional(),
-  VITE_FXL_HUB_AUDIENCE: z.string().optional(),
+  // `VITE_FXL_HUB_PUBLISHABLE_KEY` is GONE with the 2.2.0 bump: the browser half
+  // identifies the Client by audience plus environment and holds no key.
+  VITE_FXL_HUB_ENVIRONMENT: z.enum(['production', 'staging', 'development']).optional(),
+  VITE_FXL_HUB_AUDIENCE: z.string().min(1).optional(),
   VITE_SENTRY_DSN: z.string().url().optional(),
 });
 

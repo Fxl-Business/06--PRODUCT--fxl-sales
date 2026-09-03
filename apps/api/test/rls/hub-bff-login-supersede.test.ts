@@ -1,3 +1,4 @@
+import type { HubSessionRecord, HubSessionTransaction } from '@fxl-business/hub-sdk';
 /**
  * The login supersede, end to end through the REAL SDK router.
  *
@@ -25,7 +26,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { createHubBff } from '@fxl-business/hub-sdk/server';
-import type { HubSdkConfig } from '@fxl-business/hub-sdk';
+import type { HubConfig } from '@fxl-business/hub-sdk';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { Hono } from 'hono';
 import postgres from 'postgres';
@@ -39,6 +40,22 @@ import {
 import { createSessionSealer } from '../../src/auth/session-crypto.js';
 import * as schema from '../../src/db/schema.js';
 
+/**
+ * The 1.3.1 `tx.get()` projection in one place.
+ *
+ * 2.2.0's `HubSessionTransaction` has `read()` returning a three-state
+ * `found | expired | absent` result and no `get`. These tests only ever asked
+ * "the record, or null", so the projection lives here rather than being spelled
+ * out at every call site. `expired` and `absent` both read as null, exactly as
+ * `get()` did; the tests that care about the DIFFERENCE assert on `read()`
+ * directly in `src/auth/__tests__/hub-session-store.test.ts`.
+ */
+async function readRecord(tx: HubSessionTransaction): Promise<HubSessionRecord | null> {
+  const observed = await tx.read();
+  return observed.status === 'found' ? observed.record : null;
+}
+
+
 const APP_DB_URL =
   process.env.TEST_DATABASE_URL ??
   process.env.DATABASE_URL ??
@@ -51,11 +68,12 @@ const IKM = 'hub-bff-login-supersede-test-ikm-0123456789';
 const HUB_API_URL = `http://hub.invalid.${randomUUID()}`;
 const TOKEN_ENDPOINT = `${HUB_API_URL}/oauth/token`;
 
-const HUB_CONFIG: HubSdkConfig = {
+const HUB_CONFIG: HubConfig = {
   apiUrl: HUB_API_URL,
-  publishableKey: 'pk_fxl-sales_integration-test-publishable-key',
-  secretKey: 'integration-test-hub-secret-key-0123456789',
-  audience: 'product.fxl-sales',
+  environment: 'development',
+  clientId: 'pk_fxl-sales_development_integration-test-client-id',
+  clientSecret: 'sk_fxl-sales_development_integration-test-only-not-a-real-secret',
+  audience: 'app.fxl-sales',
 };
 
 /** The only stub in the file: the Hub's discovery document and token exchange. */
@@ -164,7 +182,9 @@ describe('login supersede, through the real SDK BFF', () => {
 
     const bff = createHubBff(HUB_CONFIG, {
       sessionStore: store,
-      secureCookies: false,
+      // 2.x REPLACES `secureCookies` with its inverse, and the boot assertion
+      // only permits it when the environment is development, which it is here.
+      insecureCookies: true,
       fetchImpl: stubHub,
       redirectUri: 'http://localhost:8006/auth/callback',
       postLoginRedirect: 'http://localhost:8006',
@@ -201,7 +221,7 @@ describe('login supersede, through the real SDK BFF', () => {
     // live rotatable refresh token for up to 30 days.
     expect(await rowCount(first)).toBe(0);
     expect(await rowCount(second)).toBe(1);
-    expect(await store.withSession(first, async (tx) => tx.get())).toBeNull();
+    expect(await store.withSession(first, async (tx) => readRecord(tx))).toBeNull();
   });
 
   it('does not touch a session held by a second browser', async () => {
@@ -220,7 +240,7 @@ describe('login supersede, through the real SDK BFF', () => {
     expect(await rowCount(laptopFirst)).toBe(0);
     expect(await rowCount(laptopSecond)).toBe(1);
     // Still resolvable, which is what "the desktop stays signed in" means.
-    expect(await store.withSession(desktopSession, async (tx) => tx.get())).not.toBeNull();
+    expect(await store.withSession(desktopSession, async (tx) => readRecord(tx))).not.toBeNull();
   });
 
   it('creates a session for a browser that presents no prior one', async () => {

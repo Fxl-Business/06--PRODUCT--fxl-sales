@@ -231,9 +231,36 @@ function HubAuthProvider({ children }: { children: ReactNode }) {
    */
   const bffBasePath = useMemo(() => getHubBffBasePath(import.meta.env), []);
   const client = useMemo(
-    () => createHubClient(loadHubBrowserConfig(import.meta.env), { bffBasePath }),
+    () =>
+      createHubClient(loadHubBrowserConfig(import.meta.env), {
+        bffBasePath,
+        /*
+          The SDK's proactive renewal is DELIBERATELY NOT ADOPTED, and the default
+          is `true`, so this has to be said explicitly.
+
+          This file already owns renewal, and owns it in a shape the SDK's loop
+          does not have: renewal at `exp - SESSION_RENEWAL_LEAD_MS` but only while
+          the document is VISIBLE, a synchronous renew on `visibilitychange`, the
+          bounded revalidation ladder with its consecutive-failure budget, the
+          durable logout intent, and the queryClient flush rules. Every one of
+          those is pinned by tests in this directory. Two renewal loops on one
+          token cache would race each other and each other's oracles, and the
+          SDK's would renew a hidden tab this product deliberately lets idle.
+
+          Adopting it is a separate decision with its own migration, not a side
+          effect of a version bump.
+        */
+        autoRenew: false,
+      }),
     [bffBasePath],
   );
+
+  /*
+    Belt and braces for the line above: even with `autoRenew: false` the client
+    owns a scheduler, and an unmounted provider must not leave one armed. `start()`
+    is never called anywhere in this app.
+  */
+  useEffect(() => () => client.stop(), [client]);
   const tokenCache = useMemo(
     () => createHubAccessTokenCache(() => requestHubAccessToken(bffBasePath)),
     [bffBasePath],

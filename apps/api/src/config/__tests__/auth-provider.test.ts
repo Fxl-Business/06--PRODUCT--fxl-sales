@@ -15,7 +15,7 @@ import {
   tryLoadHubAuthConfig,
   type HubEnvSource,
 } from '../auth-provider.js';
-import { HubConfigError } from '../hub-config.js';
+import { HubConfigError } from '@fxl-business/hub-sdk';
 
 /** Obviously synthetic fixtures. They carry no entropy and name no real client. */
 const HUB_CLIENT_ID = 'pk_fxl-sales_development_unit-test-only-0123456789';
@@ -210,7 +210,6 @@ describe('hubEnvBag', () => {
 describe('the derived-audience guard', () => {
   it('no API module derives the Hub audience from a key', () => {
     const sources = [
-      readFileSync(new URL('../hub-config.ts', import.meta.url), 'utf8'),
       readFileSync(new URL('../auth-provider.ts', import.meta.url), 'utf8'),
       readFileSync(new URL('../../middleware/app-auth.ts', import.meta.url), 'utf8'),
     ];

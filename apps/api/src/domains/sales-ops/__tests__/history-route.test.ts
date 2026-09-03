@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { Hono } from 'hono';
+import { hubAuthContext } from '../../../auth/__tests__/hub-auth-context-fixture.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
@@ -46,15 +47,15 @@ function createTestApp() {
     c.set('orgId', 'verified-org');
     c.set('userRole', currentRole);
     c.set('userRoles', currentRole ? [currentRole] : []);
-    c.set('hubAuth', {
-      accountId: 'verified-account',
-      workspaceId: 'verified-org',
-      claims: {
-        entitlements: { access: true, modules: [] },
+    c.set(
+      'hubAuth',
+      hubAuthContext({
+        accountId: 'verified-account',
+        workspaceId: 'verified-org',
         roles: { workspace: 'admin' },
         ...currentHubClaims,
-      },
-    });
+      }),
+    );
     await next();
   });
   app.route('/', salesOpsRouter);

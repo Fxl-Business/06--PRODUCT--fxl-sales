@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { hubAuthContext as sharedHubAuthContext } from '../../../auth/__tests__/hub-auth-context-fixture.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockedDb = { name: 'sales-ops-route-test-db' };
@@ -81,15 +82,12 @@ let currentRole: TestRole;
 let currentHubClaims: { name?: string; email?: string } = {};
 
 function hubAuthContext() {
-  return {
+  return sharedHubAuthContext({
     accountId: 'verified-account',
     workspaceId: 'verified-org',
-    claims: {
-      entitlements: { access: true, modules: [] },
-      roles: { workspace: 'admin' },
-      ...currentHubClaims,
-    },
-  };
+    roles: { workspace: 'admin' },
+    ...currentHubClaims,
+  });
 }
 
 function createTestApp() {

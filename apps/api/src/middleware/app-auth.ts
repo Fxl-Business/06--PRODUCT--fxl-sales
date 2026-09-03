@@ -1,10 +1,8 @@
-import type { HubSdkConfig } from '@fxl-business/hub-sdk';
+import type { HubAuthContext, HubConfig } from '@fxl-business/hub-sdk';
 import { createHubBff, requireHubAuth } from '@fxl-business/hub-sdk/server';
 import { Hono, type MiddlewareHandler } from 'hono';
 import { hubBffErrorHandler } from '../auth/hub-bff-errors.js';
-import { createHubBffOriginShim } from '../auth/hub-bff-origin.js';
 import { createHubLoginSupersedeMiddleware } from '../auth/hub-login-scope.js';
-import { createHubRotatedCookieFetch } from '../auth/hub-rotated-cookie.js';
 import {
   SESSION_ABSOLUTE_TTL_MS,
   SESSION_TTL_MS,
@@ -15,43 +13,20 @@ import { env } from '../env.js';
 
 type EnvLike = Record<string, string | undefined>;
 
-export type MinimalHubAuthContext = {
-  accountId: string;
-  /**
-   * The active Organization id. The CLAIM is named `workspaceId` and the Hub
-   * will not rename it, so neither does this product; `getHubLegacyAuthContext`
-   * maps it to `orgId` and every tenant query filters by that.
-   */
-  workspaceId: string;
-  claims: {
-    entitlements: {
-      /**
-       * access-model-v1 baseline access. REQUIRED, and declared HERE rather
-       * than imported from the SDK on purpose: through at least 1.3.1 the
-       * SDK re-exports `HubEntitlements` from an unshipped `@fxl-hub/hub-auth`,
-       * so under `skipLibCheck: true` it degrades to `any` and `access !== true`
-       * becomes a branch the compiler no longer checks. The SDK's own
-       * MIGRATION.md section 10 says so.
-       */
-      access: boolean;
-      /**
-       * ADD-ON modules only. The old per-product core module was DELETED from the
-       * Hub's access model, so this array is NEVER read for baseline access - only
-       * by `requireHubModule` for a genuine paid add-on. CLAUDE.md's Auth Model
-       * section records which module string that was and why it is gone.
-       */
-      modules: string[];
-    };
-    roles: {
-      productRoles?: unknown;
-      workspace: string;
-    };
-    isSuperAdmin?: boolean;
-    /** Present on the Hub access token; the web reads the same two claims. */
-    name?: string;
-    email?: string;
-  };
-};
+/**
+ * The verified Hub auth context, straight from the SDK.
+ *
+ * This repo hand-declared a `MinimalHubAuthContext` while it was on 1.3.1,
+ * because that release re-exported `HubEntitlements` from an unshipped
+ * `@fxl-hub/hub-auth`, so under `skipLibCheck: true` it degraded to `any` and
+ * `access !== true` became a branch the compiler no longer checked. 2.2.0 ships
+ * the types in its own `dist`, so the local declaration is deleted and the gate
+ * is finally type-checked against the real shape.
+ *
+ * `claims.entitlements.access` and `claims.roles.workspace` are unchanged
+ * members of `HubTokenClaims`, so every reader in this file still compiles.
+ */
+export type MinimalHubAuthContext = HubAuthContext;
 
 /**
  * The caller's own display name from the VERIFIED token. Returns null rather
@@ -102,15 +77,21 @@ declare module 'hono' {
 }
 
 const hubAuthConfig = tryLoadHubAuthConfig(hubEnvBag(env));
-const hubSdkConfig: HubSdkConfig | null = hubAuthConfig
+// The 2.x `HubConfig`, projected explicitly rather than by spreading
+// `hubAuthConfig`, which also carries the operator-generated `healthToken`. That
+// value is a BFF option, not part of the Client identity, and must not ride along
+// into the config the SDK parses and validates.
+const hubSdkConfig: HubConfig | null = hubAuthConfig
   ? {
       apiUrl: hubAuthConfig.apiUrl,
-      // 1.3.1 still calls these publishableKey / secretKey and sends them as
-      // client_id / client_secret. The SDK bump renames them at that boundary.
-      publishableKey: hubAuthConfig.clientId,
-      secretKey: hubAuthConfig.clientSecret,
-      // ALWAYS passed. The audience is configured, never derived: with an
-      // explicit audience the SDK's own derivation is never consulted.
+      // EXPLICIT, validated, and never inferred from NODE_ENV. It must agree with
+      // the environment segment inside the client id, which the SDK's parser
+      // checks offline.
+      environment: hubAuthConfig.environment,
+      clientId: hubAuthConfig.clientId,
+      clientSecret: hubAuthConfig.clientSecret,
+      // ALWAYS passed. The audience is configured, never derived, and 2.x's
+      // `requireHubAuth` reads it from here: the option is gone.
       audience: hubAuthConfig.audience,
     }
   : null;
@@ -133,67 +114,13 @@ export function getHubLegacyAuthContext(auth: MinimalHubAuthContext): {
 }
 
 /** The exact 2.1.0 bodies, so slice 04 changes no contract when it deletes this. */
+/**
+ * The 401 body for the one case `requireHubAuth` cannot answer: it allowed the
+ * request but this middleware found no context on the Context. That is
+ * unreachable today and is kept as a fail-CLOSED backstop rather than a
+ * non-null assertion, which would turn the same impossible state into a crash.
+ */
 const MISSING_HUB_CONTEXT = { error: 'unauthorized', code: 'missing_hub_context' } as const;
-const NO_ORG_ACCESS = { error: 'payment_required', code: 'no_org_access' } as const;
-
-export type HubAccessVerdict =
-  | { allowed: true; auth: MinimalHubAuthContext }
-  | { allowed: false; status: 401 | 402; body: { error: string; code: string } };
-
-/**
- * Baseline access, and the ONLY question that decides it.
- *
- * Fails CLOSED by construction: the comparison is `=== true`, so `false`,
- * `undefined`, `'true'`, `1` and a missing `entitlements` object all deny. The
- * optional chaining is not decoration - the type says `access: boolean`, but the
- * value arrives from a token, and a gate that trusts a claim shape it did not
- * build is a gate that can be opened by a malformed one.
- *
- * `entitlements.modules` is deliberately NOT read here. It carries add-on
- * modules only; reading it for baseline access is the defect this slice removes.
- */
-export function hasHubOrgAccess(auth: MinimalHubAuthContext | undefined): boolean {
-  return auth?.claims?.entitlements?.access === true;
-}
-
-/**
- * The single authority for the 401 and 402 halves of the deny taxonomy.
- *
- * Returns a DISCRIMINATED verdict rather than a nullable denial so the allow
- * path carries the narrowed context and the caller needs no cast: a cast here
- * would be the one place a future edit could hand an unchecked context to
- * `getHubLegacyAuthContext`.
- */
-export function classifyHubAccess(auth: MinimalHubAuthContext | undefined): HubAccessVerdict {
-  if (!auth) {
-    return { allowed: false, status: 401, body: { ...MISSING_HUB_CONTEXT } };
-  }
-  if (!hasHubOrgAccess(auth)) {
-    return { allowed: false, status: 402, body: { ...NO_ORG_ACCESS } };
-  }
-  return { allowed: true, auth };
-}
-
-/**
- * The ONE seam that may read `entitlements.modules`, for a paid ADD-ON module.
- * No route mounts it today, because this product sells no add-on yet; it exists
- * so the 403 half of the taxonomy has a real implementation and a real oracle,
- * and its body is byte-identical to the 2.1.0 `requiredModule` denial, so slice
- * 04 replaces it with `requireHubAuth`'s own option and deletes this.
- */
-export function hasHubModule(auth: MinimalHubAuthContext | undefined, module: string): boolean {
-  const modules = auth?.claims?.entitlements?.modules;
-  return Array.isArray(modules) && modules.includes(module);
-}
-
-export function requireHubModule(module: string): MiddlewareHandler {
-  return async (c, next) => {
-    if (!hasHubModule(c.get('hubAuth'), module)) {
-      return c.json({ error: 'forbidden', code: 'missing_module', module }, 403);
-    }
-    return next();
-  };
-}
 
 /**
  * THIS app's own origin plus `/auth/callback`, never the Hub's. 2.x's
@@ -241,10 +168,22 @@ export function getHubSdkConfig() {
   return hubSdkConfig;
 }
 
-const hubAuthMiddleware =
-  hubSdkConfig && hubAuthConfig
-    ? requireHubAuth(hubSdkConfig, { audience: hubAuthConfig.audience })
-    : null;
+/**
+ * The ONE access gate. 2.2.0's `requireHubAuth` answers the whole taxonomy
+ * itself - 401 for a missing, invalid or wrong-contract-version token, 402
+ * `no_org_access` when `entitlements.access` is not true, 403 for a missing
+ * module or role - with bodies byte-identical to the ones this repo used to
+ * build by hand, so the web half is unchanged.
+ *
+ * `allowWithoutAccess` is left at its default of false, which is the gate.
+ * There is deliberately no second gate: two would mean one live and one
+ * unreachable, with a green suite over the dead one.
+ *
+ * The audience is NOT passed. 2.x takes it from `config.audience`, which is
+ * required and validated, and offers no override - an override would be a
+ * second source of truth for the one value that must match what the Hub minted.
+ */
+const hubAuthMiddleware = hubSdkConfig ? requireHubAuth(hubSdkConfig) : null;
 
 export const appAuthMiddleware: MiddlewareHandler = async (c, next) => {
   if (!hubAuthMiddleware || !hubSdkConfig) {
@@ -253,13 +192,13 @@ export const appAuthMiddleware: MiddlewareHandler = async (c, next) => {
 
   let blockedResponse: Response | undefined;
   const authResponse = await hubAuthMiddleware(c, async () => {
-    const verdict = classifyHubAccess(c.get('hubAuth'));
-    if (!verdict.allowed) {
-      blockedResponse = c.json(verdict.body, verdict.status);
+    const auth = c.get('hubAuth');
+    if (!auth) {
+      blockedResponse = c.json({ ...MISSING_HUB_CONTEXT }, 401);
       return;
     }
 
-    const legacy = getHubLegacyAuthContext(verdict.auth);
+    const legacy = getHubLegacyAuthContext(auth);
     c.set('userId', legacy.userId);
     c.set('orgId', legacy.orgId);
     c.set('userRole', legacy.userRole);
@@ -285,8 +224,19 @@ export function createAppAuthBff() {
     return null;
   }
 
-  // ONE boolean drives both the SDK's cookie name and our cookie read.
-  const secureCookies = env.NODE_ENV === 'production';
+  // ONE boolean still drives both the SDK's cookie name and our own cookie read,
+  // but it is now derived from the HUB environment rather than from NODE_ENV,
+  // because 2.x's `assertBootConfiguration` refuses `insecureCookies: true`
+  // outside `environment === 'development'` and would refuse to boot a staging
+  // deploy that happens to run with NODE_ENV unset.
+  //
+  // `secureCookies` stays the local's polarity because
+  // `createHubLoginSupersedeMiddleware` consumes it and
+  // `hubSessionCookieName(secureCookies)` must keep agreeing with the SDK's own
+  // `secure ? SESSION_COOKIE_SECURE : SESSION_COOKIE`. The 2.x option is the
+  // INVERSE, so the inversion happens exactly once, here, at the single producer.
+  const isHubDevelopment = hubAuthConfig.environment === 'development';
+  const secureCookies = !isHubDevelopment;
 
   // Computed ONCE and reused by every resolver below.
   const hubEnv = hubEnvBag(env);
@@ -306,14 +256,32 @@ export function createAppAuthBff() {
 
   const bff = createHubBff(hubSdkConfig, {
     sessionStore: session.store,
-    // The BACKCHANNEL fetch, not the browser cookie below. In production the Hub
-    // rotates the session cookie as `__Host-fxl_hub_session`, which the SDK's
-    // `parseRotatedRefresh` regex cannot match, so the rotated refresh token was
-    // dropped on every /auth/refresh and every /auth/switch while the BFF still
-    // answered 200 - and the Hub revoked the family on the second replay. See
-    // hub-rotated-cookie.ts. This has nothing to do with `secureCookies`.
-    fetchImpl: createHubRotatedCookieFetch(),
-    secureCookies,
+    // The ONLY route to an in-memory store, and legal only when the Hub
+    // environment is development. Passed as a PAIR with the memory branch so a
+    // production deploy that loses DATABASE_URL fails at boot rather than
+    // silently going per-process.
+    ...(isHubDevelopment && session.kind === 'memory'
+      ? { allowEphemeralSessionStore: true }
+      : {}),
+    // REPLACES `secureCookies` and is INVERTED. Passed only when true: the boot
+    // assertion refuses it outside development, and passing `false` explicitly
+    // there is legal but says nothing, so the key is simply absent.
+    ...(isHubDevelopment ? { insecureCookies: true } : {}),
+    // REQUIRED outside development, and generated by the OPERATOR rather than
+    // issued by the Hub. Already validated in auth-provider.ts; before 2.x there
+    // was no option to hand it to, so it was loaded and never delivered.
+    ...(hubAuthConfig.healthToken !== undefined
+      ? { healthToken: hubAuthConfig.healthToken }
+      : {}),
+    // Origins allowed to POST beyond the request's own origin. REQUIRED for this
+    // deployment: the web app is on sales.fxlbusiness.com and the API on
+    // sales-api.fxlbusiness.com, so the SDK's own-origin computation alone does
+    // not admit the browser's POST. This replaces the hand-rolled origin shim.
+    //
+    // NO `fetchImpl`. 2.2.0's `parseRotatedRefresh` matches
+    // `__Host-fxl_hub_session` natively, so the wrapper this repo carried for one
+    // wave is deleted and the SDK's default global `fetch` is correct.
+    trustedOrigins: [env.CORS_ORIGIN],
     timeoutMs: HUB_BFF_TIMEOUT_MS,
     // Derived from the store's own constants, so the SDK's view of a session's
     // lifetime and the store's cannot disagree. The store ignores the values the
@@ -345,22 +313,18 @@ export function createAppAuthBff() {
   // The error handler must be an onError rather than a middleware - see
   // hub-bff-errors.ts. Mounting it on the memory path too is inert (that store
   // never throws HubSessionStoreUnavailableError) and removes a branch.
-  // The handler must sit on BOTH apps, and that is not belt-and-braces.
-  // `bff` is now invoked through its own `fetch` rather than mounted with
-  // `route()`, so it is a separate Hono app with a separate error handler: a
-  // store outage thrown inside it is caught THERE and would answer the SDK's
-  // default 500, never reaching the outer router. That is the same
-  // catch-at-the-level-that-threw behaviour that made an error-mapping
-  // middleware dead code in the first place. The outer one still covers a throw
-  // in the shim itself.
+  // The handler must sit on BOTH apps, and that is not belt-and-braces. `bff` is
+  // its own Hono app with its own error handler, so a store outage thrown inside
+  // it is caught THERE and would answer the SDK's default 500 rather than
+  // reaching the outer router. That is the same catch-at-the-level-that-threw
+  // behaviour that made an error-mapping middleware dead code in the first
+  // place. The outer one covers a throw raised in this router's own middleware,
+  // which today is the login-supersede mount.
   bff.onError(hubBffErrorHandler);
   router.onError(hubBffErrorHandler);
-  // NOT `router.route('', bff)`. The SDK's 1.3.x CSRF guard compares the browser
-  // `Origin` against the API's own origin, which are different hosts in
-  // production (sales.fxlbusiness.com vs sales-api.fxlbusiness.com), so every
-  // POST answered 403 and logged entitled operators out. The shim vouches for
-  // CORS_ORIGIN explicitly and hands everything else through untouched. See
-  // hub-bff-origin.ts.
-  router.all('/auth/*', createHubBffOriginShim(bff, { trustedOrigins: [env.CORS_ORIGIN] }));
+  // An ORDINARY mount. The CSRF origin guard is configured through
+  // `trustedOrigins` above rather than wrapped around, so there is no shim left
+  // to pass the request through.
+  router.route('', bff);
   return router;
 }

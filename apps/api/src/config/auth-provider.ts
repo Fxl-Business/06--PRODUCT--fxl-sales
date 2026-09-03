@@ -1,7 +1,11 @@
 /**
  * The Hub configuration doors.
  *
- * `./hub-config.ts` owns the 2.x PARSER and is a temporary vendored copy.
+ * `@fxl-business/hub-sdk` owns the PARSER. This repo carried a vendored copy of
+ * it while it was on 1.3.1, which exported no parser at all; 2.2.0 exports
+ * `loadHubConfig`, `HubConfig` and `HubConfigError`, so the copy is deleted and
+ * this file imports them.
+ *
  * Everything in THIS file is ours permanently and survives the SDK bump: the
  * projection off the validated env, the two-forms presence verdict, and the
  * decision about what may fail soft.
@@ -17,7 +21,7 @@
  * import `app-auth.ts`. Do not widen it.
  */
 import type { Env } from '../env.js';
-import { type HubConfig, HubConfigError, loadHubConfig } from './hub-config.js';
+import { type HubConfig, HubConfigError, loadHubConfig } from '@fxl-business/hub-sdk';
 
 export const HUB_DISCRETE_ENV_VARS = [
   'FXL_HUB_API_URL',
@@ -106,8 +110,59 @@ export function hubConfigPresence(bag: Record<string, string | undefined>): HubC
   return 'incomplete';
 }
 
+/**
+ * Maps a `HubConfigError.field` back to the discrete variable an operator of
+ * THIS repo actually sets.
+ *
+ * The SDK names its own JSON form (`FXL_HUB_CONFIG.clientSecret`), which is
+ * correct for a consumer using that form and useless for one using the five
+ * discrete variables: it points at a variable they never set. The vendored
+ * parser this repo carried named the discrete one, and that operator experience
+ * is not something the bump should cost.
+ */
+const HUB_FIELD_TO_DISCRETE_VAR: Record<string, string> = {
+  apiUrl: 'FXL_HUB_API_URL',
+  environment: 'FXL_HUB_ENVIRONMENT',
+  clientId: 'FXL_HUB_CLIENT_ID',
+  clientSecret: 'FXL_HUB_CLIENT_SECRET',
+  audience: 'FXL_HUB_AUDIENCE',
+};
+
+/**
+ * Re-throws the SDK's own error with the discrete variable named alongside its
+ * field.
+ *
+ * This is NOT the blanket try/catch this file's header forbids, and the
+ * difference is the whole point: it never returns, never answers null and never
+ * downgrades a boot failure to a 503. It rethrows a `HubConfigError` carrying
+ * the same `field`, with a message that names the variable to change. The
+ * original message is preserved, and no VALUE is ever added to it.
+ *
+ * `incomplete` counts as well as `discrete`, and it is in fact the more common
+ * case: it is exactly the operator who set some of the five variables and missed
+ * one, which is the person who most needs to be told which name is missing.
+ * `json` is left alone, because there the SDK's own dotted path is the accurate
+ * thing to say.
+ */
+function nameDiscreteVar(error: unknown, presence: HubConfigPresence): never {
+  if (!(error instanceof HubConfigError) || (presence !== 'discrete' && presence !== 'incomplete')) {
+    throw error;
+  }
+  const variable = HUB_FIELD_TO_DISCRETE_VAR[error.field];
+  if (variable === undefined || error.message.includes(variable)) {
+    throw error;
+  }
+  throw new HubConfigError(error.field, `${variable}: ${error.message}`);
+}
+
 export function loadHubAuthConfig(bag: Record<string, string | undefined>): HubAuthConfig {
-  const config = loadHubConfig(bag);
+  const presence = hubConfigPresence(bag);
+  let config: HubConfig;
+  try {
+    config = loadHubConfig(bag);
+  } catch (error) {
+    nameDiscreteVar(error, presence);
+  }
   const healthToken = isSet(bag.FXL_HUB_HEALTH_TOKEN) ? bag.FXL_HUB_HEALTH_TOKEN : undefined;
 
   if (config.environment !== 'development' && healthToken === undefined) {

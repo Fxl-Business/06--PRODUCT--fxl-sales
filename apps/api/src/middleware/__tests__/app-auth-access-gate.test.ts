@@ -1,15 +1,20 @@
 /**
- * The end-to-end oracle for `appAuthMiddleware` itself, which nothing covered
- * before: every existing app-auth test drives the exported helpers directly.
+ * The end-to-end oracle for `appAuthMiddleware`, driving the REAL
+ * `requireHubAuth` from `@fxl-business/hub-sdk@2.2.0`.
  *
- * The SDK is stubbed, so this file is OFFLINE: the real 1.3.1 `requireHubAuth`
- * calls `discover()` over HTTP on its first request. What is exercised for real
- * is the repo's own gate and the legacy-context assignment behind it.
+ * This file used to STUB `requireHubAuth` and assert a gate this repo
+ * implemented itself. That gate is gone: 2.2.0 answers the whole 401/402/403
+ * taxonomy natively, and CLAUDE.md's rule is that there must be exactly ONE live
+ * gate, because two would mean one live and one unreachable with a green suite
+ * over the dead one. A stub would now prove only that the stub works, so the
+ * verifier runs for real here.
  *
- * It lives in its own file because it needs a module graph in which
- * `@fxl-business/hub-sdk/server` is mocked, and vitest isolates per file.
+ * It stays OFFLINE by signing its own tokens: `globalThis.fetch` is stubbed to
+ * serve the Hub's discovery document and a JWKS carrying the public half of a
+ * key generated in this process. Nothing leaves the machine and no fixture
+ * carries a real credential.
  */
-import type { Context, Next } from 'hono';
+import { exportJWK, generateKeyPair, SignJWT, type JWK } from 'jose';
 import { Hono } from 'hono';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
@@ -19,66 +24,75 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
  */
 const HUB_CLIENT_ID = 'pk_fxl-sales_development_unit-test-only-0123456789';
 const HUB_CLIENT_SECRET = 'sk_fxl-sales_development_unit-test-only-not-a-real-secret-0123456789';
-
-/** Type-only, so it is erased and cannot pull the module in before the mock. */
-type MinimalHubAuthContext = import('../app-auth.js').MinimalHubAuthContext;
-
-type StubOutcome =
-  | { kind: 'context'; auth: unknown }
-  | { kind: 'no-context' }
-  | { kind: 'reject'; code: string };
-
-/** Mutated per test; read by the stub middleware on every request. */
-let outcome: StubOutcome = { kind: 'no-context' };
+const HUB_API_URL = 'http://localhost:9016';
+const HUB_ISSUER = 'https://auth.fxlbusiness.test';
+const AUDIENCE = 'app.fxl-sales';
 
 let app: Hono;
+let signToken: (claims: Record<string, unknown>) => Promise<string>;
 
-vi.doMock('@fxl-business/hub-sdk/server', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@fxl-business/hub-sdk/server')>();
+/** Claims a healthy, entitled ordinary member carries. */
+function entitledClaims(overrides: Record<string, unknown> = {}) {
   return {
-    ...actual,
-    /*
-      Stands in for the REAL 1.3.1 requireHubAuth, whose only outcomes are
-      `401 {error:'unauthorized', code}` (dist/server.js:236,243,245) and
-      `c.set('hubAuth', ctx)` then `next()` (dist/server.js:240,247). Stubbing it
-      keeps this file offline: the real one calls `discover()` over HTTP on its
-      first request.
-    */
-    requireHubAuth: () => async (c: Context, next: Next) => {
-      if (outcome.kind === 'reject') {
-        return c.json({ error: 'unauthorized', code: outcome.code }, 401);
-      }
-      if (outcome.kind === 'context') {
-        c.set('hubAuth', outcome.auth as MinimalHubAuthContext);
-      }
-      await next();
-    },
-  };
-});
-
-const entitled = {
-  accountId: 'hub-account-1',
-  workspaceId: 'org_active_1',
-  claims: {
+    workspaceId: 'org_active_1',
+    contractVersion: 1,
     entitlements: { access: true, modules: [] },
     roles: { workspace: 'member' },
-  },
-};
+    ...overrides,
+  };
+}
+
+async function get(path: string, token: string | null) {
+  return app.request(`http://localhost${path}`, {
+    headers: token === null ? {} : { authorization: `Bearer ${token}` },
+  });
+}
 
 beforeAll(async () => {
   vi.resetModules();
 
+  const { publicKey, privateKey } = await generateKeyPair('RS256');
+  const publicJwk: JWK = { ...(await exportJWK(publicKey)), kid: 'test-key', alg: 'RS256' };
+
+  signToken = async (claims) =>
+    new SignJWT(claims)
+      .setProtectedHeader({ alg: 'RS256', kid: 'test-key', typ: 'at+jwt' })
+      .setIssuer(HUB_ISSUER)
+      .setAudience(AUDIENCE)
+      .setSubject((claims.sub as string | undefined) ?? 'hub-account-1')
+      .setIssuedAt()
+      .setExpirationTime('5m')
+      .setJti('test-jti')
+      .sign(privateKey);
+
+  // The Hub, served entirely from memory. Any other URL is a hard failure rather
+  // than a silent pass, so a test can never accidentally reach the network.
+  vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
+    const url = typeof input === 'string' ? input : input.toString();
+    if (url === `${HUB_API_URL}/.well-known/oauth-authorization-server`) {
+      return Response.json({
+        issuer: HUB_ISSUER,
+        authorization_endpoint: `${HUB_ISSUER}/authorize`,
+        token_endpoint: `${HUB_ISSUER}/token`,
+        fxl_web_url: 'http://localhost:8006',
+      });
+    }
+    if (url === `${HUB_API_URL}/.well-known/jwks.json`) {
+      return Response.json({ keys: [publicJwk] });
+    }
+    throw new Error(`unexpected fetch in an offline test: ${url}`);
+  });
+
   vi.stubEnv('NODE_ENV', 'test');
   vi.stubEnv('CORS_ORIGIN', 'http://localhost:8006');
   // No connection is opened: `createAppAuthBff()` is never called in this file.
-  // The value keeps the memory-store warning off the run.
   vi.stubEnv('DATABASE_URL', 'postgresql://postgres:postgres@localhost:5006/fxl_sales_wiring_test');
   vi.stubEnv('ADMIN_DATABASE_URL', '');
-  vi.stubEnv('FXL_HUB_API_URL', 'http://localhost:9016');
+  vi.stubEnv('FXL_HUB_API_URL', HUB_API_URL);
   vi.stubEnv('FXL_HUB_ENVIRONMENT', 'development');
   vi.stubEnv('FXL_HUB_CLIENT_ID', HUB_CLIENT_ID);
   vi.stubEnv('FXL_HUB_CLIENT_SECRET', HUB_CLIENT_SECRET);
-  vi.stubEnv('FXL_HUB_AUDIENCE', 'app.fxl-sales');
+  vi.stubEnv('FXL_HUB_AUDIENCE', AUDIENCE);
   // Blank reads as unset. A developer's own apps/api/.env could otherwise carry
   // the JSON form and make this file throw on ambiguity at import.
   vi.stubEnv('FXL_HUB_CONFIG', '');
@@ -98,15 +112,14 @@ beforeAll(async () => {
 });
 
 afterAll(() => {
-  vi.doUnmock('@fxl-business/hub-sdk/server');
+  vi.unstubAllGlobals();
   vi.unstubAllEnvs();
   vi.resetModules();
 });
 
-describe('appAuthMiddleware access gate', () => {
+describe('appAuthMiddleware access gate, through the real SDK verifier', () => {
   it('allows a protected route when entitlements.access is true', async () => {
-    outcome = { kind: 'context', auth: entitled };
-    const res = await app.request('http://localhost/probe');
+    const res = await get('/probe', await signToken(entitledClaims()));
     expect(res.status).toBe(200);
     /*
       Tenancy, pinned in the same breath: orgId is the ACTIVE HUB WORKSPACE ID
@@ -121,14 +134,10 @@ describe('appAuthMiddleware access gate', () => {
   });
 
   it('answers 402 payment_required with no_org_access when entitlements.access is false', async () => {
-    outcome = {
-      kind: 'context',
-      auth: {
-        ...entitled,
-        claims: { ...entitled.claims, entitlements: { access: false, modules: [] } },
-      },
-    };
-    const res = await app.request('http://localhost/probe');
+    const token = await signToken(
+      entitledClaims({ entitlements: { access: false, modules: [] } }),
+    );
+    const res = await get('/probe', token);
     expect(res.status).toBe(402);
     /* toEqual, not toMatchObject: the web half branches on this exact body. */
     await expect(res.json()).resolves.toEqual({
@@ -137,42 +146,59 @@ describe('appAuthMiddleware access gate', () => {
     });
   });
 
-  it('answers 402 rather than allowing when the claim set has no access key', async () => {
-    outcome = {
-      kind: 'context',
-      auth: { ...entitled, claims: { ...entitled.claims, entitlements: { modules: [] } } },
-    };
-    const res = await app.request('http://localhost/probe');
-    expect(res.status).toBe(402);
+  it('denies, and does not allow, when the claim set has no access key at all', async () => {
+    /*
+      A BEHAVIOUR CHANGE recorded rather than smoothed over. This repo's own gate
+      answered 402 here, because it read `access` off a claim shape it did not
+      validate. 2.2.0 validates the token against the contract FIRST, and an
+      `entitlements` object with no `access` member is not a well-formed Hub
+      token, so the verifier refuses it as 401 before the entitlement gate is
+      ever reached.
+
+      401 is the right answer and not a regression: per CLAUDE.md a 401 reaches
+      the login screen, which is the correct destination for a token this app
+      cannot use, exactly as for `contract_version_mismatch`. 402 is reserved for
+      a WELL-FORMED token whose Organization simply has no access, and that case
+      is pinned by the two tests above.
+
+      What must never change is that it FAILS CLOSED, so the assertion is on the
+      denial rather than on the number alone.
+    */
+    const token = await signToken(entitledClaims({ entitlements: { modules: [] } }));
+    const res = await get('/probe', token);
+    expect(res.status).toBe(401);
+    expect(res.status).not.toBe(200);
   });
 
   it('answers 402 for a workspace that still carries the deleted core module but no access', async () => {
-    outcome = {
-      kind: 'context',
-      auth: {
-        ...entitled,
-        claims: { ...entitled.claims, entitlements: { access: false, modules: ['sales.core'] } },
-      },
-    };
-    expect((await app.request('http://localhost/probe')).status).toBe(402);
+    // The whole point of access-model-v1: a module string is not access.
+    const token = await signToken(
+      entitledClaims({ entitlements: { access: false, modules: ['sales.core'] } }),
+    );
+    expect((await get('/probe', token)).status).toBe(402);
   });
 
-  it('answers 401 when the token is missing or invalid', async () => {
-    for (const code of ['missing_token', 'malformed', 'expired']) {
-      outcome = { kind: 'reject', code };
-      const res = await app.request('http://localhost/probe');
-      expect(res.status).toBe(401);
-      await expect(res.json()).resolves.toEqual({ error: 'unauthorized', code });
-    }
+  it('answers 401 when the token is missing', async () => {
+    const res = await get('/probe', null);
+    expect(res.status).toBe(401);
+    await expect(res.json()).resolves.toMatchObject({ error: 'unauthorized' });
   });
 
-  it('answers 401 missing_hub_context when the SDK calls next without a context', async () => {
-    outcome = { kind: 'no-context' };
-    const res = await app.request('http://localhost/probe');
+  it('answers 401 for a token this app cannot verify', async () => {
+    const res = await get('/probe', 'not.a.jwt');
+    expect(res.status).toBe(401);
+    await expect(res.json()).resolves.toMatchObject({ error: 'unauthorized' });
+  });
+
+  it('answers 401 contract_version_mismatch for a token minted against another contract', async () => {
+    // New in 2.2.0, and it reaches the login screen rather than the buy screen:
+    // a token this app cannot use is answered by a fresh login and nothing else.
+    const token = await signToken(entitledClaims({ contractVersion: 2 }));
+    const res = await get('/probe', token);
     expect(res.status).toBe(401);
     await expect(res.json()).resolves.toEqual({
       error: 'unauthorized',
-      code: 'missing_hub_context',
+      code: 'contract_version_mismatch',
     });
   });
 
@@ -181,16 +207,12 @@ describe('appAuthMiddleware access gate', () => {
       An entitled ordinary member: 402 is not the answer to "you may not do
       THIS", and 401 is not the answer to "we know exactly who you are".
     */
-    outcome = { kind: 'context', auth: entitled };
-    const res = await app.request('http://localhost/admin-probe');
+    const res = await get('/admin-probe', await signToken(entitledClaims()));
     expect(res.status).toBe(403);
   });
 
   it('lets an entitled workspace owner through the same admin route', async () => {
-    outcome = {
-      kind: 'context',
-      auth: { ...entitled, claims: { ...entitled.claims, roles: { workspace: 'owner' } } },
-    };
-    expect((await app.request('http://localhost/admin-probe')).status).toBe(200);
+    const token = await signToken(entitledClaims({ roles: { workspace: 'owner' } }));
+    expect((await get('/admin-probe', token)).status).toBe(200);
   });
 });

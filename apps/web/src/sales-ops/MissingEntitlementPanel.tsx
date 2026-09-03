@@ -75,8 +75,19 @@ export function MissingEntitlementPanel({ onRetry }: { onRetry?: () => void }) {
     `react-hooks/set-state-in-effect` rejects as a cascading render.
   */
   const [resolved, setResolved] = useState<{ attempt: number; state: CheckoutState } | null>(null);
+  /*
+    2.x requires the Organization the checkout is FOR, and on this screen that is
+    the active one by definition. With no active id there is nothing honest to
+    sell, so the block reads `failed` DERIVED rather than by a setState in the
+    effect below, for the same reason the attempt stamping exists.
+  */
+  const activeId = active?.id;
   const checkout: CheckoutState =
-    resolved && resolved.attempt === attempt ? resolved.state : { status: 'loading' };
+    activeId === undefined
+      ? { status: 'failed' }
+      : resolved && resolved.attempt === attempt
+        ? resolved.state
+        : { status: 'loading' };
   const [switchingId, setSwitchingId] = useState<string | null>(null);
   const [switchFailed, setSwitchFailed] = useState(false);
 
@@ -101,8 +112,11 @@ export function MissingEntitlementPanel({ onRetry }: { onRetry?: () => void }) {
   */
   useEffect(() => {
     let cancelled = false;
+    // No active Organization: `checkout` is already derived as `failed` above,
+    // and there is nothing to ask the Hub for.
+    if (activeId === undefined) return;
     client
-      .checkoutUrl()
+      .checkoutUrl(activeId)
       .then((href) => {
         if (!cancelled) setResolved({ attempt, state: { status: 'ready', href } });
       })
@@ -112,7 +126,7 @@ export function MissingEntitlementPanel({ onRetry }: { onRetry?: () => void }) {
     return () => {
       cancelled = true;
     };
-  }, [attempt, client]);
+  }, [activeId, attempt, client]);
 
   const handleSwitch = useCallback(
     (organizationId: string) => {
