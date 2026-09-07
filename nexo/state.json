@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "current_milestone_id": "v2.9.0",
+  "current_milestone_id": "v3.1.0",
   "delivery": {
     "mode": "promotion",
     "trunk": "master",
@@ -28,12 +28,12 @@
     "note": "User selected Autopilot at the front door, and pre-answered the one design fork that mattered: keep our own session store, do not adopt SqlHubSessionStore. Six slices in three waves upgrade @fxl-business/hub-sdk to ^1.3.0, port the store to the async transactional withSession contract, add an absolute session lifetime, consume the new refresh-failure classification, and close the logout leak as a defect. Gate 2 remains mandatory per slice and per wave. Gate 3 remains human-gated; this run stops at master."
   },
   "gate3": {
-    "release": "v2.8.0",
-    "commit": "0f048adad86247bca1c89f3bc4dd450623d20a85",
-    "flow": "ship",
-    "decision": "approved-staging",
-    "decided_at": "2026-09-01",
-    "note": "Gate 3a was approved explicitly in-session after a separate Verify agent returned PASS on the exact release commit 0f048ad: 1265 tests across 99 files (80 shared-utils, 415 api, 770 web), full lint, type-check and a real pnpm run build, all exit 0, plus a security review of e59f870..0f048ad with no findings. Integration was NOT run and this is recorded rather than glossed: the local Docker test DB 06--product--fxl-sales-db-1 had been Exited (0) for two weeks and port 5006 was closed, so the suite was deliberately skipped rather than allowed to fall through to the staging database that apps/api/.env points DATABASE_URL at. The gap is narrow because the release diff carries zero server, schema and migration changes. Tag v2.8.0 pushed to 0f048ad and staging fast-forwarded d1f3959..0f048ad, which is also the resync closing the 2026-08-28 direct-to-production hotfix push that deliberately skipped staging to stop an active incident. Of the 53 commits in v2.7.2..v2.8.0, 35 were already live in production from that push and had never been tagged; v2.8.0 is the first tag covering them."
+    "release": "v3.0.0",
+    "commit": "7ddf5257aada948ddc62b33b522ccaa507686a3d",
+    "flow": "ship-prod-ready",
+    "decision": "approved-production",
+    "decided_at": "2026-09-07",
+    "note": "Gate 3 was approved explicitly in-session under /nexo-ship-prod-ready, which tags master and then pushes staging and production with no validation pause. It was taken in TWO parts rather than one, because release-verify surfaced a risk the first question had not covered. The first question confirmed the two recorded promotion blockers: the Hub has deployed access-model-v1 (the checklist in nexo/ROADMAP.md forbade promoting before it, because the old Hub issues product.* audiences and the core module and would refuse this code on arrival) and new 2.x Clients were issued by hand in the admin, and the Coolify variables are set in both environments with FXL_HUB_CLIENT_SECRET carrying the SAME VALUE the old FXL_HUB_SECRET_KEY held, which matters because it is the default HKDF input for the session sealer and any byte difference costs every user one re-login. The second question covered VITE_FXL_HUB_ENVIRONMENT (new) and VITE_FXL_HUB_AUDIENCE (now required) on Vercel, which sit on a different platform from the API variables, are validated at RENDER rather than at build, and would otherwise have produced a green build and a white screen for every user; the operator confirmed both are set. Release-verify PASS by a SEPARATE Verify agent on the exact release commit 7ddf525: lint, type-check, 1288 tests across 101 files (80 shared-utils, 424 api, 784 web), a real pnpm run build and 169 integration tests across 25 files, all exit 0, with the integration suite confirmed to have run against localhost:5006 rather than the staging database apps/api/.env points DATABASE_URL at. The security review of v2.8.0..master returned no findings on any of its five axes. Zero database migrations in the range, so rollback is a pure code revert - the same property that made v2.7.2 and v2.8.0 safe to promote straight through, and the reason this cut could use the prod-ready flow at all. MAJOR bump, the first since v2.0.0, and the labels did not understate it: 1cde69a is a feat(api)! carrying a BREAKING CHANGE footer. Tag v3.0.0 pushed to 7ddf525, staging fast-forwarded 0f048ad..7ddf525 and production fast-forwarded 0f048ad..7ddf525; master, staging and production are all at 7ddf525. Slice 05 of the hub-sdk run (05-dev-identity-fixtures) remains parked and carries nothing production-facing."
   },
   "gate3_hotfix": {
     "release": "v2.7.1",
@@ -52,12 +52,12 @@
     "note": "Gate 3a was approved explicitly. Tag v2.4.0 was pushed and staging fast-forwarded to the exact verified candidate. Production remains at v2.3.1 pending in-environment staging validation and a separate Gate 3b approval."
   },
   "gate3_production": {
-    "release": "v2.8.0",
-    "commit": "0f048adad86247bca1c89f3bc4dd450623d20a85",
-    "flow": "ship",
+    "release": "v3.0.0",
+    "commit": "7ddf5257aada948ddc62b33b522ccaa507686a3d",
+    "flow": "ship-prod-ready",
     "decision": "approved-production",
-    "decided_at": "2026-09-01",
-    "note": "Gate 3b was approved explicitly in-session. Production fast-forwarded e59f870..0f048ad, and master, staging and production are all at 0f048ad == v2.8.0. The validate pause bought no signal by topology rather than by shortcut: Vercel builds apps/web from the production branch only, so the staging push produced no web deployment to test, and the API diff is empty so any API redeploy is a no-op. The evidence backing this gate was the release-verify plus the absence of any migration, apps/api source or config change, which makes rollback a pure code revert. Same reasoning as recorded for v2.7.2. Web-only release: 13 files, MissingEntitlementPanel, the useOrganizations seam, the 402 missing_entitlement classification and the Organization switcher in the sales-ops account dropdown. This closes the need for the manual access grant made in the Hub admin to unblock use."
+    "decided_at": "2026-09-07",
+    "note": "Production fast-forwarded 0f048ad..7ddf525 in the same approved sequence as the staging push, with no pause between them, which is what /nexo-ship-prod-ready is. The pause would have bought no signal by topology rather than by shortcut: Vercel builds apps/web from the production branch ONLY, so a staging push produces no web deployment to test - the same reasoning recorded for v2.7.2 and v2.8.0. The evidence backing the gate was the release-verify PASS, the absence of any migration in the range, and the operator's own confirmation of the three external preconditions this repo cannot check for itself: the Hub's access-model-v1 deploy, the new hand-issued 2.x Clients, and the environment variables on Coolify and on Vercel. This closes the Hub SDK 2.2.0 promotion checklist that had been open in nexo/ROADMAP.md since 2026-08-27."
   },
   "gate1_followups": {
     "feature": "batch-20260813-session-followups",
@@ -78,5 +78,13 @@
     "decided_at": "2026-08-28",
     "note": "Operator invoked the fix with --autopilot, having already diagnosed the defect against this tree and supplied five verified facts plus an explicit out-of-scope fence (no ?organization= deep link, no entitlement-gate change, no hub-sdk upgrade). All five facts were re-confirmed here before planning. Five slices in four waves, web-only: 01 makes a 402 missing_entitlement classifiable (ApiError gains the body code; isEntitlementFailure keys on status 402 alone); 02 exposes one useOrganizations seam over the existing setActive + workspaces context and fixes the pre-existing name-based active-org match; 03 adds the honest PT-BR MissingEntitlementPanel; 04 routes the 402 to it so the 'verifique o servidor' copy is unreachable; 05 puts the Organization switcher in the sales-ops account dropdown beside Sair and un-collides the word 'workspace' in that chrome. No API change: the active Organization and the account's Organizations are already in the access token, so touching the 402 body was rejected as out of scope and unnecessary. Gate 2 remains mandatory per slice and per wave. Gate 3 remains human-gated; this run stops at master.",
     "outcome": "All five slices merged to master, each passing Gate 2 by a SEPARATE Verify agent, plus a feature-boundary gate on integrated master: 1265 tests (80 shared-utils, 415 api, 770 web), full lint, type-check and a real pnpm run build, all exit 0. The adversarial plan-check earned its keep: slices 03, 04 and 05 had been planned in parallel against three different assumed shapes of the useOrganizations seam, and it judged 04 and 05 RED before a line was written (05 coded against an activeOrganizationId that slice 02 does not return; 04 rendered the panel with no props against a then-required onRetry). One replan applied its eight required edits, zero wave recoveries. Evidence is 26 mutations across the five slices, 24 RED. The two that stayed GREEN were reported honestly rather than buried: slice 03's switch-before-checkout render order, which was closed on the branch with a dedicated ordering test proven RED under the swap, and slice 05's two aria-label-only renames, which are a test-coverage gap on shipped-correct code and are filed in ROADMAP.md. No API change: the active Organization and the account's Organizations are already in the access token, so the 402 body was left untouched exactly as the operator's out-of-scope fence required. Execution ran SERIAL, not worktree-parallel, because nexo-wave-exec.sh hardcodes a main trunk while this repo's trunk is master and a pnpm worktree has no node_modules; Gate 2 was not weakened. Planning also surfaced that waves.sh only parses INLINE yaml arrays, so the planners' block lists had silently collapsed all five slices into one wave and would have built 04 and 05 concurrently on SalesOpsApp.tsx. Mutation tooling is still not configured at the feature boundary, so the per-slice batteries stood in. NOT promoted: this run stops at master, Gate 3 is human-gated."
+  },
+  "gate3_prior": {
+    "release": "v2.8.0",
+    "commit": "0f048adad86247bca1c89f3bc4dd450623d20a85",
+    "flow": "ship",
+    "decision": "approved-staging",
+    "decided_at": "2026-09-01",
+    "note": "Gate 3a was approved explicitly in-session after a separate Verify agent returned PASS on the exact release commit 0f048ad: 1265 tests across 99 files (80 shared-utils, 415 api, 770 web), full lint, type-check and a real pnpm run build, all exit 0, plus a security review of e59f870..0f048ad with no findings. Integration was NOT run and this is recorded rather than glossed: the local Docker test DB 06--product--fxl-sales-db-1 had been Exited (0) for two weeks and port 5006 was closed, so the suite was deliberately skipped rather than allowed to fall through to the staging database that apps/api/.env points DATABASE_URL at. The gap is narrow because the release diff carries zero server, schema and migration changes. Tag v2.8.0 pushed to 0f048ad and staging fast-forwarded d1f3959..0f048ad, which is also the resync closing the 2026-08-28 direct-to-production hotfix push that deliberately skipped staging to stop an active incident. Of the 53 commits in v2.7.2..v2.8.0, 35 were already live in production from that push and had never been tagged; v2.8.0 is the first tag covering them."
   }
 }

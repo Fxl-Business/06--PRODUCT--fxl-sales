@@ -42,22 +42,30 @@
 - DONE 2026-09-03: the rotation parser was fixed upstream in `@fxl-business/hub-sdk@2.2.0` (commit `b301b98`): `__Host-fxl_hub_session` is matched first and the plain name is the fallback. `apps/api/src/auth/hub-rotated-cookie.ts` and its test are deleted, and the deletion was gated on the non-vacuity oracle being observed RED against 2.2.0 first.
 - chore: `CadastroHistoryPanel.tsx` still classifies its error state as `isAuthFailure ? 'Sessão expirada' : generic`, so it never routes a `402 missing_entitlement` to the entitlement panel the way the shell now does. `feature-20260828-organization-context-escape` slice 04 deliberately left it out on a structural argument rather than a budget one: `CadastroHistorySection` renders at `SalesOpsApp.tsx` inside the `!isLoading && !isError` SUCCESS branch, so it is reachable only after a bootstrap that already passed the entitlement gate, and a 402 fails that bootstrap first. Its generic copy also does not claim the server is broken. Close this the day that panel gains a route that is not behind a successful bootstrap.
 - chore: two of the five `Workspace` to `Painel` display renames from `feature-20260828-organization-context-escape` slice 05 are `aria-label` attributes (`Painel: <nome>` and `Fechar painéis`), and `textContent` cannot see an attribute, so reverting only those two leaves the whole web suite green. The slice 05 verifier recorded this as mutation M5b. The shipped code is correct and the three VISIBLE strings are pinned; this is a test-coverage gap, not a defect. Close it with one `getAttribute('aria-label')` assertion in `shell-organization-switcher.test.tsx`.
+- chore: `CLAUDE.md` states that it is the ONE place in the tree that still spells `sales.core`, and the `v3.0.0` release-verify found two other occurrences: a negative test fixture and a `checkoutUrl` product id. Neither reads `modules` for baseline access, so the invariant the sentence protects is intact and only the sentence is imprecise. Close it by narrowing the claim to "the one place that spells it as PROSE", or by renaming the fixture's literal.
 
-## Hub SDK 2.2.0 promotion checklist (open)
+## Hub SDK 2.2.0 promotion checklist (CLOSED 2026-09-07 by v3.0.0)
 
-The `feature-20260827-hub-sdk-210-access-model` run lands on `master` only. Before any
-promotion, and coordinated with the Hub's own deploy:
+Every item below was satisfied and confirmed by the operator at Gate 3 before `v3.0.0` was
+tagged, and `master == staging == production == 7ddf525`.
 
-- Issue new Hub Clients by hand in the admin. The audience moves from `product.fxl-sales`
-  to `app.fxl-sales` and the old client id has no environment segment, so it is not a valid
-  2.x credential.
-- Carry the SAME VALUE from `FXL_HUB_SECRET_KEY` to the renamed `FXL_HUB_CLIENT_SECRET` in
-  every environment. It is the default HKDF input for the session sealer, so a different
-  value costs every user one re-login. See the run's AUDIT.md.
-- Generate `FXL_HUB_HEALTH_TOKEN`. It is operator-generated, not Hub-issued, and is required
-  outside development.
-- Set `FXL_HUB_ENVIRONMENT` to match the client id's environment segment. A disagreement is
-  now a boot failure by design, checked offline.
-
-Do not promote before the Hub deploys access-model-v1. The production Hub still issues
-`product.*` audiences and the core module, so this code would be refused on arrival.
+- DONE: new Hub Clients issued by hand in the admin. The audience moved from
+  `product.fxl-sales` to `app.fxl-sales`, and the old client id has no environment segment,
+  so it was not a valid 2.x credential.
+- DONE: the SAME VALUE was carried from `FXL_HUB_SECRET_KEY` to the renamed
+  `FXL_HUB_CLIENT_SECRET` in every environment. It is the default HKDF input for the session
+  sealer, so a different value would have cost every user one re-login. See the run's
+  AUDIT.md.
+- DONE: `FXL_HUB_HEALTH_TOKEN` generated. It is operator-generated, not Hub-issued, and is
+  required outside development.
+- DONE: `FXL_HUB_ENVIRONMENT` set to match the client id's environment segment. A
+  disagreement is a boot failure by design, checked offline.
+- DONE, and NOT on the original list: `VITE_FXL_HUB_ENVIRONMENT` (new) and
+  `VITE_FXL_HUB_AUDIENCE` (now required) were set on Vercel. The release-verify agent caught
+  this one; it is a different platform from the API variables above, and both are validated
+  at RENDER rather than at build, so a Vercel build missing them goes GREEN and then
+  white-screens for every user. Any future release that adds a `VITE_*` variable carries the
+  same trap - a green build is not evidence the browser can boot.
+- DONE: the Hub deployed access-model-v1 before the promotion. This was the hard ordering
+  precondition; the old Hub issued `product.*` audiences and the core module and would have
+  refused this code on arrival.
