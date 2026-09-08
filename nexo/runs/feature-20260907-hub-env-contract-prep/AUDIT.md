@@ -66,3 +66,8 @@ reads it.
 - [ ] `node --test <directory>` does not work on this repo's declared Node floor, so each file under
       `scripts/__tests__/` must be named explicitly in the root `test` script. A third guard test
       added later will be silently unrun if someone forgets.
+
+- [ ] **Seven em dashes are committed in `nexo/runs/.../context-pack.md`.** The repo forbids the
+      character. They are tool-generated boilerplate from `nexo-context-pack.sh`, not written by any
+      agent here, and there are zero under `apps/`, `packages/` or `scripts/`. The fix belongs in the
+      generator in `15--SKILL--nexo`, not in a rewrite of a generated artifact.
