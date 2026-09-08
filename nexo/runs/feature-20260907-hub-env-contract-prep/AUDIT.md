@@ -71,3 +71,20 @@ reads it.
       character. They are tool-generated boilerplate from `nexo-context-pack.sh`, not written by any
       agent here, and there are zero under `apps/`, `packages/` or `scripts/`. The fix belongs in the
       generator in `15--SKILL--nexo`, not in a rewrite of a generated artifact.
+
+## Pre-existing, not caused by this run, found by the wave-verify
+
+- [ ] **`.github/workflows/ci.yml` triggers on `main`, but this repo's trunk is `master`.** It only
+      runs `fxl-doctor.sh`, so nothing important is being skipped, but it has never fired on a real
+      push and nobody would notice if it started mattering.
+- [ ] **`apps/api/.env` points `DATABASE_URL` at STAGING.** The integration suite is provably pinned
+      away from it - `test/rls/setup-env.ts` hard-overrides the value - but anything that bypasses
+      that file talks to staging. Already documented in `CLAUDE.md`; repeated here because it is a
+      live foot-gun.
+
+## Rollback note
+
+Zero migrations in this range, so a revert is a pure code revert - BUT only if the operator CREATES
+`SALES_SESSION_ENCRYPTION_IKM` alongside the old variable rather than renaming it in place. If the
+old name is deleted and the code is later reverted, the sealer loses its IKM in the other direction.
+Keep both names present until the revert window closes.
