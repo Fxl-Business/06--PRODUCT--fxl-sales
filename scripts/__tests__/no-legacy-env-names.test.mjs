@@ -16,6 +16,16 @@ const retired = String.fromCharCode(
   69, 89,
 );
 
+// The post-login pair, same idiom and for the same reason.
+const retiredPostLogin = String.fromCharCode(
+  70, 88, 76, 95, 72, 85, 66, 95, 80, 79, 83, 84, 95, 76, 79, 71, 73, 78, 95, 82, 69, 68, 73, 82,
+  69, 67, 84,
+);
+const retiredPostLoginError = String.fromCharCode(
+  70, 88, 76, 95, 72, 85, 66, 95, 80, 79, 83, 84, 95, 76, 79, 71, 73, 78, 95, 69, 82, 82, 79, 82,
+  95, 82, 69, 68, 73, 82, 69, 67, 84,
+);
+
 const tempRoots = [];
 
 after(() => {
@@ -103,6 +113,54 @@ test("tolerates the SDK's canonical name, of which the retired one is a suffix",
   const result = runGuard(dir);
 
   assert.equal(result.status, 0, `guard rejected the SDK's own name: ${result.stderr}`);
+});
+
+test('fails when the retired post-login redirect name appears under apps/', () => {
+  const dir = makeRepo({
+    'apps/api/.env.example': `${retiredPostLogin}=\n`,
+  });
+
+  const result = runGuard(dir);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /apps\/api\/\.env\.example/);
+  assert.match(result.stderr, /SALES_POST_LOGIN_REDIRECT/);
+});
+
+test('fails when the retired post-login ERROR redirect name appears under apps/', () => {
+  const dir = makeRepo({
+    'apps/api/.env.example': `${retiredPostLoginError}=\n`,
+  });
+
+  const result = runGuard(dir);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /SALES_POST_LOGIN_ERROR_REDIRECT/);
+});
+
+test('the two post-login bans do not cross-fire, and spare the canonical nine', () => {
+  // The decisive case: a file holding ONLY the names that must stay legal. If
+  // either ban were written as a substring match, or if one of the pair were a
+  // substring of the other, this repository would go red.
+  const dir = makeRepo({
+    'apps/api/.env.example': [
+      'FXL_HUB_API_URL=',
+      'FXL_HUB_ENVIRONMENT=',
+      'FXL_HUB_CLIENT_ID=',
+      'FXL_HUB_CLIENT_SECRET=',
+      'FXL_HUB_AUDIENCE=',
+      'FXL_HUB_REDIRECT_URI=',
+      'FXL_HUB_HEALTH_TOKEN=',
+      'FXL_HUB_TRUSTED_ORIGINS=',
+      'SALES_POST_LOGIN_REDIRECT=',
+      'SALES_POST_LOGIN_ERROR_REDIRECT=',
+      '',
+    ].join('\n'),
+  });
+
+  const result = runGuard(dir);
+
+  assert.equal(result.status, 0, `guard rejected a name that must stay legal: ${result.stderr}`);
 });
 
 test('passes on a repository that names nothing retired', () => {

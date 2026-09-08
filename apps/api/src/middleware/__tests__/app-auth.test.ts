@@ -168,4 +168,30 @@ describe('resolveHubPostLoginRedirect', () => {
       'http://localhost:8006/?error=auth',
     );
   });
+
+  // EnvLike is Record<string, string | undefined>, so type-check cannot see a
+  // key name here. These two are what pin the read to the renamed variables.
+  it('prefers an explicit SALES_POST_LOGIN_REDIRECT over CORS_ORIGIN', () => {
+    expect(
+      resolveHubPostLoginRedirect({
+        SALES_POST_LOGIN_REDIRECT: 'https://sales.fxlbusiness.com/tatico/dashboard',
+        CORS_ORIGIN: 'http://localhost:8006',
+      }),
+    ).toBe('https://sales.fxlbusiness.com/tatico/dashboard');
+  });
+
+  it('prefers an explicit SALES_POST_LOGIN_ERROR_REDIRECT over the derived one', () => {
+    expect(
+      resolveHubPostLoginErrorRedirect({
+        SALES_POST_LOGIN_ERROR_REDIRECT: 'https://sales.fxlbusiness.com/entrar',
+        SALES_POST_LOGIN_REDIRECT: 'https://sales.fxlbusiness.com',
+        CORS_ORIGIN: 'http://localhost:8006',
+      }),
+    ).toBe('https://sales.fxlbusiness.com/entrar');
+  });
+
+  it('falls back to / and /?error=auth when neither the pair nor CORS_ORIGIN is set', () => {
+    expect(resolveHubPostLoginRedirect({})).toBe('/');
+    expect(resolveHubPostLoginErrorRedirect({})).toBe('/?error=auth');
+  });
 });

@@ -167,7 +167,7 @@ describe('tryLoadHubAuthConfig', () => {
 });
 
 describe('hubEnvBag', () => {
-  it('projects exactly the Hub variables off the validated env object', () => {
+  it('projects exactly the auth variables off the validated env object', () => {
     const source = {
       NODE_ENV: 'development',
       CORS_ORIGIN: 'http://localhost:8006',
@@ -179,8 +179,8 @@ describe('hubEnvBag', () => {
       FXL_HUB_AUDIENCE: HUB_AUDIENCE,
       FXL_HUB_HEALTH_TOKEN: undefined,
       FXL_HUB_REDIRECT_URI: undefined,
-      FXL_HUB_POST_LOGIN_REDIRECT: undefined,
-      FXL_HUB_POST_LOGIN_ERROR_REDIRECT: undefined,
+      SALES_POST_LOGIN_REDIRECT: undefined,
+      SALES_POST_LOGIN_ERROR_REDIRECT: undefined,
     } as HubEnvSource;
 
     const bag = hubEnvBag(source);
@@ -195,8 +195,8 @@ describe('hubEnvBag', () => {
         'FXL_HUB_CONFIG',
         'FXL_HUB_ENVIRONMENT',
         'FXL_HUB_HEALTH_TOKEN',
-        'FXL_HUB_POST_LOGIN_ERROR_REDIRECT',
-        'FXL_HUB_POST_LOGIN_REDIRECT',
+        'SALES_POST_LOGIN_ERROR_REDIRECT',
+        'SALES_POST_LOGIN_REDIRECT',
         'FXL_HUB_REDIRECT_URI',
         'NODE_ENV',
       ].sort(),
