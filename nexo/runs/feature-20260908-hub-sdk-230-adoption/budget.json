@@ -21,7 +21,9 @@
   },
   "paused": false,
   "scoped_counters": {
-    "verify_attempts": {}
+    "verify_attempts": {
+      "05-contract-single-resolver": 1
+    }
   },
   "version": 1
 }
