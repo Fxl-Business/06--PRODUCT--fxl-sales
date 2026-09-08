@@ -49,8 +49,10 @@ Line numbers current as of `master` today:
 | `HUB_DISCRETE_ENV_VARS` | 26 | the SDK owns the discrete-form list |
 | `HubConfigPresence` / `hubConfigPresence` | 34 / 100 | two-forms detection and the mixed-forms refusal are the SDK's, and D3 makes its refusal STRICTER than ours: an operational key inside `FXL_HUB_CONFIG` is now also a hard refusal, which ours never checked |
 | `HUB_FIELD_TO_DISCRETE_VAR` / `nameDiscreteVar` | 126 / 150 | existed only because the SDK named its JSON form; 2.3.0's `operationalMessage` names the discrete variable itself, with the fix command |
-| the `healthToken` requirement | 171 | REPLACED by check 6, not dropped. Prove the replacement with a test before deleting ours |
+| the `healthToken` requirement | 171 | REPLACED by check 6 inside `createHubBff`, not dropped. Prove the replacement with a test before deleting ours |
+| `HubAuthConfig`'s healthToken extension | 57 | `HubConfig` declares `healthToken` itself now |
 | `resolveHubRedirectUri` | `app-auth.ts:133` | REPLACED by `config.redirectUri` plus check 7, which is strictly stronger - see below |
+| the `healthToken` / `redirectUri` / `trustedOrigins` OPTIONS passed to `createHubBff` | `app-auth.ts:287,298,308` | they ride on the config now; passing them would be a second resolution to keep in step |
 
 ## What SURVIVES, and must not be removed by tidiness
 
@@ -83,6 +85,59 @@ The local development convenience (`${CORS_ORIGIN}/auth/callback`) is preserved 
 `FXL_HUB_REDIRECT_URI=http://localhost:8006/auth/callback` in both `.env` examples in slice 06, not
 by keeping a resolver. `CLAUDE.md` already documents exactly that value.
 
+## AMENDED 2026-09-08, before execution, on two counts
+
+### 1. Do NOT call `assertBootConfiguration` separately. `createHubBff` already calls it.
+
+Read from the shipped `dist/server.js`:
+
+```js
+function createHubBff(config, options = {}) {
+  const resolved = assertBootConfiguration({ config,
+    ...(options.sessionStore ? { sessionStore: options.sessionStore } : {}),
+    ...(options.allowEphemeralSessionStore !== undefined ? {...} : {}),
+    ...(options.insecureCookies !== undefined ? {...} : {}),
+    ...(options.healthToken   !== undefined ? {...} : {}),
+    ...(options.redirectUri   !== undefined ? {...} : {}),
+    ...(options.trustedOrigins!== undefined ? {...} : {}) });
+```
+
+So checks 6 and 7 are already ours for free, at the moment `createAppAuthBff()` runs - which is
+module top level in `server.ts`, so it IS a boot failure and not a lazy one.
+
+Calling the assertion ourselves as well would be legal and idempotent ONLY if we passed it the
+identical options object. Passing a different one validates one configuration and constructs
+another, and the value it would silently disagree about is `redirectUri` - the exact class of
+divergence check 7 exists to catch. So: one call site, `createHubBff`, and no separate assertion.
+
+Consequence: we no longer pass `healthToken`, `redirectUri` or `trustedOrigins` as OPTIONS at all.
+They ride on the config, which is where the contract puts them. `HubAuthConfig`'s
+`& { healthToken: string | undefined }` extension also goes: `HubConfig` now declares it.
+
+### 2. `hubConfigPresence` SHRINKS, it does not vanish - and this is a real behaviour decision
+
+The plan above said delete it. That is wrong, and working the deletion through is what found it.
+
+`tryLoadHubAuthConfig` exists to answer a question the SDK has no API for: *has this machine been
+given credentials at all?* That is what keeps `503 hub_auth_not_configured` alive for a fresh clone,
+pinned by `app-auth-unconfigured.test.ts` whose own comment names `hubConfigPresence` as the
+mechanism. Deleting the presence layer outright and wrapping `loadHubConfig` in a `try/catch` to
+recover the same behaviour would install exactly the blanket `try/catch` the file header forbids.
+
+So keep a MINIMAL absent-check - none of `FXL_HUB_CONFIG` and none of the five discrete variables
+set - and delete everything else: the two-forms ambiguity detection, the `json`/`discrete` verdicts
+and the discrete-name remapper, all of which the SDK now owns and does STRICTER (D3 also refuses an
+operational key inside `FXL_HUB_CONFIG`, which ours never checked).
+
+**Named behaviour change, deliberate, and it must be pinned rather than absorbed:** today the
+`incomplete` presence - some of the five set, not all - returns `null` and answers `503`. After this
+slice it is a BOOT FAILURE carrying the SDK's own `operationalMessage`, which names the missing
+variable and the fix. That is strictly better: three-of-five is a misconfiguration, not an
+unconfigured machine, and answering 503 to every request tells the operator nothing. It cannot
+affect a fresh clone, because `.env.example` ships all five blank, which is `absent` and unchanged.
+
+Add an oracle for it. Do not let it ride on a changed existing test.
+
 ## Locked oracles
 
 1. `app-auth-unconfigured.test.ts` - `503 hub_auth_not_configured` still answers with no credentials.
@@ -96,6 +151,10 @@ by keeping a resolver. `CLAUDE.md` already documents exactly that value.
    must be proven, not assumed.
 5. NEW: **`refuses a missing health token outside development`** - pins check 6 as the replacement
    for the deleted local check. Write this BEFORE deleting ours and watch it pass against the SDK.
+6. NEW: **`a partially configured Hub is a boot failure, not a 503`** - pins the named behaviour
+   change in the amendment above.
+7. `app-auth-unconfigured.test.ts` keeps its exact title and assertion for the ABSENT case. Update
+   only the stale comment naming `hubConfigPresence` as the mechanism.
 
 ## Non-vacuity required
 
