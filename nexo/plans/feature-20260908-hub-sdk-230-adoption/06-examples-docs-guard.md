@@ -38,6 +38,54 @@ because the DEFAULT lands on the Hub's origin and check 7 refuses that origin, n
 variable is missing. Write it that way. A reader who takes away "the variable is required" will
 eventually write a presence check, and a presence check waves through the copy-error case.
 
+## CARRY-OVERS from slices 04 and 05's Gate 2 reports - all in scope here
+
+**D6, the same defect class as slice 05's blocking failure, surviving in docs.**
+`README.md:43-52` and `CLAUDE.md`'s "Required API vars" block each carry a fenced `dotenv` block a
+human can copy wholesale. Both describe a PARTIAL Hub configuration - some identity variables with
+values, others absent - which after slice 05 is a BOOT FAILURE rather than a 503.
+
+The lesson slice 05 paid for is that the suite never read the artefact a human actually uses. Fixing
+the two `.env` examples without fixing these two blocks leaves the same trap one file over. Make
+both blocks show all five identity variables BLANK, exactly as the examples now do, with the
+known-good values alongside as comments. Say in one line what the rule is: all five together, or
+none.
+
+Extend `env-example-contract.test.ts` to cover them if the fenced blocks can be parsed reliably. If
+they cannot be parsed without inventing a markdown parser, say so plainly in your notes and leave
+them covered by prose alone rather than writing a fragile test - a brittle oracle on a doc block is
+worse than an honest gap.
+
+**D4.** `CLAUDE.md` states the two BFF mount tests "keep their exact titles". Slice 05 renamed both,
+justifiably, with assertions intact. Correct that line.
+
+**The `nameDiscreteVar` decision, now that it is on the record.** `CLAUDE.md` documents that wrapper
+and why it existed. It is deleted. Record the deletion AND its cost honestly: the SDK's
+`operationalMessage` names the discrete variable for the four OPERATIONAL fields, but the five
+IDENTITY fields still format as `FXL_HUB_CONFIG.<field>`, so an operator using the five discrete
+variables who misconfigures one is now pointed at a variable they never set. That is an accepted
+diagnostic regression, not an oversight, and it is reported upstream as 2.4.0 feedback.
+
+**A comment wording nit from slice 04.** In
+`apps/api/src/middleware/__tests__/app-auth-bff-production-boot.test.ts`, the fixture comment calls
+`sales-api.fxlbusiness.test` "the BROWSER-facing origin". It is the API origin; the web origin in
+these fixtures is `sales.fxlbusiness.test`. The VALUE is correct and load-bearing - it differs from
+the fixture `apiUrl`, which is the only property check 7 tests - so fix the word, keep the value.
+
+**`FXL_HUB_TRUSTED_ORIGINS` is a PROMOTION gate, not a `.env` matter.** Document it as such. Slice 05
+moved `trustedOrigins` off `env.CORS_ORIGIN`; unset, the list is `[]` and the 2026-08-10 cross-origin
+outage returns, because the web app and the API are on different hosts. The `.env` examples help a
+fresh clone and do nothing for a deploy, so this needs a line in `CLAUDE.md` and an AUDIT entry, not
+just an example value.
+
+## The Auth Model section is now substantially wrong
+
+`CLAUDE.md`'s Auth Model describes `hubConfigPresence`, `HUB_DISCRETE_ENV_VARS`, `nameDiscreteVar`,
+the local health-token requirement and `resolveHubRedirectUri` as live. None of them exists. Rewrite
+that section against the code as it now is, preserving the parts that are still true - the single
+access gate, the deny taxonomy, the session store decision, the `503` fail-soft door and why it is
+narrow. Do not rewrite what the slice did not change.
+
 ## Locked oracle
 
 Documentation and examples: the full suite stays green, both guards exit 0, and a real
