@@ -50,8 +50,8 @@ export type HubEnvSource = Pick<
   | 'FXL_HUB_AUDIENCE'
   | 'FXL_HUB_HEALTH_TOKEN'
   | 'FXL_HUB_REDIRECT_URI'
-  | 'FXL_HUB_POST_LOGIN_REDIRECT'
-  | 'FXL_HUB_POST_LOGIN_ERROR_REDIRECT'
+  | 'SALES_POST_LOGIN_REDIRECT'
+  | 'SALES_POST_LOGIN_ERROR_REDIRECT'
 >;
 
 export type HubAuthConfig = HubConfig & {
@@ -73,6 +73,9 @@ function isSet(value: string | undefined): value is string {
  * that `env.ts` normalised (notably '' to undefined) cannot be read back raw.
  */
 export function hubEnvBag(source: HubEnvSource): Record<string, string | undefined> {
+  // Not every key here is a Hub variable: NODE_ENV, CORS_ORIGIN and the two
+  // SALES_POST_LOGIN_* names are this repo's own, and the bag is simply the one
+  // bridge every auth loader reads through.
   return {
     NODE_ENV: source.NODE_ENV,
     CORS_ORIGIN: source.CORS_ORIGIN,
@@ -84,8 +87,8 @@ export function hubEnvBag(source: HubEnvSource): Record<string, string | undefin
     FXL_HUB_AUDIENCE: source.FXL_HUB_AUDIENCE,
     FXL_HUB_HEALTH_TOKEN: source.FXL_HUB_HEALTH_TOKEN,
     FXL_HUB_REDIRECT_URI: source.FXL_HUB_REDIRECT_URI,
-    FXL_HUB_POST_LOGIN_REDIRECT: source.FXL_HUB_POST_LOGIN_REDIRECT,
-    FXL_HUB_POST_LOGIN_ERROR_REDIRECT: source.FXL_HUB_POST_LOGIN_ERROR_REDIRECT,
+    SALES_POST_LOGIN_REDIRECT: source.SALES_POST_LOGIN_REDIRECT,
+    SALES_POST_LOGIN_ERROR_REDIRECT: source.SALES_POST_LOGIN_ERROR_REDIRECT,
   };
 }
 

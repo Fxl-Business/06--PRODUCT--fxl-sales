@@ -23,6 +23,27 @@ const retired = [
     ),
     replacement: 'SALES_SESSION_ENCRYPTION_IKM',
   },
+  {
+    // The post-login redirect rename. This pair is resolved start to finish
+    // inside this repo and falls back to CORS_ORIGIN, so it never belonged to
+    // the namespace the SDK claims. Read the old spelling off the codes.
+    name: String.fromCharCode(
+      70, 88, 76, 95, 72, 85, 66, 95, 80, 79, 83, 84, 95, 76, 79, 71, 73, 78, 95, 82, 69, 68, 73,
+      82, 69, 67, 84,
+    ),
+    replacement: 'SALES_POST_LOGIN_REDIRECT',
+  },
+  {
+    // Its error sibling. Neither of the two is a substring of the other - the
+    // ERROR segment sits in the middle - so the two bans cannot cross-fire, and
+    // neither is a substring of any of the nine canonical names. Verified with
+    // `git grep -w` against a file holding all of them, not assumed.
+    name: String.fromCharCode(
+      70, 88, 76, 95, 72, 85, 66, 95, 80, 79, 83, 84, 95, 76, 79, 71, 73, 78, 95, 69, 82, 82, 79,
+      82, 95, 82, 69, 68, 73, 82, 69, 67, 84,
+    ),
+    replacement: 'SALES_POST_LOGIN_ERROR_REDIRECT',
+  },
 ];
 
 /**

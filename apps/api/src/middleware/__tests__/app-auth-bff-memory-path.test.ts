@@ -50,8 +50,8 @@ beforeAll(async () => {
   // the JSON form and make this file throw on ambiguity at import.
   vi.stubEnv('FXL_HUB_CONFIG', '');
   vi.stubEnv('FXL_HUB_REDIRECT_URI', 'http://localhost:8006/auth/callback');
-  vi.stubEnv('FXL_HUB_POST_LOGIN_REDIRECT', 'http://localhost:8006');
-  vi.stubEnv('FXL_HUB_POST_LOGIN_ERROR_REDIRECT', 'http://localhost:8006/?error=auth');
+  vi.stubEnv('SALES_POST_LOGIN_REDIRECT', 'http://localhost:8006');
+  vi.stubEnv('SALES_POST_LOGIN_ERROR_REDIRECT', 'http://localhost:8006/?error=auth');
   vi.stubEnv('SALES_SESSION_ENCRYPTION_IKM', '');
 
   vi.doMock('../../auth/hub-session-store.js', async (importOriginal) => {

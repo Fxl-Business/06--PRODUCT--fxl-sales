@@ -144,12 +144,19 @@ export function resolveHubRedirectUri(envBag: EnvLike): string | undefined {
   throw new Error('FXL_HUB_REDIRECT_URI is required for FXL Hub auth in production');
 }
 
+/**
+ * SALES_ and not FXL_HUB_: this pair is resolved start to finish here, falls
+ * back to CORS_ORIGIN - the consumer's own configuration - and is not one of
+ * the nine names the SDK resolves and validates itself. `createHubBff` still
+ * takes `postLoginRedirect` / `postLoginErrorRedirect` as CODE options; what
+ * carries this repo's own prefix is only where the VALUES are read from.
+ */
 export function resolveHubPostLoginRedirect(envBag: EnvLike): string {
-  return envBag.FXL_HUB_POST_LOGIN_REDIRECT ?? envBag.CORS_ORIGIN ?? '/';
+  return envBag.SALES_POST_LOGIN_REDIRECT ?? envBag.CORS_ORIGIN ?? '/';
 }
 
 export function resolveHubPostLoginErrorRedirect(envBag: EnvLike): string {
-  const explicit = envBag.FXL_HUB_POST_LOGIN_ERROR_REDIRECT;
+  const explicit = envBag.SALES_POST_LOGIN_ERROR_REDIRECT;
   if (explicit) {
     return explicit;
   }

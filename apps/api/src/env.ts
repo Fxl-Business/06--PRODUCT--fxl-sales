@@ -47,8 +47,13 @@ const schema = z.object({
   // development Hub environment.
   FXL_HUB_HEALTH_TOKEN: emptyToUndefined,
   FXL_HUB_REDIRECT_URI: emptyToUndefinedUrl,
-  FXL_HUB_POST_LOGIN_REDIRECT: emptyToUndefinedUrl,
-  FXL_HUB_POST_LOGIN_ERROR_REDIRECT: emptyToUndefinedUrl,
+  // THIS repo's own pair, resolved start to finish by resolveHubPostLogin*
+  // in middleware/app-auth.ts and falling back to CORS_ORIGIN, which is the
+  // consumer's own configuration. They carry no FXL_HUB_ prefix because the
+  // SDK neither resolves nor validates them; only the nine canonical names
+  // (FXL_HUB_REDIRECT_URI among them) belong to that namespace.
+  SALES_POST_LOGIN_REDIRECT: emptyToUndefinedUrl,
+  SALES_POST_LOGIN_ERROR_REDIRECT: emptyToUndefinedUrl,
   // Optional input keying material for THIS repo's own Hub BFF session sealer.
   // Defaults to an HKDF-SHA256 derivation from FXL_HUB_CLIENT_SECRET, so no
   // deploy needs this set. NOT the SDK's FXL_HUB_SESSION_ENCRYPTION_KEY, which
