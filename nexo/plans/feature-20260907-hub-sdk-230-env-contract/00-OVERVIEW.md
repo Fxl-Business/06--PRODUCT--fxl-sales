@@ -1,12 +1,16 @@
 ---
 feature: hub-sdk-230-env-contract
 milestone: v3.1.0
-status: PARKED, waiting on publication
+status: SUPERSEDED by nexo/plans/feature-20260908-hub-sdk-230-adoption/
 ---
 
 # Adopt `@fxl-business/hub-sdk` 2.3.0, the canonical Hub env contract
 
-STATUS: **PARKED**. Nothing here is executed. No install, no `package.json` edit, no lockfile move.
+> **SUPERSEDED 2026-09-08.** 2.3.0 was published at 10:23:37Z and the adoption is planned in
+> `nexo/plans/feature-20260908-hub-sdk-230-adoption/`. This file is kept for its inventory and for
+> the D6 correction below, which is the whole reason it is worth keeping.
+
+STATUS: this plan was PARKED. Nothing in it was executed. No install, no `package.json` edit, no lockfile move.
 
 Evidence, 2026-09-07:
 
@@ -79,18 +83,42 @@ explicit option WINS over the config value. Removing them would be a major bump 
 
 **D5.** Hard cutover. No legacy name accepted, no compatibility layer, no deprecation warning.
 
-**D6, REVISED 2026-09-07 and the revision matters more than the original.**
-`FXL_HUB_REDIRECT_URI` is REQUIRED outside `development`; the `${apiUrl}/auth/callback` default
-survives ONLY in `development`. Absent with environment `staging` or `production` is a
-`HubConfigError('redirectUri', ...)` naming the variable and explaining the SDK CANNOT derive it,
-because it is the BROWSER's origin.
-The original decision kept the default everywhere. The fxl-finance adoption session objected that
-the default is never correct for any Application, since `apiUrl` is the HUB's origin, and the
-objection was accepted. The refusal lives in `parseHubConfig`, not `boot.ts`, so it fails earliest
-and `parseHubConfig` stays idempotent.
+**D6, FINAL - and this paragraph was WRONG until 2026-09-08, corrected against the shipped code.**
 
-This plan was written once against the pre-revision D6 and was wrong. Re-read the Hub plan before
-executing, because it moved once already.
+`FXL_HUB_REDIRECT_URI` is NOT a presence rule in any environment. `parseRedirectUri` in the shipped
+2.3.0 bundle returns `${apiUrl}/auth/callback` whenever the value is `undefined`, with NO branch on
+environment at all - the only `environment` branch in that function is the https-versus-http rule.
+
+What refuses is CHECK 7 inside `assertBootConfiguration`, and it tests the ORIGIN of the EFFECTIVE
+value, not its presence:
+
+```js
+if (!isDevelopment && callbackOrigin === originOf(config.apiUrl)) { throw HubConfigError(...) }
+```
+
+Effective means the code option when one was passed, otherwise the config value.
+
+WHY THE DISTINCTION IS NOT ACADEMIC, and why this correction is recorded rather than quietly edited.
+Under the presence reading, the natural things to build are a boot presence assertion or a doc line
+saying the variable is mandatory. Both would be wrong, and one of them dangerously so:
+
+- A presence check is a SECOND encoding of a rule the SDK already owns, and a WEAKER one. It waves
+  through the operator who sets `FXL_HUB_REDIRECT_URI` to the Hub's own callback by copy error,
+  which is exactly the fxl-finance outage. The origin check catches that; presence cannot.
+- `loadHubConfig` never throws on an absent redirect URI, so a test here asserting "absent in
+  production throws at config load" would FAIL, and the tempting fix is to add the missing rule
+  locally - the precise local duplication this contract exists to delete.
+- The rule lives in `boot.ts` rather than the resolver because of D4: `loadHubConfig` runs BEFORE
+  `createHubBff`, so a presence rule in the resolver would make the `redirectUri` code option
+  unreachable outside development.
+
+Operationally the conclusion barely moves, which is what makes it easy to get wrong: an unset
+variable in production still fails the boot, because the default lands on the Hub's origin. The
+MECHANISM and the MESSAGE differ. Anything written about this must say ORIGIN, not presence.
+
+This plan first recorded D6 in its original form, then in a middle revision that did say "required
+outside development". Both are superseded. The lesson is not about D6: it is that a plan file read
+mid-revision is not a contract, and the shipped artifact is.
 
 ## Slices, none of them started
 

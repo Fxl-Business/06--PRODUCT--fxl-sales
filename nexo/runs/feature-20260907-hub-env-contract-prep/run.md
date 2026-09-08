@@ -55,13 +55,28 @@ SDK-resolved and is not, which is a strictly worse version of the defect the con
 
 `FXL_HUB_REDIRECT_URI` was deliberately left alone: it IS one of the nine.
 
-## The Hub's D6 was revised mid-session
+## The Hub's D6 was revised mid-session, and my reading of it was WRONG
 
 The plan was read twice, and between readings the Hub reversed D6: `FXL_HUB_REDIRECT_URI` is now
 REQUIRED outside `development`, with the `${apiUrl}/auth/callback` default surviving only in dev,
 because that default is never correct for any Application (`apiUrl` is the HUB's origin). The staged
-plan had been written against the original and was wrong. It was rewritten, and it now says in its
-own text that the contract has moved once and must be re-read before execution.
+plan had been written against the original and was wrong. It was rewritten.
+
+CORRECTION, 2026-09-08, left here rather than edited away because the record is the point. That
+middle revision was ITSELF superseded, and the version recorded above is not what shipped. There is
+NO presence rule for `FXL_HUB_REDIRECT_URI` in any environment: the shipped `parseRedirectUri`
+returns `${apiUrl}/auth/callback` for an absent value unconditionally. What refuses outside
+development is check 7 of `assertBootConfiguration`, comparing the ORIGIN of the effective callback
+against the Hub's `apiUrl`. Verified by reading the 2.3.0 bundle, not the plan.
+
+The operational conclusion barely moves - an unset variable in production still fails the boot,
+because the default lands on the Hub's origin - which is exactly what makes the error easy to keep.
+The mechanism differs, and a presence check would have been a weaker second encoding that waves
+through the copy-error case the origin check exists to catch.
+
+The transferable lesson is not about D6. A plan file read mid-revision is not a contract; the
+shipped artifact is. Three of this run's findings came from reading shipped bytes rather than
+documents, and this is the fourth.
 
 ## Four things the agents found that the plans did not anticipate
 
