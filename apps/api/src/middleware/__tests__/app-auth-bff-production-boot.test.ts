@@ -126,6 +126,17 @@ describe('createAppAuthBff outside a development Hub environment', () => {
       The two inputs differ in the health token and in NOTHING else, so the throw
       cannot be blamed on some other missing member. Without that pairing a bare
       `toThrow()` would pass for the wrong reason and prove nothing.
+
+      `redirectUri` is a MEMBER of that pairing and not decoration.
+      `@fxl-business/hub-sdk@2.3.0` grew two redirect checks that 2.2.0 did not
+      have, and `parseHubConfig` defaults an absent `redirectUri` to
+      `${apiUrl}/auth/callback` - which is the Hub's own origin, and which check
+      7 refuses outside development. Omitting it therefore makes BOTH inputs
+      throw, so the `not.toThrow()` half stops testing the health token and
+      starts testing the redirect. Naming it explicitly, on the BROWSER-facing
+      origin, restores the health token as the single variable. It is a fixture
+      value only: nothing in this repo calls `assertBootConfiguration` in
+      production yet.
     */
     const base = {
       config: {
@@ -134,6 +145,7 @@ describe('createAppAuthBff outside a development Hub environment', () => {
         clientId: HUB_CLIENT_ID,
         clientSecret: HUB_CLIENT_SECRET,
         audience: 'app.fxl-sales',
+        redirectUri: 'https://sales-api.fxlbusiness.test/auth/callback',
       },
       sessionStore: {
         kind: 'persistent' as const,

@@ -28,8 +28,8 @@ importers:
   apps/api:
     dependencies:
       '@fxl-business/hub-sdk':
-        specifier: 2.2.0
-        version: 2.2.0(hono@4.12.28)
+        specifier: 2.3.0
+        version: 2.3.0(hono@4.12.28)
       '@fxl-sales/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
@@ -110,8 +110,8 @@ importers:
         specifier: ^5.2.8
         version: 5.2.9
       '@fxl-business/hub-sdk':
-        specifier: 2.2.0
-        version: 2.2.0(hono@4.12.28)
+        specifier: 2.3.0
+        version: 2.3.0(hono@4.12.28)
       '@fxl-sales/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
@@ -745,8 +745,8 @@ packages:
   '@fontsource-variable/geist@5.2.9':
     resolution: {integrity: sha512-TP+QSBG3wxKGPE33CbMy/L0Nu3qvJ6Fy81Yc4LnQ95xH+i+cfEp8fyU8/kfV14YwszxIFPhnoMTbjL71waVpyQ==}
 
-  '@fxl-business/hub-sdk@2.2.0':
-    resolution: {integrity: sha512-/yH4npyf6Ac4uvDqYEMb2yDNEXb2AiH7GengnuYtdn119Jw5LY6hYfYwMqi6DRfM3d/gOjv6qoDIeFW3bIPBGw==}
+  '@fxl-business/hub-sdk@2.3.0':
+    resolution: {integrity: sha512-DHUI/qvYMKMebY8LLxuo8tz6wRbYE4fPxxX9x6Q1AdtoKMBmldAx5+NdWOXnQoh0KdmBDB82RqMTZSAPh41rcA==}
     peerDependencies:
       hono: 4.12.28
 
@@ -3239,7 +3239,7 @@ snapshots:
 
   '@fontsource-variable/geist@5.2.9': {}
 
-  '@fxl-business/hub-sdk@2.2.0(hono@4.12.28)':
+  '@fxl-business/hub-sdk@2.3.0(hono@4.12.28)':
     dependencies:
       hono: 4.12.28
       jose: 5.10.0
