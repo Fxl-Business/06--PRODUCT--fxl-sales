@@ -1,0 +1,42 @@
+=== BASELINE 2026-09-08T02:09:16Z HEAD=5eeff1e ===
+--- lint ---
+packages/shared-types lint: Done
+apps/api lint$ eslint src/
+apps/web lint$ eslint src/
+apps/api lint: Done
+apps/web lint: Done
+lint_exit=0
+--- type-check ---
+packages/shared-utils type-check: Done
+apps/api type-check$ tsc --noEmit
+apps/web type-check$ tsc --noEmit
+apps/api type-check: Done
+apps/web type-check: Done
+tc_exit=0
+--- test ---
+apps/web test:  ✓ src/sales-ops/__tests__/optimistic.test.ts (14 tests) 11ms
+apps/web test:  ✓ src/auth/__tests__/refresh.test.ts (15 tests) 6ms
+apps/web test:  ✓ src/auth/__tests__/session-recovery.test.ts (68 tests) 8ms
+apps/web test:  ✓ src/auth/__tests__/token.test.ts (14 tests) 15ms
+apps/web test:  ✓ src/lib/__tests__/app-mutation.test.ts (6 tests) 8ms
+apps/web test:  ✓ src/components/ui/__tests__/dialog-outside-close.test.tsx (6 tests) 28ms
+apps/web test:  ✓ src/components/ui/__tests__/info-hint.test.tsx (7 tests) 60ms
+apps/web test:  ✓ src/sales-ops/__tests__/forbidden-panel.test.tsx (3 tests) 12ms
+apps/web test:  ✓ src/i18n/__tests__/keys-resolve.test.ts (8 tests) 5ms
+apps/web test:  ✓ src/lib/__tests__/api-client-token-guard.test.ts (16 tests) 6ms
+apps/web test:  ✓ src/auth/__tests__/claims.test.ts (8 tests) 3ms
+apps/web test:  ✓ src/sales-ops/__tests__/sale-wizard-shell-layout.test.tsx (1 test) 43ms
+apps/web test:  ✓ src/auth/__tests__/provider.test.ts (7 tests) 2ms
+apps/web test:  ✓ src/sales-ops/__tests__/funcao-cost-seeding.test.ts (11 tests) 3ms
+apps/web test:  ✓ src/sales-ops/__tests__/areas-view.test.tsx (9 tests) 97ms
+apps/web test:  ✓ src/sales-ops/__tests__/sale-wizard-state-preservation.test.tsx (2 tests) 69ms
+apps/web test:  ✓ src/sales-ops/__tests__/client-dialog-legal-fields.test.tsx (3 tests) 38ms
+apps/web test:  ✓ src/sales-ops/__tests__/navigation.test.ts (11 tests) 2ms
+apps/web test:  Test Files  56 passed (56)
+apps/web test:       Tests  784 passed (784)
+apps/web test:    Start at  23:09:28
+apps/web test:    Duration  7.46s (transform 4.56s, setup 0ms, collect 52.91s, tests 9.61s, environment 18.46s, prepare 3.71s)
+apps/web test: Done
+nexo/runs/20260907-ship-v3.0.0/release-verify.md:140:`VITE_*` strings surviving into the bundle are `VITE_API_URL`, `VITE_AUTH_BFF_BASE_PATH`, `VITE_FXL_HUB_API_URL`, `VITE_FXL_HUB_AUDIENCE`, `VITE_FXL_HUB_ENVIRONMENT`, `VITE_SENTRY_DSN` - all non-secret - plus one dead `VITE_CLERK_PUBLISHABLE_KEY` **key name** inside an unassigned zod schema that ships in the vendored `@fxl-business/hub-sdk` dist, not in this repo (`grep` for it over `apps/web/src` and `packages/*/src` is empty). No value, no read. Cosmetic only.
+ ELIFECYCLE  Test failed. See above for more details.
+test_exit=0
