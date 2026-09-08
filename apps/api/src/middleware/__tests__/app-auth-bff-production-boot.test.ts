@@ -58,7 +58,7 @@ beforeAll(async () => {
   vi.stubEnv('FXL_HUB_REDIRECT_URI', 'https://sales-api.fxlbusiness.test/auth/callback');
   vi.stubEnv('FXL_HUB_POST_LOGIN_REDIRECT', 'https://sales.fxlbusiness.test');
   vi.stubEnv('FXL_HUB_POST_LOGIN_ERROR_REDIRECT', 'https://sales.fxlbusiness.test/?error=auth');
-  vi.stubEnv('HUB_SESSION_ENCRYPTION_KEY', '');
+  vi.stubEnv('SALES_SESSION_ENCRYPTION_IKM', '');
 
   vi.doMock('@fxl-business/hub-sdk/server', async (importOriginal) => {
     const actual = await importOriginal<typeof import('@fxl-business/hub-sdk/server')>();

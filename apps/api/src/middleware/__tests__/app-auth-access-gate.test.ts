@@ -99,7 +99,7 @@ beforeAll(async () => {
   vi.stubEnv('FXL_HUB_REDIRECT_URI', 'http://localhost:8006/auth/callback');
   vi.stubEnv('FXL_HUB_POST_LOGIN_REDIRECT', 'http://localhost:8006');
   vi.stubEnv('FXL_HUB_POST_LOGIN_ERROR_REDIRECT', 'http://localhost:8006/?error=auth');
-  vi.stubEnv('HUB_SESSION_ENCRYPTION_KEY', '');
+  vi.stubEnv('SALES_SESSION_ENCRYPTION_IKM', '');
 
   const appAuth = await import('../app-auth.js');
   const { requireAdmin } = await import('../require-admin.js');

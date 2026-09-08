@@ -49,9 +49,13 @@ const schema = z.object({
   FXL_HUB_REDIRECT_URI: emptyToUndefinedUrl,
   FXL_HUB_POST_LOGIN_REDIRECT: emptyToUndefinedUrl,
   FXL_HUB_POST_LOGIN_ERROR_REDIRECT: emptyToUndefinedUrl,
-  // Optional override for the Hub BFF session encryption key. Defaults to an
-  // HKDF-SHA256 derivation from FXL_HUB_CLIENT_SECRET, so no deploy needs this set.
-  HUB_SESSION_ENCRYPTION_KEY: emptyToUndefined,
+  // Optional input keying material for THIS repo's own Hub BFF session sealer.
+  // Defaults to an HKDF-SHA256 derivation from FXL_HUB_CLIENT_SECRET, so no
+  // deploy needs this set. NOT the SDK's FXL_HUB_SESSION_ENCRYPTION_KEY, which
+  // is a required strict-hex 32-byte key for the SDK's own SqlHubSessionStore;
+  // the SDK never sees this variable. emptyToUndefined is load-bearing: the
+  // examples ship it blank and `??` does not catch ''.
+  SALES_SESSION_ENCRYPTION_IKM: emptyToUndefined,
   SENTRY_DSN: emptyToUndefinedUrl,
   // Public origin used to build referral full URLs.
   PUBLIC_LINK_BASE_URL: emptyToUndefinedUrl,

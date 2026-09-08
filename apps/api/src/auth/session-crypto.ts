@@ -3,15 +3,26 @@
  *
  * Every secret persisted by `hub-session-store.ts` (the Hub refresh token, the
  * PKCE code verifier) is sealed with a key derived by HKDF-SHA256 from
- * `HUB_SESSION_ENCRYPTION_KEY` when set, otherwise from `FXL_HUB_CLIENT_SECRET`.
+ * `SALES_SESSION_ENCRYPTION_IKM` when set, otherwise from `FXL_HUB_CLIENT_SECRET`.
  * The row's own id is the AEAD additional data, so a ciphertext cannot be moved
  * from one row to another.
  *
  * OPERATIONAL CONSEQUENCE: rotating `FXL_HUB_CLIENT_SECRET` (or
- * `HUB_SESSION_ENCRYPTION_KEY`) invalidates EVERY stored session. Decryption
+ * `SALES_SESSION_ENCRYPTION_IKM`) invalidates EVERY stored session. Decryption
  * failure is treated exactly as "unknown session", so the effect on a user is a
  * single re-login. Operators who need to rotate the Hub client secret without a
- * mass logout should set `HUB_SESSION_ENCRYPTION_KEY` BEFORE rotating.
+ * mass logout should set `SALES_SESSION_ENCRYPTION_IKM` BEFORE rotating.
+ *
+ * NAME: `SALES_`, not `FXL_HUB_`, and `IKM`, not `KEY`. This is THIS repo's own
+ * variable, resolved by `apps/api/src/env.ts` and read at exactly one site
+ * (`middleware/app-auth.ts`); the Hub SDK never sees it. It is NOT the SDK
+ * session store's key: the canonical `FXL_HUB_SESSION_ENCRYPTION_KEY` is a
+ * REQUIRED strict-hex 64-character value decoded to exactly 32 bytes, validated
+ * by the SDK, and belongs to the SDK's own `SqlHubSessionStore`, which this repo
+ * deliberately does not use. Ours is OPTIONAL input keying material for
+ * HKDF-SHA256, of any length at or above the 32-character floor below, and blank
+ * means absent. Putting one value where the other belongs is a boot failure at
+ * best and a silent mass logout at worst, which is why the names must not rhyme.
  */
 import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from 'node:crypto';
 
