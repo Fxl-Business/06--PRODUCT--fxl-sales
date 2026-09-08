@@ -51,7 +51,7 @@ REPLACED by the SDK's, not deleted.
 `postLoginErrorRedirect` as code options, and the contract never claimed them. The prep run's rename
 to `SALES_POST_LOGIN_*` stands, and stop condition 2 closes clean.
 
-### `assertBootConfiguration` is the seam, and it answers the `redirectUri` question the prep run refused to pre-answer
+### `assertBootConfiguration` is the seam, reached THROUGH `createHubBff`, and it answers the `redirectUri` question the prep run refused to pre-answer
 
 ```ts
 declare function assertBootConfiguration(input: BootAssertionInput): ResolvedHubConfig;
@@ -78,8 +78,12 @@ variable, always set, no local resolver, and a LOUDER refusal than we have now.
 1. Both apps pinned at exactly `2.3.0`, no caret, lockfile in the same commit.
 2. `loadHubConfig` is the only env resolver for the Hub contract; the duplicated presence,
    discrete-naming and healthToken layers are gone.
-3. `assertBootConfiguration` runs before `createHubBff` and its `ResolvedHubConfig` is what the BFF
-   receives.
+3. The boot assertion runs, and runs EXACTLY ONCE. `createHubBff` calls
+   `assertBootConfiguration` itself, so this repo does NOT call it separately: two calls with
+   different option objects would validate one configuration and construct another, and the value
+   they would silently disagree about is `redirectUri`, which is the divergence check 7 exists to
+   catch. `createAppAuthBff()` runs at module top level in `server.ts`, so the assertion is a real
+   boot failure and not a lazy one.
 4. `trustedOrigins` and `redirectUri` come from the contract, not from `env.CORS_ORIGIN` and not
    from a local resolver.
 5. No file under `apps/` reads a `FXL_HUB_*` name. The guard proves it mechanically.
