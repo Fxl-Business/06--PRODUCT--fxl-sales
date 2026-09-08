@@ -41,7 +41,7 @@ Fill the Hub secret from the operator-issued value.
 API:
 
 ALL FIVE IDENTITY VARIABLES TOGETHER, OR NONE.
-They are one Client credential, so a partial set is a boot failure naming the missing variable, while none of them set boots and answers `503 hub_auth_not_configured` to the sales-ops routes.
+They are one Client credential, so a partial set is a boot failure naming the missing FIELD (the SDK says `FXL_HUB_CONFIG.clientId` even to an operator who set the five discrete names - see the `nameDiscreteVar` record), while none of them set boots and answers `503 hub_auth_not_configured` to the sales-ops routes.
 That is why the block below ships all five BLANK with the known-good local values alongside as comments: a block a human copies wholesale must not itself describe a partial configuration.
 
 ```dotenv
