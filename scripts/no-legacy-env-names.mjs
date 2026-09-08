@@ -12,6 +12,16 @@ import { spawnSync } from 'node:child_process';
  * Spelled by CHARACTER CODE, exactly as the sibling guard spells its own
  * literal: written out, the name would be found by the very grep it defines and
  * the gate could never pass.
+ *
+ * The v3.1.0 `@fxl-business/hub-sdk` 2.3.0 adoption added NO entry, and that was
+ * checked rather than skipped. It retired code identifiers - `hubConfigPresence`,
+ * `HUB_DISCRETE_ENV_VARS`, `HUB_FIELD_TO_DISCRETE_VAR`, `nameDiscreteVar`,
+ * `resolveHubRedirectUri` - and not one environment variable NAME. Identifiers
+ * are the type checker's and lint's problem: a reintroduced one either fails to
+ * resolve or is dead code, whereas a retired env NAME resolves to `undefined` in
+ * silence, which is the whole reason this file exists. Adding them here would
+ * make the guard mean two different things and would go red on `nexo/`-adjacent
+ * prose the moment either is legitimately discussed outside the pathspec.
  */
 const retired = [
   {
@@ -57,7 +67,8 @@ const PATHSPEC = ['.', ':(exclude)nexo', ':(exclude)CLAUDE.md'];
 /**
  * `-w` and not a plain substring match. The retired session name is a strict
  * SUFFIX of the SDK's canonical `FXL_HUB_SESSION_ENCRYPTION_KEY`, which is a
- * real name this repo may legitimately mention once 2.3.0 lands. `_` is a word
+ * real name this repo now legitimately mentions - both `.env` examples name it,
+ * to say it deliberately has no line of its own. `_` is a word
  * character, so `-w` refuses that longer name while still matching the retired
  * one wherever it stands on its own - `env.X`, `X=`, `stubEnv('X', ...)`.
  */

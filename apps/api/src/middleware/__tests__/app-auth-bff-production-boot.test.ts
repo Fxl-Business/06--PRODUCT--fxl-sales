@@ -33,8 +33,10 @@ const HEALTH_TOKEN = 'unit-test-operator-generated-health-token';
  *
  * A factory rather than a shared constant: the redirect test spreads a modified
  * `config` over it, and a shared object would let one test's mutation leak into
- * the next. The `redirectUri` is on the BROWSER-facing origin, which is a
- * different host from `apiUrl` in this topology - see the redirect test.
+ * the next. The `redirectUri` is on this app's own API origin, which is a
+ * different host from `apiUrl` - the HUB's origin - in this topology. That
+ * difference is the only property check 7 examines; the web origin in these
+ * fixtures is `sales.fxlbusiness.test`, a third host again.
  */
 function bootBase() {
   return {
@@ -189,8 +191,9 @@ describe('createAppAuthBff outside a development Hub environment', () => {
       `${apiUrl}/auth/callback` - which is the Hub's own origin, and which check
       7 refuses outside development. Omitting it therefore makes BOTH inputs
       throw, so the `not.toThrow()` half stops testing the health token and
-      starts testing the redirect. Naming it explicitly, on the BROWSER-facing
-      origin, restores the health token as the single variable.
+      starts testing the redirect. Naming it explicitly, on this app's own API
+      origin rather than the Hub's, restores the health token as the single
+      variable.
     */
     expect(() => assertBootConfiguration({ ...bootBase() })).toThrow(HubConfigError);
     expect(caughtField(() => assertBootConfiguration({ ...bootBase() }))).toBe('healthToken');
