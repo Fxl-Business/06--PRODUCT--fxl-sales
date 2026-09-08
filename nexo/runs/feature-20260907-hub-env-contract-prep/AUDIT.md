@@ -88,3 +88,9 @@ Zero migrations in this range, so a revert is a pure code revert - BUT only if t
 `SALES_SESSION_ENCRYPTION_IKM` alongside the old variable rather than renaming it in place. If the
 old name is deleted and the code is later reverted, the sealer loses its IKM in the other direction.
 Keep both names present until the revert window closes.
+
+## Runtime budget exhausted
+
+Reason: `max_active_seconds:14400`.
+
+Unfinished work must be parked and the run must finish without extending the budget.

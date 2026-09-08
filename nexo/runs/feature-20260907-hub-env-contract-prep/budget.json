@@ -1,5 +1,5 @@
 {
-  "active_accumulated_seconds": 0,
+  "active_accumulated_seconds": 30922,
   "active_since": 1788833198,
   "counters": {
     "agent_dispatches": 4,
@@ -8,7 +8,10 @@
     "total_slices": 0,
     "wave_recoveries": 0
   },
-  "exhausted": null,
+  "exhausted": {
+    "at": 1788864111,
+    "reason": "max_active_seconds:14400"
+  },
   "limits": {
     "agent_result_timeout_seconds": 600,
     "max_active_seconds": 14400,
@@ -19,7 +22,7 @@
     "max_verify_attempts_per_slice": 3,
     "max_wave_recoveries": 1
   },
-  "paused": false,
+  "paused": true,
   "scoped_counters": {
     "verify_attempts": {}
   },
