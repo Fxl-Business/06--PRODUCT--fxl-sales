@@ -76,25 +76,24 @@ declare module 'hono' {
   }
 }
 
-const hubAuthConfig = tryLoadHubAuthConfig(hubEnvBag(env));
-// The 2.x `HubConfig`, projected explicitly rather than by spreading
-// `hubAuthConfig`, which also carries the operator-generated `healthToken`. That
-// value is a BFF option, not part of the Client identity, and must not ride along
-// into the config the SDK parses and validates.
-const hubSdkConfig: HubConfig | null = hubAuthConfig
-  ? {
-      apiUrl: hubAuthConfig.apiUrl,
-      // EXPLICIT, validated, and never inferred from NODE_ENV. It must agree with
-      // the environment segment inside the client id, which the SDK's parser
-      // checks offline.
-      environment: hubAuthConfig.environment,
-      clientId: hubAuthConfig.clientId,
-      clientSecret: hubAuthConfig.clientSecret,
-      // ALWAYS passed. The audience is configured, never derived, and 2.x's
-      // `requireHubAuth` reads it from here: the option is gone.
-      audience: hubAuthConfig.audience,
-    }
-  : null;
+/**
+ * The WHOLE Hub contract, resolved once by the SDK's own `loadHubConfig`.
+ *
+ * It used to be projected down to the five identity fields, because
+ * `healthToken` was a BFF option this repo resolved separately and had to keep
+ * out of the config the SDK parsed. 2.3.0 inverts that: `healthToken`,
+ * `redirectUri` and `trustedOrigins` are CONFIG, resolved from their own
+ * canonical variables by the same loader, and `assertBootConfiguration` reads
+ * them off the config. Projecting them away here would silently drop three boot
+ * rules; re-passing them as options would be a second resolution to keep in
+ * step. So the config travels whole and unmodified.
+ *
+ * `environment` is EXPLICIT, validated, and never inferred from NODE_ENV; it
+ * must agree with the environment segment inside the client id, which the
+ * parser checks offline. `audience` is configured, never derived, and 2.x's
+ * `requireHubAuth` reads it from here.
+ */
+const hubSdkConfig: HubConfig | null = tryLoadHubAuthConfig(hubEnvBag(env));
 
 export function getHubLegacyAuthContext(auth: MinimalHubAuthContext): {
   userId: string;
@@ -122,27 +121,22 @@ export function getHubLegacyAuthContext(auth: MinimalHubAuthContext): {
  */
 const MISSING_HUB_CONTEXT = { error: 'unauthorized', code: 'missing_hub_context' } as const;
 
-/**
- * THIS app's own origin plus `/auth/callback`, never the Hub's. 2.x's
- * `createHubBff` defaults `redirectUri` to `${config.apiUrl}/auth/callback`,
- * which is the HUB's origin and is therefore always wrong here. Locally vite
- * proxies `/auth` from 8006 to the api on 3006, so the registered callback is
- * the WEB origin. The NODE_ENV read below is about whether an EXPLICIT redirect
- * is mandatory; it has nothing to do with the Hub environment.
- */
-export function resolveHubRedirectUri(envBag: EnvLike): string | undefined {
-  const explicit = envBag.FXL_HUB_REDIRECT_URI;
-  if (explicit) {
-    return explicit;
-  }
+/*
+  `resolveHubRedirectUri` lived here and is DELETED, replaced by
+  `FXL_HUB_REDIRECT_URI` on the config plus the SDK's own check, which is
+  strictly stronger in both directions.
 
-  if ((envBag.NODE_ENV ?? 'development') !== 'production') {
-    const webOrigin = (envBag.CORS_ORIGIN ?? 'http://localhost:8006').replace(/\/+$/, '');
-    return `${webOrigin}/auth/callback`;
-  }
+  Ours keyed on NODE_ENV, so a staging deploy running NODE_ENV=production was
+  judged by the wrong variable, and nothing anywhere refused a callback pointed
+  at the Hub's own origin - a guaranteed outage that booted cleanly.
+  `assertBootConfiguration`, which `createHubBff` calls itself, refuses exactly
+  that on the ORIGIN of the EFFECTIVE value.
 
-  throw new Error('FXL_HUB_REDIRECT_URI is required for FXL Hub auth in production');
-}
+  There is deliberately NO local presence assertion in its place. That would be a
+  second, weaker encoding of a rule the SDK owns, and it would wave through the
+  operator who pastes the Hub's own callback. The local development convenience
+  is preserved by SETTING `FXL_HUB_REDIRECT_URI` in the `.env` examples.
+*/
 
 /**
  * SALES_ and not FXL_HUB_: this pair is resolved start to finish here, falls
@@ -227,7 +221,7 @@ export const appAuthMiddleware: MiddlewareHandler = async (c, next) => {
 const HUB_BFF_TIMEOUT_MS = 5_000;
 
 export function createAppAuthBff() {
-  if (!hubSdkConfig || !hubAuthConfig) {
+  if (!hubSdkConfig) {
     return null;
   }
 
@@ -242,10 +236,11 @@ export function createAppAuthBff() {
   // `hubSessionCookieName(secureCookies)` must keep agreeing with the SDK's own
   // `secure ? SESSION_COOKIE_SECURE : SESSION_COOKIE`. The 2.x option is the
   // INVERSE, so the inversion happens exactly once, here, at the single producer.
-  const isHubDevelopment = hubAuthConfig.environment === 'development';
+  const isHubDevelopment = hubSdkConfig.environment === 'development';
   const secureCookies = !isHubDevelopment;
 
-  // Computed ONCE and reused by every resolver below.
+  // Computed ONCE and reused by the two post-login resolvers below, which are
+  // the only env-reading resolvers left in this file.
   const hubEnv = hubEnvBag(env);
 
   const session = createHubSessionStore({
@@ -265,7 +260,7 @@ export function createAppAuthBff() {
     // `SqlHubSessionStore` - a store this repo deliberately does not use.
     // `SALES_SESSION_ENCRYPTION_IKM` is optional HKDF input keying material for
     // OUR store, and this `??` is the ONLY read of it in the tree.
-    encryptionIkm: env.SALES_SESSION_ENCRYPTION_IKM ?? hubAuthConfig.clientSecret,
+    encryptionIkm: env.SALES_SESSION_ENCRYPTION_IKM ?? hubSdkConfig.clientSecret,
   });
 
   const bff = createHubBff(hubSdkConfig, {
@@ -281,21 +276,26 @@ export function createAppAuthBff() {
     // assertion refuses it outside development, and passing `false` explicitly
     // there is legal but says nothing, so the key is simply absent.
     ...(isHubDevelopment ? { insecureCookies: true } : {}),
-    // REQUIRED outside development, and generated by the OPERATOR rather than
-    // issued by the Hub. Already validated in auth-provider.ts; before 2.x there
-    // was no option to hand it to, so it was loaded and never delivered.
-    ...(hubAuthConfig.healthToken !== undefined
-      ? { healthToken: hubAuthConfig.healthToken }
-      : {}),
-    // Origins allowed to POST beyond the request's own origin. REQUIRED for this
-    // deployment: the web app is on sales.fxlbusiness.com and the API on
-    // sales-api.fxlbusiness.com, so the SDK's own-origin computation alone does
-    // not admit the browser's POST. This replaces the hand-rolled origin shim.
+    // NO `healthToken`, NO `redirectUri` and NO `trustedOrigins` here, and their
+    // absence is the point of this slice.
     //
-    // NO `fetchImpl`. 2.2.0's `parseRotatedRefresh` matches
+    // `createHubBff` calls `assertBootConfiguration` ITSELF, spreading any such
+    // option OVER the config before validating. Resolving them a second time
+    // here would mean validating one configuration and constructing another, and
+    // the value the two would silently disagree about is `redirectUri` - the
+    // exact class of divergence the boot check exists to catch. So all three ride
+    // on `hubSdkConfig`, resolved once by `loadHubConfig` from
+    // `FXL_HUB_HEALTH_TOKEN`, `FXL_HUB_REDIRECT_URI` and
+    // `FXL_HUB_TRUSTED_ORIGINS`.
+    //
+    // `trustedOrigins` is REQUIRED for this deployment: the web app is on
+    // sales.fxlbusiness.com and the API on sales-api.fxlbusiness.com, so the
+    // SDK's own-origin computation alone does not admit the browser's POST, and
+    // an empty list reproduces the 2026-08-10 outage.
+    //
+    // NO `fetchImpl` either. 2.2.0's `parseRotatedRefresh` matches
     // `__Host-fxl_hub_session` natively, so the wrapper this repo carried for one
     // wave is deleted and the SDK's default global `fetch` is correct.
-    trustedOrigins: [env.CORS_ORIGIN],
     timeoutMs: HUB_BFF_TIMEOUT_MS,
     // Derived from the store's own constants, so the SDK's view of a session's
     // lifetime and the store's cannot disagree. The store ignores the values the
@@ -305,7 +305,6 @@ export function createAppAuthBff() {
     // than a surprise.
     sessionTtlSeconds: SESSION_TTL_MS / 1000,
     sessionAbsoluteTtlSeconds: SESSION_ABSOLUTE_TTL_MS / 1000,
-    redirectUri: resolveHubRedirectUri(hubEnv),
     postLoginRedirect: resolveHubPostLoginRedirect(hubEnv),
     postLoginErrorRedirect: resolveHubPostLoginErrorRedirect(hubEnv),
   });
@@ -336,9 +335,9 @@ export function createAppAuthBff() {
   // which today is the login-supersede mount.
   bff.onError(hubBffErrorHandler);
   router.onError(hubBffErrorHandler);
-  // An ORDINARY mount. The CSRF origin guard is configured through
-  // `trustedOrigins` above rather than wrapped around, so there is no shim left
-  // to pass the request through.
+  // An ORDINARY mount. The CSRF origin guard is configured through the config's
+  // own `trustedOrigins` rather than wrapped around, so there is no shim left to
+  // pass the request through.
   router.route('', bff);
   return router;
 }

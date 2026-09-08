@@ -23,8 +23,12 @@ beforeAll(async () => {
   vi.stubEnv('CORS_ORIGIN', 'http://localhost:8006');
   vi.stubEnv('DATABASE_URL', 'postgresql://postgres:postgres@localhost:5006/fxl_sales_wiring_test');
   vi.stubEnv('ADMIN_DATABASE_URL', '');
-  // Every Hub variable blank, so `hubConfigPresence` is `absent` and
+  // Every Hub variable blank, so `hubConfigIsAbsent` is true and
   // `tryLoadHubAuthConfig` returns null WITHOUT throwing. Blank reads as unset.
+  //
+  // ABSENT, and only absent, is the null door. A PARTIAL configuration - some of
+  // the five set, not all - is a boot failure as of v3.1.0 and is pinned in
+  // `app-auth-partial-config.test.ts`.
   vi.stubEnv('FXL_HUB_CONFIG', '');
   vi.stubEnv('FXL_HUB_API_URL', '');
   vi.stubEnv('FXL_HUB_ENVIRONMENT', '');
@@ -33,6 +37,7 @@ beforeAll(async () => {
   vi.stubEnv('FXL_HUB_AUDIENCE', '');
   vi.stubEnv('FXL_HUB_HEALTH_TOKEN', '');
   vi.stubEnv('FXL_HUB_REDIRECT_URI', '');
+  vi.stubEnv('FXL_HUB_TRUSTED_ORIGINS', '');
   vi.stubEnv('SALES_POST_LOGIN_REDIRECT', '');
   vi.stubEnv('SALES_POST_LOGIN_ERROR_REDIRECT', '');
   vi.stubEnv('SALES_SESSION_ENCRYPTION_IKM', '');
