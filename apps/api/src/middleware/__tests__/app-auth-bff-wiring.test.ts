@@ -13,9 +13,9 @@
  * stay green with `sessionStore: session.store` deleted.
  *
  * It also pins Blocker A: the module graph is loaded with
- * `HUB_SESSION_ENCRYPTION_KEY=''`, which is the value `.env.dev.example` ships
+ * `SALES_SESSION_ENCRYPTION_IKM=''`, which is the value `.env.dev.example` ships
  * and therefore the value the documented local setup produces. Reading
- * `process.env.HUB_SESSION_ENCRYPTION_KEY ?? secretKey` keeps that empty string,
+ * `process.env.SALES_SESSION_ENCRYPTION_IKM ?? secretKey` keeps that empty string,
  * `createSessionSealer('')` throws its 32-character floor, and `server.ts` calls
  * `createAppAuthBff()` at module top level - so the API would not boot at all.
  */
@@ -123,7 +123,7 @@ beforeAll(async () => {
   vi.stubEnv('FXL_HUB_POST_LOGIN_REDIRECT', 'http://localhost:8006');
   vi.stubEnv('FXL_HUB_POST_LOGIN_ERROR_REDIRECT', 'http://localhost:8006/?error=auth');
   // BLOCKER A: exactly what .env.dev.example ships.
-  vi.stubEnv('HUB_SESSION_ENCRYPTION_KEY', '');
+  vi.stubEnv('SALES_SESSION_ENCRYPTION_IKM', '');
 
   vi.doMock('@fxl-business/hub-sdk/server', async (importOriginal) => {
     const actual = await importOriginal<typeof import('@fxl-business/hub-sdk/server')>();
@@ -266,11 +266,59 @@ function stubHub(setCookies: readonly string[], body: unknown, status = 200) {
 }
 
 describe('createAppAuthBff wiring', () => {
-  it('boots with the blank HUB_SESSION_ENCRYPTION_KEY that .env.dev.example ships', () => {
+  it('boots with the blank SALES_SESSION_ENCRYPTION_IKM that .env.dev.example ships', () => {
     // The blank override must read as "unset" and fall back to the documented
     // HKDF-from-FXL_HUB_CLIENT_SECRET default, not reach the sealer as ''.
     expect(encryptionIkm).toBe(HUB_CLIENT_SECRET);
     expect(authBff).not.toBeNull();
+  });
+
+  /**
+   * The BLANK case above and this ABSENT case are different inputs to the same
+   * `??`: blank travels through `emptyToUndefined` in env.ts, absent never
+   * reaches zod at all. This one is the property a careless rename drops - move
+   * the declaration to the new name and leave the READ on the old one and the
+   * variable is simply never resolved, which nothing else here would notice
+   * because the fallback would still produce the client secret by accident.
+   * So the module graph is reloaded with the key genuinely deleted from
+   * `process.env`, and the captured seam value is compared to the secret.
+   *
+   * The shared capture variables are snapshotted and restored, because every
+   * other test in this file reads the objects the `beforeAll` load produced.
+   */
+  it('falls back to the client secret when SALES_SESSION_ENCRYPTION_IKM is absent', async () => {
+    const saved = { encryptionIkm, bffOptions, sessionStoreKind, durableStore, authBff };
+    const previous = process.env.SALES_SESSION_ENCRYPTION_IKM;
+    // `vi.stubEnv` cannot express "absent" here without also being undone by the
+    // afterAll unstub, so the key is deleted directly and restored in `finally`.
+    delete process.env.SALES_SESSION_ENCRYPTION_IKM;
+
+    let closeSecondDb: (() => Promise<void>) | undefined;
+    try {
+      vi.resetModules();
+      const dbClient = await import('../../db/client.js');
+      closeSecondDb = dbClient.closeDb;
+      const appAuth = await import('../app-auth.js');
+
+      const reloaded = appAuth.createAppAuthBff();
+
+      expect(reloaded).not.toBeNull();
+      // Drop `?? hubAuthConfig.clientSecret` and this is `undefined`.
+      expect(encryptionIkm).toBe(HUB_CLIENT_SECRET);
+      expect(encryptionIkm).not.toBe('');
+    } finally {
+      await closeSecondDb?.();
+      if (previous === undefined) {
+        delete process.env.SALES_SESSION_ENCRYPTION_IKM;
+      } else {
+        process.env.SALES_SESSION_ENCRYPTION_IKM = previous;
+      }
+      encryptionIkm = saved.encryptionIkm;
+      bffOptions = saved.bffOptions;
+      sessionStoreKind = saved.sessionStoreKind;
+      durableStore = saved.durableStore;
+      authBff = saved.authBff;
+    }
   });
 
   it('builds a durable session store rather than the SDK in-memory default', () => {

@@ -35,7 +35,7 @@ beforeAll(async () => {
   vi.stubEnv('FXL_HUB_REDIRECT_URI', '');
   vi.stubEnv('FXL_HUB_POST_LOGIN_REDIRECT', '');
   vi.stubEnv('FXL_HUB_POST_LOGIN_ERROR_REDIRECT', '');
-  vi.stubEnv('HUB_SESSION_ENCRYPTION_KEY', '');
+  vi.stubEnv('SALES_SESSION_ENCRYPTION_IKM', '');
 
   const appAuth = await import('../app-auth.js');
   app = new Hono();

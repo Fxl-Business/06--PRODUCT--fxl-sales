@@ -245,13 +245,20 @@ export function createAppAuthBff() {
     databaseUrlPresent: Boolean(env.DATABASE_URL),
     nodeEnv: env.NODE_ENV,
     // Read the VALIDATED env, never process.env: .env.dev.example ships
-    // `HUB_SESSION_ENCRYPTION_KEY=` (blank) and CLAUDE.md documents that file as
+    // `SALES_SESSION_ENCRYPTION_IKM=` (blank) and CLAUDE.md documents that file as
     // the one an operator copies to .env. `process.env.X ?? secret` keeps the
     // empty string, createSessionSealer('') throws its 32-char floor, and
     // server.ts calls this at module top level - so a blank value would stop the
     // API booting. env.ts's emptyToUndefined turns '' into undefined, which is
     // what makes the documented HKDF-from-FXL_HUB_CLIENT_SECRET default apply.
-    encryptionIkm: env.HUB_SESSION_ENCRYPTION_KEY ?? hubAuthConfig.clientSecret,
+    //
+    // This is NOT the SDK session store's key. The canonical
+    // `FXL_HUB_SESSION_ENCRYPTION_KEY` is a required strict-hex 64-character
+    // value decoded to 32 bytes, validated by the SDK, keying its own
+    // `SqlHubSessionStore` - a store this repo deliberately does not use.
+    // `SALES_SESSION_ENCRYPTION_IKM` is optional HKDF input keying material for
+    // OUR store, and this `??` is the ONLY read of it in the tree.
+    encryptionIkm: env.SALES_SESSION_ENCRYPTION_IKM ?? hubAuthConfig.clientSecret,
   });
 
   const bff = createHubBff(hubSdkConfig, {
