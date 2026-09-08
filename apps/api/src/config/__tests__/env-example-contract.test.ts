@@ -167,3 +167,110 @@ describe('the shipped .env examples', () => {
     expect(raw).toContain('# FXL_HUB_AUDIENCE=app.fxl-sales');
   });
 });
+
+/**
+ * The SAME defect, one file over.
+ *
+ * `README.md` and `CLAUDE.md` each carry a fenced `dotenv` block that a human
+ * copies wholesale, and both shipped three of five identity variables populated
+ * for exactly as long as the `.env` examples did. Fixing the files a script
+ * copies while leaving the blocks a person copies would have left the trap
+ * intact with a green suite over it.
+ *
+ * This is NOT a markdown parser and must never become one. It finds fenced
+ * blocks whose info string is `dotenv` and hands the CONTENT to the same
+ * `parseEnvExample` grammar as above - which is legitimate because the content
+ * IS dotenv, that being the entire claim the fence makes. The only failure mode
+ * of the fence regex is finding too few blocks, and the vacuity test below is
+ * what refuses that.
+ */
+const DOC_BLOCKS = ['README.md', 'CLAUDE.md'] as const;
+
+function dotenvBlocks(name: string): string[] {
+  const raw = readFileSync(new URL(`../../../../../${name}`, import.meta.url), 'utf8');
+  return [...raw.matchAll(/^```dotenv\n([\s\S]*?)^```$/gm)].map((match) => match[1] ?? '');
+}
+
+function parseDotenv(body: string): Record<string, string | undefined> {
+  const bag: Record<string, string | undefined> = {};
+
+  for (const line of body.split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed === '' || trimmed.startsWith('#')) continue;
+    const eq = trimmed.indexOf('=');
+    if (eq === -1) continue;
+    bag[trimmed.slice(0, eq).trim()] = trimmed.slice(eq + 1).trim();
+  }
+
+  return bag;
+}
+
+describe('the fenced dotenv blocks a human copies out of the docs', () => {
+  it.each(DOC_BLOCKS)('has a block in %s that really names all five identity variables', (name) => {
+    /*
+      The vacuity guard, and the one that matters most here. Every assertion
+      below is of the form "nothing Hub-shaped is SET", which a regex that
+      matched no fence at all would satisfy perfectly - and a renamed heading,
+      a changed info string or a reflowed file would do exactly that.
+
+      Requiring a block that MENTIONS all five proves the fence was found and
+      that it is still the Hub block, before anything asserts a property of it.
+    */
+    const blocks = dotenvBlocks(name);
+    expect(blocks.length).toBeGreaterThan(0);
+
+    const hubBlocks = blocks.filter((body) =>
+      [
+        'FXL_HUB_API_URL',
+        'FXL_HUB_ENVIRONMENT',
+        'FXL_HUB_CLIENT_ID',
+        'FXL_HUB_CLIENT_SECRET',
+        'FXL_HUB_AUDIENCE',
+      ].every((key) => body.includes(key)),
+    );
+
+    expect(hubBlocks).toHaveLength(1);
+  });
+
+  it.each(DOC_BLOCKS)('describes an ABSENT Hub configuration in every %s block', (name) => {
+    /*
+      The property, against the same real predicate the `.env` examples are held
+      to. It goes RED the moment anyone re-populates one of the six
+      credential-bearing names in a copyable block, which is how the defect got
+      into the examples in the first place.
+    */
+    for (const body of dotenvBlocks(name)) {
+      expect(hubConfigIsAbsent(parseDotenv(body))).toBe(true);
+    }
+  });
+
+  it.each(DOC_BLOCKS)('still SHOWS the known-good identity values, commented, in %s', (name) => {
+    /*
+      Blank is only half the fix here too: the three real values must survive as
+      comments inside the block, or the next reader guesses the Hub port.
+    */
+    const block = dotenvBlocks(name).find((body) => body.includes('FXL_HUB_CLIENT_SECRET'));
+    if (block === undefined) throw new Error(`expected a Hub block in ${name}`);
+
+    expect(block).toContain('# FXL_HUB_API_URL=http://localhost:9016');
+    expect(block).toContain('# FXL_HUB_ENVIRONMENT=development');
+    expect(block).toContain('# FXL_HUB_AUDIENCE=app.fxl-sales');
+  });
+
+  it.each(DOC_BLOCKS)('keeps the callback off the Hub’s own origin in %s', (name) => {
+    /*
+      The operational half. `FXL_HUB_REDIRECT_URI` is NOT governed by a presence
+      rule - `parseRedirectUri` defaults an absent value to
+      `${apiUrl}/auth/callback`, which is the HUB's origin - so a block that
+      simply omits it documents a staging boot failure. Asserting the VALUE, and
+      that it is the web origin, is the only thing that catches a well-meant
+      deletion.
+    */
+    const bag = parseDotenv(
+      dotenvBlocks(name).find((body) => body.includes('FXL_HUB_CLIENT_SECRET')) ?? '',
+    );
+
+    expect(bag.FXL_HUB_REDIRECT_URI).toBe('http://localhost:8006/auth/callback');
+    expect(bag.FXL_HUB_TRUSTED_ORIGINS).toBe('http://localhost:8006');
+  });
+});
