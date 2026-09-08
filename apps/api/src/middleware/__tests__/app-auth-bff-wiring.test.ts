@@ -56,7 +56,6 @@ type CapturedBffOptions =
       timeoutMs?: number;
       sessionTtlSeconds?: number;
       sessionAbsoluteTtlSeconds?: number;
-      redirectUri?: unknown;
     }
   | undefined;
 
@@ -64,6 +63,17 @@ type CapturedBffOptions =
 const REFRESH_OK = { status: 200, body: { ok: true }, clear: false };
 
 let bffOptions: CapturedBffOptions;
+/**
+ * The CONFIG `createAppAuthBff` hands to `createHubBff`, captured beside the
+ * options.
+ *
+ * `redirectUri`, `healthToken` and `trustedOrigins` are no longer options: they
+ * ride on the config, which `createHubBff` runs through
+ * `assertBootConfiguration` itself. Asserting them off the config is therefore
+ * asserting the value the SDK actually resolves and boots on, which is stronger
+ * than asserting an option that used to be resolved separately.
+ */
+let bffConfig: HubConfig | undefined;
 let sessionStoreKind: string | undefined;
 /**
  * `DurableHubSessionStore`, not the SDK's `HubSessionStore`: the assignment below
@@ -120,6 +130,9 @@ beforeAll(async () => {
   // the JSON form and make this file throw on ambiguity at import.
   vi.stubEnv('FXL_HUB_CONFIG', '');
   vi.stubEnv('FXL_HUB_REDIRECT_URI', 'http://localhost:8006/auth/callback');
+  // The canonical name for what used to be `trustedOrigins: [env.CORS_ORIGIN]`.
+  // Same value, one resolver: it is now part of the config the SDK parses.
+  vi.stubEnv('FXL_HUB_TRUSTED_ORIGINS', 'http://localhost:8006');
   vi.stubEnv('SALES_POST_LOGIN_REDIRECT', 'http://localhost:8006');
   vi.stubEnv('SALES_POST_LOGIN_ERROR_REDIRECT', 'http://localhost:8006/?error=auth');
   // BLOCKER A: exactly what .env.dev.example ships.
@@ -131,6 +144,7 @@ beforeAll(async () => {
       ...actual,
       createHubBff: (config: Parameters<typeof actual.createHubBff>[0], options: never) => {
         bffOptions = options as CapturedBffOptions;
+        bffConfig = config;
         return actual.createHubBff(config, options);
       },
     };
@@ -337,10 +351,33 @@ describe('createAppAuthBff wiring', () => {
   });
 
   it("points the BFF callback at this app's own origin rather than the Hub's", () => {
-    // 2.x's createHubBff defaults redirectUri to `${config.apiUrl}/auth/callback`,
-    // which is the HUB's origin and is always wrong for this app.
-    expect(bffOptions?.redirectUri).toBe('http://localhost:8006/auth/callback');
-    expect(String(bffOptions?.redirectUri)).not.toContain('localhost:9016');
+    // `parseHubConfig` defaults an absent redirectUri to
+    // `${apiUrl}/auth/callback`, which is the HUB's origin and is always wrong
+    // for this app: locally vite proxies /auth from 8006 to the api on 3006, so
+    // the registered callback is the WEB origin.
+    //
+    // Read off the CONFIG rather than off an option. `resolveHubRedirectUri` is
+    // deleted and FXL_HUB_REDIRECT_URI is the single resolver; the second
+    // assertion is what goes red the day the default creeps back in.
+    expect(bffConfig?.redirectUri).toBe('http://localhost:8006/auth/callback');
+    expect(String(bffConfig?.redirectUri)).not.toContain('localhost:9016');
+  });
+
+  it('carries the trusted web origin on the config rather than as a second option', () => {
+    /*
+      The pair to the assertion above, and the reason both read the config.
+
+      `createHubBff` calls `assertBootConfiguration` itself, spreading any
+      `redirectUri` / `healthToken` / `trustedOrigins` OPTION over the config
+      before validating. Passing one alongside the config would mean two
+      resolutions of the same value, and the boot check would then be judging a
+      configuration that is not quite the one being constructed. So these keys
+      must be ABSENT from the options - which is what the second assertion pins.
+    */
+    expect(bffConfig?.trustedOrigins).toEqual(['http://localhost:8006']);
+    expect('trustedOrigins' in (bffOptions ?? {})).toBe(false);
+    expect('redirectUri' in (bffOptions ?? {})).toBe(false);
+    expect('healthToken' in (bffOptions ?? {})).toBe(false);
   });
 
   it('bounds the upstream Hub call with timeoutMs', () => {
@@ -560,18 +597,19 @@ describe('createAppAuthBff login supersede', () => {
 });
 
 describe('createAppAuthBff trusted-origin mount', () => {
-  it('does not 403 a cross-origin refresh from CORS_ORIGIN, through the real mount', async () => {
+  it('does not 403 a cross-origin refresh from the trusted web origin, through the real mount', async () => {
     /*
       The oracle for the 2026-08-10 production outage. This app once carried a
-      hand-rolled origin shim for it; 2.2.0 makes the guard configurable, so the
-      protection now rides `createHubBff`'s own `trustedOrigins` option and this
-      test proves `createAppAuthBff` actually passes it. Dropping that option
-      leaves the rest of the API suite green while reproducing the outage
-      exactly, which is why this test keeps its title across the change.
+      hand-rolled origin shim for it; 2.2.0 made the guard configurable and 2.3.0
+      moved its value onto the CONFIG, resolved from FXL_HUB_TRUSTED_ORIGINS by
+      the same loader as everything else. Losing that value leaves the rest of
+      the API suite green while reproducing the outage exactly, which is why this
+      test keeps its assertions across the change.
 
-      CORS_ORIGIN is stubbed to http://localhost:8006 in this file's setup, and
-      the request is issued from http://localhost - a DIFFERENT origin, which is
-      the whole point.
+      The title no longer names CORS_ORIGIN, because CORS_ORIGIN is no longer the
+      source. FXL_HUB_TRUSTED_ORIGINS is stubbed to http://localhost:8006 in this
+      file's setup, and the request is issued from http://localhost - a DIFFERENT
+      origin, which is the whole point.
     */
     if (!authBff) {
       throw new Error('expected an auth BFF router');
@@ -590,7 +628,7 @@ describe('createAppAuthBff trusted-origin mount', () => {
     expect(res.status).toBe(401);
   });
 
-  it('still 403s a cross-origin refresh from an origin that is not CORS_ORIGIN', async () => {
+  it('still 403s a cross-origin refresh from an origin that is not trusted', async () => {
     // The other half: the mount must not have widened into a blanket bypass.
     if (!authBff) {
       throw new Error('expected an auth BFF router');

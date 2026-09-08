@@ -3,22 +3,37 @@ import { describe, expect, it, vi } from 'vitest';
 /**
  * Blank reads as unset. This file imports `../app-auth.js` at MODULE scope, and
  * that module calls `tryLoadHubAuthConfig(hubEnvBag(env))` at its own top level.
- * There is no blanket try/catch behind that call any more, so a developer machine
- * whose `apps/api/.env` carries `FXL_HUB_CONFIG` beside the discrete variables
- * would make `hubConfigPresence` throw on ambiguity and crash this whole file at
- * import rather than fail one test. `vi.stubEnv` ADDS to `process.env`; it does
- * not clear it. `vi.hoisted` rather than a `beforeAll` because a static import is
- * evaluated first and a `beforeAll` would be too late to matter.
+ * There is no blanket try/catch behind that call, so whatever the developer's
+ * `apps/api/.env` happens to carry decides whether this file can be imported at
+ * all. `vi.stubEnv` ADDS to `process.env`; it does not clear it, and dotenv does
+ * not override a key already present - so blanking here wins. `vi.hoisted` rather
+ * than a `beforeAll` because a static import is evaluated first and a `beforeAll`
+ * would be too late to matter.
+ *
+ * ALL SIX credential names, not just `FXL_HUB_CONFIG`. Blanking one of them
+ * defended against only one ambient shape - the JSON form set beside the discrete
+ * ones, which throws on ambiguity. As of v3.1.0 a PARTIAL discrete configuration
+ * throws too, and a `.env` carrying `FXL_HUB_API_URL` and little else is the
+ * ordinary state of a machine that predates the canonical names. Blanking all six
+ * makes the graph unambiguously ABSENT, so `tryLoadHubAuthConfig` answers null and
+ * this file's verdict depends on nothing outside it.
+ *
+ * Nothing here needs a configured Hub: every export under test is a pure function
+ * of its argument.
  */
 vi.hoisted(() => {
   vi.stubEnv('FXL_HUB_CONFIG', '');
+  vi.stubEnv('FXL_HUB_API_URL', '');
+  vi.stubEnv('FXL_HUB_ENVIRONMENT', '');
+  vi.stubEnv('FXL_HUB_CLIENT_ID', '');
+  vi.stubEnv('FXL_HUB_CLIENT_SECRET', '');
+  vi.stubEnv('FXL_HUB_AUDIENCE', '');
 });
 
 import {
   getHubLegacyAuthContext,
   resolveHubPostLoginErrorRedirect,
   resolveHubPostLoginRedirect,
-  resolveHubRedirectUri,
 } from '../app-auth.js';
 import { hubAuthContext } from '../../auth/__tests__/hub-auth-context-fixture.js';
 
@@ -104,57 +119,19 @@ describe('getHubLegacyAuthContext', () => {
   });
 });
 
-describe('resolveHubRedirectUri', () => {
-  it('uses an explicit Hub redirect URI when provided', () => {
-    expect(
-      resolveHubRedirectUri({
-        FXL_HUB_REDIRECT_URI: 'https://app.fxl-sales.com/auth/callback',
-        PORT: '3006',
-      }),
-    ).toBe('https://app.fxl-sales.com/auth/callback');
-  });
+/*
+  `resolveHubRedirectUri` was unit-tested here and is DELETED. Its whole job now
+  belongs to `FXL_HUB_REDIRECT_URI` on the config plus the SDK's own boot check,
+  and the coverage did not go with it - it moved UP a level, to
+  `refuses a redirect uri on the Hub's own origin outside development` in
+  `app-auth-bff-production-boot.test.ts`, which drives the REAL
+  `assertBootConfiguration` instead of a local resolver this repo owned.
 
-  it('uses the local web origin in development', () => {
-    expect(
-      resolveHubRedirectUri({ NODE_ENV: 'development', CORS_ORIGIN: 'http://localhost:8006' }),
-    ).toBe('http://localhost:8006/auth/callback');
-  });
-
-  it('falls back to the local web dev port when CORS_ORIGIN is absent', () => {
-    expect(resolveHubRedirectUri({ NODE_ENV: 'development', PORT: '3006' })).toBe(
-      'http://localhost:8006/auth/callback',
-    );
-  });
-
-  it('requires an explicit redirect URI in production', () => {
-    expect(() => resolveHubRedirectUri({ NODE_ENV: 'production' })).toThrow(
-      /FXL_HUB_REDIRECT_URI/,
-    );
-  });
-
-  it("resolves the redirect to this app's own origin, never the Hub's", () => {
-    const result = resolveHubRedirectUri({
-      FXL_HUB_API_URL: 'http://localhost:9016',
-      CORS_ORIGIN: 'http://localhost:8006',
-      NODE_ENV: 'development',
-    });
-
-    expect(result).toBe('http://localhost:8006/auth/callback');
-    // Goes red the day anyone adopts 2.x's `${config.apiUrl}/auth/callback` default.
-    expect(String(result).startsWith('http://localhost:9016')).toBe(false);
-  });
-
-  it('keeps the redirect on this app origin when the Hub api url and the web origin differ', () => {
-    const result = resolveHubRedirectUri({
-      NODE_ENV: 'production',
-      FXL_HUB_API_URL: 'https://auth.fxlbusiness.com',
-      FXL_HUB_REDIRECT_URI: 'https://sales.fxlbusiness.com/auth/callback',
-    });
-
-    expect(result).toBe('https://sales.fxlbusiness.com/auth/callback');
-    expect(String(result)).not.toContain('auth.fxlbusiness.com');
-  });
-});
+  Nothing is written here in its place ON PURPOSE. A presence assertion for
+  FXL_HUB_REDIRECT_URI would be a second, weaker encoding of a rule the SDK owns,
+  and it would pass for the operator who pastes the Hub's own callback - the one
+  case the replacement exists to refuse.
+*/
 
 describe('resolveHubPostLoginRedirect', () => {
   it('returns users to the web origin after Hub callback', () => {

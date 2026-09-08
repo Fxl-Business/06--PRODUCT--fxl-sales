@@ -35,6 +35,9 @@ export default defineConfig({
     : {
       include: ['src/**/__tests__/**/*.test.ts'],
       exclude: ['node_modules/**', 'dist/**', 'test/rls/**', 'src/**/*.integration.test.ts'],
+        // Blanks the six Hub credential names so no unit file inherits the
+        // machine's own .env. See the file for why, and why it is not magic.
+        setupFiles: ['./test/unit-setup.ts'],
         // Phase 01 ships only RLS integration tests (run via test:integration).
         // Unit suite is empty for now - don't fail the gate / future CI on it.
         passWithNoTests: true,

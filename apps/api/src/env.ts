@@ -32,7 +32,9 @@ const schema = z.object({
   ADMIN_DATABASE_URL: emptyToUndefined,
   FXL_HUB_API_URL: emptyToUndefinedUrl,
   // The whole Hub configuration as one JSON object. Setting it beside any of
-  // the five discrete variables below is a boot failure - see hubConfigPresence.
+  // the five discrete variables below is a boot failure, and the SDK's own
+  // `loadHubConfig` is what refuses it. It carries ONLY the five identity
+  // fields; an operational key inside it is a hard refusal too.
   FXL_HUB_CONFIG: emptyToUndefined,
   // Deliberately a plain optional string here and NOT a z.enum. zod would
   // process.exit(1) with its own flattened field errors and the operator would
@@ -47,6 +49,16 @@ const schema = z.object({
   // development Hub environment.
   FXL_HUB_HEALTH_TOKEN: emptyToUndefined,
   FXL_HUB_REDIRECT_URI: emptyToUndefinedUrl,
+  // Origins allowed to POST to the BFF beyond the request's own origin. This
+  // deployment REQUIRES it: the web app is on sales.* and the API on
+  // sales-api.*, so the SDK's own-origin computation alone does not admit the
+  // browser's POST, and an empty list reproduces the 2026-08-10 outage.
+  //
+  // A comma-separated list, so NOT emptyToUndefinedUrl - zod's .url() would
+  // refuse the multi-origin form. The SDK's parseTrustedOrigins validates and
+  // normalizes every entry to an absolute http(s) .origin, which is the one
+  // place that rule is spelled.
+  FXL_HUB_TRUSTED_ORIGINS: emptyToUndefined,
   // THIS repo's own pair, resolved start to finish by resolveHubPostLogin*
   // in middleware/app-auth.ts and falling back to CORS_ORIGIN, which is the
   // consumer's own configuration. They carry no FXL_HUB_ prefix because the
