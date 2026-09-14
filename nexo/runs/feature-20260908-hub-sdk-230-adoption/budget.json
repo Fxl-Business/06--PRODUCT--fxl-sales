@@ -1,5 +1,5 @@
 {
-  "active_accumulated_seconds": 0,
+  "active_accumulated_seconds": 7712,
   "active_since": 1788863787,
   "counters": {
     "agent_dispatches": 0,
@@ -19,7 +19,7 @@
     "max_verify_attempts_per_slice": 3,
     "max_wave_recoveries": 1
   },
-  "paused": false,
+  "paused": true,
   "scoped_counters": {
     "verify_attempts": {
       "05-contract-single-resolver": 1
