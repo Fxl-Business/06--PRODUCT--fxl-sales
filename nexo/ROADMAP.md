@@ -69,3 +69,34 @@ tagged, and `master == staging == production == 7ddf525`.
 - DONE: the Hub deployed access-model-v1 before the promotion. This was the hard ordering
   precondition; the old Hub issued `product.*` audiences and the core module and would have
   refused this code on arrival.
+
+## v4.0.0 deploy checklist (OPEN - shipped to production 2026-09-14 with these unconfirmed)
+
+`v4.0.0` was promoted straight to production under `/nexo-ship-prod-ready` with these four items
+still open, on the operator's explicit statement that there are no production users yet.
+The repository cannot check any of them; each needs an operator to confirm it in Coolify or Vercel.
+Until then the deployed app may be up and still unusable, and three of the four fail QUIETLY.
+
+- [ ] **`FXL_HUB_TRUSTED_ORIGINS` in staging and production.** HIGHEST. Unset, the list is `[]`,
+      and with the web app on `sales.fxlbusiness.com` and the API on `sales-api.fxlbusiness.com`
+      every browser POST to `/auth/*` is `403 origin_not_trusted`. That is the 2026-08-10 outage
+      exactly. Confirmed in the shipped `dist` to have NO fallback - `env.CORS_ORIGIN` no longer
+      feeds it. Value is the WEB origin, comma-separated if more than one.
+- [ ] **`SALES_SESSION_ENCRYPTION_IKM` carries the old `HUB_SESSION_ENCRYPTION_KEY` value**, if that
+      variable was non-blank. HIGHEST DATA RISK. Miss it and the sealer silently derives from
+      `FXL_HUB_CLIENT_SECRET`, every `hub_bff_sessions` seal stops opening, and every user is logged
+      out once. Nothing throws and nothing logs - an unopenable seal reports ABSENT by design.
+      Self-healing after one re-login, which is what makes it easy to miss. If it is blank today
+      there is nothing to carry; CONFIRM per environment rather than assuming.
+- [ ] **`SALES_POST_LOGIN_REDIRECT` and `SALES_POST_LOGIN_ERROR_REDIRECT` carry their old values.**
+      Both optional and both quiet: no crash, no log, post-login just lands on `CORS_ORIGIN`.
+- [ ] **`FXL_HUB_REDIRECT_URI` explicit in staging and production.** Not a presence rule and that
+      wording must not enter the runbook: an absent value takes the SDK's default
+      `${apiUrl}/auth/callback`, which is the HUB's origin, and the boot then refuses it because the
+      callback's ORIGIN equals the Hub's. This one is LOUD.
+
+Create each renamed variable ALONGSIDE the old name rather than renaming in place, so a revert to
+`v3.0.0` inside the rollback window still finds its value - `v3.0.0`'s code reads the old names.
+
+Vercel note that applies to every future release, not only this one: `VITE_*` variables are
+validated at RENDER, not at build, so a green Vercel build is never evidence the browser can boot.
