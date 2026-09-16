@@ -31,6 +31,67 @@ Closed inside slice 01 rather than parked: `apps/api/test/unit-setup.ts` now bla
 decided by its own fixtures and never by the operator's shell. Recorded here because it is a file
 the human's brief did not name.
 
+## Wave 1 integration gate - FAIL on a PRE-EXISTING condition, NOT reverted
+
+- [ ] **DO THIS BY HAND: update `apps/api/.env` to the nine-name Hub contract**, using
+      `apps/api/.env.dev.example` as the source, and delete the retired `FXL_HUB_PUBLISHABLE_KEY`
+      and `FXL_HUB_SECRET_KEY` lines. Only you can do it: the file is gitignored, holds your own
+      values, and your brief forbids this run from editing it.
+
+The wave-1 verifier graded `master` at `2facf27` and returned FAIL on exactly one of its checks.
+Everything the run's own acceptance criteria name is GREEN: `type-check`, `lint`, `pnpm run test`
+(1318 tests, 0 failures, both legacy-name guards included), `build`, and `db:migrate` against the
+local database.
+
+What failed is that `node apps/api/dist/server.js` does not boot:
+
+```
+HubConfigError: FXL_HUB_CONFIG.environment must be exactly one of "production", "staging" or
+"development".
+```
+
+The untracked `apps/api/.env` on this machine is STALE against `@fxl-business/hub-sdk@2.3.0`. It
+still names `FXL_HUB_PUBLISHABLE_KEY` / `FXL_HUB_SECRET_KEY`, which that migration retired, and it
+supplies none of `FXL_HUB_ENVIRONMENT`, `FXL_HUB_CLIENT_ID`, `FXL_HUB_CLIENT_SECRET`,
+`FXL_HUB_AUDIENCE`. Because `FXL_HUB_API_URL` IS set, `hubConfigIsAbsent` is false, so this is a
+PARTIAL discrete configuration - which `CLAUDE.md` records as a DELIBERATE v3.1.0 boot failure
+rather than a `503 hub_auth_not_configured`. The SDK is behaving exactly as documented.
+
+### Why this wave was NOT reverted
+
+The verifier isolated the cause rather than asserting it. Same binary, same two env files, with the
+five identity values supplied in-process only, boots and serves `/health` 200. And
+`git diff 22a08a1 2facf27 -- apps/api/src/env.ts` shows that with `SALES_ENV_FILE` unset - which it
+is, and must be - the new loader does byte-for-byte what the old one did. The slice touches no
+Hub-config code.
+
+The failure therefore predates this run and dates from the SDK 2.3.0 adoption, which updated both
+`.env.example` files but could not update a developer's untracked `.env`. It survived until now
+because nothing in the suite had ever started the real server.
+
+Reverting slice 01 would not fix it and would destroy correct, independently verified work. Under
+the autopilot rule the wave is recorded and the run continues.
+
+### This was partly MY overreach in the gate contract
+
+Check B ("the API boots and `/health` answers 200") is not reachable on this machine, and your brief
+says so plainly: *"Os valores do Hub vem depois, a mao, com credenciais que ainda nao foram
+emitidas."* I asked a verifier for a property the stated state of the machine forbids. The waves
+that follow grade the achievable and still-decisive property instead: that the database guard runs
+and prints BEFORE the `HubConfigError`, which is exactly the boot ordering slice 02 must guarantee.
+
+That ordering is a STRONGER oracle than a 200 would have been. The guard is specified to run before
+`const app = new Hono()`, so a remote `DATABASE_URL` must produce `[local-database-guard]` lines and
+exit 1 WITHOUT the Hub error ever being reached - and the Hub error failing later is what proves the
+guard really is first.
+
+## Behaviour change worth knowing about, from slice 01
+
+`pnpm --filter @fxl-sales/api db:migrate` now also reads `apps/api/.env.local`, which the old bare
+`import 'dotenv/config'` ignored. That is the intended consequence of the two entrypoints sharing
+one resolver, and it is what makes them unable to diverge - but it is a real change for anyone who
+keeps overrides in `.env.local`.
+
 ## Blockers and parks during execution
 
 (none yet)
