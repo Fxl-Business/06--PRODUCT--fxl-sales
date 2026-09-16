@@ -30,6 +30,18 @@ import { vi } from 'vitest';
  * The four OPERATIONAL names are deliberately left alone. None of them
  * identifies a Client, so none can turn an absent configuration into a partial
  * one, and a test that wants to observe one should be able to.
+ *
+ * SALES_ENV_FILE is blanked here for the same reason and it is the same class
+ * of leak. `env.ts` calls `loadEnvFiles` at MODULE scope, and much of the unit
+ * suite imports `env.ts` transitively, so a developer with SALES_ENV_FILE
+ * exported in their shell would have the suite either THROW at module load or
+ * silently load another environment's values on top of the blanking above. The
+ * suite must be decided by its own fixtures and never by the operator's shell.
+ * Setup files are evaluated before the test module, so this really does reach
+ * the resolver first, and blank reads as absent because
+ * `resolveNamedEnvFilePath` maps an empty string to null. This scopes the
+ * opt-in out of the TEST process only; `make back` and `make migrate` are
+ * unaffected.
  */
 for (const name of [
   'FXL_HUB_CONFIG',
@@ -38,6 +50,7 @@ for (const name of [
   'FXL_HUB_CLIENT_ID',
   'FXL_HUB_CLIENT_SECRET',
   'FXL_HUB_AUDIENCE',
+  'SALES_ENV_FILE',
 ]) {
   vi.stubEnv(name, '');
 }
