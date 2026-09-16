@@ -1,24 +1,69 @@
-import { serve } from '@hono/node-server';
-import { Hono } from 'hono';
-import { logger } from 'hono/logger';
-import { env } from './env.js';
-import { corsMiddleware } from './middleware/cors.js';
-import { errorMiddleware } from './middleware/error.js';
-import { appAuthMiddleware, createAppAuthBff } from './middleware/app-auth.js';
-import { requireAdmin } from './middleware/require-admin.js';
-import { adminRouter } from './domains/admin/index.js';
-import { findersPublicRouter } from './domains/finders/public-routes.js';
-import { linksRouter } from './domains/links/routes.js';
-import { referralsRouter } from './domains/referrals/routes.js';
-import { finderRouter } from './domains/finder/routes.js';
-import { hmacVerifyMiddleware } from './domains/conversions/hmac-middleware.js';
-import { conversionsAdminRouter, conversionsRouter } from './domains/conversions/routes.js';
-import { commissionsAdminRouter, commissionsRouter } from './domains/commissions/routes.js';
-import { payoutsAdminRouter, payoutsRouter } from './domains/payouts/routes.js';
-import { salesOpsRouter } from './domains/sales-ops/routes.js';
-import { auditRouter } from './domains/audit/routes.js';
-import { setupNightlyJob } from './jobs/nightly-job.js';
-import { healthRouter } from './routes/health.js';
+// ONLY the two modules the local-database guard itself needs are imported
+// statically, and that is load-bearing rather than stylistic. ESM evaluates the
+// ENTIRE static import graph before the first statement of this module body
+// runs, so anything reached through a static import speaks before the guard
+// does. `./middleware/app-auth.js` loads the Hub configuration at ITS module
+// top level and throws there on a bad one, which is exactly how the guard's
+// verdict got buried under an unrelated failure. Both static imports below are
+// pure with respect to the database: `./env.js` resolves env files and
+// zod-parses, and the guard module imports nothing at all.
+import { env, namedEnvFile } from './env.js';
+import { assertLocalDatabase, describeDatabaseTarget } from './db/local-database-guard.js';
+
+// The local-database guard runs FIRST, before anything else in this process.
+// `createAppAuthBff()` below reaches getAdminDb() synchronously and constructs
+// a postgres-js pool against DATABASE_URL; no socket opens until the first
+// query, but the guard belongs in front of it all the same. Deliberately NOT in
+// env.ts: that module is imported by the unit suite, and an assertion there
+// would make the whole suite environment-dependent.
+const databaseViolations = assertLocalDatabase({
+  nodeEnv: env.NODE_ENV,
+  databaseUrl: env.DATABASE_URL,
+  namedEnvFile,
+});
+if (databaseViolations.length > 0) {
+  for (const line of databaseViolations) console.error(line);
+  process.exit(1);
+}
+
+// One line, every non-production boot, naming the database this process is
+// about to use. Its absence is what made the 2026-09-16 staging write invisible.
+// Host and port ONLY - never the user, the password or the whole URL.
+if (env.NODE_ENV !== 'production') {
+  const target = describeDatabaseTarget(env.DATABASE_URL);
+  console.log(
+    target
+      ? `[fxl-sales-api] database host=${target.host} port=${target.port}`
+      : '[fxl-sales-api] database target unknown - DATABASE_URL is absent or does not parse',
+  );
+}
+
+// Everything else loads here, AFTER the guard has had its say. The order is the
+// order the static import list used to have, and the bindings keep their names.
+const { serve } = await import('@hono/node-server');
+const { Hono } = await import('hono');
+const { logger } = await import('hono/logger');
+const { corsMiddleware } = await import('./middleware/cors.js');
+const { errorMiddleware } = await import('./middleware/error.js');
+const { appAuthMiddleware, createAppAuthBff } = await import('./middleware/app-auth.js');
+const { requireAdmin } = await import('./middleware/require-admin.js');
+const { adminRouter } = await import('./domains/admin/index.js');
+const { findersPublicRouter } = await import('./domains/finders/public-routes.js');
+const { linksRouter } = await import('./domains/links/routes.js');
+const { referralsRouter } = await import('./domains/referrals/routes.js');
+const { finderRouter } = await import('./domains/finder/routes.js');
+const { hmacVerifyMiddleware } = await import('./domains/conversions/hmac-middleware.js');
+const { conversionsAdminRouter, conversionsRouter } = await import(
+  './domains/conversions/routes.js'
+);
+const { commissionsAdminRouter, commissionsRouter } = await import(
+  './domains/commissions/routes.js'
+);
+const { payoutsAdminRouter, payoutsRouter } = await import('./domains/payouts/routes.js');
+const { salesOpsRouter } = await import('./domains/sales-ops/routes.js');
+const { auditRouter } = await import('./domains/audit/routes.js');
+const { setupNightlyJob } = await import('./jobs/nightly-job.js');
+const { healthRouter } = await import('./routes/health.js');
 
 const app = new Hono();
 
