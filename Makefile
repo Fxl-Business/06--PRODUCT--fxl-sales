@@ -1,4 +1,4 @@
-.PHONY: dev front back install setup setup-no-db build build-shared build-web build-api \
+.PHONY: dev front back stg back-stg front-stg install setup setup-no-db build build-shared build-web build-api \
        lint lint-fix type-check check \
        migrate db-up db-down db-reset docker-up docker-down docker-build \
        clean preview help doctor
@@ -24,6 +24,36 @@ front: ## Run only the frontend
 
 back: build-shared ## Run only the API
 	pnpm --filter @fxl-sales/api dev
+
+# --- Staging ---
+#
+# Staging is opt-in BY NAME and never by default. `back-stg` names
+# apps/api/.env.staging through SALES_ENV_FILE; `front-stg` names
+# apps/web/.env.staging through vite's --mode. Both files are gitignored and
+# hold real values; the committed shapes are the .env.staging.example files.
+#
+# There is deliberately NO `migrate-stg` target, and none is to be added.
+# Applying DDL to staging is a DEPLOY step, run by the deploy pipeline against
+# the deploy's own credentials - not a target sitting one typo away from
+# `make migrate` on a developer's machine. If you came here to add it: don't.
+
+stg: ## Interactive app selector for STAGING - pick api or web to run
+	@printf "Which app do you want to run against STAGING?\n"
+	@printf "  1) api     (SALES_ENV_FILE=.env.staging)\n"
+	@printf "  2) web     (vite --mode staging)\n"
+	@printf "Selection [1-2]: "
+	@read choice; \
+	case "$$choice" in \
+		1) $(MAKE) back-stg ;; \
+		2) $(MAKE) front-stg ;; \
+		*) echo "Invalid choice: $$choice"; exit 1 ;; \
+	esac
+
+front-stg: ## Run only the frontend against staging (reads apps/web/.env.staging)
+	pnpm --filter @fxl-sales/web dev --mode staging
+
+back-stg: build-shared ## Run only the API against staging (reads apps/api/.env.staging)
+	SALES_ENV_FILE=.env.staging pnpm --filter @fxl-sales/api dev
 
 # --- Setup ---
 
@@ -80,7 +110,14 @@ db-up: ## Start PostgreSQL only
 db-down: ## Stop PostgreSQL
 	docker compose down db
 
-db-reset: ## Destroy and recreate database volume
+# db-reset chains `migrate`, and that chain is what once carried DDL to staging.
+# The line below is an ANNOUNCEMENT, not a guard: it prints the host that
+# `migrate` is about to receive, before anything is destroyed, so a wrong host is
+# visible while the prompt is still yours to abort. The enforcement lives in
+# apps/api/src/db/migrate.ts and refuses by exit code. Host and port only - never
+# a user, never a password, never the whole URL.
+db-reset: ## Destroy and recreate database volume (announces the target host first)
+	@node -e 'const fs=require("fs");const p="apps/api/.env";let host="(unknown - no DATABASE_URL in environment or apps/api/.env)";try{let raw=process.env.DATABASE_URL||"";if(!raw){const line=fs.readFileSync(p,"utf8").split("\n").map(s=>s.trim()).filter(s=>s.startsWith("DATABASE_URL=")).pop();if(line)raw=line.slice(13).trim().replace(/"/g,"");}if(raw){const u=new URL(raw);host=u.hostname+":"+(u.port||"5432");}}catch(e){host="(unknown - DATABASE_URL unreadable or unparseable)";}console.log("db-reset: migrations will target host "+host);'
 	docker compose down db -v
 	docker compose up db -d
 	@echo "Waiting for PostgreSQL..."
