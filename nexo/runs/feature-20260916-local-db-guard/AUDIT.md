@@ -92,6 +92,32 @@ guard really is first.
 one resolver, and it is what makes them unable to diverge - but it is a real change for anyone who
 keeps overrides in `.env.local`.
 
+## A gate of MINE was vacuous, and a verifier caught it
+
+The secret-leak sweep I wrote into the wave-1 and wave-2 verify contracts used
+
+```sh
+git grep -n -E '^\s*SALES_ENV_FILE=' -- . ':(exclude)nexo'
+```
+
+`git grep`'s ERE does NOT honour `\s`, and the one legitimate assignment is TAB-indented inside the
+`Makefile`'s `back-stg` recipe. So the pattern matched nothing and reported a clean sweep WITHOUT
+HAVING LOOKED. Measured directly afterwards: the `\s` form exits 1 finding nothing, while
+
+```sh
+git grep -n -E '^[[:space:]]*SALES_ENV_FILE=' -- . ':(exclude)nexo'
+```
+
+exits 0 and finds `Makefile:56`, which is the expected and only hit.
+
+Nothing was actually leaked - the corrected pattern confirms exactly one assignment, and it is the
+mandated one. But the check had been passing for the wrong reason, which is the same failure mode as
+an oracle that certifies nothing. The wave-2 verifier found it by re-running the check rather than
+trusting the pattern it was handed, and wave 3 uses the corrected form.
+
+Worth keeping because it generalises: a grep-based gate that reports "clean" is indistinguishable
+from a grep-based gate that is broken, unless something proves it can still find a known hit.
+
 ## Blockers and parks during execution
 
 (none yet)
