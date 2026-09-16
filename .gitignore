@@ -6,6 +6,11 @@ dist/
 .env.*.local
 .env.test
 **/.env.test
+# Real staging credentials. `.env.staging` is loaded BY NAME (see `make stg`),
+# never as a default, and it holds a live database URL. The committed shape
+# lives in .env.staging.example instead.
+.env.staging
+**/.env.staging
 *.log
 .DS_Store
 .turbo
@@ -13,6 +18,10 @@ dist/
 
 # TypeScript build artifacts
 *.tsbuildinfo
+
+# Nexo live run state (status.json process tree). Never committed; the durable
+# record lives under nexo/runs/ instead.
+.nexo/
 
 # Tool caches
 .superpowers/
