@@ -1,7 +1,7 @@
 ---
 id: 02-local-database-guard
 milestone: v4.1.0
-status: todo
+status: done
 depends_on: [01-env-file-resolution]
 files_modified:
   - apps/api/src/db/local-database-guard.ts

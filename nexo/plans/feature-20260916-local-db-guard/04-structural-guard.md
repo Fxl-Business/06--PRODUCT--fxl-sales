@@ -1,7 +1,7 @@
 ---
 id: 04-structural-guard
 milestone: v4.1.0
-status: todo
+status: done
 depends_on: [02-local-database-guard]
 files_modified:
   - scripts/__tests__/local-database-guard.test.mjs

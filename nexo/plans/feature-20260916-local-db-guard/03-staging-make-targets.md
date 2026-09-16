@@ -1,7 +1,7 @@
 ---
 id: 03-staging-make-targets
 milestone: v4.1.0
-status: todo
+status: done
 depends_on: [01-env-file-resolution]
 files_modified:
   - Makefile

@@ -1,7 +1,7 @@
 ---
 id: 01-env-file-resolution
 milestone: v4.1.0
-status: todo
+status: done
 depends_on: []
 files_modified:
   - apps/api/src/config/env-files.ts
