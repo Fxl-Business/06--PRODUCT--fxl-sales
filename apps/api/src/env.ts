@@ -1,14 +1,15 @@
-import { config } from 'dotenv';
-import { resolve } from 'node:path';
 import { z } from 'zod';
+import { API_ROOT_DIR, loadEnvFiles } from './config/env-files.js';
 
 // Load apps/api/.env first (committed dev defaults from .env.dev.example),
-// then apps/api/.env.local on top (gitignored per-dev override). Path
-// resolves identically in dev (src/env.ts) and prod (dist/env.js) - both
-// sit one dir below apps/api.
-const baseDir = resolve(import.meta.dirname, '..');
-config({ path: resolve(baseDir, '.env') });
-config({ path: resolve(baseDir, '.env.local'), override: true });
+// then apps/api/.env.local on top (gitignored per-dev override), then - only
+// when the operator named one - SALES_ENV_FILE last, with override.
+//
+// The ordering, the path maths and the refusal when a named file cannot be read
+// all live in config/env-files.ts, because src/db/migrate.ts has to reach the
+// SAME environment and used to reach a different one through a bare
+// `import 'dotenv/config'`.
+export const { namedEnvFile } = loadEnvFiles({ baseDir: API_ROOT_DIR, bag: process.env });
 
 // Treat empty strings as "unset" so `.optional()` works for keys that the
 // user left blank in .env / .env.local. Without this, `SENTRY_DSN=` (no
