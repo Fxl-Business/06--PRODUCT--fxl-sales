@@ -1,7 +1,7 @@
 import { and, asc, eq, max, ne } from 'drizzle-orm';
 import type { getDb } from '../../../db/client.js';
 import { salesOpsLeadStages } from '../../../db/schema.js';
-import { withTenant } from '../service.js';
+import { withTenant } from './with-tenant.js';
 import type { LeadStageInput } from './schemas.js';
 
 type Db = ReturnType<typeof getDb>;
