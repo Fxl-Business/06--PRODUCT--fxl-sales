@@ -6,6 +6,8 @@ import {
   ContactRound,
   Database,
   Layers,
+  LayoutGrid,
+  ListChecks,
   Search,
   Tags,
   UsersRound,
@@ -29,7 +31,9 @@ export type SalesOpsView =
   | 'clientes'
   | 'pessoas'
   | 'funcoes'
-  | 'geral';
+  | 'geral'
+  | 'leads'
+  | 'etapas';
 
 export type SalesOpsNavigationItem = {
   id: SalesOpsView;
@@ -60,6 +64,12 @@ const tacticalTeam: SalesOpsNavigationItem[] = [
 const operational: SalesOpsNavigationItem[] = [
   { id: 'vendas', label: 'Propostas', icon: BriefcaseBusiness },
   { id: 'comissoes', label: 'Comissões', icon: BadgeDollarSign },
+  /*
+    APPENDED, never prepended. `getDefaultSalesOpsRoute` lands on `[0]` of this
+    list, so the first entry is the `operacional` landing ROUTE: moving it
+    rewrites where every `Trocar painel` click arrives.
+  */
+  { id: 'leads', label: 'Prospecção', icon: LayoutGrid },
 ];
 
 const cadastros: SalesOpsNavigationItem[] = [
@@ -68,12 +78,23 @@ const cadastros: SalesOpsNavigationItem[] = [
   { id: 'clientes', label: 'Clientes', icon: ContactRound },
   { id: 'pessoas', label: 'Pessoas', icon: UsersRound },
   { id: 'funcoes', label: 'Funções', icon: Tags },
+  /*
+    Before `geral`, which is the settings-and-history catch-all and stays last.
+    `produtos` remains `[0]`, so the Cadastros landing route does not move.
+  */
+  { id: 'etapas', label: 'Etapas do funil', icon: ListChecks },
   { id: 'geral', label: 'Geral', icon: Cog },
 ];
 
 const meusDadosSeller: SalesOpsNavigationItem[] = [
   { id: 'vendedores', label: 'Meu painel', icon: UsersRound },
   { id: 'comissoes', label: 'Comissões', icon: BadgeDollarSign },
+  /*
+    APPENDED: `[0]` here is where EVERY seller's session starts.
+    Seller only - a finder gains no personal lead scope, so `meusDadosFinder`
+    is deliberately byte-unchanged.
+  */
+  { id: 'leads', label: 'Minha prospecção', icon: LayoutGrid },
 ];
 
 const meusDadosFinder: SalesOpsNavigationItem[] = [
