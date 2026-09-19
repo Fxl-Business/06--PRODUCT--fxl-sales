@@ -26,8 +26,22 @@ export type LeadsBoardContainerProps = {
   products: SalesOpsProduct[];
   /** Built by the routing layer with `hasFuncao(person, FUNCAO_SLUG_VENDEDOR)`. */
   sellers: ComboboxOption[];
-  /** Controlled vendedor filter; the routing layer owns the state. */
-  sellerFilter?: { value: string | null; onChange: (value: string | null) => void };
+  /**
+   * Whether to OFFER the vendedor narrowing filter. `true` under `operacional`
+   * (the team board), `false` under `meus-dados`.
+   *
+   * It is NOT a scope switch and must never be read as one. A seller's board is
+   * narrowed SERVER-side inside `withTenant` from the verified token; this boolean
+   * only decides whether an admin is offered a control, and setting it `true` for
+   * a seller would add a picker, not data.
+   *
+   * The STATE behind it lives here and not in `SalesOpsApp.tsx`, unlike
+   * `productKind`: that one is hoisted because the shell's header action READS it,
+   * and nothing in the shell chrome reads this one. It is component state and not
+   * URL state for the same reason `productKind` is - the URL is the source of
+   * truth for the painel and the page, and a narrowing filter is neither.
+   */
+  showSellerFilter?: boolean;
   /** Forwarded verbatim to `LeadsBoard`. The conversion flow's entire attachment surface. */
   onRequestConversion?: (request: LeadConversionRequest) => Promise<string | null>;
 };
@@ -53,16 +67,20 @@ export function LeadsBoardContainer({
   people,
   products,
   sellers,
-  sellerFilter,
+  showSellerFilter = false,
   onRequestConversion,
 }: LeadsBoardContainerProps) {
+  const [sellerPersonId, setSellerPersonId] = React.useState<string | null>(null);
   // The columns are resolved FIRST: the board query fans out one request per
   // stage and the API requires a `stageId`, so without the stage list there is
   // nothing to ask for.
   const stagesQuery = useLeadStages();
   const stages = React.useMemo(() => stagesQuery.data ?? [], [stagesQuery.data]);
 
-  const sellerFilterValue = sellerFilter?.value ?? null;
+  // A filter that is not OFFERED can never narrow: an operator who filters under
+  // `operacional` and then opens their own board must not carry that narrowing
+  // into a query the server has already scoped.
+  const sellerFilterValue = showSellerFilter ? sellerPersonId : null;
   /*
     Memoized on the VALUE alone, and the same object reaches both hooks: the
     mutation patches the cache entry the board reads, so a mismatch would
@@ -127,12 +145,12 @@ export function LeadsBoardContainer({
         }}
         onMoveLead={(payload) => moveLead.mutate(payload)}
         onRequestConversion={onRequestConversion}
-        {...(sellerFilter
+        {...(showSellerFilter
           ? {
               sellerFilter: {
-                value: sellerFilter.value,
+                value: sellerPersonId,
                 options: sellers,
-                onChange: sellerFilter.onChange,
+                onChange: setSellerPersonId,
               },
             }
           : {})}

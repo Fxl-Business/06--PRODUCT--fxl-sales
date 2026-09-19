@@ -130,6 +130,8 @@ import { CadastroHistorySection } from './CadastroHistoryPanel';
 import { ForbiddenPanel } from './ForbiddenPanel';
 import { MissingEntitlementPanel } from './MissingEntitlementPanel';
 import { ProfessionalSplitPanel } from './ProfessionalSplitPanel';
+import { LeadsBoardContainer } from './leads/LeadsBoardContainer';
+import { LeadStagesContainer } from './leads/LeadStagesContainer';
 import {
   addMonthsToIsoDate,
   buildDashboardModel,
@@ -406,6 +408,20 @@ function titleForView(view: SalesOpsView, workspace: SalesOpsWorkspace) {
     geral: {
       title: 'Geral',
       subtitle: 'Empresa, comissão padrão, financeiro e preferências',
+    },
+    /*
+      The `personal` ternary mirrors `vendas` and `comissoes`, the only other two
+      views that render in both a team and a personal workspace.
+    */
+    leads: {
+      title: personal ? 'Minha prospecção' : 'Prospecção',
+      subtitle: personal
+        ? 'Seus leads em negociação, por etapa, com o tempo parado em cada uma'
+        : 'Leads em negociação por etapa, com vendedor responsável e tempo parado',
+    },
+    etapas: {
+      title: 'Etapas do funil',
+      subtitle: 'Etapas configuráveis do quadro de prospecção, na ordem em que aparecem nele',
     },
   };
   return map[view];
@@ -1201,6 +1217,27 @@ export function SalesOpsApp() {
     [bootstrap.funcoes, persistedBootstrap],
   );
   const dashboard = useMemo(() => buildDashboardModel(persistedBootstrap), [persistedBootstrap]);
+  /**
+   * The vendedor options for the lead board and the lead dialog. Built HERE, not
+   * in `leads/`, because `hasFuncao` and `FUNCAO_SLUG_VENDEDOR` are module-local
+   * to this file: `react-refresh/only-export-components` allows only component
+   * exports from this module, so they cannot be exported, and re-deriving them in
+   * `leads/` would be exactly the per-call-site slug comparison CLAUDE.md forbids.
+   *
+   * Resolved through `person.funcoes`, never through the deprecated `is_seller`
+   * mirror. Active pessoas only: an archived pessoa disappears from every
+   * assignment picker.
+   *
+   * `persistedBootstrap` and not `bootstrap`: an in-flight optimistic pessoa must
+   * not become a selectable vendedor on a lead that is about to be written.
+   */
+  const leadSellerOptions = useMemo(
+    () =>
+      persistedBootstrap.people
+        .filter((person) => person.status === 'active' && hasFuncao(person, FUNCAO_SLUG_VENDEDOR))
+        .map((person) => ({ value: person.id, label: person.displayName })),
+    [persistedBootstrap.people],
+  );
   const filteredSales = useMemo(() => {
     return bootstrap.sales.filter((sale) => {
       if (salesFilters.status !== 'all' && sale.status !== salesFilters.status) return false;
@@ -1353,8 +1390,14 @@ export function SalesOpsApp() {
     setSaleWizard({ mode: 'create' });
   }
 
+  /*
+    `leads` and `etapas` join `geral` at the head of the chain because both screens
+    draw their own primary button (`Novo lead`, `Nova etapa`). Without naming them
+    the chain falls through to `'Nova proposta'`, which would render a proposta
+    button over a Kanban board and open the wizard from it.
+  */
   const headerAction =
-    view === 'geral'
+    view === 'geral' || view === 'leads' || view === 'etapas'
       ? null
       : view === 'produtos'
         ? productKind === 'service'
@@ -1931,6 +1974,27 @@ export function SalesOpsApp() {
                     onEdit={(funcao) => setModal({ kind: 'funcao', funcao })}
                   />
                 ) : null}
+                {view === 'leads' ? (
+                  /*
+                    ONE component for both routes. The difference between the team
+                    board and a seller's board is NOT this boolean - the scope is
+                    applied on the SERVER inside `withTenant` from the verified
+                    token. `showSellerFilter` only decides whether an admin is
+                    OFFERED the narrowing picker; flipping it for a seller would add
+                    a control, never a row.
+                    `persistedBootstrap` throughout: an optimistic cadastro row
+                    belongs to the cadastro screen that created it, never to a
+                    picker on another page.
+                  */
+                  <LeadsBoardContainer
+                    clients={persistedBootstrap.clients}
+                    people={persistedBootstrap.people}
+                    products={persistedBootstrap.products}
+                    sellers={leadSellerOptions}
+                    showSellerFilter={workspace === 'operacional'}
+                  />
+                ) : null}
+                {view === 'etapas' ? <LeadStagesContainer /> : null}
                 {view === 'geral' ? (
                   /*
                     The history is a SIBLING of `SettingsView`, never nested inside it:
