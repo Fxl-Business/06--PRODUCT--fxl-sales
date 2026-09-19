@@ -162,6 +162,13 @@
       "when": 1789781107269,
       "tag": "0022_sales_ops_leads",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1789782282603,
+      "tag": "0023_lead_seller_identity",
+      "breakpoints": true
     }
   ]
 }

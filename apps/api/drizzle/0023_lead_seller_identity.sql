@@ -1,0 +1,25 @@
+-- 0023_lead_seller_identity - the join from a verified Hub token to a pessoa.
+--
+-- The kanban board must scope a seller to their own leads ON THE SERVER, inside
+-- withTenant. That is impossible without knowing which pessoa the caller IS, and
+-- sales_ops_people had no account column at all: the two tables that do carry
+-- one (finders, sellers) are the legacy affiliate half, not the sales-ops
+-- cadastro. This column is that missing edge, and nothing else.
+--
+-- The index is PARTIAL on purpose. One Hub account is at most one pessoa per
+-- org, while the many pessoas who are not Hub accounts at all stay NULL and are
+-- not constrained - exactly the unique-with-NULLs shape finders.account_id
+-- already uses. It is also the database-level backstop under the one-shot
+-- self-claim in leads/lead-service.ts: a second claim of an already-claimed row
+-- cannot commit even if the service's `hub_account_id IS NULL` predicate were
+-- ever deleted.
+--
+-- No backfill, deliberately. NULL means "not yet claimed", and the scope
+-- resolver answers an unresolvable caller with 403 seller_person_unmapped rather
+-- than degrading into an unscoped read. Guessing a pessoa from historical text
+-- is the third-party heuristic this repo already rejected for the audit ledger.
+--
+-- sales_ops_people already carries its row-level security policies from 0009; a
+-- new column inherits them, so no policy statement belongs here.
+ALTER TABLE "sales_ops_people" ADD COLUMN "hub_account_id" text;--> statement-breakpoint
+CREATE UNIQUE INDEX "sales_ops_people_org_hub_account_idx" ON "sales_ops_people" USING btree ("org_id","hub_account_id") WHERE "sales_ops_people"."hub_account_id" is not null;

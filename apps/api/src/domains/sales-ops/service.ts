@@ -158,6 +158,17 @@ const PersonFieldsSchema = z.object({
   status: z.enum(['active', 'inactive']).default('active'),
   // Forward contract: the assignment set is authoritative when present.
   funcaoIds: z.array(uuid).optional(),
+  /**
+   * The Hub account id this pessoa IS, or null.
+   *
+   * This is the ONLY join from a verified token to a cadastro row, and the leads
+   * board's server-side seller scoping is built on it. Admin-writable here
+   * through PATCH /people/:id, and self-claimed once from the caller's own
+   * verified token e-mail by leads/lead-service.ts#resolveCallerPersonId - see
+   * there for why a token claiming its OWN verified e-mail is not the
+   * third-party name guess this repo rejects for the audit ledger.
+   */
+  hubAccountId: z.string().trim().min(1).max(255).nullish(),
   /** @deprecated compat shim - accepted only while the web build predates slice 09. */
   isSeller: z.boolean().optional(),
   /** @deprecated compat shim - accepted only while the web build predates slice 09. */
@@ -1519,6 +1530,10 @@ export async function createPerson(
         status: data.status,
         orgId,
         contactEmail: data.contactEmail || null,
+        // Conditional, so a body with no hubAccountId key writes nothing and the
+        // column keeps its NULL default. createPerson does NOT spread `data`, so
+        // an unconditional key here is the only way this reaches the row.
+        ...(data.hubAccountId !== undefined ? { hubAccountId: data.hubAccountId } : {}),
         ...deriveBooleanMirrors(resolved),
       })
       .returning();
@@ -1571,6 +1586,12 @@ export async function updatePerson(
         // Consequence for later slices: any PATCH that omits contactEmail clears
         // it, so a caller sending funcaoIds must send contactEmail alongside.
         contactEmail: data.contactEmail || null,
+        // Conditional and NOT unconditional like contactEmail above: an absent
+        // key must leave an existing claim in place, because every shipped PATCH
+        // from the Pessoa dialog omits it and would otherwise clear the one join
+        // the leads board's seller scoping depends on. Sending `null` clears it,
+        // which is the admin repair path for a claim bound to the wrong pessoa.
+        ...(data.hubAccountId !== undefined ? { hubAccountId: data.hubAccountId } : {}),
         ...(resolved ? deriveBooleanMirrors(resolved) : {}),
         ...archivedAtPatch(current.status, data.status ?? current.status, 'inactive'),
         updatedAt: new Date(),

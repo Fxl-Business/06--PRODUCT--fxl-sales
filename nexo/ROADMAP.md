@@ -14,6 +14,8 @@
 
 (one line per intent; Nexo files new requests here)
 
+- feat: a web control for `sales_ops_people.hub_account_id`. Slice 03 of `feature-20260918-kanban-pipeline-leads` added the column - the only join from a verified Hub token to a cadastro pessoa, and what makes the leads board's seller scoping enforceable on the SERVER. It is written two ways today and neither is a screen: an admin `PATCH /people/:id {hubAccountId}`, and a one-shot self-claim from the caller's own verified token e-mail (exactly one active in-org candidate whose `hub_account_id IS NULL`). An org whose sellers' `contact_email` does not match their Hub login therefore needs an admin PATCH before those sellers see any board at all - until then they get `403 seller_person_unmapped`, which is a refusal and never an unscoped read. The Pessoa dialog is where the control belongs; remember that a person write is a full-set replacement, so it must send `contactEmail` alongside.
+
 - feat: dashboard funnel per área/produto/vendedor with real month filtering (Phase 2 of Propostas)
 - feat: contract document generation from a won proposta (Phase 3)
 - chore: add mutation testing tooling (feature-boundary gate currently skipped)

@@ -447,6 +447,19 @@ export const salesOpsPeople = pgTable(
     orgId: text('org_id').notNull(),
     displayName: text('display_name').notNull(),
     contactEmail: text('contact_email'),
+    /**
+     * The Hub account id this pessoa IS, or NULL for the many pessoas who are
+     * not Hub accounts at all.
+     *
+     * This is the ONLY join from a verified token to a cadastro row, and the
+     * leads board's server-side seller scoping is built on it: without it the
+     * server cannot know which pessoa the caller is, and acceptance 15 forbids
+     * scoping in the client. Written by an admin through PATCH /people/:id, or
+     * self-claimed exactly once from the caller's own verified token e-mail -
+     * see resolveCallerPersonId in leads/lead-service.ts for the four guards on
+     * that path.
+     */
+    hubAccountId: text('hub_account_id'),
     status: text('status').notNull().default('active'), // 'active' | 'inactive'
     /** @see archivedAt on sales_ops_areas - identical contract, 'inactive' spelling. */
     archivedAt: timestamp('archived_at', { withTimezone: true }),
@@ -472,6 +485,13 @@ export const salesOpsPeople = pgTable(
     index('sales_ops_people_org_id_idx').on(t.orgId, t.displayName),
     // Composite-FK target for sales_ops_person_funcoes.(org_id, person_id).
     uniqueIndex('sales_ops_people_org_id_id_idx').on(t.orgId, t.id),
+    // PARTIAL unique: one Hub account is at most one pessoa per org, while every
+    // pessoa who is not a Hub account stays NULL and is not constrained at all.
+    // Same shape and same reason as finders.account_id. It is also what makes a
+    // second self-claim of an already-claimed row impossible at the database.
+    uniqueIndex('sales_ops_people_org_hub_account_idx')
+      .on(t.orgId, t.hubAccountId)
+      .where(sql`${t.hubAccountId} is not null`),
   ],
 );
 

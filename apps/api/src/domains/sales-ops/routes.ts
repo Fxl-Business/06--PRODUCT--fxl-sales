@@ -4,6 +4,7 @@ import { getDb } from '../../db/client.js';
 import { getHubActorDisplayName } from '../../middleware/app-auth.js';
 import { requireAdmin } from '../../middleware/require-admin.js';
 import { HISTORY_MAX_LIMIT, listOrgAuditHistory } from '../audit/history-service.js';
+import { leadsRouter } from './leads/lead-routes.js';
 import { leadStagesRouter } from './leads/stage-routes.js';
 import {
   AreaSchema,
@@ -286,6 +287,12 @@ salesOpsRouter.patch('/funcoes/:id', requireAdmin, async (c) => {
 // The lead stage cadastro owns the whole /lead-stages... path, so the mount
 // prefix is '/'. The lead entity mounts its own router separately at '/leads'.
 salesOpsRouter.route('/', leadStagesRouter);
+
+// The lead entity. Two imports, two mounts, two distinct identifiers and no
+// alias: '/lead-stages...' and '/leads...' do not overlap, and naming the
+// difference here is what keeps a reader from thinking one router grew a second
+// responsibility. There is no DELETE verb on either.
+salesOpsRouter.route('/leads', leadsRouter);
 
 salesOpsRouter.get('/sales', async (c) => {
   const sales = await listSales(getDb(), c.get('orgId'));
