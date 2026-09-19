@@ -4,6 +4,7 @@ import { getDb } from '../../db/client.js';
 import { getHubActorDisplayName } from '../../middleware/app-auth.js';
 import { requireAdmin } from '../../middleware/require-admin.js';
 import { HISTORY_MAX_LIMIT, listOrgAuditHistory } from '../audit/history-service.js';
+import { leadStagesRouter } from './leads/stage-routes.js';
 import {
   AreaSchema,
   CancelContractSchema,
@@ -281,6 +282,10 @@ salesOpsRouter.patch('/funcoes/:id', requireAdmin, async (c) => {
   if (!funcao) return c.json({ error: 'not_found' }, 404);
   return c.json({ funcao });
 });
+
+// The lead stage cadastro owns the whole /lead-stages... path, so the mount
+// prefix is '/'. The lead entity mounts its own router separately at '/leads'.
+salesOpsRouter.route('/', leadStagesRouter);
 
 salesOpsRouter.get('/sales', async (c) => {
   const sales = await listSales(getDb(), c.get('orgId'));
