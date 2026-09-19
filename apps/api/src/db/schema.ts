@@ -645,6 +645,8 @@ export const salesOpsProducts = pgTable(
   (t) => [
     index('sales_ops_products_org_id_idx').on(t.orgId, t.name),
     uniqueIndex('sales_ops_products_org_code_suffix_idx').on(t.orgId, t.codeSuffix),
+    // Composite-FK target for sales_ops_lead_products.(org_id, product_id).
+    uniqueIndex('sales_ops_products_org_id_id_idx').on(t.orgId, t.id),
     check('sales_ops_products_kind_check', sql`${t.kind} in ('product', 'service')`),
     check(
       'sales_ops_products_kind_open_price_check',
@@ -728,7 +730,11 @@ export const salesOpsClients = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }),
   },
-  (t) => [index('sales_ops_clients_org_id_idx').on(t.orgId, t.name)],
+  (t) => [
+    index('sales_ops_clients_org_id_idx').on(t.orgId, t.name),
+    // Composite-FK target for sales_ops_leads.(org_id, client_id).
+    uniqueIndex('sales_ops_clients_org_id_id_idx').on(t.orgId, t.id),
+  ],
 );
 
 export const salesOpsSettings = pgTable('sales_ops_settings', {
@@ -797,6 +803,8 @@ export const salesOpsSales = pgTable(
   (t) => [
     uniqueIndex('sales_ops_sales_org_sequence_idx').on(t.orgId, t.sequence),
     index('sales_ops_sales_org_status_idx').on(t.orgId, t.status),
+    // Composite-FK target for sales_ops_leads.(org_id, sale_id).
+    uniqueIndex('sales_ops_sales_org_id_id_idx').on(t.orgId, t.id),
   ],
 );
 
@@ -872,6 +880,213 @@ export const salesOpsSaleProfessionals = pgTable(
       columns: [t.orgId, t.funcaoId],
       foreignColumns: [salesOpsFuncoes.orgId, salesOpsFuncoes.id],
       name: 'sales_ops_sale_professionals_org_funcao_fk',
+    }).onDelete('restrict'),
+  ],
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// sales_ops_lead_stages - the kanban pipeline's columns, org-configurable.
+//
+// NOTE the naming trap: the legacy referral-funnel table above is `leads`
+// (`export const leads`). This feature's tables are `sales_ops_*` and are a
+// different domain entirely. Do not merge the two.
+// ─────────────────────────────────────────────────────────────────────────────
+export const salesOpsLeadStages = pgTable(
+  'sales_ops_lead_stages',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    // pt-BR display label shown on the board and in Cadastros.
+    orgId: text('org_id').notNull(),
+    name: text('name').notNull(),
+    /**
+     * The machine key. A text discriminator plus a CHECK, exactly as
+     * sales_ops_products.kind, and deliberately NOT two booleans: the three
+     * categories are mutually exclusive, so a single column makes
+     * `is_conversion AND is_lost` unrepresentable rather than merely rejected.
+     *
+     * 'conversion' is the single stage whose entry hands control to the proposta
+     * wizard; a card only lands there once POST /sales returns 201.
+     * 'lost' is the single terminal-negative stage, which requires a reason.
+     * There is no 'converted' kind and no 'open' kind.
+     */
+    kind: text('kind').notNull().default('normal'), // 'normal' | 'conversion' | 'lost'
+    /**
+     * Guards rename and archive, exactly as on sales_ops_funcoes. Held equal to
+     * `kind <> 'normal'` by sales_ops_lead_stages_system_kind_check, so the two
+     * orthogonal facts ("may the API rename this?" and "what does this stage
+     * mean?") can never drift apart.
+     */
+    isSystem: boolean('is_system').notNull().default(false),
+    /**
+     * Board order. Deliberately NOT unique per org: a reorder has to pass through
+     * a transient duplicate, and a non-deferrable unique index would force a
+     * two-pass update for no gain. The board read orders by ("position", name),
+     * so ties are still deterministic. Always double-quoted in hand-written SQL.
+     */
+    position: integer('position').notNull().default(0),
+    status: text('status').notNull().default('active'), // 'active' | 'archived'
+    /**
+     * @see archivedAt on sales_ops_areas - identical contract, with one
+     * difference: a lead stage is NEVER purged. A hard-deleted stage would orphan
+     * every lead naming it, and the restrict FK from sales_ops_leads makes the
+     * attempt fail as 23503 anyway, which the nightly purge already treats as
+     * "skip". Written by the stage cadastro, read by nobody in this feature.
+     */
+    archivedAt: timestamp('archived_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }),
+  },
+  (t) => [
+    // A REAL database uniqueness rule, mirroring sales_ops_funcoes_org_name_idx,
+    // and what the API surfaces as 409 stage_name_taken. A service-level probe
+    // alone is a time-of-check/time-of-use race two concurrent admins walk past.
+    uniqueIndex('sales_ops_lead_stages_org_name_idx').on(t.orgId, t.name),
+    // Composite-FK target for sales_ops_leads.(org_id, stage_id).
+    uniqueIndex('sales_ops_lead_stages_org_id_id_idx').on(t.orgId, t.id),
+    index('sales_ops_lead_stages_org_position_idx').on(t.orgId, t.position),
+    // Exactly one conversion stage and exactly one lost stage per org, and any
+    // number of normal ones. One partial index gives both rules at once.
+    uniqueIndex('sales_ops_lead_stages_org_kind_idx')
+      .on(t.orgId, t.kind)
+      .where(sql`${t.kind} <> 'normal'`),
+    check('sales_ops_lead_stages_kind_check', sql`${t.kind} in ('normal', 'conversion', 'lost')`),
+    check('sales_ops_lead_stages_system_kind_check', sql`(${t.kind} <> 'normal') = ${t.isSystem}`),
+  ],
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// sales_ops_leads - one card on the kanban board.
+//
+// Every FK that crosses a tenant boundary is COMPOSITE on (org_id, <fk>): a
+// foreign key does not consult the RLS predicate, so a single-column FK would
+// accept another org's id whenever a service filter was forgotten. All four are
+// MATCH SIMPLE (the default), so a NULL client_id / seller_person_id / sale_id
+// skips the lookup entirely - which is exactly what an unlinked company, an
+// unassigned lead and an unconverted lead need.
+// ─────────────────────────────────────────────────────────────────────────────
+export const salesOpsLeads = pgTable(
+  'sales_ops_leads',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: text('org_id').notNull(),
+    contactName: text('contact_name').notNull(),
+    /**
+     * Empresa. Nullable id + ALWAYS-written snapshot, exactly as
+     * sales_ops_sales.(client_id, client_name_snapshot). The snapshot IS the
+     * free-text fallback: a lead may name a company that has no cadastro row, and
+     * creating a lead NEVER inserts into sales_ops_clients - conversion does that,
+     * and not before.
+     */
+    clientId: uuid('client_id'),
+    clientNameSnapshot: text('client_name_snapshot').notNull(),
+    /**
+     * The ESTIMATE. Integer cents, like every other money column. The name says
+     * "estimated" so no reader can mistake it for a priced total: nothing here
+     * reaches getSalesOpsSummary, the dashboard or computeSaleFinancials.
+     */
+    estimatedValueBrl: integer('estimated_value_brl').notNull().default(0),
+    description: text('description'),
+    /**
+     * Nullable: a lead may sit unassigned. Server-side seller scoping therefore
+     * shows an unassigned lead to admins only, which is correct.
+     */
+    sellerPersonId: uuid('seller_person_id'),
+    sellerNameSnapshot: text('seller_name_snapshot').notNull().default(''),
+    stageId: uuid('stage_id').notNull(),
+    /**
+     * Changes ONLY when stage_id changes - never on an ordinary edit and never on
+     * a reorder. That is a service-layer rule; there is deliberately no trigger.
+     */
+    stageChangedAt: timestamp('stage_changed_at', { withTimezone: true }).defaultNow().notNull(),
+    position: integer('position').notNull().default(0),
+    lostReason: text('lost_reason'),
+    /**
+     * The post-conversion link. Written once, after POST /sales returns 201.
+     * NULL for every lead that has not converted.
+     */
+    saleId: uuid('sale_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }),
+  },
+  (t) => [
+    // Composite-FK target for sales_ops_lead_products.(org_id, lead_id).
+    uniqueIndex('sales_ops_leads_org_id_id_idx').on(t.orgId, t.id),
+    index('sales_ops_leads_org_stage_position_idx').on(t.orgId, t.stageId, t.position),
+    index('sales_ops_leads_org_seller_idx').on(t.orgId, t.sellerPersonId),
+    // At most one lead per venda; PARTIAL, so any number of leads sit unconverted.
+    uniqueIndex('sales_ops_leads_org_sale_idx')
+      .on(t.orgId, t.saleId)
+      .where(sql`${t.saleId} is not null`),
+    // restrict everywhere: a stage, a cliente, a pessoa and a venda all carry
+    // history a lead still names.
+    foreignKey({
+      columns: [t.orgId, t.stageId],
+      foreignColumns: [salesOpsLeadStages.orgId, salesOpsLeadStages.id],
+      name: 'sales_ops_leads_org_stage_fk',
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [t.orgId, t.clientId],
+      foreignColumns: [salesOpsClients.orgId, salesOpsClients.id],
+      name: 'sales_ops_leads_org_client_fk',
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [t.orgId, t.sellerPersonId],
+      foreignColumns: [salesOpsPeople.orgId, salesOpsPeople.id],
+      name: 'sales_ops_leads_org_seller_fk',
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [t.orgId, t.saleId],
+      foreignColumns: [salesOpsSales.orgId, salesOpsSales.id],
+      name: 'sales_ops_leads_org_sale_fk',
+    }).onDelete('restrict'),
+    // "Perdido requires a reason" is NOT here and must never become a CHECK or a
+    // trigger: the rule needs the lead's stage kind, which is a join to
+    // sales_ops_lead_stages, and a CHECK constraint may not contain one. It is a
+    // zod rule in the service layer, for the same reason cost_split_bp's
+    // Sigma === 10000 is.
+    check('sales_ops_leads_estimated_value_check', sql`${t.estimatedValueBrl} >= 0`),
+  ],
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// sales_ops_lead_products - what one lead is negotiating.
+//
+// THE ONE CASCADE IN THIS FEATURE, and it is the product_funcao_costs case, not
+// the sale_items case: a row here has no independent identity, names no
+// beneficiary, carries no money, no schedule and no ledger entry, and nothing
+// references it. It is a line in one lead's "what are we negotiating" list - an
+// intention, superseded the moment a proposta exists, at which point the real
+// history lives in sales_ops_sale_items. product_id is restrict for the mirror
+// reason: it points at a produto that DOES carry history, and that FK is also
+// what keeps the nightly purge from hard-deleting a produto out from under an
+// open negotiation.
+//
+// Deliberately NOT here: a unique index on (org_id, lead_id, product_id). A
+// free-form row has product_id IS NULL and would fall outside a partial unique
+// index anyway, so the rule would be half-enforced at the database and would
+// still have to be spelled in zod. The service layer de-duplicates on write.
+// ─────────────────────────────────────────────────────────────────────────────
+export const salesOpsLeadProducts = pgTable(
+  'sales_ops_lead_products',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: text('org_id').notNull(),
+    leadId: uuid('lead_id').notNull(),
+    productId: uuid('product_id'),
+    productNameSnapshot: text('product_name_snapshot').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index('sales_ops_lead_products_org_lead_idx').on(t.orgId, t.leadId),
+    foreignKey({
+      columns: [t.orgId, t.leadId],
+      foreignColumns: [salesOpsLeads.orgId, salesOpsLeads.id],
+      name: 'sales_ops_lead_products_org_lead_fk',
+    }).onDelete('cascade'),
+    foreignKey({
+      columns: [t.orgId, t.productId],
+      foreignColumns: [salesOpsProducts.orgId, salesOpsProducts.id],
+      name: 'sales_ops_lead_products_org_product_fk',
     }).onDelete('restrict'),
   ],
 );

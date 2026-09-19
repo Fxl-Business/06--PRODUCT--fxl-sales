@@ -1300,7 +1300,9 @@ export function summarizeSalesOpsState(snapshot: SalesOpsSnapshot) {
   };
 }
 
-async function withTenant<T>(db: Db, orgId: string, fn: (tx: Db) => Promise<T>): Promise<T> {
+// Exported so the leads module can open the SAME tenant-scoped transaction; there
+// must be exactly one implementation of setTenantContext-then-run.
+export async function withTenant<T>(db: Db, orgId: string, fn: (tx: Db) => Promise<T>): Promise<T> {
   return db.transaction(async (tx) => {
     await setTenantContext(tx as unknown as Tx, orgId);
     return fn(tx as unknown as Db);
