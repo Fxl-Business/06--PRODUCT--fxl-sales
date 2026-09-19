@@ -39,10 +39,12 @@ import {
   ClientSchema,
   PersonSchema,
   ProductSchema,
+  UpdatePersonSchema,
   createArea,
   createClient,
   createPerson,
   createProduct,
+  updatePerson,
 } from '../../src/domains/sales-ops/service.js';
 
 const APP_DB_URL =
@@ -53,6 +55,7 @@ const ADMIN_DB_URL = process.env.ADMIN_DATABASE_URL ?? APP_DB_URL;
 const ADMIN_CONNECTION_OPTIONS = { connection: { 'app.fxl_admin': 'true' } } as const;
 
 const ADMIN_SCOPE: LeadScope = { userId: 'hub_admin', email: null, isAdmin: true };
+const ADMIN_ACTOR = { userId: 'hub_admin', displayName: 'Admin' } as const;
 
 function sellerScope(userId: string, email: string | null = null): LeadScope {
   return { userId, email, isAdmin: false };
@@ -304,6 +307,78 @@ describe('sales operations leads: seller scope, movement and isolation', () => {
     const claimedRows = await adminClient<{ id: string }[]>`
       SELECT id FROM sales_ops_people WHERE org_id = ${orgTwo} AND hub_account_id IS NOT NULL`;
     expect(claimedRows).toHaveLength(0);
+  });
+
+  /**
+   * The ADMIN write path for the same column the test above self-claims, and the
+   * ordinary Pessoa save that must not undo it.
+   *
+   * It exists because nothing else in the tree exercises it: every other test
+   * binds `hub_account_id` with raw SQL through `bindHubAccount`, so replacing
+   * `updatePerson`'s conditional spread with an unconditional
+   * `hubAccountId: data.hubAccountId ?? null` leaves the whole shipped suite
+   * green while every Pessoa-dialog save silently wipes the one join the leads
+   * board's server-side seller scoping is built on. This test therefore drives
+   * the real `updatePerson` for BOTH writes and reads the column back only to
+   * assert - binding it with SQL here would reintroduce exactly that blindness.
+   *
+   * The first half also guards the other direction: a PATCH that answers 200 and
+   * persists nothing, which is what `PATCH /clients/:id {"status":"archived"}`
+   * does today because `sales_ops_clients` has no such column and zod strips the
+   * unknown key.
+   */
+  it('persists hubAccountId on an admin PATCH, and an omitting Pessoa save does not clear it', async () => {
+    const orgId = newOrg('hubclaimwrite');
+    const { open } = await stagesFor(orgId);
+    const ana = await seedSeller(orgId, 'Ana Martins', 'ana@example.test');
+    await createLead(db, orgId, leadPayload({ sellerPersonId: ana.id }), ADMIN_SCOPE);
+
+    // 1. The admin PATCH really lands in the column, and is not a silent no-op.
+    const claimed = await updatePerson(
+      db,
+      orgId,
+      ana.id,
+      UpdatePersonSchema.parse({ hubAccountId: 'hub_ana', contactEmail: 'ana@example.test' }),
+      ADMIN_ACTOR,
+    );
+    if (!claimed || typeof claimed === 'string') throw new Error(`unexpected outcome: ${claimed}`);
+    expect(claimed.hubAccountId).toBe('hub_ana');
+    const [afterClaim] = await adminClient<{ hub_account_id: string | null }[]>`
+      SELECT hub_account_id FROM sales_ops_people WHERE id = ${ana.id}`;
+    expect(afterClaim!.hub_account_id).toBe('hub_ana');
+
+    // 2. The ordinary Pessoa dialog save: the full row it submits, with no
+    //    hubAccountId key at all. The claim must survive it.
+    const renamed = await updatePerson(
+      db,
+      orgId,
+      ana.id,
+      UpdatePersonSchema.parse({
+        displayName: 'Ana Martins Silva',
+        contactEmail: 'ana@example.test',
+        status: 'active',
+        funcaoIds: ana.funcaoIds,
+      }),
+      ADMIN_ACTOR,
+    );
+    if (!renamed || typeof renamed === 'string') throw new Error(`unexpected outcome: ${renamed}`);
+    expect(renamed.displayName).toBe('Ana Martins Silva');
+    expect(renamed.hubAccountId).toBe('hub_ana');
+    const [afterSave] = await adminClient<{ hub_account_id: string | null }[]>`
+      SELECT hub_account_id FROM sales_ops_people WHERE id = ${ana.id}`;
+    expect(afterSave!.hub_account_id).toBe('hub_ana');
+
+    // 3. What the column is FOR: the seller still reaches their own board. This
+    //    is the user-visible consequence of losing the claim - a 403
+    //    seller_person_unmapped forever - rather than a column read.
+    const board = await listLeads(
+      db,
+      orgId,
+      ListLeadsQuerySchema.parse({ stageId: open.id }),
+      sellerScope('hub_ana'),
+    );
+    if (!board.ok) throw new Error(`unexpected refusal: ${board.reason}`);
+    expect(board.leads.map((lead) => lead.sellerPersonId)).toEqual([ana.id]);
   });
 
   it("never returns another org's lead, over the admin connection", async () => {
