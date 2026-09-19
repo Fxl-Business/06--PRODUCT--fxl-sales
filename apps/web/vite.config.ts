@@ -35,12 +35,6 @@ export default defineConfig(({ mode }) => {
         '@radix-ui/react-select',
         '@radix-ui/react-slot',
         '@radix-ui/react-tabs',
-        // `DndContext` is a React context, so it is the identical hazard the
-        // comment above records: a dep discovered mid-load is re-served under a
-        // `?t=` URL and its context is split between provider and consumer.
-        '@dnd-kit/core',
-        '@dnd-kit/sortable',
-        '@dnd-kit/utilities',
       ],
     },
     server: {
