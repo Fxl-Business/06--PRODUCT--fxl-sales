@@ -333,6 +333,16 @@ type SaleWizardRequest =
       settle: ConversionSettle;
     };
 
+/*
+  Everything between the sentinel below and its END is BOARD-OWNED code that happens
+  to live in this file. `apps/web/src/sales-ops/leads/__tests__/board-write-surface.test.ts`
+  scans exactly these regions, under the same ban it applies to `leads/*`: no board
+  action may reach a sale transition endpoint. Do not delete, rename or widen the
+  sentinels - the guard fails if a region disappears or if the code it names moves
+  out of one. The propostas screen further down this same file IS the rightful
+  caller of that endpoint, which is why the fence is a region and not the file.
+*/
+/* BOARD-WRITE-FENCE:START conversion-identity */
 /** The identity a conversion needs out of a `POST /sales` that answered 201. */
 type CreatedSaleIdentity = { saleId: string; saleCode: string };
 
@@ -349,6 +359,7 @@ function createdSaleIdentity(sale: unknown): CreatedSaleIdentity | null {
   if (typeof row.id !== 'string' || row.id === '') return null;
   return { saleId: row.id, saleCode: typeof row.code === 'string' ? row.code : '' };
 }
+/* BOARD-WRITE-FENCE:END conversion-identity */
 
 type SalesFilters = { status: SalesOpsStatus | 'all'; areaId: string | 'all' };
 
@@ -1403,6 +1414,7 @@ export function SalesOpsApp() {
     saleWizardRef.current = saleWizard;
   }, [saleWizard]);
 
+  /* BOARD-WRITE-FENCE:START conversion-handlers - see the note at conversion-identity */
   /*
     A conversion request must ALWAYS settle. Unmounting with a `'convert'` wizard
     open would otherwise leave slice 06's `emitMove` awaiting a promise nobody
@@ -1483,6 +1495,7 @@ export function SalesOpsApp() {
     wizard.settle.resolve(created.saleId);
     setSaleWizard(null);
   }
+  /* BOARD-WRITE-FENCE:END conversion-handlers */
 
   useEffect(() => {
     if (modal?.kind !== 'person' || personModalMatchesRoute) return;
