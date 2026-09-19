@@ -27,6 +27,10 @@ const OWNED_FILES = [
   'board-labels.ts',
   'board-move.ts',
   'board-ui.ts',
+  // Slice 08's pure conversion module. It lives under `leads/` precisely so this
+  // scanner covers it: it is the one new module on the path from a card to a
+  // proposta, and the ban it must obey is the same one.
+  'conversion.ts',
   'LeadCard.tsx',
   'LeadDialog.tsx',
   'LeadsBoard.tsx',

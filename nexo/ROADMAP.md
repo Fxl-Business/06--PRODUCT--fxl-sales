@@ -104,3 +104,22 @@ Create each renamed variable ALONGSIDE the old name rather than renaming in plac
 
 Vercel note that applies to every future release, not only this one: `VITE_*` variables are
 validated at RENDER, not at build, so a green Vercel build is never evidence the browser can boot.
+
+## Lead conversion: two accepted, bounded costs (v4.1.0)
+
+Both are recorded here rather than discovered later, and both are narrow by construction.
+
+- **One orphaned rascunho after a failed move plus a page reload.** The conversion is
+  `POST /clients` (when needed), then `POST /sales`, then `POST /leads/:id/move`.
+  `convertedSales` in `SalesOpsApp.tsx` closes the duplicate-proposta window within a session, and
+  the API's `409 already_converted` closes the sub-case where the first move landed. The remaining
+  case - the move fails, the operator reloads, then retries - issues a second `POST /sales` while
+  `sale_id` is still null, so the second move succeeds and the FIRST proposta is orphaned. It is
+  visible on the propostas screen as a `Rascunho` and can be archived. Closing it properly needs a
+  transactional `POST /leads/:id/convert`, which would duplicate the whole `CreateSaleSchema`
+  surface and make a SECOND creator of `sales_ops_sales`; that is a design change, not a fix.
+- **`sales_ops_clients` has no unique index on `(org_id, name)`.** `findClientByName` folds case,
+  accents and whitespace, but it reads a possibly stale snapshot and `ON CONFLICT` is not available,
+  so two operators converting the same empresa concurrently still create two clientes. Adding the
+  index is a DESTRUCTIVE migration against live data that may already hold duplicate names, on a
+  table the conversion slice does not own. It needs its own slice with a dedupe pass first.
