@@ -14,6 +14,14 @@ import type { CommissionStatus } from '@/lib/api-client';
 
 type CommissionFilters = { status?: CommissionStatus; finderId?: string } | undefined;
 type ConversionFilters = { source?: string; finderId?: string } | undefined;
+/**
+ * Declared LOCALLY, and deliberately NOT imported from sales-ops/leads/types.ts:
+ * this file is imported by `admin/`, `finder/` and `lib/` and must not grow an
+ * edge into a sales-ops subtree. `sales-ops/leads/types.ts` exports a
+ * structurally identical alias for its own consumers, exactly as
+ * `CommissionFilters` duplicates its consumers' shape here.
+ */
+type LeadBoardFilters = { sellerPersonId?: string } | undefined;
 
 export const queryKeys = {
   salesOps: {
@@ -72,6 +80,33 @@ export const queryKeys = {
     all: ['finder', 'apps'] as const,
     apps: () => ['finder', 'apps'] as const,
     products: (appId?: string) => ['finder', 'apps', appId ?? 'all', 'products'] as const,
+  },
+  /**
+   * Leads are deliberately a TOP-LEVEL root and NOT nested under `['sales-ops']`.
+   *
+   * Every sales-ops write declares `invalidates: [queryKeys.salesOps.all]`, and
+   * TanStack invalidates by prefix match. Nesting the board there would make a
+   * produto rename, an área archive and every other cadastro keystroke refetch a
+   * paginated board of the highest-volume entity in the product - the exact cost
+   * leads were given their own paginated endpoint to avoid.
+   *
+   * The separation is one-directional and intentional: a lead CONVERSION creates
+   * a sale, so slice 08's conversion mutation lists BOTH `queryKeys.leads.all`
+   * and `queryKeys.salesOps.all`, explicitly and type-checked, rather than
+   * relying on a prefix that would also fire in the useless direction.
+   *
+   * Stages live under the same `['leads']` root on purpose: archiving a stage
+   * removes a column, so one `invalidates: [queryKeys.leads.all]` refreshes the
+   * cadastro list and the board together.
+   *
+   * Account- and org-agnostic, exactly like every key in this file: tenant
+   * separation is `queryClient.clear()` on logout and on every completed
+   * workspace switch (see apps/web/src/auth/react.tsx), never a key segment.
+   */
+  leads: {
+    all: ['leads'] as const,
+    board: (filters: LeadBoardFilters) => ['leads', 'board', filters ?? null] as const,
+    stages: () => ['leads', 'stages'] as const,
   },
   finderClicks: {
     all: ['finder', 'clicks'] as const,
