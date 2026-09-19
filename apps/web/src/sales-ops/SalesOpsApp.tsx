@@ -994,9 +994,9 @@ const FUNCAO_GRANT_GROUP_LABEL = 'Adicionar a esta função';
  *
  * Deliberately separate from `personOptions`: the vendedor and finder pickers
  * share that one and must not grow a grant row, because a pessoa there has to
- * ALREADY hold the system função. Module-local for the same reason as
- * `FUNCAO_SLUG_VENDEDOR` - `react-refresh/only-export-components` allows only
- * component exports from this module.
+ * ALREADY hold the system função. Module-local because
+ * `react-refresh/only-export-components` allows only component exports from this
+ * module, so this builder cannot be exported.
  */
 function professionalPersonOptions(
   people: SalesOpsPerson[],
@@ -1278,11 +1278,13 @@ export function SalesOpsApp() {
   );
   const dashboard = useMemo(() => buildDashboardModel(persistedBootstrap), [persistedBootstrap]);
   /**
-   * The vendedor options for the lead board and the lead dialog. Built HERE, not
-   * in `leads/`, because `hasFuncao` and `FUNCAO_SLUG_VENDEDOR` are module-local
-   * to this file: `react-refresh/only-export-components` allows only component
-   * exports from this module, so they cannot be exported, and re-deriving them in
-   * `leads/` would be exactly the per-call-site slug comparison CLAUDE.md forbids.
+   * The vendedor options for the lead board and the lead dialog. `hasFuncao` and
+   * `FUNCAO_SLUG_VENDEDOR` now live in `calculations.ts` and are IMPORTED here;
+   * they were hoisted out of this file by slice 08 precisely so this builder and
+   * `leads/` could share one resolver rather than re-deriving it per call site,
+   * which is the slug comparison CLAUDE.md forbids. The builder itself stays HERE
+   * because `react-refresh/only-export-components` allows only component exports
+   * from this module, so it cannot be exported to `leads/`.
    *
    * Resolved through `person.funcoes`, never through the deprecated `is_seller`
    * mirror. Active pessoas only: an archived pessoa disappears from every
