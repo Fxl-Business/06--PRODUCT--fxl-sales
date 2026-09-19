@@ -477,13 +477,40 @@ describe('sales operations leads: seller scope, movement and isolation', () => {
     const created = await expectOk(createLead(db, orgId, leadPayload(), ADMIN_SCOPE));
     const id = (created as unknown as { lead: { id: string } }).lead.id;
 
-    const readStamp = async () => {
-      const [row] = await adminClient<{ stage_changed_at: Date }[]>`
-        SELECT stage_changed_at FROM sales_ops_leads WHERE id = ${id}`;
-      return row!.stage_changed_at;
+    // Read at FULL Postgres precision, as microseconds, never through a JS
+    // `Date`. `new Date(...)` truncates to milliseconds, and the two stamps
+    // being compared are minted by two different clocks at two different
+    // resolutions: the create stamp is the column's `defaultNow()`, a Postgres
+    // transaction timestamp with microseconds, while every move stamp is the
+    // service's own `new Date()`, already millisecond-grained. Truncating the
+    // first one to match the second threw away the only digits that could
+    // separate two writes landing inside one millisecond, which is what made
+    // `expected 1789785147396 to be greater than 1789785147396` a ~40% flake.
+    const readStampMicros = async () => {
+      const [row] = await adminClient<{ micros: string }[]>`
+        SELECT (EXTRACT(EPOCH FROM stage_changed_at)::numeric * 1000000)::bigint AS micros
+        FROM sales_ops_leads WHERE id = ${id}`;
+      return BigInt(row!.micros);
     };
-    const atCreate = await readStamp();
 
+    /**
+     * Hold until this process's clock is strictly past `micros`, so the
+     * `new Date()` the service is about to mint CANNOT collide with the stamp
+     * already stored. Precision alone is not enough here: a move stamp carries
+     * no sub-millisecond digits at all, so two moves inside one millisecond
+     * really are equal and no read could separate them. This buys the gap
+     * instead of weakening the assertion, and the assertion stays a strict `>`.
+     * Bounded so a clock disagreement fails the assertion rather than hanging.
+     */
+    const awaitClockPast = async (micros: bigint) => {
+      for (let i = 0; i < 2000 && BigInt(Date.now()) * 1000n <= micros; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 1));
+      }
+    };
+
+    const atCreate = await readStampMicros();
+
+    await awaitClockPast(atCreate);
     await expectOk(
       moveLead(
         db,
@@ -493,10 +520,12 @@ describe('sales operations leads: seller scope, movement and isolation', () => {
         ADMIN_SCOPE,
       ),
     );
-    const afterMove = await readStamp();
-    expect(afterMove.getTime()).toBeGreaterThan(atCreate.getTime());
+    const afterMove = await readStampMicros();
+    expect(afterMove).toBeGreaterThan(atCreate);
 
-    // An ordinary edit never touches it either.
+    // An ordinary edit never touches it either. EXACT equality, at full
+    // precision, and deliberately no clock wait in front of it: the whole point
+    // is that time passing changes nothing.
     await expectOk(
       updateLead(
         db,
@@ -506,13 +535,14 @@ describe('sales operations leads: seller scope, movement and isolation', () => {
         ADMIN_SCOPE,
       ),
     );
-    expect(await readStamp()).toEqual(afterMove);
+    expect(await readStampMicros()).toBe(afterMove);
 
     // Back to the first column: it advances again.
+    await awaitClockPast(afterMove);
     await expectOk(
       moveLead(db, orgId, id, MoveLeadSchema.parse({ stageId: open.id, position: 0 }), ADMIN_SCOPE),
     );
-    expect((await readStamp()).getTime()).toBeGreaterThan(afterMove.getTime());
+    expect(await readStampMicros()).toBeGreaterThan(afterMove);
   });
 
   it('a move into the lost stage without a reason throws lost_reason_required and writes nothing', async () => {
