@@ -6,6 +6,7 @@ import type {
   PaymentMethod,
   SaleDraft,
   SalesOpsBootstrap,
+  SalesOpsPerson,
   SalesOpsProduct,
   SalesOpsProductFuncaoCost,
   SalesOpsSale,
@@ -13,6 +14,25 @@ import type {
 } from './types';
 
 const wonStatuses = new Set<string>(['won']);
+
+/**
+ * The two predefined app funções, and the ONE place a função assignment is
+ * tested. They live here rather than in `SalesOpsApp.tsx` because
+ * `react-refresh/only-export-components` allows only component exports from that
+ * module, so a second consumer - `leads/conversion.ts`, which must decide whether
+ * a lead's vendedor may be seeded onto a real proposta - could not import them
+ * from there and would have had to write a per-call-site slug comparison, which
+ * CLAUDE.md bans outright.
+ *
+ * Resolved through `person.funcoes`, NEVER through the deprecated `is_seller` /
+ * `is_finder` mirrors, which `SalesOpsPerson` deliberately does not declare.
+ */
+export const FUNCAO_SLUG_VENDEDOR = 'vendedor';
+export const FUNCAO_SLUG_FINDER = 'finder';
+
+export function hasFuncao(person: Pick<SalesOpsPerson, 'funcoes'>, slug: string): boolean {
+  return person.funcoes.some((funcao) => funcao.slug === slug);
+}
 
 function toNumber(value: string | number | undefined, fallback = 0): number {
   if (typeof value === 'number') return Number.isFinite(value) ? value : fallback;

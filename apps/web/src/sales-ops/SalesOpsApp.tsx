@@ -120,6 +120,7 @@ import type {
   SalesOpsSettings,
   SalesOpsStatus,
 } from './types';
+import type { SalesOpsLead } from './leads/types';
 import { computeSaleFinancials } from '@fxl-sales/shared-utils/sale-financials';
 /*
   The SUBPATH, never the package root, for the same reason as `/sale-financials`
@@ -130,6 +131,9 @@ import { CadastroHistorySection } from './CadastroHistoryPanel';
 import { ForbiddenPanel } from './ForbiddenPanel';
 import { MissingEntitlementPanel } from './MissingEntitlementPanel';
 import { ProfessionalSplitPanel } from './ProfessionalSplitPanel';
+import { buildLeadConversionPrefill, findClientByName } from './leads/conversion';
+import type { LeadConversionItem, LeadConversionPrefill } from './leads/conversion';
+import type { LeadConversionRequest } from './leads/LeadsBoard';
 import { LeadsBoardContainer } from './leads/LeadsBoardContainer';
 import { LeadStagesContainer } from './leads/LeadStagesContainer';
 import {
@@ -143,7 +147,10 @@ import {
   entradaCentsFor,
   formatIsoDateBr,
   formatMoneyBrl,
+  FUNCAO_SLUG_FINDER,
+  FUNCAO_SLUG_VENDEDOR,
   generateInstallmentPlan,
+  hasFuncao,
   inferPaymentPlanShape,
   initials,
   installmentSumCents,
@@ -298,7 +305,50 @@ type ModalState =
   | { kind: 'person'; person?: SalesOpsPerson }
   | null;
 
-type SaleWizardRequest = { mode: 'create' } | { mode: 'edit'; sale: SalesOpsSale };
+/**
+ * The two halves of the promise slice 06's `onRequestConversion` returned. The
+ * board is AWAITING it and moves nothing until it settles, which is why a
+ * conversion request must always settle exactly once - including on unmount.
+ */
+type ConversionSettle = {
+  resolve: (saleId: string | null) => void;
+  reject: (error: unknown) => void;
+};
+
+/**
+ * A conversion is a CREATE that happens to arrive with seed values, and it is
+ * NEVER expressed as a synthetic `editSale`. `editSale` is a behavioural
+ * discriminator, not merely data: it gates the produto-função seeding block, it
+ * marks every professional row `costManual`, it retitles the dialog and it gates
+ * `submit` on the sale's status. A fake sale there would silently disable all
+ * four and nothing in the type system would notice.
+ */
+type SaleWizardRequest =
+  | { mode: 'create' }
+  | { mode: 'edit'; sale: SalesOpsSale }
+  | {
+      mode: 'convert';
+      lead: SalesOpsLead;
+      prefill: LeadConversionPrefill;
+      settle: ConversionSettle;
+    };
+
+/** The identity a conversion needs out of a `POST /sales` that answered 201. */
+type CreatedSaleIdentity = { saleId: string; saleCode: string };
+
+/**
+ * `salesOpsApi.createSale` is typed `{ sale: unknown; ledger: unknown }` and that
+ * typing is deliberately NOT widened here: widening it would be an unchecked
+ * assertion over a response nothing validates, while the one place that needs the
+ * id can afford this guard. It fails CLOSED - no id means no move, which leaves a
+ * real proposta and an unmoved card, the recoverable direction.
+ */
+function createdSaleIdentity(sale: unknown): CreatedSaleIdentity | null {
+  if (typeof sale !== 'object' || sale === null) return null;
+  const row = sale as { id?: unknown; code?: unknown };
+  if (typeof row.id !== 'string' || row.id === '') return null;
+  return { saleId: row.id, saleCode: typeof row.code === 'string' ? row.code : '' };
+}
 
 type SalesFilters = { status: SalesOpsStatus | 'all'; areaId: string | 'all' };
 
@@ -704,20 +754,16 @@ function salePrimaryProductName(bootstrap: SalesOpsBootstrap, saleId: string): s
   );
 }
 
-/**
- * The two predefined app funções. Every função read in this file goes through
- * `hasFuncao`, never through an inline slug comparison, so there is exactly one
- * adaptation point if the slugs ever move.
- *
- * Deliberately not exported: `react-refresh/only-export-components` allows only
- * component exports from this module, and nothing outside it needs these.
- */
-const FUNCAO_SLUG_VENDEDOR = 'vendedor';
-const FUNCAO_SLUG_FINDER = 'finder';
-
-function hasFuncao(person: SalesOpsPerson, slug: string): boolean {
-  return person.funcoes.some((funcao) => funcao.slug === slug);
-}
+/*
+  `FUNCAO_SLUG_VENDEDOR`, `FUNCAO_SLUG_FINDER` and `hasFuncao` were declared here
+  and are now imported from `./calculations`. They moved because
+  `react-refresh/only-export-components` allows only component exports from THIS
+  module, so a second consumer could never import them from here - and
+  `leads/conversion.ts` is that second consumer, since deciding whether a lead's
+  vendedor may be seeded onto a real proposta is exactly the `vendedor` função
+  question. Re-deriving it there would have been the per-call-site slug
+  comparison CLAUDE.md bans. The bodies are byte-identical; only the home moved.
+*/
 
 /*
   `isCollaboratorPerson` lived here and had exactly one consumer left: the wizard's
@@ -948,9 +994,9 @@ const FUNCAO_GRANT_GROUP_LABEL = 'Adicionar a esta função';
  *
  * Deliberately separate from `personOptions`: the vendedor and finder pickers
  * share that one and must not grow a grant row, because a pessoa there has to
- * ALREADY hold the system função. Module-local for the same reason as
- * `FUNCAO_SLUG_VENDEDOR` - `react-refresh/only-export-components` allows only
- * component exports from this module.
+ * ALREADY hold the system função. Module-local because
+ * `react-refresh/only-export-components` allows only component exports from this
+ * module, so this builder cannot be exported.
  */
 function professionalPersonOptions(
   people: SalesOpsPerson[],
@@ -1178,6 +1224,20 @@ export function SalesOpsApp() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [modal, setModal] = useState<ModalState>(null);
   const [saleWizard, setSaleWizard] = useState<SaleWizardRequest | null>(null);
+  /**
+   * The proposta a conversion has ALREADY created but whose lead move has not
+   * landed. It exists so a failed move is retried with the SAME sale, never by
+   * POSTing a second proposta - which would be unrecoverable, because
+   * `salesOpsRouter` has no DELETE verb by law. Keyed by lead id.
+   */
+  const [convertedSales, setConvertedSales] = useState<Record<string, CreatedSaleIdentity>>({});
+  /**
+   * The open wizard, readable from an unmount cleanup that must not re-run on
+   * every change. A `'convert'` request left unsettled leaves the board's
+   * `emitMove` awaiting forever, which is invisible in tests and shows up as a
+   * board that silently stops accepting moves.
+   */
+  const saleWizardRef = useRef<SaleWizardRequest | null>(null);
   const [salesFilters, setSalesFilters] = useState<SalesFilters>({ status: 'all', areaId: 'all' });
   /**
    * Which bucket of `cadastros/produtos` is on screen. Component state, not URL
@@ -1218,11 +1278,13 @@ export function SalesOpsApp() {
   );
   const dashboard = useMemo(() => buildDashboardModel(persistedBootstrap), [persistedBootstrap]);
   /**
-   * The vendedor options for the lead board and the lead dialog. Built HERE, not
-   * in `leads/`, because `hasFuncao` and `FUNCAO_SLUG_VENDEDOR` are module-local
-   * to this file: `react-refresh/only-export-components` allows only component
-   * exports from this module, so they cannot be exported, and re-deriving them in
-   * `leads/` would be exactly the per-call-site slug comparison CLAUDE.md forbids.
+   * The vendedor options for the lead board and the lead dialog. `hasFuncao` and
+   * `FUNCAO_SLUG_VENDEDOR` now live in `calculations.ts` and are IMPORTED here;
+   * they were hoisted out of this file by slice 08 precisely so this builder and
+   * `leads/` could share one resolver rather than re-deriving it per call site,
+   * which is the slug comparison CLAUDE.md forbids. The builder itself stays HERE
+   * because `react-refresh/only-export-components` allows only component exports
+   * from this module, so it cannot be exported to `leads/`.
    *
    * Resolved through `person.funcoes`, never through the deprecated `is_seller`
    * mirror. Active pessoas only: an archived pessoa disappears from every
@@ -1333,6 +1395,94 @@ export function SalesOpsApp() {
       mountedRef.current = false;
     };
   }, []);
+
+  // Mirrored in an effect and never during render: a ref written in the render
+  // body is `react-hooks/refs`, and the only reader is an unmount cleanup, which
+  // runs strictly after every one of these has landed.
+  useEffect(() => {
+    saleWizardRef.current = saleWizard;
+  }, [saleWizard]);
+
+  /*
+    A conversion request must ALWAYS settle. Unmounting with a `'convert'` wizard
+    open would otherwise leave slice 06's `emitMove` awaiting a promise nobody
+    holds any more, and the board would silently stop accepting moves for the rest
+    of that session. Read through the ref so the cleanup runs on unmount alone.
+  */
+  useEffect(
+    () => () => {
+      const open = saleWizardRef.current;
+      if (open?.mode === 'convert') open.settle.resolve(null);
+    },
+    [],
+  );
+
+  /**
+   * Slice 06's `onRequestConversion`. The BOARD awaits this before it moves
+   * anything, so "the card only moves after the proposta exists" is the SHAPE of
+   * the control flow rather than a rule some guard enforces. Flattening this
+   * promise into a callback would silently destroy that.
+   *
+   * It must NEVER call a lead mutation itself. It resolves an id; the board owns
+   * the move. One writer.
+   */
+  function requestLeadConversion(request: LeadConversionRequest): Promise<string | null> {
+    // A proposta already exists for this lead in this session: only the move is
+    // outstanding, so the retry re-issues the move alone and `POST /sales` is
+    // unreachable a second time. Creating a second proposta is unrecoverable -
+    // there is no DELETE verb.
+    const already = convertedSales[request.lead.id];
+    if (already) return Promise.resolve(already.saleId);
+
+    return new Promise<string | null>((resolve, reject) => {
+      setSaleWizard({
+        mode: 'convert',
+        lead: request.lead,
+        prefill: buildLeadConversionPrefill(request.lead, persistedBootstrap),
+        settle: { resolve, reject },
+      });
+    });
+  }
+
+  /**
+   * The conversion save, in the ONE order acceptance 12 names: resolve-or-create
+   * the cliente, then `POST /sales`, and only then hand the id back so the board
+   * may move the card. Every early return leaves the card exactly where it was
+   * with the wizard still open, because nothing was started.
+   */
+  async function saveLeadConversion(
+    wizard: Extract<SaleWizardRequest, { mode: 'convert' }>,
+    payload: CreateSalePayload,
+  ) {
+    // STEP 1 - the cliente, HERE and nowhere earlier. Creating or editing a lead
+    // never creates one; this moment is the only one that does.
+    let clientId = payload.clientId ?? '';
+    if (!clientId) {
+      const existing = findClientByName(persistedBootstrap.clients, payload.clientName);
+      if (existing) {
+        clientId = existing;
+      } else {
+        const created = await createClientByName(payload.clientName);
+        if (!created) return;
+        clientId = created.id;
+      }
+    }
+
+    // STEP 2 - the proposta. The card has still not moved.
+    let response: { sale: unknown };
+    try {
+      response = await createSale.mutateAsync({ ...payload, clientId });
+    } catch {
+      return;
+    }
+    const created = createdSaleIdentity(response.sale);
+    if (!created) return;
+
+    // STEP 3 - and ONLY now, hand the id back so the board may move the card.
+    setConvertedSales((current) => ({ ...current, [wizard.lead.id]: created }));
+    wizard.settle.resolve(created.saleId);
+    setSaleWizard(null);
+  }
 
   useEffect(() => {
     if (modal?.kind !== 'person' || personModalMatchesRoute) return;
@@ -1989,6 +2139,7 @@ export function SalesOpsApp() {
                   <LeadsBoardContainer
                     clients={persistedBootstrap.clients}
                     people={persistedBootstrap.people}
+                    onRequestConversion={requestLeadConversion}
                     products={persistedBootstrap.products}
                     sellers={leadSellerOptions}
                     showSellerFilter={workspace === 'operacional'}
@@ -2092,8 +2243,18 @@ export function SalesOpsApp() {
           */
           bootstrapPending={bootstrapQuery.isFetching}
           editSale={saleWizard?.mode === 'edit' ? saleWizard.sale : null}
+          leadPrefill={saleWizard?.mode === 'convert' ? saleWizard.prefill : null}
           onAssignFuncao={assignFuncaoToPerson}
-          onClose={() => setSaleWizard(null)}
+          /*
+            `resolve(null)` is the WHOLE of "cancelling persists nothing": slice
+            06's `emitMove` sees it and returns before touching the optimistic
+            cache, before calling `onMoveLead` and before issuing any request.
+            Nothing is undone because nothing was started.
+          */
+          onClose={() => {
+            if (saleWizard?.mode === 'convert') saleWizard.settle.resolve(null);
+            setSaleWizard(null);
+          }}
           onCreateArea={createAreaByName}
           onCreateClient={createClientByName}
           onCreateFuncao={createFuncaoByName}
@@ -2104,6 +2265,8 @@ export function SalesOpsApp() {
                 { saleId: saleWizard.sale.id, payload },
                 { onSuccess: () => setSaleWizard(null) },
               );
+            } else if (saleWizard?.mode === 'convert') {
+              void saveLeadConversion(saleWizard, payload);
             } else {
               createSale.mutate(payload, { onSuccess: () => setSaleWizard(null) });
             }
@@ -5855,6 +6018,40 @@ type WizardPrefill = {
   recurringMethod: PaymentMethod;
 };
 
+/**
+ * Widens one wizard-agnostic conversion seed item into the wizard's own private
+ * row shape. This is the SINGLE call site that knows both types, which is why
+ * `leads/conversion.ts` can stay free of `SaleItemForm` and `SaleItemForm` can
+ * stay module-private here.
+ *
+ * `areaId: ''` on a product row is the existing convention - a product row
+ * derives its área from the produto. `areaId: ''` on a FREE row is the ghost-card
+ * guard: `draftValid` requires `Boolean(item.areaId)` for a free row, so a lead
+ * whose produto is only free text cannot be saved until the operator picks an
+ * área. THIS IS LOAD-BEARING. Do not seed it.
+ */
+function toSaleItemForm(item: LeadConversionItem): SaleItemForm {
+  return item.kind === 'product'
+    ? {
+        kind: 'product',
+        productId: item.productId,
+        areaId: '',
+        customLabel: '',
+        quantity: '1',
+        unitBrl: centsToInput(item.unitCents),
+        descriptionOpen: false,
+      }
+    : {
+        kind: 'free',
+        productId: '',
+        areaId: '',
+        customLabel: item.customLabel,
+        quantity: '1',
+        unitBrl: centsToInput(item.unitCents),
+        descriptionOpen: false,
+      };
+}
+
 /** Shared by `totalCents` and by the prefill, so the two can never disagree. */
 function itemsTotalCents(items: SaleItemForm[]): number {
   return items.reduce(
@@ -6071,6 +6268,17 @@ export function SaleWizardDialog(props: {
    */
   bootstrapPending?: boolean;
   editSale: SalesOpsSale | null;
+  /**
+   * Seed values for a lead -> proposta conversion. Mutually exclusive with
+   * `editSale` by construction: a `{mode:'convert'}` request carries no sale.
+   *
+   * Every initializer below reads it strictly AFTER `prefill?.x`, so the EDIT
+   * path is provably unaffected, and it is absent on the ordinary create path, so
+   * that one takes the branch it takes today. It relaxes NO gate: `canSave`,
+   * `canSaveBasics` and `draftValid` are byte-unchanged and judge this seed with
+   * exactly the rules they already had.
+   */
+  leadPrefill?: LeadConversionPrefill | null;
   onClose: () => void;
   /**
    * Grants a função to a pessoa who does not carry it yet, from the `PROFISSIONAL`
@@ -6093,10 +6301,11 @@ export function SaleWizardDialog(props: {
       // snapshot refetch that changed the first cliente, the first produto or the
       // people count destroy in-progress typing. The body already unmounts when the
       // dialog closes, so re-opening still re-seeds the defaults from fresh data.
-      key={props.editSale?.id ?? 'create'}
+      key={props.editSale?.id ?? props.leadPrefill?.leadId ?? 'create'}
       bootstrap={props.bootstrap}
       bootstrapPending={props.bootstrapPending ?? false}
       editSale={props.editSale}
+      leadPrefill={props.leadPrefill ?? null}
       onAssignFuncao={props.onAssignFuncao}
       onClose={props.onClose}
       onCreateArea={props.onCreateArea}
@@ -6113,6 +6322,7 @@ function SaleWizardDialogBody({
   bootstrap,
   bootstrapPending,
   editSale,
+  leadPrefill,
   onAssignFuncao,
   onClose,
   onCreateClient,
@@ -6125,6 +6335,7 @@ function SaleWizardDialogBody({
   bootstrap: SalesOpsBootstrap;
   bootstrapPending: boolean;
   editSale: SalesOpsSale | null;
+  leadPrefill: LeadConversionPrefill | null;
   onAssignFuncao?: (payload: SavePersonPayload) => Promise<SalesOpsPerson | null>;
   onClose: () => void;
   onCreateClient?: (name: string) => Promise<SalesOpsClient | null>;
@@ -6228,12 +6439,24 @@ function SaleWizardDialogBody({
     false,
     bootstrap.settings,
   );
-  const [clientId, setClientId] = useState(prefill?.clientId ?? firstClient?.id ?? '');
-  const [clientName, setClientName] = useState(prefill?.clientName ?? firstClient?.name ?? '');
-  const [sellerPersonId, setSellerPersonId] = useState(prefill?.sellerPersonId ?? firstSeller?.id ?? '');
+  const [clientId, setClientId] = useState(
+    prefill?.clientId ?? leadPrefill?.clientId ?? firstClient?.id ?? '',
+  );
+  const [clientName, setClientName] = useState(
+    prefill?.clientName ?? leadPrefill?.clientName ?? firstClient?.name ?? '',
+  );
+  /*
+    NOTE the shape: when a `leadPrefill` exists there is NO `firstSeller`
+    fallback. A blank vendedor costs the operator one click, because `canSave`
+    requires one; defaulting to whoever sorts first would attribute a real
+    proposta and every commission derived from it to the wrong person.
+  */
+  const [sellerPersonId, setSellerPersonId] = useState(
+    prefill?.sellerPersonId ?? (leadPrefill ? leadPrefill.sellerPersonId : (firstSeller?.id ?? '')),
+  );
   const [finderPersonId, setFinderPersonId] = useState(prefill?.finderPersonId ?? '');
   const [baseDate, setBaseDate] = useState(prefill?.baseDate ?? inputDateToday());
-  const [notes, setNotes] = useState(prefill?.notes ?? '');
+  const [notes, setNotes] = useState(prefill?.notes ?? leadPrefill?.notes ?? '');
   const [taxPct, setTaxPct] = useState(prefill?.taxPct ?? String(settings.defaultTaxPct ?? 6));
   const [sellerCommissionPct, setSellerCommissionPct] = useState(
     prefill?.sellerCommissionPct ?? String(initialCommissionDefaults.sellerCommissionPct),
@@ -6276,19 +6499,21 @@ function SaleWizardDialogBody({
   const [sellerIsFinder, setSellerIsFinder] = useState(prefill?.sellerIsFinder ?? false);
   const [items, setItems] = useState<SaleItemForm[]>(() =>
     prefill?.items ??
-    (firstProduct
-      ? [
-          {
-            kind: 'product',
-            productId: firstProduct.id,
-            areaId: '',
-            customLabel: '',
-            quantity: '1',
-            unitBrl: centsToInput(productBaseValueBrl(firstProduct)),
-            descriptionOpen: false,
-          },
-        ]
-      : []),
+    (leadPrefill && leadPrefill.items.length > 0
+      ? leadPrefill.items.map(toSaleItemForm)
+      : firstProduct
+        ? [
+            {
+              kind: 'product',
+              productId: firstProduct.id,
+              areaId: '',
+              customLabel: '',
+              quantity: '1',
+              unitBrl: centsToInput(productBaseValueBrl(firstProduct)),
+              descriptionOpen: false,
+            },
+          ]
+        : []),
   );
   /**
    * Index whose description input should take focus on its next mount. A callback
