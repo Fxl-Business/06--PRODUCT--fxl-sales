@@ -1,0 +1,36 @@
+{
+  "active_accumulated_seconds": 0,
+  "active_since": 1789779122,
+  "counters": {
+    "agent_dispatches": 35,
+    "initial_slices": 8,
+    "replans": 2,
+    "total_slices": 8,
+    "wave_recoveries": 1
+  },
+  "exhausted": null,
+  "limits": {
+    "agent_result_timeout_seconds": 600,
+    "max_active_seconds": 14400,
+    "max_agent_dispatches": 64,
+    "max_initial_slices": 16,
+    "max_replans": 3,
+    "max_total_slices": 24,
+    "max_verify_attempts_per_slice": 3,
+    "max_wave_recoveries": 1
+  },
+  "paused": false,
+  "scoped_counters": {
+    "verify_attempts": {
+      "01-leads-schema": 1,
+      "02-api-stage-cadastro": 1,
+      "03-api-leads": 1,
+      "04-web-data-layer": 1,
+      "05-web-stage-cadastro": 1,
+      "06-web-kanban-board": 1,
+      "07-web-routing": 2,
+      "08-web-conversion": 2
+    }
+  },
+  "version": 1
+}

@@ -1,0 +1,1 @@
+07-web-routing feat/20260918-07-web-routing apps/web/src/sales-ops/navigation.ts apps/web/src/sales-ops/SalesOpsApp.tsx apps/web/src/sales-ops/leads/LeadsBoardContainer.tsx apps/web/src/sales-ops/leads/LeadStagesContainer.tsx apps/web/src/sales-ops/__tests__/navigation.test.ts apps/web/src/sales-ops/__tests__/leads-routing.test.tsx CLAUDE.md nexo/ROADMAP.md

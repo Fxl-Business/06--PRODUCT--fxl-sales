@@ -123,3 +123,58 @@ Both are recorded here rather than discovered later, and both are narrow by cons
   so two operators converting the same empresa concurrently still create two clientes. Adding the
   index is a DESTRUCTIVE migration against live data that may already hold duplicate names, on a
   table the conversion slice does not own. It needs its own slice with a dedupe pass first.
+## Acoplar os tipos web de leads ao contrato zod da API
+
+Levantado pelo verificador da slice 04 do run `20260918T000000Z-kanban-pipeline-leads`.
+Hoje nada acopla estruturalmente `apps/web/src/sales-ops/leads/types.ts` aos schemas zod de
+`apps/api/src/domains/sales-ops/leads/lead-schemas.ts`. Um rename de campo continua verde dos DOIS
+lados e só quebra em runtime, com 400 da API, porque os testes web usam fixtures escritas à mão.
+O verificador fechou isso à mão, campo a campo, apenas para a slice 04.
+Conserto real: um tipo de contrato compartilhado ou um cliente gerado a partir do zod. É trabalho
+próprio, fora do escopo deste feature, e por isso está aqui e não foi improvisado no run.
+
+## Copy de erro de nome duplicado em `LeadStagesView` diz "Tente novamente"
+
+Levantado pelo verificador da slice 05 do run `20260918T000000Z-kanban-pipeline-leads`.
+Um `409 stage_name_taken` é respondido com uma mensagem terminada em "Tente novamente", mas repetir
+a mesma ação nunca funciona: o operador precisa ESCOLHER OUTRO NOME. A copy foi escrita assim
+porque o plano prescrevia esse texto, e não foi trocada dentro do run para não gastar um ciclo de
+verify numa slice já pronta para merge. É defeito de copy, não de correção.
+Conserto: mensagem específica do `stage_name_taken` pedindo outro nome, sem "Tente novamente".
+
+## Imprecisão na seção `Kanban de leads` do `CLAUDE.md`
+
+Levantada pelo verificador da slice 08 do run `20260918T000000Z-kanban-pipeline-leads`.
+A prosa diz "slice 03's `409 already_converted`", que é o motivo INTERNO do serviço
+(`lead-service.ts`), enquanto o corpo que vai no fio é `lead_already_converted`
+(`lead-routes.ts`). Os dois tokens existem de verdade e a frase não afirma estar citando o corpo,
+então é FROUXA e não falsa - por isso não virou um terceiro ciclo de correção de docs neste run.
+Apertar da próxima vez que esse bullet for tocado.
+
+## Sobreviventes medidos da passada de mutação do feature Kanban de leads
+
+Run `20260918T000000Z-kanban-pipeline-leads`, 22 mutações cruzando slices, 18 mortas, 4 vivas.
+Relatório completo: `nexo/runs/20260918T000000Z-kanban-pipeline-leads/mutation-report.md`.
+A sobrevivente 1 (o furo na cerca da aceitação 13) FOI CONSERTADA no próprio run. As três abaixo
+ficam registradas porque cada uma é trabalho próprio, não um ajuste de uma linha.
+
+### 1. O fio API/web são dois pinos literais independentes, com NADA entre eles
+Renomear `stageId` no `MoveLeadSchema` da API mais o serviço matou 10 testes de API e deixou a suíte
+web INTEIRA verde. Qualquer uma das metades pode ser renomeada com a suíte da outra cega. Isso já
+estava registrado como acoplamento ausente; agora está MEDIDO como total. Conserto real: tipo de
+contrato compartilhado ou cliente gerado a partir do zod.
+
+### 2. O fail-closed de `createdSaleIdentity` não tem oráculo
+Fazer a função falhar ABERTO sobreviveu às 911 web tests. O comportamento documentado é fail-closed.
+Conserto: um teste que force a identidade a não resolver e prove que a conversão recusa em vez de
+prosseguir.
+
+### 3. Vazamento em `getSalesOpsSummary` FORA do `withTenant` é absorvido por RLS, não por teste
+O mesmo vazamento DENTRO do `withTenant` morre na hora. Registrado por honestidade: a aceitação 17
+está defendida por RLS nesse caminho, não pela suíte. Conserto: um teste sobre conexão
+`app.fxl_admin`, no estilo do que a slice 03 usa para provar o escopo por vendedor.
+
+### Dois kills fracos, registrados
+A guarda de mover card convertido e a guarda de PATCH em lead convertido só morrem COLATERALMENTE,
+num teste sobre `saleId` que move um card convertido como passo de fixture. Nenhum teste nomeia
+essas duas propriedades no nível de serviço.
