@@ -274,3 +274,76 @@ describe('the fenced dotenv blocks a human copies out of the docs', () => {
     expect(bag.FXL_HUB_TRUSTED_ORIGINS).toBe('http://localhost:8006');
   });
 });
+
+/**
+ * The dev-fake switch's own contract.
+ *
+ * `apps/api/.env.example`, `apps/api/.env.dev.example`, `apps/web/.env.example`
+ * and `apps/web/.env.dev.example` are what a fresh clone copies to `.env`, and
+ * `apps/api/.env.staging.example` / `apps/web/.env.staging.example` are what an
+ * operator copies to run against staging. A `SALES_AUTH_FAKE` or
+ * `VITE_AUTH_FAKE` line that is ACTIVE in any of the four dev-or-default files
+ * would authenticate fake identities out of the box, on every command, for
+ * every developer; the same line in either staging file would document fake
+ * identities as a thing to try against a shared database. Nothing else in the
+ * suite reads these six files, so this describe is their only oracle.
+ *
+ * Reused from above: `../../../${name}` reaches `apps/api`, and
+ * `../../../../../${name}` reaches the repo root, so the same relative-path
+ * mechanism this file already uses for `README.md` and `CLAUDE.md` reaches
+ * `apps/web` too. `parseDotenv`, already defined above for the fenced doc
+ * blocks, is the same small dotenv grammar `parseEnvExample` uses, so it is
+ * reused rather than re-implemented a third time.
+ */
+const DEV_FAKE_DEV_OR_DEFAULT_EXAMPLES = [
+  'apps/api/.env.example',
+  'apps/api/.env.dev.example',
+  'apps/web/.env.example',
+  'apps/web/.env.dev.example',
+] as const;
+
+const DEV_FAKE_STAGING_EXAMPLES = ['apps/api/.env.staging.example', 'apps/web/.env.staging.example'] as const;
+
+function readFromRepoRoot(relativePath: string): string {
+  return readFileSync(new URL(`../../../../../${relativePath}`, import.meta.url), 'utf8');
+}
+
+function devFakeUsageLineFor(relativePath: string): string {
+  return relativePath.startsWith('apps/api/') ? '# SALES_AUTH_FAKE=1' : '# VITE_AUTH_FAKE=1';
+}
+
+describe('the dev-fake switch in the shipped examples', () => {
+  it.each(DEV_FAKE_DEV_OR_DEFAULT_EXAMPLES)('still SHOWS the dev-fake switch, commented, in %s', (relativePath) => {
+    /*
+      The vacuity guard, modelled on `still SHOWS the known-good local values,
+      commented`. Without this, "never enables the switch" below would pass
+      just as happily against a file that never documented the switch at all.
+    */
+    expect(readFromRepoRoot(relativePath)).toContain(devFakeUsageLineFor(relativePath));
+  });
+
+  it.each([...DEV_FAKE_DEV_OR_DEFAULT_EXAMPLES, ...DEV_FAKE_STAGING_EXAMPLES])(
+    'never ENABLES the dev-fake switch in %s',
+    (relativePath) => {
+      /*
+        Absence from the PARSED bag, not merely "not equal to 1": any active
+        line at all, blank or otherwise, fails this, which is exactly the rule
+        this slice ships.
+      */
+      const bag = parseDotenv(readFromRepoRoot(relativePath));
+      expect(bag.SALES_AUTH_FAKE).toBeUndefined();
+      expect(bag.VITE_AUTH_FAKE).toBeUndefined();
+    },
+  );
+
+  it.each(DEV_FAKE_STAGING_EXAMPLES)(
+    'keeps the dev-fake switch out of the staging examples entirely in %s',
+    (relativePath) => {
+      // Raw text, not merely the parsed bag: a staging example must not carry
+      // even a commented invitation to run fake identities against it.
+      const raw = readFromRepoRoot(relativePath);
+      expect(raw).not.toContain('SALES_AUTH_FAKE');
+      expect(raw).not.toContain('VITE_AUTH_FAKE');
+    },
+  );
+});
