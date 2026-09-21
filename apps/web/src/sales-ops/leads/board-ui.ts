@@ -40,7 +40,29 @@ export const columnHeaderClass =
 export const cardClass =
   'flex flex-col gap-2 rounded-[14px] border border-[#e8e8ec] bg-white p-3 text-left shadow-none transition';
 
-export const cardDraggingClass = 'opacity-60 ring-2 ring-[#eaa81a]';
+/**
+ * The ORIGINAL card while its copy rides the DragOverlay. It stays in the flow so
+ * the column keeps its height and the other cards do not jump, but it is faded
+ * out so the overlay is unambiguously the thing being moved.
+ */
+export const cardDraggingClass = 'opacity-40';
+
+/**
+ * REQUIRED on anything that starts a pointer drag, and the reason the board felt
+ * like it kept "letting go" mid-gesture.
+ *
+ * Without `touch-action: none` the browser owns the gesture first: on a
+ * horizontally scrollable board it reads the same movement as a pan, takes over,
+ * and fires `pointercancel`. dnd-kit then aborts the drag, correctly, because
+ * the pointer stream it was promised ended. The board's own `overflow-x-auto`
+ * scroller made this the normal case rather than an edge case.
+ *
+ * dnd-kit documents this as a requirement of `PointerSensor`, not a nicety.
+ */
+export const dragHandleSurfaceClass = 'touch-none select-none';
+
+/** The card riding the cursor. Elevated so it reads as lifted off the board. */
+export const dragOverlayCardClass = 'w-[276px] rotate-2 cursor-grabbing shadow-xl';
 
 /**
  * Read-only is a property of the CARD (`leadIsConverted`) and never of a column,

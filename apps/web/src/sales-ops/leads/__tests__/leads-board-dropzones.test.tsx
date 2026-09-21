@@ -157,6 +157,56 @@ describe('the board drop surface', () => {
   });
 });
 
+describe('the drag gesture contract', () => {
+  /**
+   * These pin the two dnd-kit requirements the board shipped without, both of
+   * which the operator felt as the card "letting go" mid-drag rather than as
+   * anything a test was asserting.
+   */
+  it('gives every draggable card touch-action none, so the browser cannot claim the gesture', async () => {
+    // Without this the browser reads a drag on a horizontally scrollable board
+    // as a pan, takes the pointer and fires pointercancel; dnd-kit then aborts.
+    await act(async () => {
+      root.render(
+        <LeadsBoard
+          leads={[lead('l1', NOVO_ID)]}
+          lookups={LOOKUPS}
+          now={NOW}
+          onMoveLead={vi.fn()}
+          stages={STAGES}
+        />,
+      );
+    });
+
+    const card = container.querySelector('[data-lead-card]');
+    const surface = card?.closest('.touch-none');
+    expect(surface, 'the sortable node must carry touch-none').not.toBeNull();
+  });
+
+  it('renders the dragged card in an overlay outside the scrolling board', async () => {
+    // The board scroller is overflow-x-auto: a card transformed in place clips
+    // at its edge and vanishes while still being dragged. The overlay is
+    // dnd-kit's documented answer, so assert the mount point exists.
+    await act(async () => {
+      root.render(
+        <LeadsBoard
+          leads={[lead('l1', NOVO_ID)]}
+          lookups={LOOKUPS}
+          now={NOW}
+          onMoveLead={vi.fn()}
+          stages={STAGES}
+        />,
+      );
+    });
+
+    // dnd-kit renders the overlay container even while idle; what must never
+    // happen is the scroller being the only place a dragged card can live.
+    const scroller = container.querySelector('.overflow-x-auto');
+    expect(scroller).not.toBeNull();
+    expect(container.querySelectorAll('[data-lead-card]')).toHaveLength(1);
+  });
+});
+
 describe('a converted card names its proposta', () => {
   const converted = lead('l9', CONVERSAO_ID, {
     contactName: 'Renata Ipê',
