@@ -46,6 +46,22 @@ export function stageOpensConversion(stage: SalesOpsLeadStage | undefined): bool
  *  - the lead's OWN stage is INCLUDED: that is the reorder-within-column case,
  *    which the same dialog and the same payload serve.
  */
+/**
+ * Does a DRAG onto this stage have to hand back to the `Mover para` dialog?
+ *
+ * Only the stage that REQUIRES A REASON does, because a drag has nowhere to
+ * type one and the API rejects the move without it.
+ *
+ * The conversion stage deliberately does NOT, and that is a correction: it used
+ * to, on the reasoning that a drag cannot fill a wizard. The wizard opens
+ * itself, so the dialog only asked the operator to confirm a destination they
+ * had just dropped the card on. Named here rather than left inline in the drag
+ * handler so the rule has one home and an oracle.
+ */
+export function dragHandsBackToDialog(stage: SalesOpsLeadStage | undefined): boolean {
+  return stageRequiresReason(stage);
+}
+
 export function moveTargetsFor(
   lead: SalesOpsLead,
   stages: readonly SalesOpsLeadStage[],
