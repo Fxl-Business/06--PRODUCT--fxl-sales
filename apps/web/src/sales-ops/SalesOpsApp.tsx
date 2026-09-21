@@ -1495,6 +1495,29 @@ export function SalesOpsApp() {
     wizard.settle.resolve(created.saleId);
     setSaleWizard(null);
   }
+
+  /**
+   * Takes the operator from a converted card to its proposta.
+   *
+   * It NAVIGATES rather than opening the wizard, and that is a correction of a
+   * first attempt that did open it. `SaleWizardDialog` returns null for any sale
+   * whose status is not `draft` or `open` - editing a proposta ganha is not a
+   * thing - and a converted lead sits in that column precisely because its
+   * proposta has usually been won, lost or cancelled. So the wizard door was
+   * silently dead in the common case: the click did nothing at all, which is a
+   * worse dead end than the bare chip it replaced. Found in a real browser on
+   * 2026-09-21, because no unit test renders that guard.
+   *
+   * Navigation works for EVERY status, which is why it is one behaviour and not
+   * a branch on the sale's status: two doors that look identical and behave
+   * differently is how the operator learns not to trust either.
+   *
+   * It writes nothing and transitions nothing. The propostas screen remains the
+   * only writer of `sale.status`.
+   */
+  function openSaleFromBoard(_saleId: string) {
+    navigate(buildSalesOpsPath({ workspace: 'operacional', view: 'vendas' }));
+  }
   /* BOARD-WRITE-FENCE:END conversion-handlers */
 
   useEffect(() => {
@@ -2152,6 +2175,7 @@ export function SalesOpsApp() {
                   <LeadsBoardContainer
                     clients={persistedBootstrap.clients}
                     people={persistedBootstrap.people}
+                    onOpenSale={openSaleFromBoard}
                     onRequestConversion={requestLeadConversion}
                     products={persistedBootstrap.products}
                     sellers={leadSellerOptions}

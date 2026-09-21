@@ -154,6 +154,7 @@ type LeadPatch = Partial<{
   estimatedValueBrl: number;
   saleId: string | null;
   saleStatus: string | null;
+  saleCode: string | null;
   stageId: string;
 }>;
 
@@ -173,6 +174,7 @@ function leadRow(patch: LeadPatch = {}) {
     stageChangedAt: '2026-09-15T12:00:00.000Z',
     saleId: null,
     saleStatus: null,
+    saleCode: null,
     products: [{ productId: PRODUCT_ID, productNameSnapshot: 'FXL Custom' }],
     createdAt: '2026-09-01T12:00:00.000Z',
     updatedAt: null,
@@ -325,6 +327,7 @@ function route(input: string, init?: RequestInit): Promise<Response> {
       stageId: body.stageId ?? scenario.lead.stageId,
       saleId: body.saleId ?? null,
       saleStatus: body.saleId ? 'draft' : null,
+      saleCode: body.saleId ? '0001-1' : null,
     };
     return Promise.resolve(json(200, { lead: scenario.lead }));
   }
@@ -641,6 +644,7 @@ describe('a lead becomes a proposta, and the card moves only afterwards', () => 
       stageId: STAGE_CONVERSAO,
       saleId: SALE_ID,
       saleStatus: 'won',
+      saleCode: '0001-1',
     });
     await renderApp();
 

@@ -85,6 +85,7 @@ export type LeadView = {
   sellerNameSnapshot: string;
   saleId: string | null;
   saleStatus: string | null;
+  saleCode: string | null;
   lostReason: string | null;
   products: Array<{ productId: string | null; productNameSnapshot: string }>;
   createdAt: string;
@@ -330,7 +331,7 @@ function toIso(value: Date | string | null): string | null {
  */
 async function readLeadView(tx: Db, orgId: string, leadId: string): Promise<LeadView> {
   const [row] = await tx
-    .select({ lead: salesOpsLeads, saleStatus: salesOpsSales.status })
+    .select({ lead: salesOpsLeads, saleStatus: salesOpsSales.status, saleCode: salesOpsSales.code })
     .from(salesOpsLeads)
     .leftJoin(
       salesOpsSales,
@@ -339,7 +340,12 @@ async function readLeadView(tx: Db, orgId: string, leadId: string): Promise<Lead
     .where(and(eq(salesOpsLeads.orgId, orgId), eq(salesOpsLeads.id, leadId)))
     .limit(1);
   if (!row) throw new Error(`lead ${leadId} disappeared inside its own transaction`);
-  return toLeadView(row.lead, row.saleStatus, await readLeadProducts(tx, orgId, [leadId]));
+  return toLeadView(
+    row.lead,
+    row.saleStatus,
+    row.saleCode,
+    await readLeadProducts(tx, orgId, [leadId]),
+  );
 }
 
 async function readLeadProducts(
@@ -381,6 +387,7 @@ async function readLeadProducts(
 function toLeadView(
   lead: LeadRow,
   saleStatus: string | null,
+  saleCode: string | null,
   products: Map<string, ResolvedLeadProduct[]>,
 ): LeadView {
   return {
@@ -397,6 +404,10 @@ function toLeadView(
     sellerNameSnapshot: lead.sellerNameSnapshot,
     saleId: lead.saleId,
     saleStatus: lead.saleId ? saleStatus : null,
+    // Guarded by `lead.saleId` for the same reason `saleStatus` is: the LEFT JOIN
+    // yields a row either way, and a code without a link is a label pointing at
+    // nothing. The board renders this as the card's only proposta identity.
+    saleCode: lead.saleId ? saleCode : null,
     lostReason: lead.lostReason,
     products: products.get(lead.id) ?? [],
     createdAt: toIso(lead.createdAt)!,
@@ -454,7 +465,7 @@ export async function listLeads(
 
     const limit = query.limit ?? LEADS_DEFAULT_LIMIT;
     const rows = await tx
-      .select({ lead: salesOpsLeads, saleStatus: salesOpsSales.status })
+      .select({ lead: salesOpsLeads, saleStatus: salesOpsSales.status, saleCode: salesOpsSales.code })
       .from(salesOpsLeads)
       .leftJoin(
         salesOpsSales,
@@ -477,7 +488,7 @@ export async function listLeads(
     const last = page.at(-1);
     return {
       ok: true,
-      leads: page.map((row) => toLeadView(row.lead, row.saleStatus, products)),
+      leads: page.map((row) => toLeadView(row.lead, row.saleStatus, row.saleCode, products)),
       nextCursor: hasMore && last ? `${last.lead.position}:${last.lead.id}` : null,
       total,
     } as const;

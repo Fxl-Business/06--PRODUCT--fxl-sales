@@ -1,6 +1,7 @@
 import * as React from 'react';
 import {
   DndContext,
+  useDroppable,
   PointerSensor,
   closestCorners,
   useSensor,
@@ -63,6 +64,8 @@ export type LeadsBoardProps = {
    *   reject          -> surfaced exactly like any other failed move.
    */
   onRequestConversion?: (request: LeadConversionRequest) => Promise<string | null>;
+  /** Opens the proposta a converted lead became. */
+  onOpenSale?: (saleId: string) => void;
   /** Controlled by the routing layer; the board renders the picker and owns no filter state. */
   sellerFilter?: {
     value: string | null;
@@ -82,13 +85,21 @@ type SortableCardProps = {
   now: Date;
   onRequestMove?: (lead: SalesOpsLead) => void;
   onEdit?: (lead: SalesOpsLead) => void;
+  onOpenSale?: (saleId: string) => void;
 };
 
 /**
  * The drag plumbing for ONE movable card, isolated here so `LeadCard` stays free
  * of dnd-kit entirely and can be rendered by any oracle without a `DndContext`.
  */
-function SortableLeadCard({ lead, lookups, now, onRequestMove, onEdit }: SortableCardProps) {
+function SortableLeadCard({
+  lead,
+  lookups,
+  now,
+  onRequestMove,
+  onEdit,
+  onOpenSale,
+}: SortableCardProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: lead.id,
     data: { stageId: lead.stageId },
@@ -106,8 +117,44 @@ function SortableLeadCard({ lead, lookups, now, onRequestMove, onEdit }: Sortabl
         lookups={lookups}
         now={now}
         onEdit={onEdit}
+        onOpenSale={onOpenSale}
         onRequestMove={onRequestMove}
       />
+    </div>
+  );
+}
+
+/**
+ * THE COLUMN ITSELF AS A DROP TARGET.
+ *
+ * Without this every droppable on the board was a CARD (`useSortable` registers
+ * each one), so `over` could only ever be another card. Three consequences, all
+ * measured in a real browser on 2026-09-21:
+ *   - an EMPTY column could never receive a card;
+ *   - a drop had to land precisely on a card, never on the column's free space;
+ *   - worst, the CONVERSION column was permanently unreachable, because its
+ *     cards are converted, converted cards are excluded from `movableIds`, and
+ *     a card outside `SortableContext` is not a droppable at all. The one column
+ *     the whole feature exists to move leads into accepted nothing.
+ *
+ * `handleDragEnd` already read `over.id` as a stage id when it was not a card
+ * (`overLead ? overLead.stageId : overId`); that branch was simply dead code
+ * until this registered the id it was looking for.
+ *
+ * Drag remains pure convenience: the `Mover para` dialog is the real control and
+ * its oracles still pass with this entire layer deleted.
+ */
+function StageDropZone({ stageId, children }: { stageId: string; children: React.ReactNode }) {
+  const { setNodeRef, isOver } = useDroppable({ id: stageId });
+  return (
+    <div
+      className={`flex min-h-[72px] flex-col gap-2 rounded-md transition-colors${
+        isOver ? ' bg-[#eeeef6]' : ''
+      }`}
+      data-stage-dropzone={stageId}
+      ref={setNodeRef}
+    >
+      {children}
     </div>
   );
 }
@@ -122,6 +169,7 @@ export function LeadsBoard({
   onCreateLead,
   onEditLead,
   onRequestConversion,
+  onOpenSale,
   sellerFilter,
   hasMore = false,
   onLoadMore,
@@ -266,7 +314,7 @@ export function LeadsBoard({
                 </header>
 
                 <SortableContext items={movableIds} strategy={verticalListSortingStrategy}>
-                  <div className="flex flex-col gap-2">
+                  <StageDropZone stageId={stage.id}>
                     {column.map((lead) => {
                       const targets = moveTargetsFor(lead, columns, hasConversionHandler);
                       if (targets.length === 0) {
@@ -277,6 +325,7 @@ export function LeadsBoard({
                             lookups={lookups}
                             now={now}
                             onEdit={onEditLead}
+                            onOpenSale={onOpenSale}
                           />
                         );
                       }
@@ -287,6 +336,7 @@ export function LeadsBoard({
                           lookups={lookups}
                           now={now}
                           onEdit={onEditLead}
+                          onOpenSale={onOpenSale}
                           onRequestMove={(row) => openMoveDialog(row)}
                         />
                       );
@@ -294,7 +344,7 @@ export function LeadsBoard({
                     {column.length === 0 ? (
                       <p className={mutedStateClass}>Nenhum lead nesta etapa.</p>
                     ) : null}
-                  </div>
+                  </StageDropZone>
                 </SortableContext>
               </section>
             );

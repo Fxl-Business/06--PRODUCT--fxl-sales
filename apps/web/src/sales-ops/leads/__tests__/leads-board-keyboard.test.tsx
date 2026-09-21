@@ -15,11 +15,23 @@ import type { SalesOpsLead, SalesOpsLeadStage, LeadStageKind } from '../types';
  * rows. NO DRAG IS EVER SIMULATED - happy-dom runs neither pointer capture nor
  * activation behaviour, so a simulated drag would prove nothing.
  *
- * That is not a gap in the coverage, it is the design being asserted: the drag
- * layer calls the same `emitMove` the dialog does and installs no keyboard
- * sensor, so deleting the whole dnd-kit layer would leave every oracle in this
- * file green and the board fully operable. If one of these ever needs a drag to
- * go red, the design has been inverted.
+ * The design claim is real: the drag layer calls the same `emitMove` the dialog
+ * does and installs no keyboard sensor, so deleting the whole dnd-kit layer
+ * leaves every oracle in this file green and the board fully operable. If one of
+ * these ever needs a drag to go red, the design has been inverted.
+ *
+ * WHAT THIS FILE USED TO CLAIM, AND WHY THAT WAS WRONG. It said the absence of
+ * drag oracles "is not a gap in the coverage". It was. The board shipped with NO
+ * column registered as a droppable, so a drag could only ever land on another
+ * card: an empty column accepted nothing, and the CONVERSION column accepted
+ * nothing either, because its cards are converted and a converted card is not a
+ * drag source. The one column the feature exists to move leads into was
+ * unreachable by drag, and every test here stayed green.
+ *
+ * The lesson is narrower than "simulate drags in happy-dom", which still proves
+ * nothing. It is that the drop SURFACE is structure, and structure is exactly
+ * what a DOM can answer for. That half now has its own oracles in
+ * `leads-board-dropzones.test.tsx`; this file keeps owning the behaviour.
  */
 
 const act = (React as typeof React & { act: typeof import('react-dom/test-utils').act }).act;
@@ -77,6 +89,7 @@ function lead(
     stageChangedAt: '2026-09-15T12:00:00.000Z',
     saleId: null,
     saleStatus: null,
+    saleCode: null,
     products: [],
     createdAt: '2026-09-01T12:00:00.000Z',
     updatedAt: null,
