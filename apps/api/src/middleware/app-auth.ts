@@ -1,6 +1,6 @@
-import type { HubAuthContext, HubConfig } from '@fxl-business/hub-sdk';
+import { HubConfigError, type HubAuthContext, type HubConfig } from '@fxl-business/hub-sdk';
 import { createHubBff, requireHubAuth } from '@fxl-business/hub-sdk/server';
-import { Hono, type MiddlewareHandler } from 'hono';
+import { Hono, type Context, type MiddlewareHandler, type Next } from 'hono';
 import { hubBffErrorHandler } from '../auth/hub-bff-errors.js';
 import { createHubLoginSupersedeMiddleware } from '../auth/hub-login-scope.js';
 import {
@@ -93,7 +93,65 @@ declare module 'hono' {
  * parser checks offline. `audience` is configured, never derived, and 2.x's
  * `requireHubAuth` reads it from here.
  */
-const hubSdkConfig: HubConfig | null = tryLoadHubAuthConfig(hubEnvBag(env));
+const DEV_IDENTITY_FLAG_TRUTHY_VALUES = new Set(['1', 'true', 'yes', 'on']);
+
+/**
+ * Mirrors `isFakeAuthRequested` / `isProductionEnv` in
+ * `apps/api/src/auth/select.ts` without importing that module - select.ts
+ * already imports `MinimalHubAuthContext` from this file, so a value import
+ * the other way would be a cycle. Both read raw `process.env` directly,
+ * exactly as select.ts does for the same two questions and exactly as
+ * `installAppAuthAdapter` below already does for its own production refusal.
+ */
+function isDevIdentityFlagActive(): boolean {
+  const value = process.env.SALES_AUTH_FAKE;
+  if (typeof value !== 'string') return false;
+  return DEV_IDENTITY_FLAG_TRUTHY_VALUES.has(value.trim().toLowerCase());
+}
+
+function isProductionProcess(): boolean {
+  return (process.env.NODE_ENV ?? '').trim().toLowerCase() === 'production';
+}
+
+/**
+ * `tryLoadHubAuthConfig` throws `HubConfigError` for a Hub configuration that
+ * is PRESENT but partial or otherwise invalid - see auth-provider.ts's
+ * header - and that is correctly a boot failure on the real path. But the
+ * development identity mode exists so this product can run WITHOUT the Hub
+ * at all, and a real developer machine routinely carries a leftover or
+ * partial Hub variable that this mode must survive, because this module is
+ * imported during boot no matter what: the sales-ops router depends on
+ * `appAuthMiddleware`.
+ *
+ * The tolerance is CONDITIONAL and narrow in both dimensions:
+ * - only `HubConfigError` is absorbed, never a broader catch;
+ * - it applies only when the development identity flag is active AND the
+ *   process is not production, so a run with the flag absent, or a
+ *   production run, rethrows and stays byte-equivalent to today.
+ *
+ * `null` is already a state this module understands: it is what
+ * `tryLoadHubAuthConfig` returns for a machine with NO credentials at all,
+ * and it is what keeps `503 hub_auth_not_configured` alive. Under the
+ * development adapter the value is irrelevant anyway, because
+ * `installAppAuthAdapter` REPLACES `hubAppAuthMiddleware` and the BFF is
+ * already documented as unusable in this mode.
+ */
+function resolveHubSdkConfig(): HubConfig | null {
+  try {
+    return tryLoadHubAuthConfig(hubEnvBag(env));
+  } catch (error) {
+    if (error instanceof HubConfigError && isDevIdentityFlagActive() && !isProductionProcess()) {
+      console.warn(
+        '[dev-identity] Ignoring the Hub configuration because SALES_AUTH_FAKE is active: ' +
+          error.message,
+      );
+      return null;
+    }
+    throw error;
+  }
+}
+
+const hubSdkConfig: HubConfig | null = resolveHubSdkConfig();
 
 export function getHubLegacyAuthContext(auth: MinimalHubAuthContext): {
   userId: string;
@@ -186,7 +244,33 @@ export function getHubSdkConfig() {
  */
 const hubAuthMiddleware = hubSdkConfig ? requireHubAuth(hubSdkConfig) : null;
 
-export const appAuthMiddleware: MiddlewareHandler = async (c, next) => {
+/**
+ * Lifted verbatim out of the inner callback below so the Hub adapter and the
+ * development adapter (installed through `installAppAuthAdapter`, built in
+ * `apps/api/src/auth/select.ts`) apply tenancy IDENTICALLY. `orgId` always
+ * comes from the verified `auth.workspaceId` and from nowhere else - nothing
+ * on this path reads an org, an account or a workspace off a request body or
+ * a query string.
+ */
+export async function applyHubAuthContext(
+  c: Context,
+  auth: MinimalHubAuthContext,
+  next: Next,
+): Promise<void> {
+  const legacy = getHubLegacyAuthContext(auth);
+  c.set('userId', legacy.userId);
+  c.set('orgId', legacy.orgId);
+  c.set('userRole', legacy.userRole);
+  c.set('userRoles', legacy.userRoles);
+  await next();
+}
+
+/**
+ * The real Hub gate, unchanged in substance from before the adapter slot
+ * existed. `appAuthMiddleware` below is now a one-line dispatcher over this
+ * and whatever adapter `installAppAuthAdapter` has installed.
+ */
+const hubAppAuthMiddleware: MiddlewareHandler = async (c, next) => {
   if (!hubAuthMiddleware || !hubSdkConfig) {
     return c.json({ error: 'unavailable', code: 'hub_auth_not_configured' }, 503);
   }
@@ -199,15 +283,50 @@ export const appAuthMiddleware: MiddlewareHandler = async (c, next) => {
       return;
     }
 
-    const legacy = getHubLegacyAuthContext(auth);
-    c.set('userId', legacy.userId);
-    c.set('orgId', legacy.orgId);
-    c.set('userRole', legacy.userRole);
-    c.set('userRoles', legacy.userRoles);
-    await next();
+    await applyHubAuthContext(c, auth, next);
   });
   return blockedResponse ?? authResponse;
 };
+
+/**
+ * The adapter slot. Empty on every production and every ordinary Hub-backed
+ * boot. Filling it REPLACES `hubAppAuthMiddleware` rather than stacking beside
+ * it: two live gates would mean one live gate and one unreachable one with a
+ * green suite over the dead one, which CLAUDE.md forbids.
+ */
+let installedAppAuthAdapter: MiddlewareHandler | null = null;
+
+export const DEV_IDENTITY_ADAPTER_IN_PRODUCTION_MESSAGE =
+  'SALES_AUTH_FAKE is set while NODE_ENV=production. ' +
+  'The development identity adapter must never run in production. Refusing to boot.';
+
+/**
+ * Installs a development identity adapter in place of the Hub gate.
+ *
+ * Both refusals THROW rather than returning a value a caller could ignore.
+ * The production refusal is duplicated with `installFakeAuthIfRequested` in
+ * `apps/api/src/auth/select.ts` on purpose, and both throw this SAME exported
+ * constant so the two cannot drift into saying different things about one
+ * rule: a function that switches off an authentication surface must not be
+ * safe only because somebody upstream happened to check first. The
+ * second-install refusal exists because this slot exists to REPLACE the one
+ * gate and not to stack a second one beside it.
+ */
+export function installAppAuthAdapter(adapter: MiddlewareHandler): void {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(DEV_IDENTITY_ADAPTER_IN_PRODUCTION_MESSAGE);
+  }
+  if (installedAppAuthAdapter) {
+    throw new Error(
+      'installAppAuthAdapter was called a second time. ' +
+        'The adapter slot replaces the Hub gate and must never stack a second one beside it.',
+    );
+  }
+  installedAppAuthAdapter = adapter;
+}
+
+export const appAuthMiddleware: MiddlewareHandler = (c, next) =>
+  (installedAppAuthAdapter ?? hubAppAuthMiddleware)(c, next);
 
 /**
  * Bounds the Hub round-trip the BFF makes from INSIDE the transaction that holds

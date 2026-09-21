@@ -27,6 +27,9 @@ Keep the repository folder name unchanged until the editor session can safely mo
 - `requireHubAuth` from `@fxl-business/hub-sdk@2.3.0` is the single authority and the ONLY access gate in the API. It allows only on `entitlements.access === true`, and fails CLOSED: absent, false, non-boolean, or a missing `entitlements` object all deny. `allowWithoutAccess` is left at its default of `false`, which IS the gate.
 - There is deliberately exactly ONE gate. `classifyHubAccess`, `hasHubOrgAccess`, `hasHubModule` and `requireHubModule` were this repo's ONE-WAVE BRIDGE while it was on `1.3.1`, which exported no access gate at all; they are DELETED, because two gates would mean one live gate and one unreachable one with a green suite over the dead one.
   `requireHubAuth`'s own `requiredModule` is now the only seam that may read `modules`, for a paid add-on, and no route mounts it today.
+  That sentence is TRUE and is now written with its scope out loud: in PRODUCTION, and in any run that does not set `SALES_AUTH_FAKE`, `requireHubAuth` is the one and only access gate and the request path holds no branch that could become a second one.
+  The development identity mode added on 2026-09-21 does NOT stand a second gate beside it: it REPLACES the middleware at BOOT, once, so a process has exactly one gate in either mode, which is the same invariant this bullet has always asserted rather than an exception to it.
+  What actually keeps a second gate from ever answering a real request is narrower than first documented, and `## Development identity mode` records the true shape rather than the intended one: the package is NOT absent from the shipped production API image, and the real backstop is `NODE_ENV=production` baked into that image at build time, together with the boot refusal that reads it.
 - `MinimalHubAuthContext` is now an ALIAS of the SDK's real `HubAuthContext`, not a local declaration. It was hand-declared because `1.3.1` re-exported `HubEntitlements` from an unshipped package, so under `skipLibCheck` it degraded to `any` and the deny branch was unreachable at type level; 2.2.0 ships the types in its own `dist`, so the gate is finally type-checked against the shape the Hub actually mints.
 - ONE recorded behaviour change from that migration: a token whose `entitlements` object carries NO `access` key at all is answered `401`, not `402`. The SDK validates the token against the contract BEFORE the entitlement gate runs, and such a token is not well-formed. That is correct and is not a regression: a `401` reaches the login screen, which is the right destination for a token this app cannot use, exactly as for `contract_version_mismatch`. `402` stays reserved for a WELL-FORMED token whose Organization simply has no access. Both are pinned in `apps/api/src/middleware/__tests__/app-auth-access-gate.test.ts`.
 - That file drives the REAL verifier rather than a stub: it generates an RSA keypair in-process, serves the Hub's discovery document and JWKS off a stubbed `fetch`, and signs its own tokens, so the gate is proven live and the suite still never leaves the machine.
@@ -219,6 +222,63 @@ Keep the repository folder name unchanged until the editor session can safely mo
   The switch flush goes AFTER `await client.setActive(...)` and after the `operationGeneration` check, and BEFORE `tokenCache.seed` and `observeToken`: flushing earlier would wipe the current tenant's data on a switch that is still in flight, fails, or is superseded.
   Those two orderings have DEDICATED oracles, because nothing else in the suite catches either one - `keeps the current tenant's cache while a workspace switch is still in flight` and `does not flush when a superseded workspace switch resolves late`, both in `apps/web/src/auth/__tests__/react.test.tsx`.
   A ladder recovery must NOT flush. The condition is `typeof lastAppliedToken.current === 'string'`, i.e. a token arriving while NO session is held, so a transient blip cannot destroy the operator's cached screen; `keeps the cache when the revalidation ladder recovers from a blip` is the only test that fails on the obvious wrong implementation of "flush on every non-null token".
+
+## Development identity mode
+
+- There is a DEVELOPMENT identity mode, added 2026-09-21, and its whole purpose is that this product can be developed and reviewed with NO Hub listening anywhere.
+  Before it, a Hub outage or a Hub contract change stopped every screen behind authentication, which is a coupling problem rather than an auth problem: the ability to work on Sales was bound to a live, contract-stable instance of another application.
+  Its second purpose is reach: a role-gated screen can only be reviewed by an operator holding that role, and the mode lets one developer adopt each identity in turn instead of holding six Hub accounts.
+- It is OFF unless asked for, and asking for it is two flags: `SALES_AUTH_FAKE` on the API and `VITE_AUTH_FAKE` on the web, both documented as COMMENTED lines in every shipped `.env` example and enabled by nothing that a fresh clone copies.
+  With both absent the repository behaves EXACTLY as it did before the mode existed, which is the claim the feature is measured on rather than a hope: the request path gains no branch, `requireHubAuth` is still constructed the same way with `allowWithoutAccess` at its default of `false`, and the 401/402/403/503 taxonomy above is byte-identical.
+  `make dev-fake` sets both and runs the pair; `make back-fake` and `make front-fake` set one each.
+- The substitution happens ONCE, at BOOT, and REPLACES the Hub middleware rather than standing beside it.
+  That is the design decision the rest of this section defends, and the alternative, a per-request branch reading the flag, is what it exists to forbid: a branch inside the request path ships inside the production artifact and is one truthy environment variable away from authenticating anyone, whereas a boot-time replacement means a given process has exactly ONE gate in either mode and never two.
+  It is also why the ONE-gate rule in `## Auth Model` is not weakened by this mode: two gates would mean one live and one unreachable with a green suite over the dead one, and this mode creates no second gate.
+- The defence was DESIGNED as four layers, structural first and assertive last, because an environment flag guarding an in-tree code path does not meet the bar for something that can authenticate a person.
+  It was verified against the real `apps/api/Dockerfile` on 2026-09-21 and only two of the four hold for the API's actual shipped artifact; this paragraph names the gap rather than the plan, because a claim this file makes and a build proves false is worse than making no claim at all.
+  ONE, `packages/auth-fake` (`@fxl-sales/auth-fake`) is a devDependency of both apps and never a dependency, which is TRUE as a `package.json` fact and is exactly what the isolation guard below checks - but it does NOT mean the production API image excludes the package, and stating it that way was the error.
+  `apps/api/Dockerfile`'s `deps` stage runs `pnpm install --frozen-lockfile` with no `--prod`, so devDependencies are resolved rather than excluded, and its runtime stage does `COPY --from=build /app/packages ./packages`, copying the WHOLE `packages/` tree rather than a scoped subset the way its own `deps` stage already scopes `package.json` copies.
+  A built image was inspected directly and `/app/packages/auth-fake/{package.json,src/,tsconfig.json}` plus a resolving `node_modules` symlink to it are both PRESENT inside the shipped runtime image, so layer one does not hold for this deployment path and never did.
+  TWO, every access to it is a DYNAMIC import, because a static import, INCLUDING a type-only one the compiler erases, pulls the package into the build graph; that is also why the API selector, `apps/api/src/auth/select.ts`, declares the shape it needs structurally instead of importing the type. This layer HOLDS: it stops a bundler tree-shaking failure from leaking the package, but it says nothing about a package already physically present on disk, which is why it cannot substitute for layer one.
+  THREE, the web half, `apps/web/src/dev/install-dev-identity.ts`, sits behind `import.meta.env.DEV`, which `vite build` statically replaces with `false`. This layer HOLDS and is the one PROVEN against the real artifact rather than merely argued: `scripts/assert-web-bundle-clean.mjs` builds the actual bundle and asserts the sentinel is absent from `apps/web/dist`, so the web deployment path (Vercel, static assets, no Docker stage in between) genuinely cannot reach the fake identity in production.
+  FOUR, the API REFUSES TO BOOT, with a named message, when the flag is set while `NODE_ENV=production`. This is not the belt behind three working braces; for the API it is the ONLY layer standing, because `NODE_ENV=production` is baked into `apps/api/Dockerfile` at build time and running the real production image with `SALES_AUTH_FAKE=1` against that baked-in value was reproduced live refusing to boot with the named error.
+  A second thing was also found to stop it, but by ACCIDENT and not by design: forcing `NODE_ENV=development` against that same production image does not trip the boot refusal, and it fails only because `packages/auth-fake`'s `package.json` points `main` straight at uncompiled `./src/index.ts`, and plain `node` - the production runtime, with no `tsx` in front of it - cannot load raw TypeScript.
+  That crash is asserted by no test, is not a designed boundary, is not mentioned anywhere else in this file, and would silently disappear the day anyone gives `packages/auth-fake` a build step, which is the natural-looking fix for the very workspace-resolution gap layer one's Docker failure comes from.
+  So the honest count for the API's shipped artifact is TWO real, independent things holding it closed today - `NODE_ENV=production` baked into the image, and the boot-time refusal that reads it - plus one accidental crash that is not a layer because nothing pins it, rather than the four originally claimed.
+  The remediation is named here so it is not lost: `apps/api/Dockerfile` must scope its runtime `packages` copy to what the API actually needs instead of the whole tree, and must install with `--prod` (or `pnpm deploy`/prune) so devDependencies are genuinely excluded the way the documentation always claimed, and a test must build or otherwise inspect the real artifact and assert the package and its sentinel are absent, the way `assert-web-bundle-clean.mjs` already does for the web bundle. Filed on `nexo/ROADMAP.md`.
+- `scripts/__tests__/auth-fake-isolation.test.mjs` is what makes layers two through four IRREMOVABLE at the source level, and it runs inside `pnpm run test`.
+  It asserts the dependency classification, that no shipped source imports the package statically, that the package is reached only from the sanctioned boot-time selectors (`apps/api/src/auth/select.ts` and `apps/web/src/dev/install-dev-identity.ts`), and that the flag in production is refused.
+  It proves itself against mutated fixture trees and demands a non-zero exit, in the mould of `scripts/__tests__/local-database-guard.test.mjs`, because a guard that cannot fail is a guard that reports green without having looked.
+  It never builds or inspects the actual Docker artifact, so it could not and did not catch the layer-one gap above; that class of defect needs the remediation's second half, a test against the real built image.
+- The roles travel the REAL translation path in BOTH halves, and this is the property that makes the mode worth having rather than a screenshot tool.
+  The package emits CLAIMS in the Hub's own shape; the web passes them through `getRolesFromHubClaims` in `apps/web/src/auth/claims.ts` and then through `getVisibleWorkspaces` in `apps/web/src/sales-ops/navigation.ts`, exactly as a real token does.
+  NOTHING hands a ready-made profile to the app and nothing writes `profile.roles` directly.
+  A fixture that wrote the profile would make the mode agree with the app by construction and would prove nothing about the visibility rule it is used to review.
+- ONE acceptance criterion was SUPERSEDED during planning rather than implemented, and it is recorded here rather than left to be discovered.
+  The request asked the roster for an `admin-only` identity seeing `tatico` plus `operacional` plus `cadastros` and NO `meus-dados`.
+  No such identity exists, because `getRolesFromHubClaims` has three outcomes and every admin-bearing one returns `['admin', 'seller', 'finder']`, so `getVisibleWorkspaces` always adds `meus-dados`.
+  Producing it would have meant changing `getRolesFromHubClaims`, which is a PRODUCTION behaviour change and is precisely what this feature promised not to do.
+  The roster therefore carries THREE identities (`team-owner`, `team-admin`, `product-admin` in `packages/auth-fake/src/index.ts`) that reach the full-access set through the three DIFFERENT claim shapes `getRolesFromHubClaims` really has, workspace `owner`, workspace `admin` and `productRoles: ['admin']`, each seeing all four paineis, and the gap is filed in `nexo/ROADMAP.md` rather than faked.
+- The browser seam is `requestHubAccessToken` in `apps/web/src/auth/refresh.ts` and NOT `HubClient.getToken()`, and that follows from a rule this file already states: the browser reads `/auth/refresh` itself and never through the client.
+  Substituting the client, which is what the vendor recipe does, would deliver no token at all here, because the token path is the hand-rolled fetch.
+  Anyone porting this mode from another FXL product will reach for the client seam first; that is the seam this repository does not have.
+- The mode runs against the LOCAL Postgres and nothing else, under the `## Local database guard` rules unchanged.
+  `apps/api/scripts/seed-dev.ts` is deterministic and idempotent and creates the `org_id` values the roster names, each with its `vendedor` and `finder` system funcoes and with pessoas attached, so `meus-dados` and `cadastros` open with rows instead of empty states.
+  Tenancy is untouched: every query still filters on `eq(table.orgId, c.get('orgId'))`, the active org of a fake identity is an `org_id` that the seed created, and nothing on the fake path reads `user_id`, `org_id`, `account_id` or `workspace_id` out of a request body.
+- A SENTENCE ALREADY IN THIS FILE IS FALSE, and this feature found it rather than caused it, so it is recorded here rather than quietly fixed.
+  `## Sales Ops Routing` states, of the visibility rule, that "team-only sees the three team workspaces and no `meus-dados`".
+  No token this product accepts can put an operator in that state, for the reason in the bullet above: every admin-bearing branch of `getRolesFromHubClaims` returns `['admin', 'seller', 'finder']`, so `getVisibleWorkspaces` always adds `meus-dados`.
+  `getVisibleWorkspaces` itself is correct and is not the defect: it really would return the three team painéis alone for the role set `['admin']`, and that role set is simply unreachable.
+  So either `claims.ts` is wrong or that sentence is, and deciding which is a PRODUCT question about whether a workspace owner who is neither vendedor nor finder should see `meus-dados`.
+  This feature deliberately did not answer it, because answering it changes a production claim reader, and the question is filed for the human in the run's `AUDIT.md` and on `nexo/ROADMAP.md`.
+  The sentence is left standing with this note beside it rather than edited, because editing it would pick the answer by accident.
+- This mode makes a written prohibition FALSE, and the prohibition is superseded where it lives rather than deleted.
+  `nexo/plans/feature-20260827-hub-sdk-210-access-model/05-dev-identity-fixtures.md` is `status: parked` and forbids a runtime development-identity path in four places, on the grounds that it would be a production hazard.
+  That reasoning was RIGHT for what it judged, which was wiring a fake client into the SHIPPED request path during an auth migration with no structural isolation behind it.
+  It is void for what actually landed, which is a boot-time replacement rather than a per-request branch: the web half's exclusion from the production bundle is genuinely proven by its own build check, and the API half is currently held closed by `NODE_ENV=production` baked into the image plus the boot refusal that reads it, not by the package's absence from the image, which the section above now corrects.
+  The isolation guard proves itself against the source tree, not yet against the built Docker artifact, and that remaining gap is exactly what the paragraph above files on `nexo/ROADMAP.md`.
+  The parked file carries a dated supersession note, corrected on the same day to state the Docker gap rather than the four-layer claim it first repeated, and `nexo/knowledge/decisions/2026-09-21-development-identity-is-a-boot-time-adapter.md` carries the reasoning.
+  `scripts/__tests__/dev-identity-docs-reconciliation.test.mjs` fails if that note is removed while `packages/auth-fake` is still in the tree, so the repository can never again ship a prohibition against something it does.
 
 ## Tenancy
 
@@ -583,6 +643,12 @@ FXL_HUB_REDIRECT_URI=http://localhost:8006/auth/callback
 FXL_HUB_TRUSTED_ORIGINS=http://localhost:8006
 
 PUBLIC_LINK_BASE_URL=http://localhost:3006
+
+# Development identity mode. COMMENTED here and commented in every .env example:
+# absent means the ordinary Hub path, which is what a copied block must
+# reproduce. Set it through `make dev-fake` rather than by hand. The API refuses
+# to boot with it set while NODE_ENV=production.
+# SALES_AUTH_FAKE=1
 ```
 
 Required web vars:
@@ -594,6 +660,10 @@ VITE_AUTH_BFF_BASE_PATH=
 VITE_FXL_HUB_API_URL=http://localhost:9016
 VITE_FXL_HUB_ENVIRONMENT=development
 VITE_FXL_HUB_AUDIENCE=app.fxl-sales
+
+# Development identity mode. COMMENTED, for the same reason. The whole web half
+# is behind import.meta.env.DEV, so a production build eliminates it.
+# VITE_AUTH_FAKE=1
 ```
 
 The API owns public referral redirects at `/r/:code`.
@@ -606,11 +676,13 @@ This section exists because of a measured incident on 2026-09-16, not a hypothes
 `make db-reset` was the worst of the three, because it drops the local docker volume and then chains `$(MAKE) migrate`, which applied DDL to staging.
 Everything below is the mechanism that stops the next occurrence, and every rule in it is load-bearing.
 
-- There are exactly TWO guarded entrypoints, `apps/api/src/server.ts` and `apps/api/src/db/migrate.ts`, and the number two is deliberate rather than incidental.
-  `migrate.ts` is the one that MATTERS: it reads `process.env.DATABASE_URL` raw and never passes through `apps/api/src/env.ts`, so a check living in the zod schema would have missed exactly the path that applies DDL.
-  A third call site is not free - the guard's value is that both doors are provably guarded by `scripts/__tests__/local-database-guard.test.mjs`, and that test names those two paths - so adding one means adding its assertion in the same change.
-  `apps/api/drizzle.config.ts` is a known UNGUARDED third door: it has its own `import 'dotenv/config'` and a `localhost:5006` fallback, so `db:studio` reaches a database without passing either entrypoint.
+- There are exactly THREE guarded entrypoints, `apps/api/src/server.ts`, `apps/api/src/db/migrate.ts` and `apps/api/scripts/seed-dev.ts`, and the number three is deliberate rather than incidental.
+  `migrate.ts` is the one that MATTERS most: it reads `process.env.DATABASE_URL` raw and never passes through `apps/api/src/env.ts`, so a check living in the zod schema would have missed exactly the path that applies DDL.
+  A fourth call site is not free - the guard's value is that all three doors are provably guarded by `scripts/__tests__/local-database-guard.test.mjs`, and that test names those three paths - so adding one means adding its assertion in the same change.
+  `apps/api/drizzle.config.ts` is a known UNGUARDED fourth door: it has its own `import 'dotenv/config'` and a `localhost:5006` fallback, so `db:studio` reaches a database without passing any of the three entrypoints.
   It is out of scope by decision (read-mostly, no `make` target) rather than by oversight, and it is recorded here so a future `db:push` script does not inherit an unguarded path with a green suite over it.
+  `seed-dev.ts` is the THIRD entrypoint, added in v4.1.0: it seeds the dev-fake identity roster's orgs, and it DELETES rows before it inserts them, which makes it the second most dangerous door after `migrate.ts`.
+  Unlike the other two it does NOT accept `SALES_ENV_FILE`: it calls the guard with `namedEnvFile` hard-coded to `null`, because seeding a shared database is never the right thing to do on purpose, so the escape hatch that lets `make back-stg` reach staging does not apply here at all.
 - `apps/api/src/db/local-database-guard.ts` is PURE.
   It imports NOTHING, performs no I/O, and never reads `process.env`; every input arrives as an argument.
   That is what lets its unit test cover every branch with no database, no file and no ambient environment, and it is what keeps the module safe to import without making any importing test suite environment-dependent.
@@ -655,7 +727,7 @@ Everything below is the mechanism that stops the next occurrence, and every rule
   It proves itself by re-spawning against mutated fixture trees and asserting a NON-ZERO exit, never a message.
   `runAgainst` strips every `NODE_TEST_`-prefixed key from the child env FOR A REASON: `node --test` sets `NODE_TEST_CONTEXT` in each test file's process, and spreading it into the grandchild makes node warn `run() is being called recursively within a test file`, run ZERO TESTS and exit `0`, so all four negative cases pass while proving nothing.
   The positive control does not catch that, because a vacuous child exits 0 and that is precisely what the positive control asserts; the four negatives are what catch it.
-  A real run reports `# pass 10` and a fixture-mode run reports 5, so the count is itself a tripwire.
+  A real run reports `# pass 17` and a fixture-mode run reports 8, so the count is itself a tripwire.
 - `SALES_ENV_FILE` is deliberately NOT in `scripts/no-legacy-env-names.mjs`.
   That guard has a single purpose, retired names, and this is a NEW name.
 

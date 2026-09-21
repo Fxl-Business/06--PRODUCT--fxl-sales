@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "."
+  },
+  // `src/**/*` is included alongside `scripts/**/*`, not only the latter: with
+  // scripts/-only roots, TypeScript pulls in apps/api/src/middleware/auth.ts
+  // purely as a transitively-referenced file (via the dynamic
+  // `await import('../src/domains/sales-ops/service.js')` chain), and its
+  // `declare module 'hono'` augmentation then fails to resolve the `hono`
+  // package with TS2664 - a real TypeScript module-augmentation limitation for
+  // files that are reachable but not themselves program roots. Listing
+  // `src/**/*` as a root too makes the augmentation resolve exactly as it does
+  // under the ordinary tsconfig.json. This changes nothing about emission:
+  // `noEmit` stays true here, so `apps/api/src/` is still compiled into
+  // `dist/` ONLY by the unmodified `tsconfig.json` / `tsc` build.
+  "include": ["src/**/*", "scripts/**/*"]
+}

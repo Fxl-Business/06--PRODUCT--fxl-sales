@@ -1,6 +1,7 @@
-.PHONY: dev front back stg back-stg front-stg install setup setup-no-db build build-shared build-web build-api \
+.PHONY: dev front back stg back-stg front-stg dev-fake back-fake front-fake dev-fake-setup \
+       install setup setup-no-db build build-shared build-web build-api \
        lint lint-fix type-check check \
-       migrate db-up db-down db-reset docker-up docker-down docker-build \
+       migrate db-up db-down db-reset db-seed docker-up docker-down docker-build \
        clean preview help doctor
 
 .DEFAULT_GOAL := dev
@@ -24,6 +25,50 @@ front: ## Run only the frontend
 
 back: build-shared ## Run only the API
 	pnpm --filter @fxl-sales/api dev
+
+# --- Development without the Hub ---
+#
+# This section runs the whole product against local development identities,
+# with the Hub never contacted, so work on screens behind auth is not blocked
+# by a Hub that is down or has not yet issued a Client for this machine.
+#
+# The safety lives elsewhere and not in these targets. The identity package is
+# a devDependency and is absent from the production image, every access to it
+# is a dynamic import, the web half is behind import.meta.env.DEV so a
+# production build eliminates it as dead code, and the API refuses to boot with
+# SALES_AUTH_FAKE set under NODE_ENV=production.
+#
+# The flags are OFF in every committed .env example and are turned on here, by
+# a target, at the moment the operator means it.
+#
+# There is deliberately NO staging or production variant, no `dev-fake-stg`,
+# and no target that sets a dev-fake flag alongside SALES_ENV_FILE. If you came
+# here to add one, do not.
+#
+# `dev-fake-setup` chains db-up, migrate and db-seed and deliberately does NOT
+# chain db-reset, which destroys the local volume.
+
+dev-fake: build-shared ## Run the full stack with development identities (no Hub required)
+	@echo "dev-fake: api http://localhost:3006 | web http://localhost:8006 | the Hub is never contacted"
+	@set -m; \
+	SALES_AUTH_FAKE=1 pnpm --filter @fxl-sales/api dev & api=$$!; \
+	VITE_AUTH_FAKE=1 pnpm --filter @fxl-sales/web dev & web=$$!; \
+	trap 'kill -- -$$api -$$web 2>/dev/null || true' INT TERM EXIT; \
+	wait
+
+back-fake: build-shared ## Run only the API with development identities
+	SALES_AUTH_FAKE=1 pnpm --filter @fxl-sales/api dev
+
+front-fake: ## Run only the frontend with development identities
+	VITE_AUTH_FAKE=1 pnpm --filter @fxl-sales/web dev
+
+dev-fake-setup: ## One-shot: start the DB, migrate, seed the dev dataset, then run dev-fake
+	$(MAKE) db-up
+	@echo "Waiting for PostgreSQL..."
+	@sleep 3
+	$(MAKE) migrate
+	$(MAKE) db-seed
+	$(MAKE) dev-fake
 
 # --- Staging ---
 #
@@ -103,6 +148,9 @@ doctor: ## Run the FXL health check
 
 migrate: ## Run database migrations
 	pnpm --filter @fxl-sales/api db:migrate
+
+db-seed: ## Seed the local database with the deterministic development dataset
+	pnpm --filter @fxl-sales/api db:seed:dev
 
 db-up: ## Start PostgreSQL only
 	docker compose up db -d

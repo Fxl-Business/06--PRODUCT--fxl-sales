@@ -19,6 +19,7 @@ import { Combobox } from '@/components/ui/combobox';
 import { Skeleton } from '@/components/ui/skeleton';
 import { isOrgLabelFallback, orgLabel } from '@/lib/displayNames';
 import { getRoleFromHubClaims, getRolesFromHubClaims, parseJwtPayload, type AppRole } from './claims';
+import { getDevIdentitySession } from '../dev/dev-identity-registry';
 import { getHubBffBasePath, loadHubBrowserConfig } from './provider';
 import { requestHubAccessToken, TRANSIENT_TOKEN_RESULT, type HubTokenResult } from './refresh';
 import {
@@ -230,29 +231,50 @@ function HubAuthProvider({ children }: { children: ReactNode }) {
    * resolve to a different origin than the SDK client's.
    */
   const bffBasePath = useMemo(() => getHubBffBasePath(import.meta.env), []);
+  /*
+    Read ONCE per provider mount. `getDevIdentitySession()` answers `null` outside
+    `import.meta.env.DEV` and whenever no dev session was installed, which is every
+    production build and every ordinary local boot - so `devSession` is `null` there
+    and both memos below take exactly the branch they always did.
+
+    Installed BEFORE the first render, from `main.tsx`'s bootstrap, by the one seam
+    file under `apps/web/src/dev/` that is allowed to name the roster package. This
+    file must never name that seam, the switcher, or the roster package itself: it
+    only ever reads the tiny registry slot in `../dev/dev-identity-registry.ts`.
+  */
+  const devSession = useMemo(() => getDevIdentitySession(), []);
   const client = useMemo(
     () =>
-      createHubClient(loadHubBrowserConfig(import.meta.env), {
-        bffBasePath,
-        /*
-          The SDK's proactive renewal is DELIBERATELY NOT ADOPTED, and the default
-          is `true`, so this has to be said explicitly.
+      /*
+        A TERNARY, and never `devSession?.client ?? createHubClient(...)`. `??`
+        evaluates its right operand regardless, and `loadHubBrowserConfig` THROWS
+        when the Hub env vars are absent - which is exactly the machine dev-fake
+        exists to boot on. The ternary is what keeps the real construction from
+        ever being evaluated while a dev session is installed.
+      */
+      devSession
+        ? devSession.client
+        : createHubClient(loadHubBrowserConfig(import.meta.env), {
+            bffBasePath,
+            /*
+              The SDK's proactive renewal is DELIBERATELY NOT ADOPTED, and the default
+              is `true`, so this has to be said explicitly.
 
-          This file already owns renewal, and owns it in a shape the SDK's loop
-          does not have: renewal at `exp - SESSION_RENEWAL_LEAD_MS` but only while
-          the document is VISIBLE, a synchronous renew on `visibilitychange`, the
-          bounded revalidation ladder with its consecutive-failure budget, the
-          durable logout intent, and the queryClient flush rules. Every one of
-          those is pinned by tests in this directory. Two renewal loops on one
-          token cache would race each other and each other's oracles, and the
-          SDK's would renew a hidden tab this product deliberately lets idle.
+              This file already owns renewal, and owns it in a shape the SDK's loop
+              does not have: renewal at `exp - SESSION_RENEWAL_LEAD_MS` but only while
+              the document is VISIBLE, a synchronous renew on `visibilitychange`, the
+              bounded revalidation ladder with its consecutive-failure budget, the
+              durable logout intent, and the queryClient flush rules. Every one of
+              those is pinned by tests in this directory. Two renewal loops on one
+              token cache would race each other and each other's oracles, and the
+              SDK's would renew a hidden tab this product deliberately lets idle.
 
-          Adopting it is a separate decision with its own migration, not a side
-          effect of a version bump.
-        */
-        autoRenew: false,
-      }),
-    [bffBasePath],
+              Adopting it is a separate decision with its own migration, not a side
+              effect of a version bump.
+            */
+            autoRenew: false,
+          }),
+    [bffBasePath, devSession],
   );
 
   /*
@@ -262,8 +284,11 @@ function HubAuthProvider({ children }: { children: ReactNode }) {
   */
   useEffect(() => () => client.stop(), [client]);
   const tokenCache = useMemo(
-    () => createHubAccessTokenCache(() => requestHubAccessToken(bffBasePath)),
-    [bffBasePath],
+    () =>
+      createHubAccessTokenCache(
+        devSession ? devSession.requestToken : () => requestHubAccessToken(bffBasePath),
+      ),
+    [bffBasePath, devSession],
   );
   const operationGeneration = useRef(0);
   /**

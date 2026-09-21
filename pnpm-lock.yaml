@@ -73,6 +73,9 @@ importers:
       '@eslint/js':
         specifier: ^9.39.5
         version: 9.39.5
+      '@fxl-sales/auth-fake':
+        specifier: workspace:*
+        version: link:../../packages/auth-fake
       '@types/node':
         specifier: ^22.13.5
         version: 22.20.0
@@ -194,6 +197,9 @@ importers:
       '@eslint/js':
         specifier: ^9.39.5
         version: 9.39.5
+      '@fxl-sales/auth-fake':
+        specifier: workspace:*
+        version: link:../../packages/auth-fake
       '@types/node':
         specifier: ^22.13.5
         version: 22.20.0
@@ -239,6 +245,15 @@ importers:
       vite:
         specifier: ^6.2.0
         version: 6.4.3(@types/node@22.20.0)(jiti@1.21.7)(tsx@4.23.0)
+      vitest:
+        specifier: ^3.2.7
+        version: 3.2.7(@types/node@22.20.0)(happy-dom@20.10.6)(jiti@1.21.7)(tsx@4.23.0)
+
+  packages/auth-fake:
+    devDependencies:
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
       vitest:
         specifier: ^3.2.7
         version: 3.2.7(@types/node@22.20.0)(happy-dom@20.10.6)(jiti@1.21.7)(tsx@4.23.0)
