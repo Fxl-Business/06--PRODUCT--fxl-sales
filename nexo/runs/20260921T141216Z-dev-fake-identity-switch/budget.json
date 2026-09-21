@@ -2,7 +2,7 @@
   "active_accumulated_seconds": 0,
   "active_since": 1789999986,
   "counters": {
-    "agent_dispatches": 26,
+    "agent_dispatches": 28,
     "initial_slices": 7,
     "replans": 1,
     "total_slices": 8,
@@ -28,7 +28,8 @@
       "03-web-dev-identity": 2,
       "04-dev-seed": 1,
       "05-isolation-guard": 1,
-      "06-make-targets": 1
+      "06-make-targets": 1,
+      "07-docs-reconciliation": 1
     }
   },
   "version": 1

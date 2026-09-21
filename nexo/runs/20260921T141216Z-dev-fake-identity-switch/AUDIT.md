@@ -288,3 +288,42 @@ output state something false about the tree, and the assertion now covers MORE t
 `CLAUDE.md` has direct precedent, having renamed the trusted-origins mount tests when their titles
 named a deleted shim, and having corrected its own earlier claim that those titles were unchanged.
 Recorded here so the rename is a decision on the record rather than a silent edit.
+
+## The final gate FAILED twice, correctly, and what that cost
+
+The final integration verifier BUILT the real `apps/api/Dockerfile` rather than reasoning about it,
+and proved that `packages/auth-fake` SHIPS INSIDE the production API image.
+`CLAUDE.md` had just claimed it was "absent from the production artifact by construction".
+The deps stage installs with no `--prod` and the runtime stage copies the whole `packages/` tree.
+
+Production is not left unsafe by this feature: `NODE_ENV=production` is baked into that image and the
+two independent boot refusals were reproduced live refusing to start. But the DOCUMENTED defence was
+four layers and the REAL one, for the API artifact, is one layer plus an accident.
+
+The first correction fixed `CLAUDE.md` and was FAILED AGAIN by a second verifier, because the same
+false claim still stood in the parked plan's supersession note and in the new ADR, and because
+`CLAUDE.md` had then asserted that the parked note "says exactly that" when it did not.
+That second FAIL is the one worth remembering: a correction that fixes the most-read copy of a claim
+and leaves its other two copies standing is not a correction, it is a contradiction with better
+manners.
+
+All three were then corrected to state the Docker gap.
+
+### [ ] FOR THE HUMAN - the one real remediation this run did NOT do
+
+`apps/api/Dockerfile` was deliberately left BYTE-UNCHANGED.
+Scoping its runtime `packages` copy and installing with `--prod` is the actual fix, and it was not
+attempted because a production image build cannot be validated inside this run, and a broken runtime
+image is the kind of failure that only appears at deploy time.
+It is filed on `nexo/ROADMAP.md` and described in `CLAUDE.md`.
+The second half of the remediation matters just as much: a test that inspects the REAL BUILT IMAGE,
+the way `scripts/assert-web-bundle-clean.mjs` already does for the web bundle. No source-level guard
+can catch this class of defect, which is exactly why five green source guards did not.
+
+### Process note, declared rather than hidden
+
+The last two documentation corrections were made by the ORCHESTRATOR rather than by a delegated
+executor, because the runtime budget was nearly exhausted.
+They were checked against the verifiers' own established facts and the docs guard was re-run green.
+That is weaker than the Execute-then-separate-Verify loop every other change in this run went
+through, and it is recorded here rather than presented as equivalent.

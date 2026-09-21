@@ -17,6 +17,21 @@ rules:
 verifier_focus: "that no runtime auth bypass was introduced and that no replaced fixture now proves less than it did"
 ---
 
+> **SUPERSEDED IN PART - 2026-09-21 - the prohibition only.**
+> This slice's ban on a runtime development-identity path is VOID as of `feature-20260921-dev-fake-identity-switch`, which built one.
+> Four statements in this file assert that ban and are now history rather than instruction: the frontmatter `goal` ("with no runtime identity path"), the frontmatter `acceptance`, the rule "no runtime development-identity path and no stubbed signature verification", and the section "### 1. No `createDevHubClient`, ever".
+> They are left standing, unedited, because they are the record of what was decided in August and why.
+> What changed is not the risk assessment but the isolation.
+> The ban judged a fake wired into the SHIPPED request path during an auth migration, with nothing but a flag between it and production, and for that it was right.
+> What landed instead is a BOOT-TIME replacement of the middleware, designed behind four layers but NOT closed by four.
+> Verified against the real `apps/api/Dockerfile` on 2026-09-21: the package is NOT absent from the API's production image, because the `deps` stage installs without `--prod` and the runtime stage copies the whole `packages/` tree.
+> What actually holds the API artifact closed is `NODE_ENV=production` baked into that image plus the boot refusal that reads it.
+> The web side IS genuinely closed, and that one is proven against the built bundle by `scripts/assert-web-bundle-clean.mjs`.
+> `scripts/__tests__/auth-fake-isolation.test.mjs` proves the SOURCE-level layers and proves itself against mutated fixtures, but it never inspects the built Docker artifact and did not catch the gap above.
+> The remediation is filed on `nexo/ROADMAP.md`.
+> Everything ELSE in this file is untouched and still parked: adopting `@fxl-business/hub-sdk-testing` as a devDependency for Hub-shaped claim fixtures remains unbuilt and remains a good idea.
+> Read `CLAUDE.md`'s `## Development identity mode` section for what exists today, and `nexo/knowledge/decisions/2026-09-21-development-identity-is-a-boot-time-adapter.md` for the reasoning.
+
 # 05 - dev-identity-fixtures
 
 ## What this slice is, in one paragraph
@@ -48,6 +63,8 @@ replaces only the claims skeleton. The file is therefore declared in this slice'
 Read this before writing code. Three plausible-looking pieces of work were considered and cut.
 
 ### 1. No `createDevHubClient`, ever
+
+> Superseded 2026-09-21. See the note at the top of this file. The paragraph below is left exactly as written.
 
 `createDevHubClient` is the package's headline seam and it is the one thing this slice must not
 use. It returns a `DevHubClient` that stands in for the real `HubClient` at runtime. Wiring it
