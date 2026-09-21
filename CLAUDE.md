@@ -606,11 +606,13 @@ This section exists because of a measured incident on 2026-09-16, not a hypothes
 `make db-reset` was the worst of the three, because it drops the local docker volume and then chains `$(MAKE) migrate`, which applied DDL to staging.
 Everything below is the mechanism that stops the next occurrence, and every rule in it is load-bearing.
 
-- There are exactly TWO guarded entrypoints, `apps/api/src/server.ts` and `apps/api/src/db/migrate.ts`, and the number two is deliberate rather than incidental.
-  `migrate.ts` is the one that MATTERS: it reads `process.env.DATABASE_URL` raw and never passes through `apps/api/src/env.ts`, so a check living in the zod schema would have missed exactly the path that applies DDL.
-  A third call site is not free - the guard's value is that both doors are provably guarded by `scripts/__tests__/local-database-guard.test.mjs`, and that test names those two paths - so adding one means adding its assertion in the same change.
-  `apps/api/drizzle.config.ts` is a known UNGUARDED third door: it has its own `import 'dotenv/config'` and a `localhost:5006` fallback, so `db:studio` reaches a database without passing either entrypoint.
+- There are exactly THREE guarded entrypoints, `apps/api/src/server.ts`, `apps/api/src/db/migrate.ts` and `apps/api/scripts/seed-dev.ts`, and the number three is deliberate rather than incidental.
+  `migrate.ts` is the one that MATTERS most: it reads `process.env.DATABASE_URL` raw and never passes through `apps/api/src/env.ts`, so a check living in the zod schema would have missed exactly the path that applies DDL.
+  A fourth call site is not free - the guard's value is that all three doors are provably guarded by `scripts/__tests__/local-database-guard.test.mjs`, and that test names those three paths - so adding one means adding its assertion in the same change.
+  `apps/api/drizzle.config.ts` is a known UNGUARDED fourth door: it has its own `import 'dotenv/config'` and a `localhost:5006` fallback, so `db:studio` reaches a database without passing any of the three entrypoints.
   It is out of scope by decision (read-mostly, no `make` target) rather than by oversight, and it is recorded here so a future `db:push` script does not inherit an unguarded path with a green suite over it.
+  `seed-dev.ts` is the THIRD entrypoint, added in v4.1.0: it seeds the dev-fake identity roster's orgs, and it DELETES rows before it inserts them, which makes it the second most dangerous door after `migrate.ts`.
+  Unlike the other two it does NOT accept `SALES_ENV_FILE`: it calls the guard with `namedEnvFile` hard-coded to `null`, because seeding a shared database is never the right thing to do on purpose, so the escape hatch that lets `make back-stg` reach staging does not apply here at all.
 - `apps/api/src/db/local-database-guard.ts` is PURE.
   It imports NOTHING, performs no I/O, and never reads `process.env`; every input arrives as an argument.
   That is what lets its unit test cover every branch with no database, no file and no ambient environment, and it is what keeps the module safe to import without making any importing test suite environment-dependent.
@@ -655,7 +657,7 @@ Everything below is the mechanism that stops the next occurrence, and every rule
   It proves itself by re-spawning against mutated fixture trees and asserting a NON-ZERO exit, never a message.
   `runAgainst` strips every `NODE_TEST_`-prefixed key from the child env FOR A REASON: `node --test` sets `NODE_TEST_CONTEXT` in each test file's process, and spreading it into the grandchild makes node warn `run() is being called recursively within a test file`, run ZERO TESTS and exit `0`, so all four negative cases pass while proving nothing.
   The positive control does not catch that, because a vacuous child exits 0 and that is precisely what the positive control asserts; the four negatives are what catch it.
-  A real run reports `# pass 10` and a fixture-mode run reports 5, so the count is itself a tripwire.
+  A real run reports `# pass 17` and a fixture-mode run reports 8, so the count is itself a tripwire.
 - `SALES_ENV_FILE` is deliberately NOT in `scripts/no-legacy-env-names.mjs`.
   That guard has a single purpose, retired names, and this is a NEW name.
 

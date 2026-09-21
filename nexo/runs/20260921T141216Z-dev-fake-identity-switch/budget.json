@@ -2,7 +2,7 @@
   "active_accumulated_seconds": 0,
   "active_since": 1789999986,
   "counters": {
-    "agent_dispatches": 20,
+    "agent_dispatches": 22,
     "initial_slices": 7,
     "replans": 1,
     "total_slices": 8,
@@ -25,7 +25,8 @@
       "01-auth-fake-package": 1,
       "02-api-dev-adapter": 1,
       "02.1-dev-fake-hub-config-independence": 1,
-      "03-web-dev-identity": 2
+      "03-web-dev-identity": 2,
+      "04-dev-seed": 1
     }
   },
   "version": 1

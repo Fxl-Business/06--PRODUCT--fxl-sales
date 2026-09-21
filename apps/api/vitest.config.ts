@@ -33,7 +33,7 @@ export default defineConfig({
         fileParallelism: false,
       }
     : {
-      include: ['src/**/__tests__/**/*.test.ts'],
+      include: ['src/**/__tests__/**/*.test.ts', 'scripts/**/__tests__/**/*.test.ts'],
       exclude: ['node_modules/**', 'dist/**', 'test/rls/**', 'src/**/*.integration.test.ts'],
         // Blanks the six Hub credential names so no unit file inherits the
         // machine's own .env. See the file for why, and why it is not magic.

@@ -272,3 +272,19 @@ that slice. It DOES still block running the API against a real Hub locally, so i
 wanted, the four canonical variables have to be filled in. `apps/api/.env.example` and
 `apps/api/.env.dev.example` are the reference, and `CLAUDE.md`'s Environments section carries the
 copyable block.
+
+## One pre-existing test TITLE was renamed in slice 04, accepted deliberately
+
+`scripts/__tests__/local-database-guard.test.mjs` had a test titled
+`both inspected files exist and are readable`.
+With the seed added as a third guarded entrypoint, "both" became factually wrong, and it was renamed
+to `every inspected file exists and is readable`.
+The ASSERTION BODY is untouched; only the noun changed.
+
+Acceptance 12 forbids weakening an existing test's title or assertion to accommodate this feature,
+and this was checked against that rule rather than waved through.
+It is accepted because it is the opposite of a weakening: leaving the old title would make the test
+output state something false about the tree, and the assertion now covers MORE than it did.
+`CLAUDE.md` has direct precedent, having renamed the trusted-origins mount tests when their titles
+named a deleted shim, and having corrected its own earlier claim that those titles were unchanged.
+Recorded here so the rename is a decision on the record rather than a silent edit.

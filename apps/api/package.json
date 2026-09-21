@@ -7,12 +7,13 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc && tsc-alias",
     "start": "node dist/server.js",
-    "type-check": "tsc --noEmit",
-    "lint": "eslint src/",
+    "type-check": "tsc --noEmit && tsc --noEmit -p tsconfig.scripts.json",
+    "lint": "eslint src/ scripts/",
     "test": "vitest run",
     "test:integration": "VITEST_INTEGRATION=1 vitest run",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
+    "db:seed:dev": "tsx scripts/seed-dev.ts",
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
