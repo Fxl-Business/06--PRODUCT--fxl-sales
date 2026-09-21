@@ -155,3 +155,31 @@ never saw the implementer's reasoning.
 Every wave still gets one full suite plus lint plus type-check on the integrated branch, by another
 separate Verify agent.
 What is lost is build concurrency, which is wall-clock, not assurance.
+
+## Carry-forward from slice 01's Verify into slice 03's Verify
+
+Slice 01's verifier confirmed the roster is correct today, but flagged that `roster.test.ts` compares
+each identity's declared `expectedRoles` and `expectedPaineis` against HAND-TYPED literal sets rather
+than against the real `getRolesFromHubClaims` and `getVisibleWorkspaces`.
+That is correct for slice 01 and is not a defect against it: a package under `packages/` must not
+import an app, and the approved plan assigns the cross-check to slice 03 for exactly that reason.
+
+It does mean the declared fields are, until slice 03 lands, unverified claims that happen to be true.
+SLICE 03's VERIFY MUST CONFIRM the cross-check test actually exists, actually runs, and actually
+drives the real functions rather than re-asserting the same literals.
+If slice 03 ships without it, the roster's central promise is untested in both slices while looking
+tested in each.
+
+## Carry-forward into slice 05 - the guard must honour its own two-scope split
+
+Slice 02 landed `vi.mock('@fxl-sales/auth-fake', ...)` inside
+`apps/api/src/auth/__tests__/dev-identity-production-refusal.test.ts`.
+That is a STRING REFERENCE, not a static import, and it is necessary: without it the test cannot
+prove the selector's own production refusal, because `installAppAuthAdapter`'s independent second
+guard masks the deletion of the first one.
+
+The plan-check's ruling already allows this - the static-import ban binds test files, the bare
+reference ban does not - but slice 05's guard has to actually IMPLEMENT that carve-out.
+If it applies the reference ban to test files, it goes red on arrival against code that is correct.
+Slice 05's executor must check this specific file, and slice 05's verifier must confirm the carve-out
+is real rather than assumed.

@@ -42,6 +42,14 @@ import { vi } from 'vitest';
  * `resolveNamedEnvFilePath` maps an empty string to null. This scopes the
  * opt-in out of the TEST process only; `make back` and `make migrate` are
  * unaffected.
+ *
+ * SALES_AUTH_FAKE is blanked here for the same class of leak: a developer who
+ * exports it in their shell to drive `make dev-fake` must not thereby decide
+ * whether the unit suite runs the Hub path or the development identity
+ * adapter. A test that wants the fake path stubs its own value in `beforeAll`
+ * and re-imports behind `vi.resetModules()`, exactly like the Hub variables
+ * above. Blank reads as absent because the truthy set does not contain the
+ * empty string.
  */
 for (const name of [
   'FXL_HUB_CONFIG',
@@ -51,6 +59,7 @@ for (const name of [
   'FXL_HUB_CLIENT_SECRET',
   'FXL_HUB_AUDIENCE',
   'SALES_ENV_FILE',
+  'SALES_AUTH_FAKE',
 ]) {
   vi.stubEnv(name, '');
 }

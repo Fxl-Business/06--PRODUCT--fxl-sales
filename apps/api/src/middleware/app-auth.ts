@@ -1,6 +1,6 @@
 import type { HubAuthContext, HubConfig } from '@fxl-business/hub-sdk';
 import { createHubBff, requireHubAuth } from '@fxl-business/hub-sdk/server';
-import { Hono, type MiddlewareHandler } from 'hono';
+import { Hono, type Context, type MiddlewareHandler, type Next } from 'hono';
 import { hubBffErrorHandler } from '../auth/hub-bff-errors.js';
 import { createHubLoginSupersedeMiddleware } from '../auth/hub-login-scope.js';
 import {
@@ -186,7 +186,33 @@ export function getHubSdkConfig() {
  */
 const hubAuthMiddleware = hubSdkConfig ? requireHubAuth(hubSdkConfig) : null;
 
-export const appAuthMiddleware: MiddlewareHandler = async (c, next) => {
+/**
+ * Lifted verbatim out of the inner callback below so the Hub adapter and the
+ * development adapter (installed through `installAppAuthAdapter`, built in
+ * `apps/api/src/auth/select.ts`) apply tenancy IDENTICALLY. `orgId` always
+ * comes from the verified `auth.workspaceId` and from nowhere else - nothing
+ * on this path reads an org, an account or a workspace off a request body or
+ * a query string.
+ */
+export async function applyHubAuthContext(
+  c: Context,
+  auth: MinimalHubAuthContext,
+  next: Next,
+): Promise<void> {
+  const legacy = getHubLegacyAuthContext(auth);
+  c.set('userId', legacy.userId);
+  c.set('orgId', legacy.orgId);
+  c.set('userRole', legacy.userRole);
+  c.set('userRoles', legacy.userRoles);
+  await next();
+}
+
+/**
+ * The real Hub gate, unchanged in substance from before the adapter slot
+ * existed. `appAuthMiddleware` below is now a one-line dispatcher over this
+ * and whatever adapter `installAppAuthAdapter` has installed.
+ */
+const hubAppAuthMiddleware: MiddlewareHandler = async (c, next) => {
   if (!hubAuthMiddleware || !hubSdkConfig) {
     return c.json({ error: 'unavailable', code: 'hub_auth_not_configured' }, 503);
   }
@@ -199,15 +225,50 @@ export const appAuthMiddleware: MiddlewareHandler = async (c, next) => {
       return;
     }
 
-    const legacy = getHubLegacyAuthContext(auth);
-    c.set('userId', legacy.userId);
-    c.set('orgId', legacy.orgId);
-    c.set('userRole', legacy.userRole);
-    c.set('userRoles', legacy.userRoles);
-    await next();
+    await applyHubAuthContext(c, auth, next);
   });
   return blockedResponse ?? authResponse;
 };
+
+/**
+ * The adapter slot. Empty on every production and every ordinary Hub-backed
+ * boot. Filling it REPLACES `hubAppAuthMiddleware` rather than stacking beside
+ * it: two live gates would mean one live gate and one unreachable one with a
+ * green suite over the dead one, which CLAUDE.md forbids.
+ */
+let installedAppAuthAdapter: MiddlewareHandler | null = null;
+
+export const DEV_IDENTITY_ADAPTER_IN_PRODUCTION_MESSAGE =
+  'SALES_AUTH_FAKE is set while NODE_ENV=production. ' +
+  'The development identity adapter must never run in production. Refusing to boot.';
+
+/**
+ * Installs a development identity adapter in place of the Hub gate.
+ *
+ * Both refusals THROW rather than returning a value a caller could ignore.
+ * The production refusal is duplicated with `installFakeAuthIfRequested` in
+ * `apps/api/src/auth/select.ts` on purpose, and both throw this SAME exported
+ * constant so the two cannot drift into saying different things about one
+ * rule: a function that switches off an authentication surface must not be
+ * safe only because somebody upstream happened to check first. The
+ * second-install refusal exists because this slot exists to REPLACE the one
+ * gate and not to stack a second one beside it.
+ */
+export function installAppAuthAdapter(adapter: MiddlewareHandler): void {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(DEV_IDENTITY_ADAPTER_IN_PRODUCTION_MESSAGE);
+  }
+  if (installedAppAuthAdapter) {
+    throw new Error(
+      'installAppAuthAdapter was called a second time. ' +
+        'The adapter slot replaces the Hub gate and must never stack a second one beside it.',
+    );
+  }
+  installedAppAuthAdapter = adapter;
+}
+
+export const appAuthMiddleware: MiddlewareHandler = (c, next) =>
+  (installedAppAuthAdapter ?? hubAppAuthMiddleware)(c, next);
 
 /**
  * Bounds the Hub round-trip the BFF makes from INSIDE the transaction that holds

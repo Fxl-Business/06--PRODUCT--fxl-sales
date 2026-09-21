@@ -38,6 +38,14 @@ if (env.NODE_ENV !== 'production') {
   );
 }
 
+// The development identity adapter, checked here so it runs AFTER the guard's
+// exit(1) and BEFORE every pre-existing dynamic import below. With
+// SALES_AUTH_FAKE absent this returns at its first statement and evaluates
+// nothing further, so the dynamic import list below keeps its exact original
+// order and its original binding names. See apps/api/src/auth/select.ts.
+const { installFakeAuthIfRequested } = await import('./auth/select.js');
+await installFakeAuthIfRequested();
+
 // Everything else loads here, AFTER the guard has had its say. The order is the
 // order the static import list used to have, and the bindings keep their names.
 const { serve } = await import('@hono/node-server');
