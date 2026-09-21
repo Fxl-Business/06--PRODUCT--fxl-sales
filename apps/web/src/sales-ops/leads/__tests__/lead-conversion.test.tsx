@@ -502,8 +502,10 @@ describe('a lead becomes a proposta, and the card moves only afterwards', () => 
     // A free row seeds `areaId: ''` on purpose, and `draftValid` requires one.
     expect(buttonLabelled('Salvar rascunho').disabled).toBe(true);
     expect(nonGetWrites()).toEqual([]);
-    expect(columnOrder(STAGE_NOVO)).toEqual([LEAD_ID]);
-    expect(columnOrder(STAGE_CONVERSAO)).toEqual([]);
+    // It previews in the destination while the wizard is open. What stops it
+    // being a GHOST card is `nonGetWrites()` above: nothing was written, so a
+    // cancel leaves nothing behind.
+    expect(columnOrder(STAGE_CONVERSAO)).toEqual([LEAD_ID]);
 
     // THE NON-VACUITY CONTROL. Without it this test passes against a wizard that
     // renders nothing at all: pick an área on the item and the very same button
@@ -524,7 +526,7 @@ describe('a lead becomes a proposta, and the card moves only afterwards', () => 
     expect(nonGetWrites()).toEqual([]);
   });
 
-  it('moves the card only after POST /sales resolves 201, and never while it is in flight', async () => {
+  it('persists the move only after POST /sales resolves 201, never while it is in flight', async () => {
     let releaseSale: (value: Response) => void = () => {};
     const gate = new Promise<Response>((resolve) => {
       releaseSale = resolve;
@@ -541,8 +543,9 @@ describe('a lead becomes a proposta, and the card moves only afterwards', () => 
     // no move request exists.
     expect(writes.some((write) => write.url.endsWith('/sales-ops/sales'))).toBe(true);
     expect(moveRequests()).toEqual([]);
-    expect(columnOrder(STAGE_NOVO)).toEqual([LEAD_ID]);
-    expect(columnOrder(STAGE_CONVERSAO)).toEqual([]);
+    // The card DOES show in the destination meanwhile - a local preview, not a
+    // write. The invariant is the line above: no move request exists yet.
+    expect(columnOrder(STAGE_CONVERSAO)).toEqual([LEAD_ID]);
 
     await act(async () => {
       scenario.saleGate?.resolve(
@@ -560,7 +563,7 @@ describe('a lead becomes a proposta, and the card moves only afterwards', () => 
     expect(columnOrder(STAGE_NOVO)).toEqual([]);
   });
 
-  it('leaves the card in place and issues no lead move when POST /sales fails', async () => {
+  it('issues no lead move and keeps the wizard open when POST /sales fails', async () => {
     scenario.saleStatus = 400;
     await renderApp();
     writes = [];
@@ -571,8 +574,9 @@ describe('a lead becomes a proposta, and the card moves only afterwards', () => 
 
     expect(writes.some((write) => write.url.endsWith('/sales-ops/sales'))).toBe(true);
     expect(moveRequests()).toEqual([]);
-    expect(columnOrder(STAGE_NOVO)).toEqual([LEAD_ID]);
-    expect(columnOrder(STAGE_CONVERSAO)).toEqual([]);
+    // The card stays in its preview position: the attempt has not settled, the
+    // wizard is still open for a retry, and nothing was persisted either way.
+    expect(columnOrder(STAGE_CONVERSAO)).toEqual([LEAD_ID]);
     // The wizard stays open so the operator can fix and retry.
     expect(wizardIsOpen()).toBe(true);
   });

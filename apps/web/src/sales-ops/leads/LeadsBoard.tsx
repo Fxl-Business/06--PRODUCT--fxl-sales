@@ -16,7 +16,13 @@ import { CSS } from '@dnd-kit/utilities';
 import { Combobox, type ComboboxOption } from '@/components/ui/combobox';
 import type { MoveLeadPayload } from './api';
 import type { LabelLookups } from './board-labels';
-import { buildMovePayload, moveTargetsFor, stageOpensConversion } from './board-move';
+import {
+  buildMovePayload,
+  dragHandsBackToDialog,
+  moveTargetsFor,
+  stageOpensConversion,
+} from './board-move';
+import { moveLeadInList } from './optimistic';
 import {
   boardScrollerClass,
   cardButtonClass,
@@ -28,7 +34,7 @@ import {
   mutedStateClass,
   primaryButtonClass,
 } from './board-ui';
-import { boardStages, leadIsConverted, leadsInStage, stageRequiresReason } from './calculations';
+import { boardStages, leadIsConverted, leadsInStage } from './calculations';
 import { LeadCard } from './LeadCard';
 import { MoveLeadDialog } from './MoveLeadDialog';
 import type { SalesOpsLead, SalesOpsLeadStage } from './types';
@@ -181,7 +187,32 @@ export function LeadsBoard({
   onLoadMore,
   loadingMore = false,
 }: LeadsBoardProps) {
+  /**
+   * THE CARD'S VISUAL MOVE WHILE THE PROPOSTA WIZARD IS OPEN.
+   *
+   * Dragging onto the conversion stage no longer detours through the `Mover
+   * para` dialog: the wizard opens straight away, and this holds the card in the
+   * destination column meanwhile so the board reflects what the operator just
+   * did. It is LOCAL and never persisted - no request is issued and no cache is
+   * patched until `POST /sales` answers 201, so a cancelled wizard still leaves
+   * nothing behind. It only removes the lie of a card sitting in its old column
+   * while its proposta is being filled in.
+   */
+  const [pendingConversion, setPendingConversion] = React.useState<MoveLeadPayload | null>(null);
+
   const columns = React.useMemo(() => boardStages(stages), [stages]);
+
+  /*
+    `moveLeadInList` is the SAME primitive the optimistic cache patch uses, so the
+    preview and the real move cannot disagree about where the card lands.
+  */
+  const visibleLeads = React.useMemo(
+    () =>
+      pendingConversion
+        ? moveLeadInList(leads, pendingConversion, new Date().toISOString())
+        : leads,
+    [leads, pendingConversion],
+  );
   const hasConversionHandler = Boolean(onRequestConversion);
 
   /**
@@ -190,7 +221,8 @@ export function LeadsBoard({
    * from it, `handleDragEnd` still reads the event.
    */
   const [activeLeadId, setActiveLeadId] = React.useState<string | null>(null);
-  const activeLead = activeLeadId === null ? null : (leads.find((row) => row.id === activeLeadId) ?? null);
+  const activeLead =
+    activeLeadId === null ? null : (visibleLeads.find((row) => row.id === activeLeadId) ?? null);
 
   const [moveLeadId, setMoveLeadId] = React.useState<string | null>(null);
   const [moveSeedStageId, setMoveSeedStageId] = React.useState<string | null>(null);
@@ -212,11 +244,22 @@ export function LeadsBoard({
         if (!onRequestConversion) return;
         const row = leads.find((candidate) => candidate.id === payload.leadId);
         if (!row) return;
-        const saleId = await onRequestConversion({
-          lead: row,
-          toStageId: payload.toStageId,
-          toIndex: payload.toIndex,
-        });
+        // Show the card where the operator dropped it while they fill in the
+        // wizard. Purely local - see `pendingConversion`.
+        setPendingConversion(payload);
+        let saleId: string | null = null;
+        try {
+          saleId = await onRequestConversion({
+            lead: row,
+            toStageId: payload.toStageId,
+            toIndex: payload.toIndex,
+          });
+        } finally {
+          // Both outcomes clear it. Cancelled, the card springs back to its
+          // original column because nothing else ever changed. Saved, the real
+          // optimistic patch from `onMoveLead` takes over the same position.
+          setPendingConversion(null);
+        }
         // Cancelled: the card never moved, nothing was persisted and no request
         // was issued.
         if (saleId === null) return;
@@ -274,10 +317,15 @@ export function LeadsBoard({
     const overIndex = overLead ? column.findIndex((row) => row.id === overId) : column.length;
     const toIndex = overIndex < 0 ? column.length : overIndex;
 
-    // A drag has nowhere to type a reason and nowhere to fill a wizard, so both
-    // of those destinations hand back to the dialog instead of emitting. That is
-    // the one place drag defers to the keyboard control.
-    if (stageRequiresReason(target) || stageOpensConversion(target)) {
+    // A drag has nowhere to TYPE, so the `Perdido` stage - and only that stage -
+    // still hands back to the dialog: its reason is required by the API and
+    // blocked in the UI before the request is built.
+    //
+    // Conversion deliberately does NOT hand back any more. It used to, on the
+    // reasoning that a drag cannot fill a wizard, which was wrong: the wizard
+    // opens itself. Routing through `Mover para` only asked the operator to
+    // confirm a destination they had just dropped the card on.
+    if (dragHandsBackToDialog(target)) {
       openMoveDialog(dragged, toStageId);
       return;
     }
@@ -337,7 +385,9 @@ export function LeadsBoard({
       >
         <div className={boardScrollerClass}>
           {columns.map((stage) => {
-            const column = leadsInStage(leads, stage.id);
+            // `visibleLeads`, so a card being converted shows in its destination
+            // column while the wizard is open.
+            const column = leadsInStage(visibleLeads, stage.id);
             const movableIds = column
               .filter((row) => !leadIsConverted(row))
               .map((row) => row.id);

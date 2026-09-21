@@ -487,3 +487,77 @@ describe('LeadsBoard, driven by the keyboard Mover para dialog alone', () => {
     expect(columnOrder(NOVO_ID)).toEqual([LEAD_A, LEAD_B]);
   });
 });
+
+describe('a move into the conversion stage goes STRAIGHT to the wizard', () => {
+  /**
+   * The `Mover para` dialog used to sit between the drop and the wizard, asking
+   * the operator to confirm a destination they had just dropped the card on.
+   * It is gone for this destination. These drive the SAME `emitMove` the drag
+   * layer calls, so they pin the drag behaviour without simulating a drag.
+   */
+  it('previews the card in the destination column while the wizard is open, then commits on save', async () => {
+    let settleWizard: ((saleId: string | null) => void) | null = null;
+    const onRequestConversion = vi.fn(
+      () =>
+        new Promise<string | null>((resolve) => {
+          settleWizard = resolve;
+        }),
+    );
+
+    const { onMoveLead } = await renderBoard([lead('L1', 'Marcos', NOVO_ID)], {
+      onRequestConversion,
+    });
+
+    await openMoveDialog('L1');
+    await pick(0, 'Proposta enviada');
+    await click(confirmButton());
+
+    // The wizard was asked for, and NO second dialog stood in the way.
+    expect(onRequestConversion).toHaveBeenCalledTimes(1);
+    // The card is already shown where it was dropped, but nothing was written.
+    expect(columnOrder(CONVERSAO_ID)).toContain('L1');
+    expect(onMoveLead).not.toHaveBeenCalled();
+
+    await act(async () => {
+      settleWizard?.('sale-1');
+    });
+    await settle();
+
+    // Saved: the real move is emitted, and it carries the sale id.
+    expect(onMoveLead).toHaveBeenCalledTimes(1);
+    expect(onMoveLead.mock.calls[0]?.[0]).toMatchObject({
+      leadId: 'L1',
+      toStageId: CONVERSAO_ID,
+      saleId: 'sale-1',
+    });
+  });
+
+  it('springs the card back to its original column when the wizard is cancelled', async () => {
+    let settleWizard: ((saleId: string | null) => void) | null = null;
+    const onRequestConversion = vi.fn(
+      () =>
+        new Promise<string | null>((resolve) => {
+          settleWizard = resolve;
+        }),
+    );
+
+    const { onMoveLead } = await renderBoard([lead('L1', 'Marcos', NOVO_ID)], {
+      onRequestConversion,
+    });
+
+    await openMoveDialog('L1');
+    await pick(0, 'Proposta enviada');
+    await click(confirmButton());
+    expect(columnOrder(CONVERSAO_ID)).toContain('L1');
+
+    await act(async () => {
+      settleWizard?.(null);
+    });
+    await settle();
+
+    // Back where it started, and nothing was ever persisted.
+    expect(columnOrder(NOVO_ID)).toContain('L1');
+    expect(columnOrder(CONVERSAO_ID)).not.toContain('L1');
+    expect(onMoveLead).not.toHaveBeenCalled();
+  });
+});

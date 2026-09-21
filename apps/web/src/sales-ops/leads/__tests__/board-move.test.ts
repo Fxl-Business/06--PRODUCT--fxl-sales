@@ -4,6 +4,7 @@ import {
   describeDaysInStage,
   moveTargetsFor,
   movePositionOptions,
+  dragHandsBackToDialog,
   stageOpensConversion,
   validateMove,
 } from '../board-move';
@@ -259,5 +260,24 @@ describe('describeDaysInStage', () => {
     expect(describeDaysInStage(1)).toBe('há 1 dia');
     expect(describeDaysInStage(2)).toBe('há 2 dias');
     expect(describeDaysInStage(31)).toBe('há 31 dias');
+  });
+});
+
+describe('dragHandsBackToDialog', () => {
+  /**
+   * Which destinations a DRAG cannot complete on its own. Only the one that
+   * needs text typed into it, because the API rejects a move into it without a
+   * reason and the UI blocks the submit before the request is built.
+   *
+   * The conversion stage must NOT be here. It used to be, and the result was a
+   * `Mover para` dialog standing between the drop and the wizard, asking the
+   * operator to confirm the column they had just dropped the card on. The
+   * wizard opens itself; nothing needs confirming.
+   */
+  it('hands back ONLY for the stage that requires a typed reason', () => {
+    expect(dragHandsBackToDialog(PERDIDO)).toBe(true);
+    expect(dragHandsBackToDialog(CONVERSAO)).toBe(false);
+    expect(dragHandsBackToDialog(NOVO)).toBe(false);
+    expect(dragHandsBackToDialog(undefined)).toBe(false);
   });
 });
