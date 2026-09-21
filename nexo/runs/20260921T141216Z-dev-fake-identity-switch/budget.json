@@ -2,7 +2,7 @@
   "active_accumulated_seconds": 0,
   "active_since": 1789999986,
   "counters": {
-    "agent_dispatches": 10,
+    "agent_dispatches": 12,
     "initial_slices": 7,
     "replans": 0,
     "total_slices": 7,
@@ -21,7 +21,9 @@
   },
   "paused": false,
   "scoped_counters": {
-    "verify_attempts": {}
+    "verify_attempts": {
+      "01-auth-fake-package": 1
+    }
   },
   "version": 1
 }
