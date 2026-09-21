@@ -1,12 +1,15 @@
 import * as React from 'react';
 import {
   DndContext,
+  DragOverlay,
+  MeasuringStrategy,
   useDroppable,
   PointerSensor,
   closestCorners,
   useSensor,
   useSensors,
   type DragEndEvent,
+  type DragStartEvent,
 } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -18,6 +21,8 @@ import {
   boardScrollerClass,
   cardButtonClass,
   columnClass,
+  dragHandleSurfaceClass,
+  dragOverlayCardClass,
   comboboxTriggerClass,
   columnHeaderClass,
   mutedStateClass,
@@ -107,6 +112,7 @@ function SortableLeadCard({
 
   return (
     <div
+      className={dragHandleSurfaceClass}
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition }}
     >
@@ -178,6 +184,14 @@ export function LeadsBoard({
   const columns = React.useMemo(() => boardStages(stages), [stages]);
   const hasConversionHandler = Boolean(onRequestConversion);
 
+  /**
+   * The card currently under the cursor, held ONLY to render the DragOverlay.
+   * It is presentation state and never a source of truth: no move is decided
+   * from it, `handleDragEnd` still reads the event.
+   */
+  const [activeLeadId, setActiveLeadId] = React.useState<string | null>(null);
+  const activeLead = activeLeadId === null ? null : (leads.find((row) => row.id === activeLeadId) ?? null);
+
   const [moveLeadId, setMoveLeadId] = React.useState<string | null>(null);
   const [moveSeedStageId, setMoveSeedStageId] = React.useState<string | null>(null);
 
@@ -228,7 +242,21 @@ export function LeadsBoard({
     setMoveLeadId(lead.id);
   }
 
+  function handleDragStart(event: DragStartEvent) {
+    setActiveLeadId(String(event.active.id));
+  }
+
+  /**
+   * A cancelled drag (Escape, a `pointercancel` the browser still wins, an
+   * unmount) MUST clear the overlay, or the board is left with a card stuck to
+   * the cursor and no way to put it down.
+   */
+  function handleDragCancel() {
+    setActiveLeadId(null);
+  }
+
   function handleDragEnd(event: DragEndEvent) {
+    setActiveLeadId(null);
     const { active, over } = event;
     if (!over || active.id === over.id) return;
 
@@ -293,7 +321,20 @@ export function LeadsBoard({
         filters, so a client-side filter would be a second, weaker answer to a
         question the server already answered.
       */}
-      <DndContext collisionDetection={closestCorners} onDragEnd={handleDragEnd} sensors={sensors}>
+      {/*
+        `measuring` on `Always`: columns change height as cards enter and leave,
+        and dnd-kit's default caches droppable rects on drag start. A stale rect
+        means the collision test is run against where a column USED to be, which
+        reads to the operator as the board refusing a perfectly aimed drop.
+      */}
+      <DndContext
+        collisionDetection={closestCorners}
+        measuring={{ droppable: { strategy: MeasuringStrategy.Always } }}
+        onDragCancel={handleDragCancel}
+        onDragEnd={handleDragEnd}
+        onDragStart={handleDragStart}
+        sensors={sensors}
+      >
         <div className={boardScrollerClass}>
           {columns.map((stage) => {
             const column = leadsInStage(leads, stage.id);
@@ -350,6 +391,23 @@ export function LeadsBoard({
             );
           })}
         </div>
+
+        {/*
+          THE DRAGGED CARD RIDES AN OVERLAY, not its own slot in the column.
+          The board scroller is `overflow-x-auto`, and a card transformed inside
+          a scroll container clips at that container's edge: drag toward a column
+          off-screen and the card visually disappears while still being dragged.
+          The overlay is rendered outside the scroller, so it follows the cursor
+          across the whole board. This is dnd-kit's documented answer for
+          scrollable containers rather than a flourish.
+        */}
+        <DragOverlay dropAnimation={null}>
+          {activeLead ? (
+            <div className={dragOverlayCardClass}>
+              <LeadCard lead={activeLead} lookups={lookups} now={now} />
+            </div>
+          ) : null}
+        </DragOverlay>
       </DndContext>
 
       {hasMore ? (

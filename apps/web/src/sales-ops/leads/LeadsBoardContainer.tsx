@@ -103,6 +103,14 @@ export function LeadsBoardContainer({
     [clients, people, products],
   );
 
+  /*
+    Stable per mount. It used to be a bare `new Date()`, so every render handed
+    every card a new object and defeated their memoisation - during a drag that
+    is one full re-render of the board per pointer move. The badge it feeds
+    counts DAYS, so a clock that advances only on remount is exact enough.
+  */
+  const now = React.useMemo(() => new Date(), []);
+
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [dialogSeed, setDialogSeed] = React.useState<SaveLeadPayload | null>(null);
 
@@ -124,7 +132,6 @@ export function LeadsBoardContainer({
   }
 
   // One clock per render, handed down, so no presentational component reads it.
-  const now = new Date();
 
   return (
     <>
