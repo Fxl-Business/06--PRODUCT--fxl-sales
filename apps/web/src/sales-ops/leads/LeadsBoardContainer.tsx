@@ -44,6 +44,8 @@ export type LeadsBoardContainerProps = {
   showSellerFilter?: boolean;
   /** Forwarded verbatim to `LeadsBoard`. The conversion flow's entire attachment surface. */
   onRequestConversion?: (request: LeadConversionRequest) => Promise<string | null>;
+  /** Opens the proposta a converted lead became. Forwarded verbatim. */
+  onOpenSale?: (saleId: string) => void;
 };
 
 /** The edit path maps a rendered lead back into the write payload the dialog seeds from. */
@@ -69,6 +71,7 @@ export function LeadsBoardContainer({
   sellers,
   showSellerFilter = false,
   onRequestConversion,
+  onOpenSale,
 }: LeadsBoardContainerProps) {
   const [sellerPersonId, setSellerPersonId] = React.useState<string | null>(null);
   // The columns are resolved FIRST: the board query fans out one request per
@@ -144,6 +147,7 @@ export function LeadsBoardContainer({
           void boardQuery.fetchNextPage();
         }}
         onMoveLead={(payload) => moveLead.mutate(payload)}
+        onOpenSale={onOpenSale}
         onRequestConversion={onRequestConversion}
         {...(showSellerFilter
           ? {

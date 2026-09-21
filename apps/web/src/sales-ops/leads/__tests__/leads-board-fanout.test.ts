@@ -65,6 +65,7 @@ function lead(id: string, stageId: string, position: number): SalesOpsLead {
     stageChangedAt: STAMP,
     saleId: null,
     saleStatus: null,
+    saleCode: null,
     products: [],
     createdAt: `2026-08-01T00:00:0${position}.000Z`,
     updatedAt: null,

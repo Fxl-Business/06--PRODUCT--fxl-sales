@@ -13,6 +13,8 @@ import {
   cardClass,
   cardDraggingClass,
   chipClass,
+  saleLinkClass,
+  saleLinkCodeClass,
   daysBadgeClass,
   readOnlyCardClass,
 } from './board-ui';
@@ -41,6 +43,12 @@ export type LeadCardProps = {
   /** Absent means no move trigger and no drag handle - a converted or otherwise immovable card. */
   onRequestMove?: (lead: SalesOpsLead) => void;
   onEdit?: (lead: SalesOpsLead) => void;
+  /**
+   * Opens the proposta this lead became. Absent means the card renders the
+   * status as plain text instead of a link, which is what an oracle rendering
+   * the card standalone gets.
+   */
+  onOpenSale?: (saleId: string) => void;
   /** dnd-kit plumbing supplied by `LeadsBoard`. Absent on a read-only card. */
   dragHandleProps?: React.HTMLAttributes<HTMLElement> & Record<string, unknown>;
   isDragging?: boolean;
@@ -52,6 +60,7 @@ export function LeadCard({
   now,
   onRequestMove,
   onEdit,
+  onOpenSale,
   dragHandleProps,
   isDragging = false,
 }: LeadCardProps) {
@@ -114,11 +123,43 @@ export function LeadCard({
         </span>
       </div>
 
+      {/*
+        A converted card's proposta identity. The CODE is the load-bearing half:
+        without it the operator sees a status and cannot tell which proposta it
+        belongs to, because this card is titled with the CONTACT name while the
+        propostas screen is keyed on the CLIENT. That was a real dead end.
+        `saleId` and `onOpenSale` together decide link vs plain text, so a card
+        rendered without the handler degrades to the old read-only chip rather
+        than to a button that does nothing.
+      */}
       {lead.saleStatus !== null ? (
         <div>
-          <span className={chipClass} data-sale-status={lead.saleStatus}>
-            {SALE_STATUS_LABEL[lead.saleStatus]}
-          </span>
+          {lead.saleId !== null && onOpenSale ? (
+            <button
+              aria-label={`Abrir a proposta ${lead.saleCode ?? ''} de ${lead.contactName}`.replace(
+                /\s+/g,
+                ' ',
+              )}
+              className={saleLinkClass}
+              data-open-sale={lead.saleId}
+              onClick={() => onOpenSale(lead.saleId as string)}
+              type="button"
+            >
+              <span className="flex items-center gap-1.5">
+                {lead.saleCode ? (
+                  <span className={saleLinkCodeClass}>{lead.saleCode}</span>
+                ) : null}
+                <span className={chipClass} data-sale-status={lead.saleStatus}>
+                  {SALE_STATUS_LABEL[lead.saleStatus]}
+                </span>
+              </span>
+              <span aria-hidden="true">&rarr;</span>
+            </button>
+          ) : (
+            <span className={chipClass} data-sale-status={lead.saleStatus}>
+              {SALE_STATUS_LABEL[lead.saleStatus]}
+            </span>
+          )}
         </div>
       ) : null}
 

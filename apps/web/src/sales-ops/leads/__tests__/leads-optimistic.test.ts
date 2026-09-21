@@ -27,6 +27,7 @@ function lead(overrides: Partial<SalesOpsLead> & { id: string }): SalesOpsLead {
     stageChangedAt: ORIGINAL_STAMP,
     saleId: null,
     saleStatus: null,
+    saleCode: null,
     products: [],
     createdAt: '2026-08-01T00:00:00.000Z',
     updatedAt: null,

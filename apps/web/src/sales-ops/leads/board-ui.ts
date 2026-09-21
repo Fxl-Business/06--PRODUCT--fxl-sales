@@ -70,3 +70,23 @@ export const blockedNoticeClass = 'text-[13px] font-medium text-[#a5341c]';
 
 export const noticeClass =
   'rounded-[10px] border border-[#f0e2bd] bg-[#fdf7e8] px-3 py-2 text-[13px] text-[#9c7210]';
+
+/**
+ * The converted card's proposta link.
+ *
+ * It is a full-width button rather than a chip because it is the ONLY way from
+ * the board to the proposta a lead became, and the bare status chip it replaces
+ * was unusable: the card is titled with the CONTACT name while the propostas
+ * screen is keyed on the CLIENT, so `Ganha` alone told the operator a status
+ * without telling them WHOSE.
+ */
+export const saleLinkClass =
+  'flex w-full items-center justify-between gap-2 rounded-md border border-[#d8d8e0] ' +
+  'bg-white px-2.5 py-1.5 text-left text-[12px] font-medium text-[#3d3d47] ' +
+  'transition-colors hover:border-[#b9b9c6] hover:bg-[#f5f5f8] ' +
+  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ' +
+  'focus-visible:outline-[#7c7ce0]';
+
+/** The code half of that link, kept monospace so a código reads as an identifier. */
+export const saleLinkCodeClass = 'font-mono text-[12px] tracking-tight text-[#1f1f27]';
+

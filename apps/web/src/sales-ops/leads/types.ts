@@ -94,6 +94,16 @@ export type SalesOpsLead = {
   saleId: string | null;
   /** Mirrored from the proposta, read-only, and null whenever `saleId` is null. */
   saleStatus: SalesOpsStatus | null;
+  /**
+   * The proposta's human code (`0001-1`), mirrored read-only and null whenever
+   * `saleId` is null.
+   *
+   * It exists because a status with no referent is not usable: the card is
+   * titled with the CONTACT name while the propostas screen is keyed on the
+   * CLIENT, so a bare `Ganha` chip left the operator unable to tell WHICH
+   * proposta the lead became. This is the card's only proposta identity.
+   */
+  saleCode: string | null;
   products: SalesOpsLeadProduct[];
   createdAt: string;
   updatedAt: string | null;

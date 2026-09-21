@@ -74,6 +74,7 @@ function lead(
     stageChangedAt: '2026-09-15T12:00:00.000Z',
     saleId: null,
     saleStatus: null,
+    saleCode: null,
     products: [],
     createdAt: '2026-09-01T12:00:00.000Z',
     updatedAt: null,
