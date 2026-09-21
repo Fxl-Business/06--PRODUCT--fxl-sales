@@ -210,3 +210,45 @@ No mid-flight slice is opened for it, and that is a decision rather than an omis
 enough signal to change code by, and editing a test that currently passes 5 times out of 5 would be
 guessing at a fix with no red to confirm it against.
 It is left recorded here so the next observation has something to join.
+
+## Wave 2 - the end-to-end probe found what 1597 green tests could not
+
+Acceptance 1 has no automated oracle, by the plan-check's explicit and correct decision, so at the
+wave 2 boundary the orchestrator actually booted the API with `SALES_AUTH_FAKE=1` and nothing
+listening on `localhost:9016`.
+
+IT DID NOT BOOT. The error was
+`HubConfigError: hub-sdk: FXL_HUB_CONFIG.environment must be exactly one of "production", "staging"
+or "development"`, thrown from inside `installFakeAuthIfRequested` itself:
+
+```
+at apps/api/src/middleware/app-auth.ts:96   (module top level)
+at async installFakeAuthIfRequested (apps/api/src/auth/select.ts:237)
+at async apps/api/src/server.ts:47
+```
+
+The cause was then ISOLATED rather than guessed. Re-running the identical probe with
+`FXL_HUB_API_URL` blanked boots cleanly in 2 seconds, prints the roster banner, and answers `200` on
+both `/health` and `/api/v1/sales-ops/bootstrap`. So the feature itself works.
+
+What breaks it is a PARTIAL Hub configuration. This machine's `apps/api/.env` carries
+`FXL_HUB_API_URL` set and the other four identity variables empty, which `CLAUDE.md` records as a
+boot failure by deliberate design since v3.1.0.
+
+That design is right for the real path and is not being changed. The defect is narrower and it is
+ours: the development identity mode exists precisely so the product can run WITHOUT the Hub, and it
+currently cannot survive a leftover Hub variable, because installing the adapter imports a module
+that loads Hub configuration at its own top level.
+The operator also gets a message naming `FXL_HUB_CONFIG.environment`, a variable they never set,
+which `CLAUDE.md` already records as an accepted diagnostic regression of the SDK migration - it is
+merely more confusing here, where the Hub is supposed to be irrelevant.
+
+This is a direct failure of acceptance 1 on the developer's real machine, so it is being fixed in
+this run as mid-flight slice `02.1`, under the replan budget, rather than filed.
+
+A SECOND observation from the same probe, recorded deliberately: `/api/v1/sales-ops/bootstrap`
+answered `200` with NO `Authorization` header at all, because the adapter falls back to the roster
+default when nothing names an identity. That is intended, matches the reference implementation, and
+is reachable only behind a flag that two independent guards refuse under `NODE_ENV=production`.
+It is written down because it is exactly the kind of behaviour that looks alarming later if nobody
+recorded that it was a decision.
