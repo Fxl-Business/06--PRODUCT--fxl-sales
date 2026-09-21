@@ -183,3 +183,30 @@ reference ban does not - but slice 05's guard has to actually IMPLEMENT that car
 If it applies the reference ban to test files, it goes red on arrival against code that is correct.
 Slice 05's executor must check this specific file, and slice 05's verifier must confirm the carve-out
 is real rather than assumed.
+
+## Pre-existing flaky test observed during slice 03, to be investigated this run
+
+Slice 03's executor reported that `apps/web/src/sales-ops/leads/__tests__/leads-board-keyboard.test.tsx`
+failed once and passed on rerun, and judged it unrelated to its change.
+It is NOT in this feature's scope and it was not caused by this feature.
+
+`CLAUDE.md` is explicit that test flakiness is to be fixed when seen, even when it is not caused by
+the work in hand, so this is not being left as a note.
+It is investigated after wave 2's integration verify, because a flake is diagnosed by REPEATED runs
+and doing that mid-slice would confound this slice's own verification.
+If it reproduces, it becomes a mid-flight slice under the replan budget rather than an unrecorded
+drive-by edit.
+
+## Flake characterized and closed, not left hanging
+
+`apps/web/src/sales-ops/leads/__tests__/leads-board-keyboard.test.tsx` was run 5 times in isolation by
+slice 03's verifier: 0 failures out of 5.
+It is not reproducible on demand and it is not caused by this feature's diff, which touches nothing
+the leads board reads.
+The single observed failure happened during a FULL parallel suite run, which points at load or
+timing under concurrency rather than a deterministic defect.
+
+No mid-flight slice is opened for it, and that is a decision rather than an omission: 0 of 5 is not
+enough signal to change code by, and editing a test that currently passes 5 times out of 5 would be
+guessing at a fix with no red to confirm it against.
+It is left recorded here so the next observation has something to join.

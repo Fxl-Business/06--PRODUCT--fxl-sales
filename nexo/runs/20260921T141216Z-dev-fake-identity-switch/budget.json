@@ -2,7 +2,7 @@
   "active_accumulated_seconds": 0,
   "active_since": 1789999986,
   "counters": {
-    "agent_dispatches": 14,
+    "agent_dispatches": 18,
     "initial_slices": 7,
     "replans": 0,
     "total_slices": 7,
@@ -23,7 +23,8 @@
   "scoped_counters": {
     "verify_attempts": {
       "01-auth-fake-package": 1,
-      "02-api-dev-adapter": 1
+      "02-api-dev-adapter": 1,
+      "03-web-dev-identity": 2
     }
   },
   "version": 1
