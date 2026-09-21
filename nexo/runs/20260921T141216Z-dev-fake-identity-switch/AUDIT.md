@@ -252,3 +252,23 @@ default when nothing names an identity. That is intended, matches the reference 
 is reachable only behind a flag that two independent guards refuse under `NODE_ENV=production`.
 It is written down because it is exactly the kind of behaviour that looks alarming later if nobody
 recorded that it was a decision.
+
+## [ ] FOR THE HUMAN - this machine's apps/api/.env is behind the SDK 2.3.0 migration
+
+Both the orchestrator's boot probe and slice 02.1's independent verifier read the real
+`apps/api/.env` in this worktree, copied from the main checkout. It carries the LEGACY names
+`FXL_HUB_PUBLISHABLE_KEY` and `FXL_HUB_SECRET_KEY`, plus `FXL_HUB_API_URL`, and NONE of the four
+canonical identity variables `FXL_HUB_CLIENT_ID`, `FXL_HUB_CLIENT_SECRET`, `FXL_HUB_ENVIRONMENT`,
+`FXL_HUB_AUDIENCE`.
+
+That is what made the API refuse to boot: one of the five canonical names set and four empty is a
+PARTIAL configuration, which `CLAUDE.md` records as a deliberate boot failure since v3.1.0.
+
+This is a fact about this MACHINE, not about the repository, and nothing in this run changed it.
+`scripts/no-legacy-env-names.mjs` cannot catch it because `.env` is not tracked.
+
+After slice 02.1 this no longer blocks the development identity mode, which is the whole point of
+that slice. It DOES still block running the API against a real Hub locally, so if that is ever
+wanted, the four canonical variables have to be filled in. `apps/api/.env.example` and
+`apps/api/.env.dev.example` are the reference, and `CLAUDE.md`'s Environments section carries the
+copyable block.

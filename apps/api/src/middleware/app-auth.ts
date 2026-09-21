@@ -1,4 +1,4 @@
-import type { HubAuthContext, HubConfig } from '@fxl-business/hub-sdk';
+import { HubConfigError, type HubAuthContext, type HubConfig } from '@fxl-business/hub-sdk';
 import { createHubBff, requireHubAuth } from '@fxl-business/hub-sdk/server';
 import { Hono, type Context, type MiddlewareHandler, type Next } from 'hono';
 import { hubBffErrorHandler } from '../auth/hub-bff-errors.js';
@@ -93,7 +93,65 @@ declare module 'hono' {
  * parser checks offline. `audience` is configured, never derived, and 2.x's
  * `requireHubAuth` reads it from here.
  */
-const hubSdkConfig: HubConfig | null = tryLoadHubAuthConfig(hubEnvBag(env));
+const DEV_IDENTITY_FLAG_TRUTHY_VALUES = new Set(['1', 'true', 'yes', 'on']);
+
+/**
+ * Mirrors `isFakeAuthRequested` / `isProductionEnv` in
+ * `apps/api/src/auth/select.ts` without importing that module - select.ts
+ * already imports `MinimalHubAuthContext` from this file, so a value import
+ * the other way would be a cycle. Both read raw `process.env` directly,
+ * exactly as select.ts does for the same two questions and exactly as
+ * `installAppAuthAdapter` below already does for its own production refusal.
+ */
+function isDevIdentityFlagActive(): boolean {
+  const value = process.env.SALES_AUTH_FAKE;
+  if (typeof value !== 'string') return false;
+  return DEV_IDENTITY_FLAG_TRUTHY_VALUES.has(value.trim().toLowerCase());
+}
+
+function isProductionProcess(): boolean {
+  return (process.env.NODE_ENV ?? '').trim().toLowerCase() === 'production';
+}
+
+/**
+ * `tryLoadHubAuthConfig` throws `HubConfigError` for a Hub configuration that
+ * is PRESENT but partial or otherwise invalid - see auth-provider.ts's
+ * header - and that is correctly a boot failure on the real path. But the
+ * development identity mode exists so this product can run WITHOUT the Hub
+ * at all, and a real developer machine routinely carries a leftover or
+ * partial Hub variable that this mode must survive, because this module is
+ * imported during boot no matter what: the sales-ops router depends on
+ * `appAuthMiddleware`.
+ *
+ * The tolerance is CONDITIONAL and narrow in both dimensions:
+ * - only `HubConfigError` is absorbed, never a broader catch;
+ * - it applies only when the development identity flag is active AND the
+ *   process is not production, so a run with the flag absent, or a
+ *   production run, rethrows and stays byte-equivalent to today.
+ *
+ * `null` is already a state this module understands: it is what
+ * `tryLoadHubAuthConfig` returns for a machine with NO credentials at all,
+ * and it is what keeps `503 hub_auth_not_configured` alive. Under the
+ * development adapter the value is irrelevant anyway, because
+ * `installAppAuthAdapter` REPLACES `hubAppAuthMiddleware` and the BFF is
+ * already documented as unusable in this mode.
+ */
+function resolveHubSdkConfig(): HubConfig | null {
+  try {
+    return tryLoadHubAuthConfig(hubEnvBag(env));
+  } catch (error) {
+    if (error instanceof HubConfigError && isDevIdentityFlagActive() && !isProductionProcess()) {
+      console.warn(
+        '[dev-identity] Ignoring the Hub configuration because SALES_AUTH_FAKE is active: ' +
+          error.message,
+      );
+      return null;
+    }
+    throw error;
+  }
+}
+
+const hubSdkConfig: HubConfig | null = resolveHubSdkConfig();
 
 export function getHubLegacyAuthContext(auth: MinimalHubAuthContext): {
   userId: string;
