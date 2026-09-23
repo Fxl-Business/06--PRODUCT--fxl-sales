@@ -4,10 +4,13 @@ services:
       context: .
       dockerfile: apps/api/Dockerfile
     ports:
-      - "3006:3006"
+      # Loopback only on the host; see SALES_LISTEN_HOST below for the inside.
+      - "127.0.0.1:3006:3006"
     environment:
       - NODE_ENV=development
       - PORT=3006
+      # Every interface INSIDE the container, or the published port cannot reach it.
+      - SALES_LISTEN_HOST=0.0.0.0
       - DATABASE_URL=postgresql://postgres:postgres@db:5432/fxl_sales
       - CORS_ORIGIN=http://localhost:8006
     env_file:
@@ -22,8 +25,9 @@ services:
     ports:
       # Host port is parameterized so multiple FXL projects can run their DBs
       # simultaneously (each project picks a different port via the number-based
-      # convention - see scripts/setup.sh). Container port stays 5432.
-      - "5006:5432"
+      # convention - see scripts/setup.sh). Container port stays 5432. Bound to
+      # 127.0.0.1 so the database is never reachable from the LAN.
+      - "127.0.0.1:5006:5432"
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
