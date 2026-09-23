@@ -4,7 +4,9 @@
        migrate db-up db-down db-reset db-seed docker-up docker-down docker-build \
        clean preview help doctor
 
-.DEFAULT_GOAL := dev
+# A bare `make` lists every target, grouped by section, so the development
+# identity targets (dev-fake and friends) are always one keystroke away.
+.DEFAULT_GOAL := help
 
 # --- Development ---
 
@@ -195,5 +197,11 @@ clean: ## Remove all node_modules and build artifacts
 
 # --- Help ---
 
-help: ## Show this help
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}'
+# Section headers are the `# --- Name ---` lines above; a target shows up when
+# its line carries a `## description`.
+help: ## Show this help (the default goal)
+	@awk '/^# --- .* ---$$/ { sub(/^# --- /, ""); sub(/ ---$$/, ""); printf "\n\033[1m%s\033[0m\n", $$0; next } \
+	/^[a-zA-Z_-]+:.*## / { split($$0, parts, "## "); target = $$0; sub(/:.*/, "", target); \
+	printf "  \033[36m%-15s\033[0m %s\n", target, parts[2] }' $(MAKEFILE_LIST)
+	@printf "\n"
+

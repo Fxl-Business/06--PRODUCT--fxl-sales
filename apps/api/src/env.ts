@@ -27,6 +27,9 @@ const emptyToUndefinedUrl = z.preprocess(
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(3006),
+  // The interface the API binds; see config/listen-host.ts. Blank means
+  // loopback outside production and every interface in production.
+  SALES_LISTEN_HOST: emptyToUndefined,
   CORS_ORIGIN: z.string().url().default('http://localhost:8006'),
   DATABASE_URL: emptyToUndefined,
   // Optional admin DB override. Standard FXL deployments use DATABASE_URL only.

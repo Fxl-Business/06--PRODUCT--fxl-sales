@@ -49,6 +49,7 @@ await installFakeAuthIfRequested();
 // Everything else loads here, AFTER the guard has had its say. The order is the
 // order the static import list used to have, and the bindings keep their names.
 const { serve } = await import('@hono/node-server');
+const { resolveListenHost } = await import('./config/listen-host.js');
 const { Hono } = await import('hono');
 const { logger } = await import('hono/logger');
 const { corsMiddleware } = await import('./middleware/cors.js');
@@ -159,6 +160,9 @@ app.notFound((c) => c.json({ error: 'not_found', path: c.req.path }, 404));
 setupNightlyJob();
 
 const port = env.PORT;
-console.log(`[fxl-sales-api] listening on http://localhost:${port} (${env.NODE_ENV})`);
+const hostname = resolveListenHost({ nodeEnv: env.NODE_ENV, listenHost: env.SALES_LISTEN_HOST });
+console.log(
+  `[fxl-sales-api] listening on ${hostname ? `http://${hostname}:${port}` : `port ${port} on every interface`} (${env.NODE_ENV})`,
+);
 
-serve({ fetch: app.fetch, port });
+serve({ fetch: app.fetch, port, hostname });

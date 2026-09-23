@@ -46,7 +46,11 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 8006,
       strictPort: true,
-      host: true,
+      // Loopback only: the dev server (and, under VITE_AUTH_FAKE, a signed-in
+      // team-owner) must never be reachable from the LAN, a tailnet or a Docker
+      // network. `localhost` rather than 127.0.0.1 keeps the origin equal to
+      // CORS_ORIGIN and the registered Hub callback.
+      host: 'localhost',
       warmup: {
         clientFiles: [
           './src/main.tsx',
