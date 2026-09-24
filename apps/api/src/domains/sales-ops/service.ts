@@ -26,7 +26,7 @@ import {
 import { setTenantContext } from '../../middleware/auth.js';
 import { writeAuditEntry, type CadastroEntityType } from '../audit/service.js';
 
-type Db = ReturnType<typeof getDb>;
+export type Db = ReturnType<typeof getDb>;
 type Tx = { execute: (query: SQL) => Promise<unknown> };
 
 /**
