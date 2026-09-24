@@ -233,7 +233,7 @@ describe('transitionSale', () => {
     expect(oneShots.map((p) => p.kind)).toEqual(['other_cost']);
   });
 
-  it('reverting a won sale voids open payables, keeps paid ones, and clears won_at', async () => {
+  it('reverting a won sale with no active baixa voids its open payables and clears won_at', async () => {
     const orgId = `org_st_revert_${crypto.randomUUID()}`;
     seededOrgIds.push(orgId);
 
@@ -249,11 +249,6 @@ describe('transitionSale', () => {
       .from(salesOpsPayables)
       .where(eq(salesOpsPayables.saleId, sale.id));
     expect(payablesBefore.length).toBeGreaterThan(0);
-    const [firstPayable] = payablesBefore;
-    await adminDb
-      .update(salesOpsPayables)
-      .set({ status: 'paid' })
-      .where(eq(salesOpsPayables.id, must(firstPayable).id));
 
     const revertResult = await transitionSale(getDb(), orgId, sale.id, 'open');
 
@@ -266,11 +261,12 @@ describe('transitionSale', () => {
       .select()
       .from(salesOpsPayables)
       .where(eq(salesOpsPayables.saleId, sale.id));
-    const paidPayable = payablesAfter.find((p) => p.id === must(firstPayable).id);
-    expect(paidPayable?.status).toBe('paid');
-    const others = payablesAfter.filter((p) => p.id !== must(firstPayable).id);
-    expect(others.length).toBeGreaterThan(0);
-    expect(others.every((p) => p.status === 'void')).toBe(true);
+    expect(payablesAfter).toHaveLength(payablesBefore.length);
+    expect(payablesAfter.every((p) => p.status === 'void')).toBe(true);
+    for (const payable of payablesAfter) {
+      const before = must(payablesBefore.find((p) => p.id === payable.id));
+      expect(payable.revision).toBe(before.revision + 1);
+    }
   });
 
   it('re-win creates exactly one missing payable for same-name professionals', async () => {
@@ -671,8 +667,8 @@ describe('cancelContract', () => {
       Every receivable below is `M`-labelled, i.e. recurring, so the
       professional-cost split has ZERO eligible rows and falls back to the legacy
       one-shot payable with receivable_id NULL. That is why `voidedPayables` is
-      still 3 here and why the one-shot assertions at the bottom still hold — do
-      not "fix" those numbers when reading this after slice 06.
+      only the seller and tax rows here and why the one-shot assertions at the
+      bottom still hold.
     */
     const sale = await seedSale(orgId, { status: 'open', recurringBrl: 100000 });
     await seedProfessional(orgId, sale.id, { costBrl: 40000 });
@@ -697,27 +693,15 @@ describe('cancelContract', () => {
     const updatedAtAfterWin = winResult.sale.updatedAt;
 
     const adminDb = getAdminDb();
-    const [r2SellerPayable] = await adminDb
-      .select()
-      .from(salesOpsPayables)
-      .where(
-        and(
-          eq(salesOpsPayables.saleId, sale.id),
-          eq(salesOpsPayables.receivableId, r2.id),
-          eq(salesOpsPayables.kind, 'seller_commission'),
-        ),
-      );
-    await adminDb
-      .update(salesOpsPayables)
-      .set({ status: 'paid' })
-      .where(eq(salesOpsPayables.id, must(r2SellerPayable).id));
 
     const result = await cancelContract(getDb(), orgId, sale.id, '2026-08-15');
 
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error('expected ok');
     expect(result.voidedReceivables).toBe(2);
-    expect(result.voidedPayables).toBe(3);
+    // Seller + tax on M2/3 and M3/3. A paid row beyond the cut-off is now a
+    // 409 sale_has_active_settlements (settlements.integration.test.ts).
+    expect(result.voidedPayables).toBe(4);
     expect(result.sale.status).toBe('won');
     expect(result.sale.updatedAt?.getTime()).toBe(updatedAtAfterWin?.getTime());
 
@@ -740,10 +724,8 @@ describe('cancelContract', () => {
     expect(r1Payables.every((p) => p.status === 'open')).toBe(true);
 
     const r2Payables = payablesAfter.filter((p) => p.receivableId === r2.id);
-    expect(r2Payables.find((p) => p.id === must(r2SellerPayable).id)?.status).toBe('paid');
-    expect(
-      r2Payables.filter((p) => p.id !== must(r2SellerPayable).id).every((p) => p.status === 'void'),
-    ).toBe(true);
+    expect(r2Payables.length).toBeGreaterThan(0);
+    expect(r2Payables.every((p) => p.status === 'void')).toBe(true);
 
     const r3Payables = payablesAfter.filter((p) => p.receivableId === r3.id);
     expect(r3Payables.length).toBeGreaterThan(0);
