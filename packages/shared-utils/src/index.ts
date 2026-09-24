@@ -5,3 +5,4 @@ export * from './hmac.js';
 export * from './sale-financials.js';
 export * from './professional-split.js';
 export * from './sao-paulo-day.js';
+export * from './liquidacao.js';

@@ -29,6 +29,10 @@
     "./sao-paulo-day": {
       "types": "./dist/sao-paulo-day.d.ts",
       "import": "./dist/sao-paulo-day.js"
+    },
+    "./liquidacao": {
+      "types": "./dist/liquidacao.d.ts",
+      "import": "./dist/liquidacao.js"
     }
   },
   "scripts": {
