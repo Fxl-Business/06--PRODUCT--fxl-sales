@@ -25,6 +25,10 @@
     "./professional-split": {
       "types": "./dist/professional-split.d.ts",
       "import": "./dist/professional-split.js"
+    },
+    "./sao-paulo-day": {
+      "types": "./dist/sao-paulo-day.d.ts",
+      "import": "./dist/sao-paulo-day.js"
     }
   },
   "scripts": {
