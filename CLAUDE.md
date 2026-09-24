@@ -207,6 +207,11 @@ Professionals (step 3):
 - `computeSaleFinancials` in `packages/shared-utils/src/sale-financials.ts` is the ONE margin implementation (web imports the `/sale-financials` subpath).
 - `resolvePartyContexts` validates every person and função in-org inside `withTenant`; server snapshots win.
 
+Civil days:
+- `due_date` stores a civil day `D` as `D T00:00:00Z` and is read back with the UTC slice (`asDateOnly` in the API, `displayDate` / `civilDayOf` in `apps/web/src/sales-ops/civil-day.ts`); never format it through `new Date(...)` in the browser timezone.
+- Every "today" decision is the `America/Sao_Paulo` day from `@fxl-sales/shared-utils/sao-paulo-day` (`todayInSaoPaulo`, `saoPauloDayOf`, `isAfterTodayInSaoPaulo`), never `new Date().toISOString().slice(0, 10)`. The won date and the `cancel-contract` default cut-off follow it.
+- Day inputs are validated with `isIsoDay` (a real calendar day), never a bare regex. The web imports the subpath, never the package root.
+
 Testing:
 - Integration tests use the local Docker test DB via the `fxl_sales_test` non-superuser role; `apps/api/test/rls/setup-env.ts` hard-overrides `DATABASE_URL`.
 
