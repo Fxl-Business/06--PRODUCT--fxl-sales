@@ -1,0 +1,34 @@
+{
+  "active_accumulated_seconds": 0,
+  "active_since": 1790213585,
+  "counters": {
+    "agent_dispatches": 26,
+    "initial_slices": 9,
+    "replans": 1,
+    "total_slices": 9,
+    "wave_recoveries": 0
+  },
+  "exhausted": null,
+  "limits": {
+    "agent_result_timeout_seconds": 600,
+    "max_active_seconds": 14400,
+    "max_agent_dispatches": 64,
+    "max_initial_slices": 16,
+    "max_replans": 3,
+    "max_total_slices": 24,
+    "max_verify_attempts_per_slice": 3,
+    "max_wave_recoveries": 1
+  },
+  "paused": false,
+  "scoped_counters": {
+    "verify_attempts": {
+      "01-sao-paulo-day": 1,
+      "02-liquidacao-reducer": 1,
+      "03-ledger-schema": 2,
+      "04-update-sale-in-place": 1,
+      "05-wizard-row-ids": 1,
+      "06-settlements-api": 1
+    }
+  },
+  "version": 1
+}

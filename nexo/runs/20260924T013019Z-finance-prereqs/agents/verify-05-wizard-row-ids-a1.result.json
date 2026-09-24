@@ -1,0 +1,1 @@
+{"agent":"verify","slice":"05-wizard-row-ids","status":"PASS","done":true,"summary":"All 7 named oracle files (60 tests) green, full web suite green (985 tests), lint clean, type-check clean; 4 mutations (drop item id, label-based regeneration mapping, won-not-editable, drop ApiError.rows) each turned the correct oracle RED and were reverted to clean.","findings":[]}

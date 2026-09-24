@@ -1,0 +1,1 @@
+{"agent":"verify","slice":"03-ledger-schema","status":"PASS","done":true,"summary":"HEAD only adds a no-op `void saleB;` unused-var marker (no assertions weakened); lint, type-check, shared-utils build, and settlements-schema.test.ts (9/9) against local Docker DB (5006) all pass; git status clean.","findings":[]}
