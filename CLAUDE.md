@@ -1,5 +1,9 @@
 # CLAUDE.md
 
+This file holds the RULES.
+The reasoning, incident history and oracle names behind each section live in `nexo/knowledge/reference/<section>.md`.
+Read the matching reference file before changing code in that area, and update it in the same change when a rule moves.
+
 ## Product
 
 FXL Sales is the affiliate and referral product for FXL.
@@ -14,271 +18,71 @@ Keep the repository folder name unchanged until the editor session can safely mo
 
 ## Auth Model
 
-- The API mounts the Hub BFF at `/auth/*`.
-- Local browser auth enters through same-origin web `/auth/*` routes.
-- Vite proxies those routes to the API BFF, and the local registered callback is `http://localhost:8006/auth/callback`.
-- Protected API routes use Hub bearer tokens through `appAuthMiddleware`.
-- `requireHubAuth` verifies access tokens and exposes `c.get('hubAuth')`.
-- `userId` is the Hub account id.
-- `orgId` is the active Hub workspace id.
-- Baseline access is the REQUIRED boolean `auth.claims.entitlements.access`, and nothing else.
-  `entitlements.modules` carries ADD-ON modules only and must NEVER be read for baseline access: the `sales.core` module was deleted in the Hub's access-model-v1, so the old `modules.includes('sales.core')` gate was false for every user and answered 402 to the entire product.
-  This is the ONE place in the tree that still spells that string, deliberately, as the prose record of what was removed; `CLAUDE.md` is outside the grep gate's pathspec for exactly that reason.
-- `requireHubAuth` from `@fxl-business/hub-sdk@2.3.0` is the single authority and the ONLY access gate in the API. It allows only on `entitlements.access === true`, and fails CLOSED: absent, false, non-boolean, or a missing `entitlements` object all deny. `allowWithoutAccess` is left at its default of `false`, which IS the gate.
-- There is deliberately exactly ONE gate. `classifyHubAccess`, `hasHubOrgAccess`, `hasHubModule` and `requireHubModule` were this repo's ONE-WAVE BRIDGE while it was on `1.3.1`, which exported no access gate at all; they are DELETED, because two gates would mean one live gate and one unreachable one with a green suite over the dead one.
-  `requireHubAuth`'s own `requiredModule` is now the only seam that may read `modules`, for a paid add-on, and no route mounts it today.
-  That sentence is TRUE and is now written with its scope out loud: in PRODUCTION, and in any run that does not set `SALES_AUTH_FAKE`, `requireHubAuth` is the one and only access gate and the request path holds no branch that could become a second one.
-  The development identity mode added on 2026-09-21 does NOT stand a second gate beside it: it REPLACES the middleware at BOOT, once, so a process has exactly one gate in either mode, which is the same invariant this bullet has always asserted rather than an exception to it.
-  What actually keeps a second gate from ever answering a real request is narrower than first documented, and `## Development identity mode` records the true shape rather than the intended one: the package is NOT absent from the shipped production API image, and the real backstop is `NODE_ENV=production` baked into that image at build time, together with the boot refusal that reads it.
-- `MinimalHubAuthContext` is now an ALIAS of the SDK's real `HubAuthContext`, not a local declaration. It was hand-declared because `1.3.1` re-exported `HubEntitlements` from an unshipped package, so under `skipLibCheck` it degraded to `any` and the deny branch was unreachable at type level; 2.2.0 ships the types in its own `dist`, so the gate is finally type-checked against the shape the Hub actually mints.
-- ONE recorded behaviour change from that migration: a token whose `entitlements` object carries NO `access` key at all is answered `401`, not `402`. The SDK validates the token against the contract BEFORE the entitlement gate runs, and such a token is not well-formed. That is correct and is not a regression: a `401` reaches the login screen, which is the right destination for a token this app cannot use, exactly as for `contract_version_mismatch`. `402` stays reserved for a WELL-FORMED token whose Organization simply has no access. Both are pinned in `apps/api/src/middleware/__tests__/app-auth-access-gate.test.ts`.
-- That file drives the REAL verifier rather than a stub: it generates an RSA keypair in-process, serves the Hub's discovery document and JWKS off a stubbed `fetch`, and signs its own tokens, so the gate is proven live and the suite still never leaves the machine.
-- The deny taxonomy is exact and EXHAUSTIVE, and the web half branches on it: `401 {"error":"unauthorized"}` is a missing or invalid token and reaches the login screen, which is the correct destination for every one of its codes, `contract_version_mismatch` included - that code is new in `@fxl-business/hub-sdk@2.1.0` and means the token's `contractVersion` is not 1, an absent one included, so it is a token this app cannot use and a fresh login is the only answer; `402 {"error":"payment_required","code":"no_org_access"}` is an Organization without access and MUST render the buy screen, never a login screen, never the expired-session panel, and never the generic API-fault panel where it landed before v2.8.0; `403 {"error":"forbidden"}`, with `missing_module` or `missing_role`, is authenticated but without the membership, Seat, module or role the route requires, and MUST render the ask-an-administrator panel, never the generic API-fault panel; `503 {"error":"unavailable","code":"hub_auth_not_configured"}` is the API having no Hub configuration at all.
-  Every body is byte-identical to the one 2.1.0's `requireHubAuth` returns natively, so the SDK flip changes no contract.
-- `isAuthFailure` is 401-only, `isEntitlementFailure` is 402-only and `isForbiddenFailure` is 403-only, all three in `apps/web/src/lib/require-token.ts`, and all three key on the STATUS ALONE.
-  The 402 and 403 predicates deliberately do not also require a `code`: `apiFetch` builds its error from `await res.json().catch(() => ({}))`, so a response whose body does not parse carries no code at all, and requiring one would fail CLOSED back onto the server-outage copy both predicates exist to remove.
-  `isEntitlementFailure is true for a 402 that carries no code at all` and `isForbiddenFailure is true for a 403 that carries no code at all` are the pins.
-  The classification chain in `SalesOpsApp` is `isEntitlementFailure`, then `isForbiddenFailure`, then `isAuthFailure`, then generic, and the INVARIANT is that the generic `Verifique o servidor local` copy is reachable ONLY for an error that is none of the classified kinds.
-  The order matters not because `isAuthFailure` is true for a 402 or a 403 today - it is false for both - but because a later widening of it placed above them would silently steal a billing or a permission answer into `Sessão expirada`, telling the operator to sign in again to fix the one thing that is not broken, and a re-login answers it with the same status forever.
-  `apps/web/src/sales-ops/__tests__/entitlement-dead-end.test.tsx` is the oracle for all four arms, drives the REAL `apiFetch` error path with `../api`, `@/lib/api-client` and `../hooks` unmocked, and its decisive mutations are the `[data-missing-entitlement]` and `[data-forbidden]` markers, so neither panel case can pass by rendering nothing.
-- `ForbiddenPanel` names no module and no role, and its `names no module, no role and no raw identifier` test pins that.
-  A 403 body is not something this app can render trustworthily: the `code` is a machine token and the `module` field is a Hub-internal identifier that the identifier law keeps out of user-facing copy. "Peça a quem administra" is the whole of what this app knows.
-- ONE-WAVE INTERNAL DISAGREEMENT, dated 2026-09-01 rather than left to be discovered. The taxonomy above says the 402 body is `no_org_access`, while the `Organization context` section below still says `402 {error: 'payment_required', code: 'missing_entitlement'}` and still names `apps/api/src/middleware/app-auth.ts` as its producer.
-  It is deliberate and it is bounded: the SDK-bump slice rewrites that line in the same pass that sweeps every other stale `missing_entitlement` literal out of the tree, and splitting the sweep across two waves would give two slices a claim on the same lines.
-  Nothing is broken in the interval, because `isEntitlementFailure` keys on `status === 402` alone and never reads the code.
-- The Hub Audience and the Hub environment are EXPLICIT validated configuration, read off the validated `env` object through `hubEnvBag` in `apps/api/src/config/auth-provider.ts` and never off raw `process.env`.
-  The Audience is `app.<slug>` and must equal `app.` plus the Client id's slug; nothing derives it from a key, and `parseAudienceFromPublishableKey` is deleted.
-  The environment must equal the environment segment inside `pk_<slug>_<environment>_<random>` and is NEVER inferred from `NODE_ENV`: a staging deploy that happens to run with `NODE_ENV=production` would otherwise ask the Hub for the wrong Client, which is a 401 at runtime instead of a refusal to boot, and the agreement is checkable OFFLINE.
-- The Hub env contract is the SDK's, whole, as of `@fxl-business/hub-sdk@2.3.0`.
-  `loadHubConfig` resolves NINE canonical names and this repo resolves none of them itself: five IDENTITY names (`FXL_HUB_API_URL`, `FXL_HUB_ENVIRONMENT`, `FXL_HUB_CLIENT_ID`, `FXL_HUB_CLIENT_SECRET`, `FXL_HUB_AUDIENCE`) plus four OPERATIONAL ones (`FXL_HUB_REDIRECT_URI`, `FXL_HUB_HEALTH_TOKEN`, `FXL_HUB_TRUSTED_ORIGINS`, `FXL_HUB_SESSION_ENCRYPTION_KEY`).
-  The ninth is read by nothing here: it keys the SDK's own `SqlHubSessionStore`, a store this repo deliberately does not use, so no `.env` example gives it a line.
-  `FXL_HUB_CONFIG`, one JSON object, is this repo's documented form for the IDENTITY five and carries NOTHING ELSE.
-  Setting it beside ANY of the five discrete identity variables is a boot failure whose message names every offender by NAME and never prints a value, and - stricter than anything this repo ever wrote - putting an OPERATIONAL key inside it is ALSO a hard refusal, naming the discrete variable to set instead.
-  The four operational values are therefore always discrete, in BOTH forms, because they rotate independently of the Client credential.
-  `FXL_HUB_HEALTH_TOKEN` is generated by the OPERATOR, not issued by the Hub, and is required whenever the environment is not `development` - enforced now by the SDK's `assertBootConfiguration` rather than by any check in this repo.
-- `FXL_HUB_REDIRECT_URI` IS NOT A PRESENCE RULE, and writing it as one is how this gets broken.
-  The SDK's `parseRedirectUri` DEFAULTS an absent value to `${apiUrl}/auth/callback`, in every environment, so the value is never actually absent by the time anything judges it.
-  What refuses outside `development` is a check on the ORIGIN of the EFFECTIVE value against `apiUrl`'s: a callback on the Hub's own origin never returns to this app, and the Hub rejects it as an unregistered `redirect_uri`.
-  An unset variable in staging or production does still fail the boot - but it fails because the DEFAULT landed on the Hub's origin, not because the variable was missing.
-  Anyone who takes away "the variable is required" will eventually write a presence check, and a presence check waves through the operator who pastes the Hub's own callback, which is the case the origin check exists for.
-  In `development` that same default boots cleanly and fails at the login screen instead, which is why both `.env` examples ship the value filled in at `http://localhost:8006/auth/callback` - the WEB origin, because vite proxies `/auth` from 8006 to the api on 3006.
-  `apps/api/src/config/__tests__/env-example-contract.test.ts` asserts that property over the shipped examples, because nothing else in the suite can: it is not a boot failure locally, not a type error, and every other test supplies its own redirect.
-- `resolveHubRedirectUri` is DELETED and must not come back.
-  It threw only when `NODE_ENV === 'production'`, so a staging deploy running `NODE_ENV=production` was judged by the wrong key, and nothing anywhere refused a callback pointed at the Hub's own origin.
-- `hubConfigPresence`'s two-forms detection, `HUB_DISCRETE_ENV_VARS`, `HUB_FIELD_TO_DISCRETE_VAR`, `nameDiscreteVar`, the local health-token requirement and `HubAuthConfig`'s local `healthToken` extension are all DELETED, because 2.3.0 owns every one of them.
-  `HubAuthConfig` is now a bare alias of the SDK's `HubConfig`.
-  What remains in `apps/api/src/config/auth-provider.ts` is `hubEnvBag`, the ONE bridge from the validated `env` object to the loaders, and `hubConfigIsAbsent`, which answers the one question the SDK has no api for: has this machine been given credentials at all?
-  It reads the SIX credential-bearing names - `FXL_HUB_CONFIG` plus the identity five - and deliberately NOT the four operational ones, because none of those identifies a Client and counting one would turn a stray `FXL_HUB_REDIRECT_URI` in a shell profile into a boot failure on a fresh clone.
-  ACCEPTED COST of deleting `nameDiscreteVar`, recorded rather than discovered later: the SDK's `operationalMessage` names the discrete variable for the four OPERATIONAL fields, but the five IDENTITY fields still format as `FXL_HUB_CONFIG.<field>`, so an operator using the five discrete variables who misconfigures one is pointed at a variable they never set.
-  That is a diagnostic regression, knowingly taken to keep exactly one resolver, and it is filed upstream as 2.4.0 feedback.
-  A wrapper that only ever rethrows was defensible while the repo owned a presence enum; it is not defensible as the one hand-maintained mapping standing between this repo and a contract the SDK now publishes.
-  A bad Hub configuration is a BOOT FAILURE and not a 503: there is no blanket `try/catch` in `auth-provider.ts`, and `tryLoadHubAuthConfig` returns `null` ONLY when `hubConfigIsAbsent` is true, which is what keeps `503 hub_auth_not_configured` alive for a machine that has simply not been given credentials yet.
-  DELIBERATE BEHAVIOUR CHANGE, v3.1.0: a PARTIAL discrete configuration - some of the five set, not all - used to fall into that null door and answer 503. It is now a boot failure carrying the SDK's own message. Three of five is a misconfiguration, not an unconfigured machine, and answering 503 to every request tells the operator nothing about which variable is missing.
-  A fresh clone is unaffected only because both `.env` examples ship all five BLANK, which is still absent - and that is a claim about a FILE, so it is pinned by a test that reads the file, `apps/api/src/config/__tests__/env-example-contract.test.ts`.
-  It exists because the previous slice shipped three of five populated and made every fresh clone a boot failure: every other test in the suite CONSTRUCTS its own env bag, so nothing in the repository had ever read the artefact a human is told to copy.
-- The boot assertion runs EXACTLY ONCE, inside `createHubBff`, which calls `assertBootConfiguration` itself.
-  This repo does NOT call it separately: two calls with different option objects would validate one configuration and construct another, and the value they would silently disagree about is `redirectUri`, which is the divergence the origin check exists to catch.
-  `createAppAuthBff()` runs at module top level in `server.ts`, so it is a real boot failure and not a lazy one.
-  For the same reason `healthToken`, `redirectUri` and `trustedOrigins` are passed as CONFIG and never as `createHubBff` options.
-- Browser Hub access tokens are memory-only, cached until JWT `exp` minus 30 seconds, and concurrent `getToken()` calls share one in-flight refresh per provider; logout and workspace generation guards reject late responses.
-- A missing access token is never defaulted.
-  `requireToken(getToken)` in `apps/web/src/lib/require-token.ts` throws `AuthTokenUnavailableError`, and `apiFetch` / `apiFetchBlob` take a REQUIRED non-empty `token` and assert it before calling `fetch`, so a null token can never become an anonymous request that reads as a server outage.
-  `no-restricted-syntax` in `apps/web/eslint.config.js` fails lint if `(await getToken()) ?? ...` comes back.
-  The sales-ops error panel routes `isAuthFailure` (an unavailable token, or an `ApiError` with `status: 401`) to `Sessão expirada` rather than to the generic API-fault copy.
-- The Hub BFF session store is DURABLE, in Postgres, and `createAppAuthBff` must always pass it.
-  Under `@fxl-business/hub-sdk@1.3.0` omitting `sessionStore` THROWS at construction when `NODE_ENV === 'production'`, and a store that does not implement `withSession` throws at construction unconditionally (`assertModernSessionStore`); outside production a missing option still falls back silently to the SDK's `InMemoryHubSessionStore`, which puts the Hub refresh token in one process's memory, so every restart or redeploy logs every user out and a second replica cannot see a session the first created.
-  `apps/api/src/middleware/__tests__/app-auth-bff-wiring.test.ts` still asserts the exact store instance reaches `createHubBff`, so deleting the option fails a test rather than silently regressing, and it fails earlier than a boot would.
-- `HubSessionStore` is ASYNC and TRANSACTIONAL as of `@fxl-business/hub-sdk@1.3.0`, and the store owns the lock.
-  `withSession(id, op)` opens ONE `db.transaction`, takes `SELECT ... FOR UPDATE` on the session row BEFORE `op` runs, and holds it until commit, so two concurrent refreshes of one session id serialize at Postgres and a rotated refresh token cannot be lost.
-  There is no hydrate phase, no flush phase and no `AsyncLocalStorage` working set; `apps/api/src/auth/hub-session-scope.ts` is deleted and must not come back.
-  Because the operation's return value is never captured outside the transaction, a commit failure cannot be returned as success - which was the pre-1.3.0 hole where the Hub had rotated `RT1` to `RT2` while Postgres still held `RT1`.
-  The transaction handle answers `read()` with a three-state `{status: 'found', record} | {status: 'expired'} | {status: 'absent'}`, because `expired` clears the browser's session cookie and `absent` never does, so collapsing the two turns a database blip into a logout the operator cannot recover from.
-  A row past EITHER `expires_at` or `absolute_expires_at` is deleted inside the same transaction and reported `expired`; a missing row is `absent`; a seal that will not open is `absent` and LEAVES the row, because a wrong key must cost one re-login rather than destroy data, and anything the store cannot positively prove is expiry is `absent` by rule.
-  `get()` survives only until the SDK flip and is a PROJECTION of `read()`, never a second lookup, so the two cannot drift.
-  `expires_at` is SLIDING (30 days, rewritten by `update`) and `absolute_expires_at` is a hard ceiling (90 days, written ONCE by `create` and absent from `update`'s `set` object entirely), so a continuously refreshing session cannot live forever.
-  `update` deliberately ignores BOTH timestamps the SDK spreads back from `get` (`dist/server.js:464`): honouring `expiresAt` would freeze the sliding TTL at 30 days from login, and honouring `absoluteExpiresAt` would let a rotation extend the ceiling.
-  `createHubBff` is given `sessionTtlSeconds` and `sessionAbsoluteTtlSeconds` derived from those same constants, so the SDK's 90-day sliding / 365-day absolute defaults are never in play, and both expiries reach the SDK as ISO strings through the single `toSessionRecord` boundary - the SDK reads them with `Date.parse`, and a `Date` object there yields `NaN` and silently disarms its own gate.
-  The nightly `deleteExpiredHubBffSessions` sweeps on either timestamp.
-  Any throw inside `withSession` - lock read, handle method, operation or commit - becomes `HubSessionStoreUnavailableError`.
-  That is answered `503` by `hubBffErrorHandler`, the BFF router's `onError`, NOT by a middleware: hono's `compose` catches a throw at the dispatch level that threw and resolves upward, so a `try { await next() } catch` mounted above the BFF is dead code.
-  The `503` is load-bearing for the same reason it always was - a store outage read as "no session" makes the SDK answer `401` and delete the session cookie, logging every user out over a brief database blip.
-  `createHubBff` is given `timeoutMs: 5_000`, because the BFF calls the Hub over HTTP from inside the row-lock transaction and an unbounded call pins a `getAdminDb()` connection (`max: 5`, shared with the audit and history paths) with an open transaction.
-- The BFF's backchannel rotation defect is FIXED UPSTREAM and this repo's bridge for it is deleted.
-  The Hub's auth service runs with `NODE_ENV=production`, so it rotates its session cookie as `Set-Cookie: __Host-fxl_hub_session=<rotated>`; outside production it uses the unprefixed name.
-  Through `1.3.1`, `parseRotatedRefresh` was `/(?:^|[,\s])fxl_hub_session=([^;]+)/`, and the `__Host-` prefix leaves the name preceded by `-`, which is neither `^` nor `[,\s]`, so the regex missed, `tx.update()` was never called, Postgres kept the refresh token that had just been spent, AND THE BFF STILL ANSWERED 200.
-  The Hub forgives exactly one stale generation for 60 seconds (`HUB_SESSION_GRACE_SECONDS`), so the replay fell further behind on every cycle: the first was forgiven, the second tripped `reuse_detected` and the Hub revoked the whole family.
-  Against a 120-second access token renewed at `exp - 60s`, that was one dead session every one to three minutes, for every user, measured in production on 2026-08-12.
-  It was invisible locally because the Hub only prefixes the cookie when `NODE_ENV=production`, which is why three rounds of browser-side fixes all missed it.
-  `2.2.0` fixes it at the source (`dist/server.js:307-316`, upstream commit `b301b98`): the `__Host-` name is tried FIRST and the plain name is the fallback, so both shapes rotate. `apps/api/src/auth/hub-rotated-cookie.ts` and its test are DELETED, no `fetchImpl` is passed, and the SDK's default global `fetch` is what runs.
-  The deletion was GATED on evidence rather than on the version number: the non-vacuity oracle that proved rotation was lost without the wrapper was run against 2.2.0 first and had to go RED before a line was removed.
-  `apps/api/src/middleware/__tests__/app-auth-bff-wiring.test.ts` still drives the REAL `createHubBff` handler against a fake Hub sending a `__Host-` prefixed `Set-Cookie` and asserts the store persisted the rotated token, so the protection is continuous across the bump.
-  `POST /auth/switch` no longer exists; an Organization switch rides `POST /auth/refresh` with `{organizationId}`, through the same handler and the same parser, and is pinned there.
-  Note for anyone editing that test file: `createHubBff` binds `options.fetchImpl ?? fetch` ONCE at construction, so a `vi.stubGlobal('fetch', ...)` installed after the BFF is built never reaches the SDK. The global is therefore stubbed BEFORE construction and each test swaps the handler behind it.
-- The SDK's CSRF origin guard is CONFIGURABLE as of 2.2.0 and this repo's `hub-bff-origin.ts` shim is deleted with it.
-  `1.3.x` hardcoded the guard to the request's own origin, which 403ed every POST in this deployment because the web app is on `sales.fxlbusiness.com` and the API on `sales-api.fxlbusiness.com`.
-  2.2.0 adds `trustedOrigins` to `CreateHubBffOptions` and computes its own origin from `x-forwarded-proto` (upstream commit `1cc4812`), so the mount is the ordinary `router.route('', bff)`.
-  As of 2.3.0 it is no longer a `createHubBff` option here at all: it rides on the CONFIG, resolved by `loadHubConfig` from the canonical `FXL_HUB_TRUSTED_ORIGINS`, and NOT from `env.CORS_ORIGIN`.
-  It is REQUIRED for this deployment and is not optional cleanup; an empty list reproduces the 2026-08-10 outage.
-  `FXL_HUB_TRUSTED_ORIGINS` IS A PROMOTION GATE, not a `.env` matter.
-  Local development is unaffected: vite proxies `/auth` with `changeOrigin: false`, so the request origin already EQUALS the origin the BFF computes for itself and the POST is admitted with the variable unset - a developer must never be told to set it.
-  STAGING AND PRODUCTION MUST SET IT before the next deploy, because there the web app is on `sales.fxlbusiness.com` and the API on `sales-api.fxlbusiness.com`; unset, the list is `[]` and every browser POST to the BFF is `403 origin_not_trusted`.
-  The `.env` examples help a fresh clone and do nothing for a deploy, which is why this is stated here and in `AUDIT.md` rather than only as an example value.
-  Its two mount tests were RENAMED by the 2.3.0 slice - they are now `does not 403 a cross-origin refresh from the trusted web origin, through the real mount` and `still 403s a cross-origin refresh from an origin that is not trusted`, in `apps/api/src/middleware/__tests__/app-auth-bff-wiring.test.ts`.
-  Their assertions are intact and they still drive the REAL mount; the titles moved because the old ones named the deleted shim rather than the behaviour. An earlier revision of this file claimed they keep their exact titles, and that claim was wrong.
-  2.2.0 also adds `code: 'origin_not_trusted'` to that 403 body; nothing in `apps/web` reads it, because `isForbiddenFailure` keys on the STATUS alone.
-- `secureCookies` is GONE as a `createHubBff` option and is replaced by its INVERSE, `insecureCookies`, which the boot assertion refuses outside `environment === 'development'`.
-  The repo keeps ONE local boolean named `secureCookies`, derived from the HUB environment rather than from `NODE_ENV`, because `createHubLoginSupersedeMiddleware` consumes it and `hubSessionCookieName(secureCookies)` must keep agreeing with the SDK's own `secure ? SESSION_COOKIE_SECURE : SESSION_COOKIE`. The inversion happens exactly once, at that single producer.
-  This names the BROWSER cookie the BFF sets on its own response, which carries a session id rather than a refresh token, and has nothing to do with the backchannel above.
-- `healthToken` rides on the CONFIG as of 2.3.0, resolved by `loadHubConfig` from `FXL_HUB_HEALTH_TOKEN`, and is NOT passed as a `createHubBff` option.
-  1.3.1 had no option for it at all and 2.2.0 took it as one; 2.3.0 makes it a canonical variable, and the SDK's own `assertBootConfiguration` is what requires it outside development, so this repo's local requirement is deleted.
-  It is generated by the OPERATOR and never issued by the Hub.
-- A store outage on `/auth/refresh` is now answered by the SDK itself as `503 {"error":"session_store_unavailable"}` with no cookie cleared, so it no longer reaches this repo's `hubBffErrorHandler` on that path. The two load-bearing properties are unchanged and are what the test asserts: 503 rather than the 401 that would read as "no session", and no cookie cleared. Nothing in `apps/web` reads that body; `requestHubAccessToken` classifies on the STATUS.
-- The SDK is pinned EXACTLY at `@fxl-business/hub-sdk@2.3.0` in BOTH apps, with no caret.
-  The exact pin is the only spelling that survives an unrelated `pnpm install`.
-  A second justification used to be recorded here - that `@fxl-business/hub-sdk-testing` peer-requires the SDK exactly - and it is DELETED because it was asserted rather than verified: that package is in no `package.json` and no lockfile entry, so this repo does not currently carry that constraint at all. Re-ground it if the twin is ever installed.
-  Historical note worth keeping, because it cost a release: `1.3.0` shipped `main`/`types`/`exports` pointing at `./src/*.ts` while `files` was `["dist","schema","MIGRATION.md"]`, so `src/` was absent from the tarball and neither Node nor Vite could resolve the package at all. It INSTALLS fine and then fails to RESOLVE at import time, which is the nastier shape of the two. `1.3.1` was that packaging fix and nothing else.
-  `hono` is pinned to `4.12.28` by a `pnpm-workspace.yaml` OVERRIDE, not only by `apps/api/package.json`: the SDK peer-requires `>= 4.12.28` and `.npmrc` sets `strict-peer-dependencies=false`, so without moving the override the workspace resolves a second Hono copy and the BFF's `Context` stops being the one `server.ts` composes with. 2.3.0's peer is unchanged at `>= 4.12.28`, so the override did not move.
-- The Hub CONFIG RESOLVER is the SDK's, whole, and no wrapper survives around it.
-  This repo vendored a parser (`apps/api/src/config/hub-config.ts`) only because `1.3.1` exported none, then kept a presence layer, a discrete-variable renamer and a health-token requirement over 2.2.0's `loadHubConfig`. 2.3.0 owns every one of those and all of them are deleted; `auth-provider.ts` imports `loadHubConfig`, `HubConfig` and `HubConfigError` and adds only `hubEnvBag` and `hubConfigIsAbsent`, both described above.
-- `hub_bff_sessions` and `hub_bff_login_txns` are global, non-tenant tables and cannot be otherwise: a session row is written at `/auth/callback`, before any workspace is known, so there is no `org_id` to key a tenant policy on.
-  Both carry FORCE RLS with only the `app.fxl_admin` policy, so the ordinary `getDb()` connection sees zero rows; the store goes through `getAdminDb()`.
-  Refresh tokens and PKCE verifiers are AES-256-GCM sealed with the row id as AEAD additional data, keyed by HKDF-SHA256 from `FXL_HUB_CLIENT_SECRET` unless `SALES_SESSION_ENCRYPTION_IKM` overrides it, so rotating either one logs every user out.
-  That variable was named `HUB_SESSION_ENCRYPTION_KEY` until v3.1.0, and this line is the prose record of the rename - `CLAUDE.md` and `nexo/` are outside `scripts/no-legacy-env-names.mjs`'s pathspec for exactly that reason.
-  It moved off the `FXL_HUB_` namespace because `@fxl-business/hub-sdk` 2.3.0 makes that namespace mean "the SDK resolves and validates this", and the canonical `FXL_HUB_SESSION_ENCRYPTION_KEY` it defines is a REQUIRED strict-hex 64-character value decoded to exactly 32 bytes, keying the SDK's own `SqlHubSessionStore` - a store this repo deliberately does not use.
-  Ours is OPTIONAL input keying material for HKDF-SHA256, hence `IKM` and not `KEY`, of any length at or above a 32-character floor, with blank meaning absent; two different types one name apart, which is why the rename is not cosmetic.
-  Semantics did not change by one byte: still `emptyToUndefined` in `apps/api/src/env.ts`, still exactly one read site in `apps/api/src/middleware/app-auth.ts` as `env.SALES_SESSION_ENCRYPTION_IKM ?? hubAuthConfig.clientSecret`, still absent meaning HKDF from `FXL_HUB_CLIENT_SECRET`.
-  Because it is the HKDF input, an operator who has SET it must carry the VALUE across unchanged under the new name before the deploy that reads it, or every stored seal stops opening and every user is logged out once; blank in both environments is the documented default, in which case there is nothing to carry.
-  Read that override through the validated `env` object, never `process.env`: `.env.dev.example` ships it blank and `??` does not catch `''`, which fails the 32-char floor and stops the API booting.
-- The post-login redirect pair is `SALES_POST_LOGIN_REDIRECT` and `SALES_POST_LOGIN_ERROR_REDIRECT`.
-  They were named `FXL_HUB_POST_LOGIN_REDIRECT` and `FXL_HUB_POST_LOGIN_ERROR_REDIRECT` until v3.1.0, and this line is the prose record of that rename, for the same reason and under the same pathspec exemption as the paragraph above.
-  They moved off the `FXL_HUB_` namespace because 2.3.0 makes that prefix mean "the SDK resolves and validates this", and this pair is not among the nine canonical names it claims (`FXL_HUB_API_URL`, `FXL_HUB_ENVIRONMENT`, `FXL_HUB_CLIENT_ID`, `FXL_HUB_CLIENT_SECRET`, `FXL_HUB_AUDIENCE`, `FXL_HUB_REDIRECT_URI`, `FXL_HUB_HEALTH_TOKEN`, `FXL_HUB_SESSION_ENCRYPTION_KEY`, `FXL_HUB_TRUSTED_ORIGINS`).
-  It is resolved start to finish inside this repo by `resolveHubPostLoginRedirect` and `resolveHubPostLoginErrorRedirect` in `apps/api/src/middleware/app-auth.ts`, and it falls back to `CORS_ORIGIN`, which the Hub's own contract names as the consumer's configuration and explicitly places outside itself, so the old prefix was a false claim of canonicity.
-  `FXL_HUB_REDIRECT_URI` IS one of the nine and is deliberately untouched by this rename; `createHubBff`'s `postLoginRedirect` / `postLoginErrorRedirect` are CODE options and are unchanged too, since what moved is only where this repo reads the VALUES from.
-  Semantics did not change by one byte: both are still `emptyToUndefinedUrl` in `apps/api/src/env.ts`, both still reach the resolvers only through `hubEnvBag` in `apps/api/src/config/auth-provider.ts`, the redirect still resolves explicit then `CORS_ORIGIN` then `/`, and the error variant still resolves explicit then the redirect with `?error=auth` appended, `/` special-cased to `/?error=auth`.
-  Because the bag now carries two keys that are deliberately NOT Hub variables, its oracle is titled `projects exactly the auth variables off the validated env object`; its sorted-key assertion is the pin that catches the bag and the schema drifting apart and must never be loosened.
-  Both are OPTIONAL and blank by default, so an operator who never set them has nothing to carry across; one who DID must copy the value under the new name before the deploy that reads it, or post-login lands on `CORS_ORIGIN` instead of wherever they pointed it.
-- A login SUPERSEDES the session id the browser presented at `/auth/callback`, deleting that row in the SAME transaction that inserts the new one, so a re-login cannot orphan a live rotatable refresh token.
-  The key is deliberately the prior SESSION ID and not the account id.
-  The 1.3.0 BFF never populates `HubSessionRecord.accountId`, so `hub_bff_sessions.account_id` is always NULL; and keying on the account would log the operator out of every other device while still leaving the previous account's row live in the one browser where two identities actually collide, which is the case invariant 3 exists to close.
-  Sessions this key cannot see, orphaned without a login, are bounded by `absoluteExpiresAt` and the nightly sweep instead.
-  The prior session id reaches `create()` through an `AsyncLocalStorage` owned by the store and set by a `/auth/callback`-only middleware, because the SDK calls `store.create` from inside its own handler with no seam for an extra argument.
-  That is NOT a return of the deleted hydrate-around-the-handler bridge, and the paragraph above forbidding a working set still stands: this context carries one string, performs no I/O, holds no lock, and has no failure mode.
-  `createHubSessionStore` returns a DISCRIMINATED union so `session.kind === 'durable'` narrows the store to `DurableHubSessionStore`, and the middleware is mounted only on that branch: the memory fallback flows through the same router and the SDK's `InMemoryHubSessionStore` has no `withLoginContext`, so an unnarrowed mount 500s every local `/auth/callback`.
-- A failed token read does NOT immediately sign the user out, and WHICH failure it was decides whether the ladder runs at all.
-  The browser reads `/auth/refresh` itself through `requestHubAccessToken` in `apps/web/src/auth/refresh.ts` and never through `HubClient.getToken()`, and that is now a DECISION rather than a workaround. 2.x adds `getTokenResult()`, which does carry the status, so the original reason (the client discarded it) is gone; the reason now is that this app's classification, bounded ladder, logout intent and cache-flush rules are specified in this file and pinned by tests, and adopting the SDK's own loop is a separate migration.
-  For the same reason `createHubClient` is given `autoRenew: false` - the 2.x default is `true` - and the provider calls `client.stop()` at unmount, so the SDK's renewal scheduler can never race this app's visibility-gated one. `start()` is never called.
-  The hand-rolled fetch is that hand-rolled fetch is coupled to the path and to `credentials: 'include'`, which is why one `getHubBffBasePath` result feeds both it and `createHubClient` and why `refresh.test.ts` pins the request shape while `apps/api/src/middleware/__tests__/app-auth-bff-wiring.test.ts` pins that the real SDK router still answers that path.
-  A `401` is the BFF's own verdict that the session is dead - both of its bodies, `session_expired` and `no_session`, mean the same thing - so classification keys on the STATUS and `failSession()` runs on that single response with no rung ever scheduled.
-  Everything else preserves the session and enters the bounded ladder (`SESSION_REVALIDATE_DELAYS_MS`), which gives up only after four CONSECUTIVE transient failures.
-  A cold start is no longer a special case: it follows the same rule, so a boot-time Hub outage holds the Skeleton for about six seconds instead of bouncing into a login that would also fail and burn the attempt budget.
-  The counter resets on every recovery; making it a lifetime total signs the operator out on roughly the fourth unrelated blip, which is the original destroyed-form bug, and `apps/web/src/auth/__tests__/react.test.tsx` pins the reset.
-- Losing a session while the app is OPEN never navigates.
-  `login()` is `client.login()`, a full `window.location.assign` to the Hub, so calling it destroys the document and every byte of unsaved form state with it; `captureReturnTo` restores the ROUTE and has never restored form state.
-  `HubProtected`'s login effect therefore splits the two cases `isSignedIn === false` conflates, on the `sessionLost` flag the provider derives from `lastAppliedToken` (`undefined` before the first apply, `null` after a loss, a string while signed in - so a live loss is exactly "was a string, is now null").
-  COLD ENTRY keeps redirecting exactly as it always did, and that is the must-not-break: nothing is on screen yet so nothing is destroyed, and breaking it means nobody can ever sign in.
-  A LIVE LOSS renders `SignedOutPanel` (`Sua sessão expirou`) in a `fixed inset-0` overlay WITH `children` still mounted underneath - the only branch in that component that does not replace the subtree, which is precisely why the operator's half-filled wizard survives - and waits for their `Entrar` click, so the navigation is theirs and the loss is expected rather than inflicted.
-  That branch sits AHEAD of `loginBlocked` and its click clears the attempt counter, because the loop guard exists to stop AUTOMATIC re-login loops and a live loss never spends an attempt on its own; letting a leftover counter swap in `SessionRecoveryPanel` would unmount the work the branch exists to protect.
-  The durable logout intent still wins over it, so an explicit `Sair` keeps its own copy rather than being told the session expired.
-  Persisting form state ACROSS a redirect remains deliberately out of scope and is filed in `nexo/ROADMAP.md`.
-  Keeping `children` mounted is only half the guarantee, and the other half lives in the CHILD: `SalesOpsApp` gates BOTH of its `<Navigate>` early returns on `rolesAreAuthoritative = profile.isSignedIn`.
-  A `return <Navigate />` is itself an unmount, so before that guard the overlay kept the subtree alive and the child immediately threw it away: `applyToken(null)` sets `roles: []`, `getVisibleWorkspaces([])` is `[]`, and the child navigated to `/no-role`, destroying the operator's wizard AND rewriting the URL that this file makes the single source of truth for the active workspace and page.
-  The login effect then captured `/no-role` as the returnTo, so `Entrar` restored a dead end - which is the production report, `Sua sessão expirou` rendered at `sales.fxlbusiness.com/no-role` for an operator who had been on `/tatico/dashboard`.
-  The SECOND early return needs the guard just as much as the first: with an empty role set `resolveSalesOpsRoute` matches no workspace and falls through to `getDefaultSalesOpsRoute`, so `redirect` is `true` for EVERY url, and guarding only the first relocates the bug into "rewrite any non-`/tatico/dashboard` url to `/tatico/dashboard`".
-  `profile.isLoaded` is deliberately absent, because `applyToken` only ever writes `isLoaded: true` and no reachable state has `isSignedIn` true while it is false.
-  Do NOT "fix" this by returning `null` or a Skeleton while signed out; that unmounts the subtree too, and exactly ONE test out of 708 catches it - `keeps the Sales Ops shell and its own component state mounted underneath the overlay`, which collapses the sidebar BEFORE the loss and asserts the collapsed state survives, because a URL-only oracle passes a fix that destroys the operator's work.
-- While the document is VISIBLE the access token renews itself at `exp - SESSION_RENEWAL_LEAD_MS` (60s), so a long-open tab never drifts into expiry and the first read after the operator returns is not a failure path.
-  The lead is deliberately longer than the cache's `ACCESS_TOKEN_EXPIRY_SKEW_MS` (30s), which is why `HubAccessTokenCache` exposes `renew()`: at that moment `getToken()` would still answer from memory, so a renewal driven through it would issue no request at all.
-  Nothing is scheduled while `document.visibilityState === 'hidden'` - a throttled tab renews late and uselessly, and holding a session alive for a tab nobody is looking at is not a service - and `visibilitychange` to visible renews SYNCHRONOUSLY on the event when the token is expired or already inside the window, so a focus-triggered query refetch cannot win that race.
-  A non-positive delay never schedules: arming the next rung out of the answer to this one is an unbounded loop for any token whose whole life is shorter than the lead, and that case belongs to the visibility handler, which fires once per event.
-  This is the SECOND timer source in `react.tsx`, so `vi.getTimerCount()` is only a ladder oracle while the renewal provably cannot arm; `react.test.tsx` pins `tokenCache.expiresAt()` to `null` outside the renewal block for exactly that, and the renewal block asserts a finite expiry really does arm one.
-  happy-dom reports `visibilityState` as `visible` whenever the document has a `defaultView`, so a visibility guard alone would NOT have kept those tests inert.
-- `sanitizeReturnTo` in `apps/web/src/auth/session-recovery.ts` re-asserts its structural checks on the NORMALIZED value it returns, not only on the raw input.
-  Validating only the raw string let dot-segment normalization through, so `/..//evil.example` returned `//evil.example` and resolved off-origin.
-  The stored path is destroyed BEFORE it is validated, so a hostile value is consumed exactly once and cannot be retried on a later mount.
-  The same normalized value is also refused outright when it names a TERMINAL auth screen, which today is the one-member `TERMINAL_AUTH_ROUTES = ['/no-role']`.
-  A terminal screen is where a failed authorization ENDS, so it is never an answer to "where was this operator before we sent them to the Hub", and restoring one is exactly the reported "I click `Entrar` and get `Acesso não autorizado`".
-  `isTerminalAuthRoute` matches it the way React Router matches it and not by string equality, because anything looser leaves a spelling the guard permits and the router still renders: per-segment percent-decoding mirroring `decodePath` (including its `/` re-encoding and its malformed-escape fallback), all trailing slashes stripped, and `toLowerCase` because `compilePath` carries the `i` flag unless a route opts into `caseSensitive` and none does.
-  It sits with the other re-asserted checks and NOT on the raw input, for the same reason they do: `/foo/../no-role` has `.` as its second character and resolves same-origin, so it walks past every raw check and only BECOMES `/no-role` inside `new URL`.
-  The constant is deliberately not exported, so the oracle pins literal paths rather than whatever the implementation happens to contain, and `refuses a terminal route that only appears after dot-segment normalization` is the test that fails on the raw-input placement while every other new test still passes.
-  The legacy trees are deliberately NOT members: `RoleGuard` bounces an unentitled operator off them to `/no-role`, but an entitled one lands on a real page, so refusing them would strand a legitimate restore for the only operator who can reach them.
-- An explicit `Sair` writes a DURABLE logout intent, `fxl-sales.auth.logoutIntent` in `sessionStorage`, and `markLogoutIntent()` is SYNCHRONOUS and lands BEFORE THE FIRST `await` in `logout()`; it is written as the first statement, above `tokenCache.clear()` and above `failSession()`.
-  The measured bug is not an ordering bug INSIDE that synchronous block - React cannot re-render in the middle of a synchronous function, so every statement from `markLogoutIntent()` through `consumeReturnTo()` completes before any flush.
-  It is that `logout()` had no durable intent at all: `consumeReturnTo()` cleared the slot, the discrete click's state update then flushed when the handler returned, and `HubProtected`'s login effect refilled the slot with the exact route the logout was clearing, spent a login attempt, and redirected to the Hub.
-  The "before the first `await`" rule is what makes the intent visible to that flush, and it is the position that stays correct if an `await` is ever inserted above it.
-  This is deliberately NOT the same mechanism as the proposta wizard's submit button, which races two browser phases within a single click; do not conflate them.
-  While the intent is set, `HubProtected` refuses to auto-login BEFORE calling `registerLoginAttempt()`, so the attempt budget is unspent - which is also the test oracle, since it proves the effect body never ran rather than merely that no redirect was seen.
-  It reduces the URL to `/` so the previous operator's route is neither on screen nor available to capture the instant the intent clears, and it renders `SignedOutPanel` in preference to `SessionRecoveryPanel`, whose "Tentamos entrar novamente algumas vezes" would be a lie when no automatic attempt was made.
-  Auto-re-login after an explicit `Sair` is deliberately not offered: on a shared machine the Hub's own SSO cookie can complete it with no prompt, undoing the one action the product has for ending a session.
-  The intent is cleared in exactly two places, and BOTH are needed: the panel's `Entrar` button, and `observeToken`'s live-token branch beside `clearLoginAttempts()`.
-  The second is the anti-lockout backstop - any token at all proves the session is live, so the intent can only ever persist while no token is obtainable.
-  It must not move into `applyToken`, whose unchanged-token early return would skip it whenever a re-login yielded a byte-identical token.
-  `sessionStorage` and not `localStorage`: the intent must die with the tab, because a week-old intent from a closed tab suppressing a fresh login is a lockout bought for nothing, and `client.logout()` destroys the session server-side anyway, so other tabs sign out on their own next refresh.
-  `hasLogoutIntent` matches an exact sentinel and fails OPEN on an unreadable storage, both for the same reason: an over-broad or fail-closed read is a lockout, while a narrow or fail-open one is only a return to the prior behaviour.
-- The TanStack query cache is FLUSHED with `queryClient.clear()` on logout, on an in-page signed-out to signed-in transition inside `observeToken`, and on every completed workspace switch inside `setActive`.
-  This is why `QueryClientProvider` is OUTSIDE `AppAuthProvider` in `apps/web/src/App.tsx`: the auth provider reads the client with `useQueryClient()`, so it can only ever flush the exact client its own subtree reads.
-  Every key in `apps/web/src/lib/query-keys.ts` is account- and org-agnostic, and `queryClient` is a module-level singleton that survives every auth event short of a page reload, so without the flush a workspace switch renders the previous tenant's rows and a second operator on the tab is served the first one's data.
-  `clear()` and not `invalidateQueries()`: invalidation leaves the stale data in the cache to be rendered while the refetch is in flight, which is the leak itself. It also clears the mutation cache, so a paused mutation from the previous identity cannot resume under the new one.
-  `Query.destroy()` cancels the retryer, and a cancelled retryer's thenable is already settled, so a request issued before the flush cannot write its result back afterwards.
-  The switch flush goes AFTER `await client.setActive(...)` and after the `operationGeneration` check, and BEFORE `tokenCache.seed` and `observeToken`: flushing earlier would wipe the current tenant's data on a switch that is still in flight, fails, or is superseded.
-  Those two orderings have DEDICATED oracles, because nothing else in the suite catches either one - `keeps the current tenant's cache while a workspace switch is still in flight` and `does not flush when a superseded workspace switch resolves late`, both in `apps/web/src/auth/__tests__/react.test.tsx`.
-  A ladder recovery must NOT flush. The condition is `typeof lastAppliedToken.current === 'string'`, i.e. a token arriving while NO session is held, so a transient blip cannot destroy the operator's cached screen; `keeps the cache when the revalidation ladder recovers from a blip` is the only test that fails on the obvious wrong implementation of "flush on every non-null token".
+Full reference: `nexo/knowledge/reference/auth-model.md`.
+
+Wiring:
+- The API mounts the Hub BFF at `/auth/*`; the browser enters through same-origin web `/auth/*`, proxied by Vite to the API. The local callback is `http://localhost:8006/auth/callback`.
+- Protected routes use Hub bearer tokens through `appAuthMiddleware`; `requireHubAuth` exposes `c.get('hubAuth')`. `userId` is the Hub account id, `orgId` the active Hub workspace id.
+- The SDK is pinned EXACTLY at `@fxl-business/hub-sdk@2.3.0` in both apps (no caret). `hono` is pinned to `4.12.28` by a `pnpm-workspace.yaml` override so only one Hono copy resolves.
+
+Access gate:
+- Baseline access is the boolean `auth.claims.entitlements.access` and nothing else. Never read `entitlements.modules` for baseline access (the old `sales.core` module gate answered 402 to everyone). `modules` is for paid add-ons only, via `requireHubAuth`'s `requiredModule`.
+- `requireHubAuth` is the ONE access gate, fails closed, with `allowWithoutAccess` at its default `false`. Do not reintroduce `classifyHubAccess`, `hasHubOrgAccess`, `hasHubModule` or `requireHubModule`.
+- `MinimalHubAuthContext` is an alias of the SDK's `HubAuthContext`.
+- Deny taxonomy (bodies are byte-identical to the SDK's):
+  - `401 {"error":"unauthorized"}` (any code, `contract_version_mismatch` and a token with no `access` key included) goes to the login screen.
+  - `402 {"error":"payment_required","code":"no_org_access"}` MUST render the buy screen (`MissingEntitlementPanel`).
+  - `403 {"error":"forbidden"}` (`missing_module`, `missing_role`, `origin_not_trusted`) MUST render the ask-an-administrator panel (`ForbiddenPanel`), which names no module, role or raw id.
+  - `503 {"error":"unavailable","code":"hub_auth_not_configured"}` means no Hub configuration at all.
+- `isAuthFailure` (401), `isEntitlementFailure` (402) and `isForbiddenFailure` (403) in `apps/web/src/lib/require-token.ts` key on the STATUS alone, never on the body `code`. `require-token.ts` imports nothing.
+- `SalesOpsApp` classifies in the order entitlement, forbidden, auth, generic. The generic `Verifique o servidor local` copy is reachable ONLY for an unclassified error. Oracle: `apps/web/src/sales-ops/__tests__/entitlement-dead-end.test.tsx`.
+- `apps/api/src/middleware/__tests__/app-auth-access-gate.test.ts` drives the REAL verifier with an in-process keypair; keep it that way.
+
+Hub configuration:
+- Hub config is the SDK's (`loadHubConfig`), read only through `hubEnvBag` in `apps/api/src/config/auth-provider.ts`, never raw `process.env`. The only local addition is `hubConfigIsAbsent`, which reads `FXL_HUB_CONFIG` plus the five identity names.
+- Identity five: `FXL_HUB_API_URL`, `FXL_HUB_ENVIRONMENT`, `FXL_HUB_CLIENT_ID`, `FXL_HUB_CLIENT_SECRET`, `FXL_HUB_AUDIENCE`. All or none: none answers `503`, a partial set is a boot failure. `FXL_HUB_CONFIG` (JSON) may carry only these five and must not coexist with the discrete ones.
+- Operational four, always discrete: `FXL_HUB_REDIRECT_URI`, `FXL_HUB_HEALTH_TOKEN` (operator-generated, required outside development), `FXL_HUB_TRUSTED_ORIGINS`, `FXL_HUB_SESSION_ENCRYPTION_KEY` (unused here, it keys the SDK store this repo does not use).
+- The Audience is `app.<slug>` matching the Client id; the environment must match the `pk_<slug>_<environment>_<random>` segment and is NEVER inferred from `NODE_ENV`.
+- `FXL_HUB_REDIRECT_URI` is judged by ORIGIN, not presence: the SDK defaults it to the Hub's own origin, which refuses outside development. Never write a presence check. Locally it must be the web origin `http://localhost:8006/auth/callback`.
+- `FXL_HUB_TRUSTED_ORIGINS` is REQUIRED in staging and production (web and API are on different origins, empty means every BFF POST is `403`). Locally it is unnecessary; never tell a developer to set it.
+- A bad Hub config is a BOOT failure, not a 503. `createHubBff` runs `assertBootConfiguration` exactly once; do not call it separately. `healthToken`, `redirectUri` and `trustedOrigins` travel on the CONFIG, not as `createHubBff` options.
+- Deleted and must not come back: `resolveHubRedirectUri`, `parseAudienceFromPublishableKey`, `nameDiscreteVar`, `hub-config.ts`, `hub-rotated-cookie.ts`, `hub-bff-origin.ts`, `hub-session-scope.ts`, `POST /auth/switch` (switching rides `POST /auth/refresh` with `{organizationId}`).
+- `secureCookies` is derived once from the HUB environment and inverted into the SDK's `insecureCookies`; `hubSessionCookieName(secureCookies)` must agree with the SDK.
+
+BFF session store:
+- The store is DURABLE in Postgres and `createAppAuthBff` must always pass it (`app-auth-bff-wiring.test.ts` asserts the instance).
+- `withSession` holds one `db.transaction` with `SELECT ... FOR UPDATE` on the row until commit. `read()` is three-state `found | expired | absent`; never collapse `expired` and `absent`. An unopenable seal is `absent` and leaves the row.
+- `expires_at` slides (30 days); `absolute_expires_at` is written once (90 days) and never by `update`. Both reach the SDK as ISO strings through `toSessionRecord`.
+- Any throw inside `withSession` becomes `HubSessionStoreUnavailableError`, answered `503` by `hubBffErrorHandler` (the router's `onError`, not a middleware). Never let a store outage read as "no session". `createHubBff` gets `timeoutMs: 5_000`.
+- `hub_bff_sessions` and `hub_bff_login_txns` are global tables with FORCE RLS and only the admin policy; the store uses `getAdminDb()`.
+- Seals are AES-256-GCM with the row id as AAD, keyed by HKDF from `env.SALES_SESSION_ENCRYPTION_IKM ?? hubAuthConfig.clientSecret`, read through the validated `env`, never `process.env`.
+- Post-login redirects are `SALES_POST_LOGIN_REDIRECT` and `SALES_POST_LOGIN_ERROR_REDIRECT`, resolved in `app-auth.ts`, falling back to `CORS_ORIGIN`.
+- A login supersedes the PRIOR SESSION ID presented at `/auth/callback` in the same transaction, never by account id. The login-context middleware is mounted only when `session.kind === 'durable'`.
+
+Browser session:
+- Access tokens are memory-only, cached until `exp - 30s`, with one shared in-flight refresh. Logout and workspace generation guards reject late responses.
+- A missing token is never defaulted: `requireToken` throws `AuthTokenUnavailableError`, and `apiFetch` / `apiFetchBlob` require a non-empty token. Lint forbids `(await getToken()) ?? ...`.
+- The browser reads `/auth/refresh` itself via `requestHubAccessToken` in `apps/web/src/auth/refresh.ts`, not `HubClient.getToken()`. `createHubClient` gets `autoRenew: false`; `start()` is never called.
+- A `401` from refresh fails the session at once; anything else enters the bounded ladder (`SESSION_REVALIDATE_DELAYS_MS`, four consecutive failures). The counter resets on every recovery.
+- A LIVE session loss never navigates: `HubProtected` renders `SignedOutPanel` as an overlay with `children` still mounted. Cold entry still redirects to login.
+- `SalesOpsApp` gates both `<Navigate>` early returns on `profile.isSignedIn`. Never return `null` or a Skeleton while signed out; that unmounts the operator's work.
+- While visible, the token renews at `exp - SESSION_RENEWAL_LEAD_MS` (60s) through `HubAccessTokenCache.renew()`. Nothing is scheduled while hidden; a non-positive delay never schedules.
+- `sanitizeReturnTo` re-validates the NORMALIZED value and refuses terminal auth routes (`/no-role`) matched the way React Router matches.
+- `Sair` writes the durable `fxl-sales.auth.logoutIntent` in `sessionStorage` synchronously before the first `await`. It blocks auto-login and is cleared only by the panel's `Entrar` and by `observeToken`'s live-token branch.
+- `queryClient.clear()` runs on logout, on an in-page signed-out to signed-in transition, and after a completed workspace switch (after the `await` and generation check, before `tokenCache.seed`). A ladder recovery must NOT flush. `QueryClientProvider` stays outside `AppAuthProvider`.
 
 ## Development identity mode
 
-- There is a DEVELOPMENT identity mode, added 2026-09-21, and its whole purpose is that this product can be developed and reviewed with NO Hub listening anywhere.
-  Before it, a Hub outage or a Hub contract change stopped every screen behind authentication, which is a coupling problem rather than an auth problem: the ability to work on Sales was bound to a live, contract-stable instance of another application.
-  Its second purpose is reach: a role-gated screen can only be reviewed by an operator holding that role, and the mode lets one developer adopt each identity in turn instead of holding six Hub accounts.
-- It is OFF unless asked for, and asking for it is two flags: `SALES_AUTH_FAKE` on the API and `VITE_AUTH_FAKE` on the web, both documented as COMMENTED lines in every shipped `.env` example and enabled by nothing that a fresh clone copies.
-  With both absent the repository behaves EXACTLY as it did before the mode existed, which is the claim the feature is measured on rather than a hope: the request path gains no branch, `requireHubAuth` is still constructed the same way with `allowWithoutAccess` at its default of `false`, and the 401/402/403/503 taxonomy above is byte-identical.
-  `make dev-fake` sets both and runs the pair; `make back-fake` and `make front-fake` set one each.
-- The substitution happens ONCE, at BOOT, and REPLACES the Hub middleware rather than standing beside it.
-  That is the design decision the rest of this section defends, and the alternative, a per-request branch reading the flag, is what it exists to forbid: a branch inside the request path ships inside the production artifact and is one truthy environment variable away from authenticating anyone, whereas a boot-time replacement means a given process has exactly ONE gate in either mode and never two.
-  It is also why the ONE-gate rule in `## Auth Model` is not weakened by this mode: two gates would mean one live and one unreachable with a green suite over the dead one, and this mode creates no second gate.
-- The defence was DESIGNED as four layers, structural first and assertive last, because an environment flag guarding an in-tree code path does not meet the bar for something that can authenticate a person.
-  It was verified against the real `apps/api/Dockerfile` on 2026-09-21 and only two of the four hold for the API's actual shipped artifact; this paragraph names the gap rather than the plan, because a claim this file makes and a build proves false is worse than making no claim at all.
-  ONE, `packages/auth-fake` (`@fxl-sales/auth-fake`) is a devDependency of both apps and never a dependency, which is TRUE as a `package.json` fact and is exactly what the isolation guard below checks - but it does NOT mean the production API image excludes the package, and stating it that way was the error.
-  `apps/api/Dockerfile`'s `deps` stage runs `pnpm install --frozen-lockfile` with no `--prod`, so devDependencies are resolved rather than excluded, and its runtime stage does `COPY --from=build /app/packages ./packages`, copying the WHOLE `packages/` tree rather than a scoped subset the way its own `deps` stage already scopes `package.json` copies.
-  A built image was inspected directly and `/app/packages/auth-fake/{package.json,src/,tsconfig.json}` plus a resolving `node_modules` symlink to it are both PRESENT inside the shipped runtime image, so layer one does not hold for this deployment path and never did.
-  TWO, every access to it is a DYNAMIC import, because a static import, INCLUDING a type-only one the compiler erases, pulls the package into the build graph; that is also why the API selector, `apps/api/src/auth/select.ts`, declares the shape it needs structurally instead of importing the type. This layer HOLDS: it stops a bundler tree-shaking failure from leaking the package, but it says nothing about a package already physically present on disk, which is why it cannot substitute for layer one.
-  THREE, the web half, `apps/web/src/dev/install-dev-identity.ts`, sits behind `import.meta.env.DEV`, which `vite build` statically replaces with `false`. This layer HOLDS and is the one PROVEN against the real artifact rather than merely argued: `scripts/assert-web-bundle-clean.mjs` builds the actual bundle and asserts the sentinel is absent from `apps/web/dist`, so the web deployment path (Vercel, static assets, no Docker stage in between) genuinely cannot reach the fake identity in production.
-  FOUR, the API REFUSES TO BOOT, with a named message, when the flag is set while `NODE_ENV=production`. This is not the belt behind three working braces; for the API it is the ONLY layer standing, because `NODE_ENV=production` is baked into `apps/api/Dockerfile` at build time and running the real production image with `SALES_AUTH_FAKE=1` against that baked-in value was reproduced live refusing to boot with the named error.
-  A second thing was also found to stop it, but by ACCIDENT and not by design: forcing `NODE_ENV=development` against that same production image does not trip the boot refusal, and it fails only because `packages/auth-fake`'s `package.json` points `main` straight at uncompiled `./src/index.ts`, and plain `node` - the production runtime, with no `tsx` in front of it - cannot load raw TypeScript.
-  That crash is asserted by no test, is not a designed boundary, is not mentioned anywhere else in this file, and would silently disappear the day anyone gives `packages/auth-fake` a build step, which is the natural-looking fix for the very workspace-resolution gap layer one's Docker failure comes from.
-  So the honest count for the API's shipped artifact is TWO real, independent things holding it closed today - `NODE_ENV=production` baked into the image, and the boot-time refusal that reads it - plus one accidental crash that is not a layer because nothing pins it, rather than the four originally claimed.
-  The remediation is named here so it is not lost: `apps/api/Dockerfile` must scope its runtime `packages` copy to what the API actually needs instead of the whole tree, and must install with `--prod` (or `pnpm deploy`/prune) so devDependencies are genuinely excluded the way the documentation always claimed, and a test must build or otherwise inspect the real artifact and assert the package and its sentinel are absent, the way `assert-web-bundle-clean.mjs` already does for the web bundle. Filed on `nexo/ROADMAP.md`.
-- `scripts/__tests__/auth-fake-isolation.test.mjs` is what makes layers two through four IRREMOVABLE at the source level, and it runs inside `pnpm run test`.
-  It asserts the dependency classification, that no shipped source imports the package statically, that the package is reached only from the sanctioned boot-time selectors (`apps/api/src/auth/select.ts` and `apps/web/src/dev/install-dev-identity.ts`), and that the flag in production is refused.
-  It proves itself against mutated fixture trees and demands a non-zero exit, in the mould of `scripts/__tests__/local-database-guard.test.mjs`, because a guard that cannot fail is a guard that reports green without having looked.
-  It never builds or inspects the actual Docker artifact, so it could not and did not catch the layer-one gap above; that class of defect needs the remediation's second half, a test against the real built image.
-- The roles travel the REAL translation path in BOTH halves, and this is the property that makes the mode worth having rather than a screenshot tool.
-  The package emits CLAIMS in the Hub's own shape; the web passes them through `getRolesFromHubClaims` in `apps/web/src/auth/claims.ts` and then through `getVisibleWorkspaces` in `apps/web/src/sales-ops/navigation.ts`, exactly as a real token does.
-  NOTHING hands a ready-made profile to the app and nothing writes `profile.roles` directly.
-  A fixture that wrote the profile would make the mode agree with the app by construction and would prove nothing about the visibility rule it is used to review.
-- ONE acceptance criterion was SUPERSEDED during planning rather than implemented, and it is recorded here rather than left to be discovered.
-  The request asked the roster for an `admin-only` identity seeing `tatico` plus `operacional` plus `cadastros` and NO `meus-dados`.
-  No such identity exists, because `getRolesFromHubClaims` has three outcomes and every admin-bearing one returns `['admin', 'seller', 'finder']`, so `getVisibleWorkspaces` always adds `meus-dados`.
-  Producing it would have meant changing `getRolesFromHubClaims`, which is a PRODUCTION behaviour change and is precisely what this feature promised not to do.
-  The roster therefore carries THREE identities (`team-owner`, `team-admin`, `product-admin` in `packages/auth-fake/src/index.ts`) that reach the full-access set through the three DIFFERENT claim shapes `getRolesFromHubClaims` really has, workspace `owner`, workspace `admin` and `productRoles: ['admin']`, each seeing all four paineis, and the gap is filed in `nexo/ROADMAP.md` rather than faked.
-- The browser seam is `requestHubAccessToken` in `apps/web/src/auth/refresh.ts` and NOT `HubClient.getToken()`, and that follows from a rule this file already states: the browser reads `/auth/refresh` itself and never through the client.
-  Substituting the client, which is what the vendor recipe does, would deliver no token at all here, because the token path is the hand-rolled fetch.
-  Anyone porting this mode from another FXL product will reach for the client seam first; that is the seam this repository does not have.
-- The mode runs against the LOCAL Postgres and nothing else, under the `## Local database guard` rules unchanged.
-  `apps/api/scripts/seed-dev.ts` is deterministic and idempotent and creates the `org_id` values the roster names, each with its `vendedor` and `finder` system funcoes and with pessoas attached, so `meus-dados` and `cadastros` open with rows instead of empty states.
-  Tenancy is untouched: every query still filters on `eq(table.orgId, c.get('orgId'))`, the active org of a fake identity is an `org_id` that the seed created, and nothing on the fake path reads `user_id`, `org_id`, `account_id` or `workspace_id` out of a request body.
-- A SENTENCE ALREADY IN THIS FILE IS FALSE, and this feature found it rather than caused it, so it is recorded here rather than quietly fixed.
-  `## Sales Ops Routing` states, of the visibility rule, that "team-only sees the three team workspaces and no `meus-dados`".
-  No token this product accepts can put an operator in that state, for the reason in the bullet above: every admin-bearing branch of `getRolesFromHubClaims` returns `['admin', 'seller', 'finder']`, so `getVisibleWorkspaces` always adds `meus-dados`.
-  `getVisibleWorkspaces` itself is correct and is not the defect: it really would return the three team painéis alone for the role set `['admin']`, and that role set is simply unreachable.
-  So either `claims.ts` is wrong or that sentence is, and deciding which is a PRODUCT question about whether a workspace owner who is neither vendedor nor finder should see `meus-dados`.
-  This feature deliberately did not answer it, because answering it changes a production claim reader, and the question is filed for the human in the run's `AUDIT.md` and on `nexo/ROADMAP.md`.
-  The sentence is left standing with this note beside it rather than edited, because editing it would pick the answer by accident.
-- This mode makes a written prohibition FALSE, and the prohibition is superseded where it lives rather than deleted.
-  `nexo/plans/feature-20260827-hub-sdk-210-access-model/05-dev-identity-fixtures.md` is `status: parked` and forbids a runtime development-identity path in four places, on the grounds that it would be a production hazard.
-  That reasoning was RIGHT for what it judged, which was wiring a fake client into the SHIPPED request path during an auth migration with no structural isolation behind it.
-  It is void for what actually landed, which is a boot-time replacement rather than a per-request branch: the web half's exclusion from the production bundle is genuinely proven by its own build check, and the API half is currently held closed by `NODE_ENV=production` baked into the image plus the boot refusal that reads it, not by the package's absence from the image, which the section above now corrects.
-  The isolation guard proves itself against the source tree, not yet against the built Docker artifact, and that remaining gap is exactly what the paragraph above files on `nexo/ROADMAP.md`.
-  The parked file carries a dated supersession note, corrected on the same day to state the Docker gap rather than the four-layer claim it first repeated, and `nexo/knowledge/decisions/2026-09-21-development-identity-is-a-boot-time-adapter.md` carries the reasoning.
-  `scripts/__tests__/dev-identity-docs-reconciliation.test.mjs` fails if that note is removed while `packages/auth-fake` is still in the tree, so the repository can never again ship a prohibition against something it does.
+Full reference: `nexo/knowledge/reference/development-identity-mode.md`.
+
+- `SALES_AUTH_FAKE` (API) plus `VITE_AUTH_FAKE` (web) let the product run with no Hub. Both are commented out in every `.env` example; `make dev-fake`, `make back-fake` and `make front-fake` set them.
+- With both absent the app behaves exactly as without the mode. The substitution happens ONCE at boot and REPLACES the Hub middleware; never add a per-request branch on the flag.
+- `packages/auth-fake` is a devDependency only, reached only by dynamic import from `apps/api/src/auth/select.ts` and `apps/web/src/dev/install-dev-identity.ts`. `scripts/__tests__/auth-fake-isolation.test.mjs` enforces this.
+- The web half sits behind `import.meta.env.DEV`; `scripts/assert-web-bundle-clean.mjs` proves it is absent from the build.
+- KNOWN GAP: the production API image still contains `packages/auth-fake`. What holds it closed is `NODE_ENV=production` baked into `apps/api/Dockerfile` plus the boot refusal. Fixing the Dockerfile (`--prod`, scoped `packages` copy, artifact test) is filed on `nexo/ROADMAP.md`.
+- Fake identities emit Hub-shaped CLAIMS that go through `getRolesFromHubClaims` and `getVisibleWorkspaces`; never write `profile.roles` directly.
+- The roster is `team-owner`, `team-admin`, `product-admin` in `packages/auth-fake/src/index.ts`. An admin-only identity without `meus-dados` is impossible today (see Sales Ops Routing).
+- `apps/api/scripts/seed-dev.ts` seeds the roster's orgs against LOCAL Postgres only.
 
 ## Tenancy
 
@@ -295,320 +99,136 @@ Keep the repository folder name unchanged until the editor session can safely mo
 
 ## UI Controls
 
-- Native `<select>`, `<option>` and `<datalist>` are banned everywhere in `apps/web/src`, and `no-restricted-syntax` in `apps/web/eslint.config.js` fails lint if one comes back.
-  A browser picker cannot be searched and cannot offer to create the item the operator just typed, which is why this is an enforced rule and not a preference.
-- Every single-select picker in `apps/web/src/sales-ops/**`, plus the workspace switcher in `apps/web/src/auth/react.tsx` and every data-driven picker in the legacy `admin/**` and `finder/**` trees, uses `Combobox` from `@/components/ui/combobox`.
-  It is the only searchable picker in the app.
-- Documented exception, and the only one: `apps/web/src/admin/products/ProductDialog.tsx` (product status) and `apps/web/src/admin/products/CommissionRuleForm.tsx` (commission basis) keep the shadcn `Select`.
-  Both are two-option closed enums that never grow, so search buys nothing, and a Radix `Select` is not a browser-native picker, so both already satisfy the ban above.
-  Convert them to `Combobox` whenever those two screens are next worked on, and do not add a third such site.
-- Numeric fields use `<Input type="number">` from `@/components/ui/input`; the OS spin buttons are suppressed by a base-layer rule in `apps/web/src/index.css`.
-  A raw `<input type="number">` is banned by the same ESLint rule.
-- `<input type="date">` is the one browser-native picker still allowed, by explicit decision.
-- Any component that opens an inline layer inside a dialog - `Combobox`'s panel, `InfoHint`'s disclosure - MUST call `useInlineLayer(open)` from `@/components/ui/inline-layer`.
-  Radix registers `useEscapeKeydown` on `document` with `{capture: true}`, so it runs before the event reaches React's root container and **no** handler inside the React tree can pre-empt it - `stopPropagation` and `stopImmediatePropagation` are both inert against it.
-  Without the registry, Escape aimed at an open picker closes the whole wizard and discards the operator's typed work.
-  `DialogContent` owns the registry and `preventDefault`s `onEscapeKeyDown` while any layer is open; the open count is a ref, so a picker opening does not re-render the dialog, and release is idempotent so a StrictMode double cleanup cannot strand the count negative and silently disarm the guard.
-  A regression test for this must render the component inside a REAL `Dialog` and assert `onOpenChange` was not called. A spy on a React sibling's `onKeyDown` passes even with the protection deleted - that exact false positive already shipped once.
-- Picker geometry has exactly two canonical sizes in sales-ops: `formSelectClass` (44px, matching `formInputClass` so a picker and the `Input` beside it line up) and `comboboxTriggerClass` (40px, the compact `Filtros` bar only).
-  Call sites pass only non-geometry extras.
-- `onCreate` is wired only where an inline create yields a complete, valid record: cliente, área and função create through the API, and profissional accepts the typed name verbatim.
-  Produto opens `ProductDialog` prefilled instead, because a produto is invalid without an área.
-  The `Custos padrão por função` picker inside `ProductDialog` gets no create row, because creating a função is admin-gated and belongs to `cadastros/funcoes`; its empty state points there.
-  The vendedor and finder pickers get no create row, because a pessoa is invalid without a função; the função picker inside the Pessoa dialog does have one, because a função needs only a name.
-  The proposta wizard's `FUNÇÃO NO PROJETO` picker has one too, for the same reason as the Pessoa dialog's; the two deliberate exclusions above are unchanged.
-- A wizard's primary button carries `type="button"` on EVERY step, and the final step saves through `onClick`.
-  Never derive that attribute from the step (`type={step < 4 ? 'button' : 'submit'}`), because the click that advances the step would then also be the click that changes the element's own activation behaviour.
-  A click runs in two phases - the event dispatch, then the browser's activation behaviour for the element - and React 18 flushes a discrete event's state update synchronously, so the re-render lands BETWEEN them.
-  The browser then asks "is this a submit button?" of an element React has already rewritten to `submit`, submits the form, and persists a record the operator never reviewed.
-  That was the produto dialog's step 3 to 4 autosave; the proposta wizard never had it because its primary button was always `type="button"`.
-- A DOM-level click test CANNOT catch that regression: happy-dom's `dispatchEvent` never runs activation behaviour, so `advances from step 3 to step 4 without saving` passes with the bug fully present.
-  The oracle is the invariant `keeps one activation behaviour on every step` in `apps/web/src/sales-ops/__tests__/product-service-dialog.test.tsx`, which was the only one of 537 web tests to go red on the mutation.
-  Anything of this class has to be proven in a real browser; assert the invariant that makes the race impossible rather than trying to observe the race in jsdom or happy-dom.
+Full reference: `nexo/knowledge/reference/ui-controls.md`.
+
+- Native `<select>`, `<option>`, `<datalist>` and raw `<input type="number">` are banned in `apps/web/src` by `no-restricted-syntax`.
+- Every picker uses `Combobox` from `@/components/ui/combobox`. The only exceptions are the shadcn `Select`s in `ProductDialog.tsx` (status) and `CommissionRuleForm.tsx` (basis); convert them when touched and add no third.
+- Numeric fields use `<Input type="number">` from `@/components/ui/input`. `<input type="date">` is allowed.
+- Any inline layer inside a dialog (`Combobox` panel, `InfoHint`) MUST call `useInlineLayer(open)` from `@/components/ui/inline-layer`, or Escape closes the whole dialog. Test it inside a REAL `Dialog`.
+- Picker sizes: `formSelectClass` (44px) and `comboboxTriggerClass` (40px, `Filtros` bar only).
+- `onCreate` is wired only where an inline create yields a complete valid record (cliente, área, função, profissional). Produto opens `ProductDialog` prefilled; vendedor and finder pickers get no create row.
+- A wizard's primary button is `type="button"` on EVERY step and the final step saves via `onClick`. Never derive `type` from the step. happy-dom cannot catch this; the oracle is `keeps one activation behaviour on every step`.
 
 ## Sales Ops Routing
 
-- Canonical Sales Ops routes are `tatico/dashboard`, `operacional/vendas|comissoes|leads`, `cadastros/produtos|areas|clientes|pessoas|funcoes|etapas|geral`, and `meus-dados/vendedores|comissoes|leads|finders|vendas`.
-- `cadastros/vendedores` and `cadastros/finders` no longer exist; `resolveSalesOpsRoute` aliases both legacy views to `pessoas` and returns `redirect: true` so the URL is rewritten to `/cadastros/pessoas`.
-- `aliasLegacyView` returns the view unchanged unless the resolved workspace is `cadastros`, so the alias can only ever fire there. The `meus-dados/vendedores` and `meus-dados/finders` views keep those exact ids and must never be aliased.
-- The URL is the single source of truth for the active Sales Ops workspace and page.
-- Workspace visibility is driven purely by the Hub role set `profile.roles: AppRole[]` (`AppRole = 'admin' | 'seller' | 'finder'`) via `getVisibleWorkspaces` in `apps/web/src/sales-ops/navigation.ts`. There is no viewing-level switcher; the old "Nível de visualização" selector was removed.
-- Visibility rule: `admin` (team) sees `tatico` + `operacional` + `cadastros`; holding `seller` or `finder` adds the `meus-dados` workspace. So seller-only or finder-only sees only `meus-dados` and defaults there; team-only sees the three team workspaces and no `meus-dados`; team + seller/finder sees all four. Zero recognized roles keeps `/no-role`.
-- "Team" is not a Hub product role. `admin` is synthesized in-app from the Hub workspace `owner`/`admin` flag (see `getRolesFromHubClaims` in `apps/web/src/auth/claims.ts`); the Hub product config defines only `seller` and `finder`.
-- `meus-dados` reuses existing panels and view components (seller: `vendedores` "Meu painel" + `comissoes`; finder: `finders` "Meu painel" + `vendas` "Indicações"); it is not a new page. Data scoping stays backend/RLS-authoritative.
-- `MeuPainelView` (formerly `PeopleView`) in `apps/web/src/sales-ops/SalesOpsApp.tsx` is the read-only `meus-dados` performance panel behind the `vendedores` and `finders` views and takes no `onEdit` prop at all. People cadastro editing lives only in `PessoasView` under `cadastros/pessoas`.
-- Pessoa and função create or edit controls are admin-only and live under Cadastros (`cadastros/pessoas` and `cadastros/funcoes`). No `meus-dados` route exposes a pessoa or função create or edit affordance.
-- Open-price sale item labels use the existing `items[].productName` to `productNameSnapshot` path while preserving the original `productId`, so do not add a parallel description field or migration.
-- Keep the static legacy route trees `/admin/*`, `/finder/*`, `/seller/*`, and `/no-role` unchanged, with ONE exception: `/no-role`'s element is wrapped in `NoRoleGuard`, which redirects to `/` as soon as `getVisibleWorkspaces(profile.roles)` is non-empty.
-  The rule protects the SHAPE of those trees - their paths, their shells and their role guards - and not the dead end.
-  No path is added, removed or renamed, the three shells are untouched, `RoleGuard` is byte-unchanged, and `NoRolePage` still renders unaltered for the operator the screen is actually for.
-  `RoleRouter` used to sit in that same file and has been deleted: it read like the `/` root redirect but was referenced from nowhere, while `/` is really `SalesOpsApp` inside `Protected` resolving the default workspace itself.
-  What it fixes is that the screen never re-checked on arrival, so an operator who reached it and then signed in successfully stayed on `Acesso não autorizado` holding full roles, and a seller who merely opened an `/admin/*` URL was stranded there by `RoleGuard` with a perfectly good `meus-dados` workspace one hop away.
-  The condition is `getVisibleWorkspaces(roles).length > 0` and must NOT be simplified to `roles.length > 0`.
-  The two agree for all seven non-empty subsets of today's `AppRole`, so tests do not distinguish them by accident; they stop agreeing the day a role is added that maps to no workspace, and at that moment `SalesOpsApp` wants `/no-role` while the guard wants `/` and the app locks into an infinite redirect loop for that operator, two files from the change that caused it.
-  Keyed on visible workspaces the exclusivity is structural rather than arithmetic: the guard fires iff `|V| > 0` and `SalesOpsApp` fires iff `|V| === 0` (and `isSignedIn`), over the same function and the same profile in the same render pass, so at most one can ever navigate for ANY role value.
-  `keeps the unauthorized screen for a role the app does not recognize, and does not ping-pong` is the sole oracle separating the two conditions, and neither lint nor type-check catches the difference.
-  `NoRoleGuard` lives beside `RoleGuard`, which is what sends operators INTO `/no-role`, and is mounted INSIDE `<Protected>`: outside it would judge an unresolved profile on a cold entry.
-  It is inert during a live session loss, because the profile is then loaded with `roles: []`, so the overlay never has the URL pulled out from under it.
+Full reference: `nexo/knowledge/reference/sales-ops-routing.md`.
+
+- Routes: `tatico/dashboard`, `operacional/vendas|comissoes|leads`, `cadastros/produtos|areas|clientes|pessoas|funcoes|etapas|geral`, `meus-dados/vendedores|comissoes|leads|finders|vendas`.
+- The URL is the single source of truth for the active workspace and page.
+- `cadastros/vendedores` and `cadastros/finders` redirect to `/cadastros/pessoas`; `aliasLegacyView` only fires in `cadastros`.
+- Visibility comes only from `profile.roles` via `getVisibleWorkspaces`: `admin` sees `tatico`, `operacional`, `cadastros`; `seller` or `finder` adds `meus-dados`; no roles keeps `/no-role`. `admin` is synthesized from the Hub workspace `owner`/`admin` flag in `getRolesFromHubClaims`.
+- OPEN PRODUCT QUESTION: every admin-bearing claim shape also returns `seller` and `finder`, so "team-only without `meus-dados`" is unreachable. Do not resolve it by changing `claims.ts` without a product decision.
+- `meus-dados` reuses existing panels; `MeuPainelView` is read-only. Pessoa and função editing live only under Cadastros.
+- Keep the legacy trees `/admin/*`, `/finder/*`, `/seller/*`, `/no-role` unchanged. `/no-role` is wrapped in `NoRoleGuard` (inside `<Protected>`), keyed on `getVisibleWorkspaces(roles).length > 0`, never `roles.length > 0`.
+- Open-price item labels use `items[].productName` to `productNameSnapshot`; add no parallel field.
 
 ## Organization context
 
-- A Hub ORGANIZATION and a Sales WORKSPACE are two different things that once shared one word on screen, and the whole of this section exists because that collision produced a dead end nobody could get out of.
-  An Organization is the Hub tenant the session is anchored to; a Sales workspace is the internal view group (`tatico`, `operacional`, `cadastros`, `meus-dados`) that the URL names.
-  The Hub gives each Application its OWN Organization context, so switching Organization in the Hub web does NOT move Sales' session, and Sales anchors on the account's primary Organization at session mint.
-- An operator whose active Organization does not carry FXL Sales gets `402 {error: 'payment_required', code: 'missing_entitlement'}` from `apps/api/src/middleware/app-auth.ts` on every sales-ops call, and that `402` is CORRECT.
-  What was wrong was that the shell rendered it as `A API de vendas não respondeu corretamente. Verifique o servidor local e tente novamente.`, which blames a machine that answered perfectly and said exactly why, and that the shell's account dropdown offered only `Sair`, whose re-login lands on the same Organization and therefore in the same dead end.
-- The classification chain in `SalesOpsApp`'s `isError` branch is `isEntitlementFailure` then `isAuthFailure` then generic, and the INVARIANT is that the generic `Verifique o servidor local` copy is reachable ONLY for an error that is neither an entitlement failure nor an auth failure.
-  The entitlement branch is deliberately FIRST.
-  `isAuthFailure` is false for a 402 today, so the order is not what makes the branch reachable now - it is what keeps it reachable if `isAuthFailure` is ever widened, because a widened predicate placed above it would silently steal every 402 into `Sessão expirada` and the operator would be told to sign in again to fix an entitlement they do not hold.
-  The four cases are pinned together in `apps/web/src/sales-ops/__tests__/entitlement-dead-end.test.tsx`, which drives the REAL `apiFetch` error path with `../api`, `@/lib/api-client` and `../hooks` unmocked, so it proves the status survives into the `ApiError` the shell classifies rather than only pinning a ternary.
-  Replacing the panel with an empty fragment is the decisive mutation and goes red on the `[data-missing-entitlement]` marker, so the 402 case cannot pass by rendering nothing.
-- `isEntitlementFailure` in `apps/web/src/lib/require-token.ts` keys on `status === 402` ALONE and deliberately does NOT also require `code === 'missing_entitlement'`.
-  `apiFetch` builds its error from `await res.json().catch(() => ({}))`, so a 402 whose body does not parse - a proxy error page, a truncated response, a gateway that rewrites the payload - carries no `code` at all, and requiring the code would classify exactly that response as NOT an entitlement failure and route it straight back onto the `Verifique o servidor local` copy this work exists to remove.
-  The two failure modes are asymmetric: keying on the code fails CLOSED onto that lie, keying on the status fails OPEN onto a panel that names the Organization and offers a switch.
-  The predicate stays narrow otherwise - no `>= 400`, no error-string alternative, strict `===`, `null` and `undefined` handled - and `isEntitlementFailure is true for a 402 that carries no code at all` is the pin that fails the day someone makes the code mandatory.
-  A SECOND 402 code meaning something other than "no Sales entitlement" is the one thing that would invalidate this, and that is the day the predicate must grow a discriminator.
-  `require-token.ts` still imports NOTHING, so the predicate is duck-typed on `status` rather than importing `ApiError`, which would be a cycle.
-- `MissingEntitlementPanel` in `apps/web/src/sales-ops/MissingEntitlementPanel.tsx` is the honest state: it names the currently active Organization, then offers switching to another of the account's Organizations, then a Hub checkout link for the active one, in that order.
-  Switch comes before checkout because switching is free and instant while checkout costs money, and offering the expensive escape first would sell an entitlement to an operator who already holds one next door.
-  Its `onRetry` prop is OPTIONAL and the shell passes NOTHING.
-  That is not an oversight: `setActive` already runs `queryClient.clear()`, which DESTROYS the query so its observer re-subscribes at `status: 'pending'` and the shell renders the loading skeleton, whereas a `refetch()` would leave the query at `status: 'error'` and keep this panel on screen still naming the OLD Organization the operator has just left.
-  Nothing in the panel calls `window.location.reload`, and the oracle installs a `reload` spy and asserts it was never called on both the success and the `setActive`-rejects paths.
-  The checkout href is unreachable while it is resolving, because `CheckoutState` is a discriminated union and `href` exists only on its `ready` member, so TypeScript itself forbids an anchor with an unresolved destination; the loading branch renders a `Skeleton` and never an empty state.
-- `useOrganizations()` in `apps/web/src/auth/react.tsx` is the ONE place `setActive` plus the token's `workspaces` claim is projected, and it is a THIN projection: no state, no request, no timer, and above all no reimplementation of `setActive`, which is handed through BY REFERENCE.
-  `setActive` owns a four-statement critical section whose ordering this file documents at length and whose two orderings have dedicated oracles, so there must be exactly one copy of it in the app; the seam must never call `queryClient.clear()` itself, because that second flush would land on the WRONG side of the `await` and is precisely the failure the in-flight oracle exists to catch.
-  `others` is derived HERE, as `workspaces.filter((w) => w.id !== active?.id)`, so no caller re-derives it - a per-call-site filter is exactly where name matching creeps back in, and there are two callers.
-  When `active` is null it removes nothing, which is the honest answer: if we cannot tell where the operator is, every Organization is somewhere else they could go.
-- The active Organization is matched by the `workspaceId` claim and NEVER by name.
-  A name cannot disambiguate two Organizations both called `Alpha`, it yields nothing whenever the name claim is absent, and it misses entirely whenever the active Organization sits outside the capped `workspaces` preview - all three were live defects in `HubUserControls`, which marked the active entry by name before this.
-  The name match survives only as the documented fallback for a token carrying no `workspaceId` claim, so such a token degrades to yesterday's behaviour rather than reporting that no Organization is active, and it must never be promoted back to the primary path.
-  `active.name` prefers the top-level `workspaceName` claim over the matched preview entry, because that claim describes the ACTIVE Organization and is present even when the preview does not contain it.
-- The sales-ops account dropdown carries its own Organization section above the `Sair` group, driven entirely by the same seam, because the shell draws its own chrome and never renders `HubUserControls`.
-  Its render guard is `others.length === 0` and must NOT be `organizations.length > 1`.
-  The one-entry-preview-that-is-not-the-active-Organization case is the whole point: the account has somewhere to go and the arithmetic guard hides it, which is the dead end all over again with a different cause.
-  `workspaces` is a CAPPED, display-only preview, so an empty picker must never render and both zero-target cases (one Organization total, and an empty preview) return `null` after the hook call rather than an empty list.
-  The active row is rendered but `disabled` and `aria-current`, never a switch target; a raw id appears only in the secondary line behind `isOrgLabelFallback`, in muted monospace, and never as the primary label.
-- The sidebar view-group chrome was renamed from `Workspace` to `Painel`, and the fence is hard: ONLY display strings moved.
-  `SalesOpsWorkspace`, the `workspace` URL segment, `getVisibleWorkspaces`, `salesOpsWorkspaces`, `workspaceForView`, `resolveSalesOpsRoute` and `buildSalesOpsPath` are unchanged by that rename, because the URL remains the single source of truth for the active Sales workspace and page and renaming the type or the segment would rewrite every stored link an operator holds.
-  That bullet used to end `and navigation.ts is byte-unchanged`, and v4.1.0 corrected it in the same commit that stopped it being true: the Kanban slice ADDS `leads` and `etapas` to `SalesOpsView` and one entry each to `operational`, `cadastros` and `meusDadosSeller`, and nothing else in the file.
-  The fence the original sentence was really drawing still holds and is the one to keep: no existing segment, type name or function in `navigation.ts` may be renamed or reordered, and a rename of DISPLAY chrome may still touch nothing but display strings.
-  Five strings moved and no more: `Trocar workspace` to `Trocar painel`, the eyebrow `Workspace` to `Painel`, the collapsed trigger's `aria-label` `Workspace: ${label}` to `Painel: ${label}`, the scrim's `Fechar workspaces` to `Fechar painéis`, and the menu heading `Workspaces` to `Painéis`.
-  The two `aria-label`-only renames are NOT pinned by any test, because `textContent` does not see an attribute, and that gap is recorded rather than hidden - the visible strings are pinned both by presence and by `not.toContain('Workspace')` on the sidebar text.
-- `?organization=` deep linking is NOT available on `@fxl-business/hub-sdk` 1.3.x, which drops the parameter, so do not build a link that relies on it.
-  It belongs to the parked SDK 2.1.0 migration run, and until that lands a switch is always an in-app `setActive` call.
+Full reference: `nexo/knowledge/reference/organization-context.md`.
+
+- A Hub ORGANIZATION (tenant) and a Sales WORKSPACE (`tatico`, `operacional`, `cadastros`, `meus-dados`) are different things. The sidebar chrome says `Painel`; code names (`SalesOpsWorkspace`, URL segments, `navigation.ts` functions) stay unchanged.
+- A `402` renders `MissingEntitlementPanel`: active Organization, then switch to another, then Hub checkout. It passes no `onRetry` and never reloads the page.
+- `useOrganizations()` in `apps/web/src/auth/react.tsx` is a thin projection that hands `setActive` through by reference and derives `others`. It never calls `queryClient.clear()` itself.
+- Match the active Organization by the `workspaceId` claim, never by name (name is only a fallback when the claim is missing).
+- The sales-ops account dropdown shows an Organization section guarded by `others.length === 0`, never `organizations.length > 1`.
+- `?organization=` deep linking is not used; a switch is always an in-app `setActive`.
 
 ## Arquivamento e histórico
 
-- There is still no DELETE **verb**: `salesOpsRouter` exposes none and must not gain one. "Arquivar" is a status-only PATCH on the endpoint that already exists, and it is reversible from `cadastros/geral`.
-  A hard delete now happens in exactly ONE place - the nightly `runArchivedCadastroPurge()` job - and only for a row that is archived, older than 30 days, not a system função, and that **nothing references**.
-- The purge lets the DATABASE decide what may be deleted. It attempts the `DELETE` and treats a Postgres `23503` foreign-key violation as "still referenced, skip"; it never hand-writes an "is it referenced?" query, because that would drift out of sync with the schema the moment a new FK is added.
-  The existing FK rules are therefore the safety mechanism, and no `ON DELETE CASCADE` may be added to `sale_items.product_id`, `sales.seller_person_id` / `finder_person_id`, `sale_professionals.person_id` / `funcao_id`, `person_funcoes.funcao_id`, `product_funcao_costs.funcao_id` or either `area_id` - each of those is what makes a produto or pessoa with real history undeletable.
-  The two CASCADE edges that DO exist (`product_funcao_costs.product_id`, `person_funcoes.person_id`) are the item's own configuration rather than shared history, so losing them with the item is correct.
-- Each purge is one transaction per row: the `cadastro.purged` ledger entry is written FIRST with the transaction handle, then the delete. A `23503` rolls the whole thing back, entry included, so a skipped purge leaves no trace - which is also the atomicity oracle, because the FK violation is a failure that lands AFTER the ledger write.
-  `actor_user_id` is the `'system'` sentinel and `actor_org_id` is the purged row's OWN org: a NULL there would make the entry invisible to the tenant's org-scoped history, hiding the deletion from the only screen meant to show it.
-- Archived rows are hidden from the four cadastro LISTS and from every picker, and nowhere else. They still render wherever a record already references them - a sale item's produto, a person's função chips, a produto cost row's função, `selectableAreas`' archived-but-current área - and those paths are load-bearing, not incidental.
-  Because an archived row is no longer listed, there is no row-level `Restaurar`; restore exists only in `Histórico de arquivamentos`. A purged entity offers none at all and reads `Excluído definitivamente`.
-  The PATCH body carries `status` and nothing else, so a stale cached `name` or `funcaoIds` can never be written back as a side effect of archiving or restoring.
-  Produto, área and função archive to `archived`; a pessoa goes to `inactive`.
-- A **cliente cannot be archived**: `sales_ops_clients` has no `status` column, `ClientSchema` declares no such key, and zod strips unknown keys, so `PATCH /clients/:id {"status":"archived"}` answers `200` with an unchanged row - a silent no-op that reads as success. Do not add the control before the column; the six-step recipe is in `nexo/runs/feature-20260805-cadastro-archive-history/00-OVERVIEW.md`.
-- Archiving and restoring append a hash-chained `audit_log` entry from INSIDE the same `withTenant` transaction as the status write, so a status change can never land without its ledger row.
-  Only the archive/restore lifecycle is audited; an ordinary rename or price edit writes nothing, because the ledger cannot be purged and every audited write queues behind a global tail lock.
-  Handing `writeAuditEntry` the pooled `db` instead of the transaction's `tx` compiles cleanly and silently breaks that guarantee - the only assertion that catches it is a `DEFERRABLE INITIALLY DEFERRED` constraint trigger firing at COMMIT, because both ordinary rollback probes throw before the entry exists and pass either way.
-- The actor's display name is SNAPSHOTTED at write time from the verified token (`name`, then `email`, then `null` - never the account id), because `sales_ops_people` has no account-id column and the Hub SDK exposes no directory. There is no join path from a Hub account id to a pessoa, so without the snapshot the history could only ever name the reader themselves.
-- `GET /api/v1/sales-ops/history` is org-scoped and is NOT the same thing as `/api/v1/admin/audit`.
-  That admin router reads through `getAdminDb()`, documents `audit_log` as cross-tenant, and applies no org filter at all, while `requireAdmin` here is synthesized from a Hub WORKSPACE owner/admin flag rather than a platform superuser - pointing an operator at it would hand one tenant every other tenant's audit trail.
-  `audit_log` carries no RLS, so `eq(auditLog.actorOrgId, orgId)` is the ONLY control enforcing isolation. It is deliberately the conditions array's first literal element, the query schema declares no org key so a smuggled `?orgId=` is never read, and the history service must never import `getAdminDb`.
-- `audit_log.id` is a `bigserial` that arrives as a JS `BigInt`, which `JSON.stringify` throws on. Project `String(row.id)`. `/api/v1/admin/audit` still does not, and 500s on any non-empty ledger - see `nexo/ROADMAP.md`.
-- A restore is a NEW ledger entry, never an undo: the chain is append-only and hash-verified, so no UI may imply the history was rewritten. `Restaurar` is offered only where it can succeed - an archive event whose entity is still archived, non-optimistic and not a system função - and an already-active entity reads `Já restaurado` rather than showing a button that would 200 and do nothing.
+Full reference: `nexo/knowledge/reference/arquivamento-e-historico.md`.
+
+- `salesOpsRouter` has no DELETE verb. "Arquivar" is a status-only PATCH (body carries `status` only), reversible from `cadastros/geral`. Produto, área, função go to `archived`; pessoa goes to `inactive`.
+- The only hard delete is the nightly `runArchivedCadastroPurge()`: archived, older than 30 days, not a system função, unreferenced. It relies on Postgres `23503` to skip referenced rows; never hand-write a reference check and never add `ON DELETE CASCADE` to the history FKs.
+- Each purge is one transaction writing the `cadastro.purged` ledger entry first (`actor_user_id = 'system'`, `actor_org_id` = the row's org).
+- Archived rows are hidden from lists and pickers only; they still render where referenced. Restore lives only in `Histórico de arquivamentos`.
+- A cliente cannot be archived (no `status` column); do not add the control before the column.
+- Archive and restore write a hash-chained `audit_log` entry with the SAME transaction `tx`, never the pooled `db`. Ordinary edits write nothing.
+- The actor name is snapshotted from the token (`name`, `email`, `null`).
+- `GET /api/v1/sales-ops/history` is org-scoped by `eq(auditLog.actorOrgId, orgId)` (no RLS on `audit_log`) and must never use `getAdminDb`. Project `audit_log.id` as `String(row.id)`.
+- A restore is a new ledger entry, never an undo.
 
 ## Pessoas e Funções
 
-- A Pessoa is the single people cadastro; a Função is an org-scoped role assigned to a pessoa. They are separate entities with separate Cadastros screens.
-- `vendedor` and `finder` are the only system funções (`isSystem: true`), seeded per org. They cannot be renamed or archived, the API answers `409 funcao_is_system`, and the UI therefore exposes no edit affordance for them at all.
-- Every other função is org-created and dynamic (designer, desenvolvedor, tester, P.O.) and is what the proposta professional-cost rows draw from. `Prestador` is one of these, not a system função, so never special-case its slug.
-- A função is never deleted, only archived via `status`, exactly like an área. `salesOpsRouter` has no DELETE verb. An archived função stays visible on the people who already carry it but disappears from the assignment picker.
-- The `sales_ops_people` columns `is_seller`, `is_finder` and `is_collaborator` are deprecated derived mirrors that the API still returns but the web type no longer declares. Web code goes through `hasFuncao` in `apps/web/src/sales-ops/SalesOpsApp.tsx`, never through a per-call-site slug comparison and never through a mirror.
-- `isCollaboratorPerson` is GONE from `apps/web`; a tombstone comment sits where it was declared in `apps/web/src/sales-ops/SalesOpsApp.tsx`. It meant "carries at least one non-system função", character for character how the API still derives `is_collaborator` in `deriveBooleanMirrors`, neither side considering `status`. Both call sites are retired: the produto Prestador picker (a produto default cost keys on a `funcaoId` now) and the proposta wizard's Profissional picker, which partitions on the ROW's `funcaoId` instead - see the Propostas domain entry. Do not reintroduce it. "Carries at least one non-system função" is not a question this app asks any more; `person.funcaoIds.includes(rowFuncaoId)` is.
-- Person writes send `funcaoIds` as a full set replacement; the API rejects an empty set with `funcao_required`. There are no assignment sub-resource endpoints.
-- Hub `AppRole` values (`admin`, `seller`, `finder`) and `roleSummaryLabel` are unrelated to funções. Workspace visibility keeps deriving purely from `profile.roles`, never from a função assignment.
+Full reference: `nexo/knowledge/reference/pessoas-e-funcoes.md`.
+
+- A Pessoa is the single people cadastro; a Função is an org-scoped role assigned to a pessoa.
+- `vendedor` and `finder` are the only system funções: not renamable or archivable (`409 funcao_is_system`), no edit affordance. Everything else, `Prestador` included, is org-created.
+- Funções are archived, never deleted.
+- Web code checks funções through `hasFuncao` (in `apps/web/src/sales-ops/calculations.ts`), never through the deprecated `is_seller` / `is_finder` / `is_collaborator` mirrors. Do not reintroduce `isCollaboratorPerson`.
+- Person writes send `funcaoIds` as a full set replacement; empty is `funcao_required`.
+- Hub `AppRole` values are unrelated to funções.
 
 ## Produtos & Serviços
 
-- `cadastros/produtos` is one screen labelled "Produtos & Serviços". The route segment stays `produtos`; what changed is the nav label, the page title and its subtitle. The wizard's missing-área hint points at `Cadastros > Produtos & Serviços` to match.
-- Every catalog row carries `kind: 'product' | 'service'` (pt-BR labels Produto/Serviço). BOTH kinds may carry an own value in `setupBrl`/`monthlyBrl`. For a Produto it is a catalog price; for a Serviço it is a BASE VALUE - a suggestion the proposta prefills and the operator negotiates, exactly like every other number in that dialog. `0` is the whole expression of "no base value": there is no separate flag, the list prints `Variável` instead of `R$ 0,00`, the product dialog seeds the field BLANK with a `Definido na venda` placeholder rather than a literal `0` (`centsToOptionalInput`), the wizard prefills `"0"` into an item's `Valor negociado`, and the step-1 negotiated-value gate still blocks. That is what every pre-0015 Serviço stores, so nothing about an existing Serviço changed.
-- The old "a Serviço has no own value" invariant is gone, and with it all four of its enforcement points: `sales_ops_products_service_no_fixed_value_check` (dropped by `0015_servico_base_value`), the `service_cannot_have_fixed_value` zod refine, the `INVALID_PRODUCT_KIND_VALUE` sentinel with its `updateProduct` merged-row guard and its `routes.ts` 400 branch, and the dialog's `isService ? 0 :` submit coercion. `DefinedOnSaleNotice` (`Definido na venda`) and the `Serviços têm valor variável, definido em cada proposta.` banner are deleted too - the dialog already says once, at the top, that everything in it is a default.
-- `openPrice` survives only as a server-written projection of `kind`, enforced by `sales_ops_products_kind_open_price_check` (`(kind = 'service') = open_price`), which slice 07 deliberately did NOT relax: that CHECK asserts "this row is a Serviço", and a Serviço carrying a base value is still a Serviço. `openPrice` never meant "has no own value" - that was only ever the constraint above, and slice 07 rewrote every web reader that conflated the two. What survives in `apps/web` is exactly two CLASSIFICATION reads, both fallbacks for a row whose `kind` never arrived: `productRowRequirements` and the wizard's edit-path `customLabel` prefill. Deliberately not folded into `isServiceProduct`, because an unclassifiable row must keep its negotiated-value gate rather than pass as a fixed-price Produto and let an item through at R$ 0. No MONEY read consults it any more; that question goes through `productBaseValueBrl`. The product dialog has no `Preço em aberto` switch and never sends `openPrice`; the `Produto | Serviço` segmented control is the single way to express the same fact.
-- `isServiceProduct` in `apps/web/src/sales-ops/calculations.ts` is the one place any branch on the discriminator happens, and `productBaseValueBrl` beside it is the one place a catalog own value is read (`setupBrl || monthlyBrl`, integer CENTS, `0` = none; the `||` is why a row with no setup that recurs suggests its mensalidade). Every unit-price prefill and the Serviço `Valor` column go through it, so "does this row suggest a price" is never re-derived per call site. `productForm` reads `product.kind` directly only to seed the dialog's own state. A row without `kind` reads as a Produto.
-- The list is one table filtered by a `Produto | Serviço` segmented bar that renders inside the card and above the empty state, so an empty bucket is never a dead end. Serviço trades the `Setup | Mensalidade | Recorrente` columns for `Valor | Plano padrão | Custos padrão`, and the `Valor` cell prints `productBaseValueBrl` when it is non-zero, `Variável` when it is `0`. The dialog names that same number `Valor base (R$)` for a Serviço and `Setup (R$)` for a Produto.
-- The kind filter is component state in `SalesOpsApp`, not URL state: the URL is the source of truth for the workspace and the page, and this is neither. The header action reads it, so it cannot live inside `ProductsView`.
-- Every value in the product dialog is a DEFAULT that a proposta may override. The dialog says so once, at the top, and the commission section is titled `Comissionamento padrão`.
-- The default payment plan is six flat columns, not a nested object: `defaultPaymentMethod`, `defaultEntradaMode` (`'none' | 'pct' | 'fix'` - the literal is `fix`, never `fixed`), `defaultEntradaPct`, `defaultEntradaBrl` (cents), `defaultRemainingInstallments`, `defaultRecurringCycles`. `'none'` plus `1` IS the app default and reproduces a single cash parcela, so there is no "no plan" state. The recurring amount is deliberately absent: it is `monthlyBrl`, and `hasMonthly` already means "recurs".
-- A blank `Número de ciclos` is the only way to express prazo indeterminado, and it submits `defaultRecurringCycles: null`. There is no `Prazo indeterminado` checkbox in the product dialog.
-- The entrada row sits on top of `defaultRemainingInstallments` when the plan is materialized, and the sale write endpoints cap `installments` at 120. The editor therefore caps the pair: 120 remaining parcelas with no entrada, 119 with one.
-- Default costs per função live in `sales_ops_product_funcao_costs` and reach the web FLAT under `bootstrap.productFuncaoCosts`, never nested on a product, so every consumer scopes them by `productId`. A row is `{funcaoId, mode: 'pct', valuePct}` or `{funcaoId, mode: 'fix', valueBrl}` where `valueBrl` is integer CENTS. Never format one with `formatProductCommission`, whose `fix` branch formats reais; use `formatFuncaoCost`.
-- A NEW função cost row draws from active, non-system funções only. `vendedor` and `finder` are already paid by `Comissionamento padrão`, so offering them here would create two competing ways to pay one role. A função already used by another row is filtered out, so the client can never trip `duplicate_funcao_cost`.
-- A row's OWN stored função always stays selectable on that row, resolved against the unfiltered `funcoes` and labelled `<nome> (arquivada)` when archived. Funções are never deleted, only archived, so a cost row pointing at an archived função is the expected end state of archiving one that carries money; hiding it would make the row read as money owed to nobody and would let a stray edit silently retarget the cost. A `funcaoId` that resolves to nothing at all reads `Função não encontrada`, never a raw id.
-- That is the same principle the Pessoa dialog follows, reached differently because the two dialogs are shaped differently. A pessoa splits the job across two controls, so `assignedFuncoes` resolves the chips from the unfiltered list while `selectableFuncoes` offers only active ones - which is why an archived função really does vanish from *that* picker. A cost row is one control doing both jobs, so the stored value has to be admitted into the row's own options; the direct precedent is `selectableAreas` in this same product dialog, which prepends an archived-but-current área into the picker it belongs to.
-- `sales_ops_products.providers` is deprecated and has no editor. Product writes OMIT the key rather than sending `[]`, so a PATCH leaves the column untouched, and the dialog surfaces the legacy names read-only inside the função cost section for manual re-entry. There is no backfill from `providers` to `productFuncaoCosts` and there cannot be one: a provider row keys on a free-text `personName` with no deterministic mapping to a `funcaoId`.
-- `code_suffix` is UNIQUE per org (`sales_ops_products_org_code_suffix_idx`, no `WHERE` clause), so an archived produto permanently occupies its slot.
-  A NEW produto seeds the field from the pure `nextProductCodeSuffix` in `apps/web/src/sales-ops/calculations.ts`: max+1 over every produto in the org, both `kind`s and both statuses, gaps deliberately left unfilled, non-numeric values ignored, numeric rather than lexicographic ordering, and a lowest-free fallback past 99.
-  The EDIT path is guarded by the `??` short-circuit on `modal?.product`, the same shape as the `name` seed, so an existing produto always renders its stored suffix and can never be silently renumbered.
-  The API still has no 23505 handling, so a genuine collision surfaces as a bare 500 - see `nexo/ROADMAP.md`.
+Full reference: `nexo/knowledge/reference/produtos-e-servicos.md`.
+
+- `cadastros/produtos` is labelled "Produtos & Serviços". Rows carry `kind: 'product' | 'service'`.
+- Both kinds may carry `setupBrl`/`monthlyBrl`; for a Serviço it is a negotiable base value and `0` means none (`Variável`).
+- Branch on kind only through `isServiceProduct`; read an own value only through `productBaseValueBrl` (cents). `openPrice` is a server projection of `kind`, not a money signal.
+- The kind filter is component state, not URL state.
+- Every value in the product dialog is a DEFAULT that a proposta may override.
+- The default payment plan is six flat columns (`defaultEntradaMode` is `'none' | 'pct' | 'fix'`, never `fixed`). A blank `Número de ciclos` means indefinite (`null`). Installments cap at 120 (119 with an entrada).
+- Default costs per função arrive flat in `bootstrap.productFuncaoCosts`; `valueBrl` is CENTS, formatted with `formatFuncaoCost`, never `formatProductCommission`. New rows offer only active, non-system, unused funções; a row's own stored função stays selectable, labelled `(arquivada)` if archived.
+- `providers` is deprecated; writes omit the key.
+- `code_suffix` is unique per org including archived rows; new produtos seed it via `nextProductCodeSuffix`; edits never renumber.
 
 ## Propostas domain
 
-- Every deal is a Proposta with statuses `draft|open|won|lost|cancelled` (pt-BR labels Rascunho/Aberta/Ganha/Perdida/Cancelada).
-- Payables materialize only when a proposta transitions to `won`.
-  `seller_commission`, `finder_commission` and `tax` are generated per receivable row and linked via `payables.receivable_id`; `professional_cost` is now ALSO per receivable, split across the INSTALLMENT rows only by `resolveProfessionalSplit`; `other_cost` alone stays one-shot with `receivableId: null`, because it names no beneficiary - its `beneficiaryName` is the literal `'Outros custos'` - and has no wizard row to hang a schedule on.
-- The split deliberately skips every `M`-prefixed recurring receivable.
-  An indefinite recorrência generates no bounded rows at all, so any design that included them would need this branch anyway; spreading a pay-once cost over 24 cycles delays a professional's pay years past delivery; and the installment rows are the only ones the wizard can preview, since step 2 holds `installmentRows` and the recorrência as separate state.
-- A proposta with NO eligible installment receivable at win - every row `M`-labelled or void - falls back to the legacy one-shot `professional_cost` at the won date with `receivableId: null`.
-  That branch is what keeps `cancelContract` on a pure-recurring sale behaving exactly as before.
-- `sales_ops_sale_professionals.cost_split_bp` (`jsonb`, nullable, migration `0017_professional_payment_split`) is the per-professional payment schedule: 1..120 non-negative integers in BASIS POINTS summing to exactly `10000`.
-  `NULL` means the default, which is `cost_brl` distributed pro rata over the installment receivable amounts.
-  Basis points and not cents, deliberately: `cost_brl` is edited one control away in the same wizard row, so a cents array would go stale on every cost edit and would need a cross-field refine plus a rewrite inside `Restaurar padrão` and inside every cost keystroke, whereas bp keep `cost_brl` (how much) and the schedule (when) ORTHOGONAL.
-  It is a column and not a child table for the mirror image of the reason `sales_ops_product_funcao_costs` is a table: that one holds a `funcao_id` which must not dangle inside jsonb, while a split part holds no id at all, only a number.
-  The `Σ === 10000` rule is enforced in `SaleProfessionalSchema`, not in SQL, because a `jsonb` array sum needs a subquery a CHECK cannot contain.
-- The part count is INDEPENDENT of the parcela count, because "this one receives in 1 time" on a three-parcela plan is the whole feature.
-  Parts bind POSITIONALLY and FRONT-ALIGNED to the installment receivables in due-date order: part `i` pays out of parcela `i`.
-  Fewer parts than parcelas means the later parcelas carry no `professional_cost` at all; more parts than parcelas folds the tail weights into the last available parcela.
-  Front-aligned rather than back-aligned so that adding a part never renumbers the ones already there.
-  The rule is total for every stored value against every plan, which matters because step 2 can be revisited after step 3.
-- `splitCentsByWeights` in `packages/shared-utils/src/professional-split.ts` is the ONE distribution primitive, following the `computeSaleFinancials` precedent of a single shared implementation rather than two copies: every part but the last is `floor(total × w / Σw)` and the LAST absorbs the whole remainder, so `Σ parts === total` exactly for every input, and for equal weights the output is byte-identical to `splitInstallmentsEqually`'s amounts - pinned by a direct test so the two rounding rules cannot drift.
-  Every caller normalizes to basis points through `defaultSplitBp` first, which is also what keeps `total × w` inside `Number.MAX_SAFE_INTEGER` given that both `cost_brl` and a receivable amount are Postgres `integer`s.
-- Newly materialized `professional_cost` payables persist `sale_professional_id` from the originating `sales_ops_sale_professionals` row.
-  Current split-row idempotency matches durable professional ID plus receivable ID, never display name.
-  Migration `0018_professional_payable_identity` backfills only one unambiguous same-organization, same-sale, same-beneficiary match and leaves ambiguous identities null.
-  Null-ID split rows use a consumable `(beneficiary_name, receivable_id, amount_brl)` multiset, so one historical row suppresses at most one candidate.
-  A surviving v2.3.1 full-cost one-shot has a null receivable and covers exactly one professional before per-receivable parts are considered.
-  An identified full-cost one-shot covers its durable professional ID, while an ambiguous null-ID one-shot is consumed once by beneficiary snapshot plus full cost.
-- Migration `0018_professional_payable_identity` is applied in phases by the shared repository migration runner.
-  Its indexes are built concurrently, its foreign key is added as not valid and then validated, and its conservative backfill runs in bounded transactions.
-  Production and integration startup must use the shared runner instead of the stock all-migrations Drizzle transaction.
-- `Detalhe de pagamento` is an IN-FLOW disclosure inside the step-3 professionals table, spanning the row with `col-span-full`, and it deliberately does NOT call `useInlineLayer`.
-  That hook guards ABSOLUTELY POSITIONED layers - `Combobox`'s panel, `InfoHint`'s panel - where an Escape aimed at the layer would otherwise close the whole wizard.
-  An expander that pushes content in flow is not such a layer, and the existing precedent is `SaleItemForm.descriptionOpen`, which does the same thing the same way.
-  It lives in its own `apps/web/src/sales-ops/ProfessionalSplitPanel.tsx`, and its trigger sits inside the existing `CUSTO ALOCADO` cell as that cell's last child, so the slice edits no grid template and adds no column.
-- Each part is entered as a PERCENTAGE and prints its resolved reais beside it; there is no `R$` input mode per part and there must not be one.
-  A reais-denominated part would have to be reconverted on every `CUSTO ALOCADO` keystroke, one control away in the same row, and would be stale in between - which is the same reason `cost_split_bp` stores basis points rather than cents.
-  The wizard's preview calls the SAME `defaultSplitBp` / `splitCentsByWeights` the server calls, over `installmentRows` and nothing else, so the parcela amounts on screen are the payables that will be written at win.
-  `ProfessionalForm.costSplitBp` and `.splitOpen` are REQUIRED and non-optional so TypeScript catches every one of the three row constructors; an optional field would let a forgotten seed send `undefined` and silently mean "no override".
-- `canAdvanceStepThree` gates on `professionalSplitsValid` as well as `professionalsValid`: an override must have between 1 and `installmentRows.length` parts and must sum to exactly 10000 bp.
-  Adding or removing a part deliberately does NOT renormalize - the `Soma` line goes red and the operator fixes it, exactly as step 2's `Soma das parcelas` behaves.
-  Only `Distribuir igualmente` and `Personalizar divisão` write a guaranteed-100% vector, and both go through `splitCentsByWeights`, so the editor obeys the same last-part-absorbs-the-remainder rule as everything else.
-  The panel's no-parcela branch is a guard, not a reachable screen: `canSaveBasics` requires `totalCents > 0` and step 2's `planRowsValid` requires every parcela amount `> 0`, so the operator cannot reach step 3 with an empty plan; it is asserted by rendering the panel directly.
-- Leaving `won` (revert, lose, cancel) voids only `open` payables and receivables; `paid` rows are never touched.
-- Payment plans are explicit installments `[{dueDate, amountBrl, method}]` plus an optional recurring block `{monthlyBrl, startDate, cycles|null}` (`cycles: null` means indefinite, no bounded rows generated beyond any setup parcela).
-- Receivable label conventions `"N/M"` (installment N of M) and `"MN/M"` (recurring cycle N of M, `M` prefix) are load-bearing: `deriveWizardPrefill` in `apps/web/src/sales-ops/SalesOpsApp.tsx` parses the `M` prefix to split installment rows from recurring rows when prefilling the edit wizard.
-- Wizard step 2 is a DECLARATIVE builder, not a manual editor: `Entrada (nenhuma | % | R$ fixo)` plus `Restante em N x` plus `Recorrência (nenhuma | mensal)` regenerate the `Parcelas a receber` table live, and every generated row stays individually editable.
-  The `Dividir em` / `Número de parcelas` / `+ parcela` / `Remover parcela N` / `Adicionar recorrência` controls are gone, and `not.toContain` guards in `apps/web/src/sales-ops/__tests__/sale-wizard-ui-contract.test.ts` fail if any of those strings comes back.
-- The generation rules are pure exported functions in `apps/web/src/sales-ops/calculations.ts` - `PaymentPlanShape`, `entradaCentsFor`, `generateInstallmentPlan`, `inferPaymentPlanShape`, `defaultPlanShapeForProduct` - and the wizard holds only state and calls them.
-  `PaymentPlanShape.entradaMode` reuses the produto cadastro's literals `'none' | 'pct' | 'fix'`, so `fix` is the one spelling in the codebase for both the stored template and the per-proposta builder.
-- The restante split delegates to `splitInstallmentsEqually`, whose LAST row absorbs the whole floor remainder, so `entrada + Σ restante === total` exactly for every input and `Soma das parcelas` can only disagree with the total after a manual row edit.
-  The API's `materializeDefaultPaymentPlan` puts that remainder on the FIRST restante row instead, so the two disagree on placement; that is inert today because the function has no production caller.
-  Were it wired up, `inferPaymentPlanShape` would read an API plan whose restante does not divide evenly and that HAS an entrada as hand-edited, which is the safe outcome, but one with NO entrada as a `R$ fixo` entrada plus n-1 parcelas.
-  That second reading is arithmetically exact and loses nothing - it reproduces the stored rows to the cent - but it labels as an entrada what the API meant as an ordinary first parcela.
-  Both cases are pinned in `apps/web/src/sales-ops/__tests__/payment-plan-generation.test.ts`, so this paragraph cannot drift away from the code again.
-- `addMonthsToIsoDate` clamps to the last valid day of the target month, matching the API's `addMonths` in `apps/api/src/domains/sales-ops/service.ts`; before this it rolled `2026-01-31` over to `2026-03-03` while the API persisted `2026-02-28`.
-  Every due date is recomputed from the anchor with an absolute month offset, never stepped one month at a time, so a clamped February cannot drift the months after it.
-- Manual plan edits are governed by one whole-plan `planDirty` flag, never per-row pinning, because recomputing an entrada or a restante redistributes value across every row to hold the exact-sum invariant.
-  A row date or amount edit sets it and freezes the rows; a `Forma` edit does NOT, because methods are carried positionally through a regeneration.
-  Changing a header control while dirty raises an amber confirm bar (`Aplicar` / `Manter parcelas`) instead of regenerating, and both `Aplicar` and the header's `Regerar plano` clear the flag AND `appliedPlanKey`, because a row edit alone leaves the key untouched and the guard would otherwise find nothing to do.
-- `inferPaymentPlanShape` reads a shape back out of stored rows by regenerate-and-compare over three ordered candidates (`none`, a clean percentage, a fixed value), comparing `dueDate` and `amountBrl` but not `method`.
-  `matchesFormula: false` means the rows are hand-tuned: they are kept verbatim, the header only describes them, and nothing but an explicit `Aplicar` or `Regerar plano` click overwrites them.
-  A false negative costs one extra `Plano ajustado manualmente` line; a false positive is impossible, because `matchesFormula` is only true after a full regenerate-and-compare.
-- A blank `Número de ciclos` is the only way to express prazo indeterminado in the wizard too, exactly as in the product dialog; there is no `Prazo indeterminado` checkbox anywhere.
-- `defaultPlanShapeForProduct` is the single seam by which a produto's `defaultEntradaMode` / `defaultEntradaPct` / `defaultEntradaBrl` / `defaultRemainingInstallments` reach a proposta, applied through a render-phase guard keyed on the product ID and its template and skipped while `planDirty` is true.
-  `defaultPaymentMethod` and `defaultRecurringCycles` are persisted and editable in the cadastro but are not read by the wizard yet.
-- Áreas are org-configurable (`cadastros/areas`) and required on every product and every proposal item; the old free-text product `Tipo` is gone from both the UI and the schema, and classification is Área plus the `kind` discriminator described under "Produtos & Serviços".
-- Free-form proposal items are `productId`-null rows using `productName` as the description (same `productNameSnapshot` path as the open-price convention above) and require an `areaId` picked directly on the item.
-- Every commercial number a produto supplies is a per-proposta DEFAULT, never a constraint: `sellerCommissionPct`, `finderCommissionPct`, `taxPct`, `otherCostsBrl` and each profissional's `costBrl` are editable inside one proposta and already have their own columns.
-  A hand-typed value is PINNED by the per-field `manualOverrides` registry in `apps/web/src/sales-ops/SalesOpsApp.tsx`, so the render-phase `commissionDefaultsSource` guard re-applies a produto default only to fields nobody touched; the source key still advances unconditionally, so the guard cannot loop.
-  On the edit path the registry is SEEDED by comparing each stored value against the default it would have inherited, which is what makes a mid-edit produto change unable to clobber a stored override; a stored value that equals its default is deliberately not pinned.
-  `Alterado manualmente` renders only when a field is pinned AND diverges from the current default, and `Restaurar padrão` clears the pin and rewrites the default in one handler so the field rejoins the re-apply path.
-- `sales_ops_sale_professionals` carries `funcao_id` plus `funcao_name_snapshot` behind a composite `(org_id, funcao_id)` FK to `sales_ops_funcoes` (migration `0014_sale_professional_funcoes`); the old free-text `role` is a DEPRECATED mirror written with the same string as the snapshot on every insert, never independently.
-  `funcao_id` is nullable and MATCH SIMPLE skips the FK lookup when it is NULL, which is what lets a legacy row whose `role` matched no cadastro função keep its label; the backfill matches on `lower(btrim(...))` and invents no função from historical text.
-  `FUNÇÃO NO PROJETO` is the FIRST column of `Profissionais alocados` and `PROFISSIONAL` the second, because the função is what partitions the person list.
-  The person picker is DISABLED, placeholdered `Selecione a função primeiro`, until the row names a função; it then lists every ACTIVE pessoa who already carries that função in the headingless bucket and every other ACTIVE pessoa under the `Adicionar a esta função` group heading, which is `ComboboxOption.group` and needs nothing new in the primitive.
-  Selecting a flagged pessoa GRANTS her that função through the `onAssignFuncao` prop, which `SalesOpsApp` wires to the ordinary `useSaveSalesOpsPerson` - so the bootstrap invalidation and the optimistic patch come for free and the flag disappears at once.
-  The payload is her EXISTING `funcaoIds` PLUS the new one and must also carry `contactEmail`: person writes are a full set replacement and a PATCH that omits `contactEmail` clears it.
-  Listing everyone unflagged before a função is chosen was rejected: it re-creates the unchecked pick this rule exists to stop, and leaves the grant with no moment to happen.
-  The ONE exception is a legacy row carrying a free-text `funcaoName` with no `funcaoId` - it keeps the picker enabled and groups nobody, because there is no id to partition on and locking it would make a stored proposta uneditable.
-  `FUNÇÃO NO PROJETO` is a Combobox over active funções; both free-text escape hatches (`Digite manualmente`, the seeded `role: 'Operacional'`) are gone and `sale-wizard-ui-contract.test.tsx` fails if either string returns.
-  A fresh `+ profissional` row seeds NO pessoa - the old `allocatablePeople[0]` seed silently allocated whoever sorted first - so step 3 also refuses to advance with `Selecione a pessoa de cada profissional alocado.`, and `createPayload` drops a row whose `personName` is blank rather than sending one the API's `personName: z.string().min(1)` answers with a 400.
-  `draftValid` deliberately does NOT gate on professionals, so `Salvar rascunho` stays reachable mid-edit.
-- A profissional's `CUSTO ALOCADO` prefills from `sales_ops_product_funcao_costs` through `buildFuncaoCostBasis` in `apps/web/src/sales-ops/calculations.ts`, whose base is the ITEM SUBTOTAL of the proposta items whose produto declares that função, summed.
-  The recurring mensalidade is excluded on purpose, and the per-receivable split did NOT weaken that: a `professional_cost` is still a PAY-ONCE TOTAL, so pricing it off a monthly stream would charge it against every cycle.
-  The split re-prices nothing - it takes an already-computed `cost_brl` and decides only WHEN it is paid, under a `Σ parts === cost_brl` contract - and it skips the `M`-labelled rows too, so the money the cost is measured against and the money it is paid out of are the same non-recurring stream.
-  That is a tighter invariant than before, not a looser one.
-  Free-form items contribute nothing.
-  The derivation is rendered under the input (`5% de FXL Custom (R$ 20.000,00)`) by `describeFuncaoCostBasis`, which reads the same entry the cents came from; a row goes `costManual` on the first keystroke and is never recomputed again, and a row prefilled from a STORED proposta by `deriveWizardPrefill` is `costManual` unconditionally, because a persisted cost is a saved decision.
-  A row SEEDED from a produto on the create path is the opposite object and is deliberately NOT `costManual`: a produto number is a default that must keep following the item value, and a Serviço seeds at 75% of the `"0"` its `Valor negociado` prefills with, so pinning it would freeze the cost at R$ 0,00 for the whole session.
-  The guard cannot clobber such a row either way, because it writes exactly the expression the seed used, and leaving it unpinned also keeps `Alterado manualmente` off a row nobody touched.
-- A NEW proposta AUTO-SEEDS one `Profissionais alocados` row per função declared by the produtos on its itens, função filled from the cadastro and PROFISSIONAL left empty for the operator, through the pure `planFuncaoCostSeeds` in `apps/web/src/sales-ops/calculations.ts` driven by a fifth render-phase guard beside the `funcaoCostKey` one.
-  The seed fires once per `(produto, função)` declaration, tracked by `funcaoCostSeedKey` in a session key set that only ever GROWS, which is what makes deleting a seeded row permanent, re-adding the produto inert, and a re-render a no-op; the ROW is deduped per função instead, so two produtos declaring `Mentor` produce two keys and one row carrying the summed basis.
-  Only `editSale === null` seeds, so reopening a saved proposta can never add a row on top of its stored `sales_ops_sale_professionals`: the absence of a row there is itself a saved decision. Only funções that are currently allocatable seed, because a seeded row is a new assignment and an archived função disappears from assignment pickers; `buildFuncaoCostBasis` still reads the unfiltered declarations, so a hand-picked função still prefills.
-  A seeded row needs no new gate: it arrives with a função, so the person picker is already unlocked, and the existing `professionalPeopleValid` bar (`Selecione a pessoa de cada profissional alocado.`) is what stops step 3 until every row names one or is removed via `Remover profissional N`.
-  `draftValid` is deliberately still not gated on professionals, so `Salvar rascunho` stays reachable from step 1, and a personless row is dropped on the way out - the API declares `personName: z.string().min(1)`.
-  That drop is expressed ONCE, by `professionalRowWillPersist` in `apps/web/src/sales-ops/calculations.ts`, which `createPayload`, the step-3 `professionalCents` sum and the `professionalPeopleValid` gate all reference: a personless row is excluded from BOTH the payload and the DISPLAYED cost, which is what keeps the `Margem líquida` on screen equal to the persisted `net_margin_brl`.
-  Spelling `personName.trim() !== ''` at each call site instead is exactly how those two once disagreed - every seeded row is personless by definition, so a new proposta showed `Margem líquida R$ 15.500 / Custos profissionais R$ 1.300` while the `Salvar rascunho` in that same footer persisted R$ 16.800.
-  The remaining limitation is deliberate and filed in `nexo/ROADMAP.md`: a rascunho saved before the pessoas are picked loses the produto's seeded funções permanently, because `if (!editSale)` correctly refuses to re-seed on reopen. It is made VISIBLE rather than prevented, by a muted `#6a6a72` line in `Profissionais alocados` shown only while some row has a função and no pessoa.
-- The wizard's `CUSTO ALOCADO` accepts `%` or `R$` through the same `UnitToggle`/`UnitInput` pair the produto dialog uses.
-  The unit is an INPUT MODE and is NOT persisted, because `sales_ops_sale_professionals.cost_brl` is a single integer-cents column and nothing ever re-evaluates a stored percentage against a later item edit; a saved proposta therefore always reopens in `R$` with the resolved cents, which is the decision that was saved.
-  `cost_split_bp` is the deliberate opposite - persisted as a RULE rather than as cents - precisely because it MUST survive a later `cost_brl` edit unchanged.
-  A `%` resolves through `resolveProfessionalCostCents` against `professionalCostBaseCents`, which is the função-scoped item subtotal, falling back to the total of all product-item subtotals when no produto declares the função (the inline-created função case), and never includes the recorrência in either branch.
-  With no product item at all the base is zero and the row states so explicitly rather than writing a silent `0`.
-  Toggling the unit pins the row (`costManual: true`) in both directions and never un-pins it, so the render-phase produto-default guard cannot resurrect a stale default over a derived number; only `Restaurar padrão` un-pins, and it also resets the unit to `fix` because restoring the produto default means restoring its cents.
-- `computeSaleFinancials` in `packages/shared-utils/src/sale-financials.ts` is the ONE margin implementation: `buildSaleLedger` delegates its money block to it and the wizard drives its step-3 and step-4 panels from it, so the `Margem líquida` on screen equals the persisted `net_margin_brl`.
-  Its semantics are the server's prior algorithm verbatim - `totalBrl = items + bounded recorrência`, `Σ floor` per receivable row, `netMarginPct` as `toFixed(2)` - so adopting it moved no persisted number. `apps/web` imports the `/sale-financials` subpath because the package root also re-exports the Node-only hmac module.
-  The Revisão card's `Total` line reads `financials.totalBrl` for the same reason, so it states the basis `total_brl` persists rather than the itens total; rendering the itens total there let the card show a margin larger than its own total once a bounded recorrência existed. Step 2's `Soma das parcelas / total` keeps the ITENS total, because the API's `validatePaymentPlan` requires the parcelas to equal exactly that.
-- `resolvePartyContexts` validates `sellerPersonId`, `finderPersonId` and every `professionals[].personId` / `.funcaoId` in-org inside the caller's `withTenant` transaction, throwing `SaleInputError` with `seller_not_found` / `finder_not_found` (`itemIndex: -1`) or `person_not_found` / `funcao_not_found` (the row index), which `routes.ts` already maps to `400 validation_error`.
-  Its snapshots are server-authoritative: `personNameSnapshot` and `funcaoNameSnapshot` come from the resolved cadastro row and a disagreeing body label loses. Cross-org rejection is proven over an `app.fxl_admin` connection in `apps/api/test/rls/sale-professional-funcoes.test.ts`, because over the ordinary app connection RLS satisfies the assertion even with the `orgId` filter deleted.
-- `sales_ops_settings.commission_on_recurring` is a DEAD setting: it is stored and editable but read by nothing that computes anything. Commissions are generated for every non-void receivable, bounded recurring rows included, and the wizard's payables preview no longer gates on it.
-- Transition endpoints are `POST /sales/:id/transition` (`{status}` for open/won/lost/cancelled/reopen) and `POST /sales/:id/cancel-contract` (mid-contract cancellation on a won recurring sale); there is no free status write.
-- Integration tests are pinned to the local Docker test database: `apps/api/.env` carries `TEST_DATABASE_URL`/`TEST_MIGRATE_DATABASE_URL`/`ADMIN_DATABASE_URL`, the app connects as the non-superuser `fxl_sales_test` role so RLS is genuinely enforced, and `apps/api/test/rls/setup-env.ts` hard-overrides `DATABASE_URL` so the suite can never fall back to whatever `.env` points the dev server at (staging, in this repo).
+Full reference: `nexo/knowledge/reference/propostas.md`.
+
+Statuses and payables:
+- Statuses `draft|open|won|lost|cancelled` (Rascunho, Aberta, Ganha, Perdida, Cancelada). Transitions only via `POST /sales/:id/transition` and `POST /sales/:id/cancel-contract`.
+- Payables materialize only on `won`. Commissions and tax are per receivable; `professional_cost` is split over INSTALLMENT receivables only (never `M`-prefixed recurring ones) by `resolveProfessionalSplit`, falling back to one-shot when none exist; `other_cost` is one-shot.
+- Leaving `won` voids only `open` payables and receivables, never `paid` ones.
+- Receivable labels `N/M` and `MN/M` are load-bearing (`deriveWizardPrefill` parses the `M`).
+- `sales_ops_settings.commission_on_recurring` is dead; commissions are generated for every non-void receivable.
+
+Professional split:
+- `cost_split_bp` is 1..120 basis points summing to exactly 10000 (enforced in `SaleProfessionalSchema`); `NULL` means pro rata. Parts bind front-aligned to installments in due-date order.
+- `splitCentsByWeights` in `packages/shared-utils/src/professional-split.ts` is the one distribution primitive (last part absorbs the remainder).
+- `professional_cost` payables persist `sale_professional_id`; idempotency matches that id plus receivable id, never display name. Migrations use the shared phased runner, not the stock Drizzle one.
+- `Detalhe de pagamento` is an in-flow disclosure (no `useInlineLayer`) in `ProfessionalSplitPanel.tsx`. Parts are entered as percentages only. Step 3 gates on `professionalSplitsValid`; adding or removing a part never renormalizes.
+
+Payment plan builder (step 2):
+- Declarative: entrada, restante and recorrência regenerate the table; rows stay editable. Pure generators live in `apps/web/src/sales-ops/calculations.ts`.
+- `splitInstallmentsEqually` puts the remainder on the LAST row. `addMonthsToIsoDate` clamps to month end and computes from the anchor.
+- A row date or amount edit sets the whole-plan `planDirty`; header changes while dirty ask `Aplicar` / `Manter parcelas`.
+- `inferPaymentPlanShape` regenerates and compares; `matchesFormula: false` keeps rows verbatim.
+- `defaultPlanShapeForProduct` is the only seam from produto template to proposta.
+
+Items and defaults:
+- Áreas are required on every product and item. Free-form items are `productId: null` with `productName` and an `areaId`.
+- Produto commercial numbers are per-proposta DEFAULTS; hand-typed values are pinned in `manualOverrides`, and `Restaurar padrão` unpins.
+
+Professionals (step 3):
+- Rows carry `funcao_id` plus `funcao_name_snapshot` (legacy `role` is a mirror). `FUNÇÃO NO PROJETO` comes first; the person picker is disabled until a função is chosen, then groups people with and without it. Choosing a person without it grants it via `useSaveSalesOpsPerson` (full `funcaoIds` plus `contactEmail`).
+- New rows seed no person. `professionalRowWillPersist` is the single rule for dropping personless rows from payload, displayed cost and gating.
+- `CUSTO ALOCADO` prefills from `buildFuncaoCostBasis` (função-scoped item subtotal, never the recorrência). New propostas auto-seed one row per declared função via `planFuncaoCostSeeds`, create path only. `%`/`R$` is an input mode; only cents persist.
+- `computeSaleFinancials` in `packages/shared-utils/src/sale-financials.ts` is the ONE margin implementation (web imports the `/sale-financials` subpath).
+- `resolvePartyContexts` validates every person and função in-org inside `withTenant`; server snapshots win.
+
+Testing:
+- Integration tests use the local Docker test DB via the `fxl_sales_test` non-superuser role; `apps/api/test/rls/setup-env.ts` hard-overrides `DATABASE_URL`.
 
 ## Kanban de leads
 
-- A LEAD is a first-class entity in `sales_ops_leads` and is not a venda with zeroed numbers. Creating one inserts NOTHING into `sales_ops_sales` and consumes no proposta code or sequence.
-  Widening `sales_ops_sales.status` with pre-proposta stages was considered and REJECTED, and that decision is recorded here so it is not revisited: `total_brl` and `net_margin_pct` are `NOT NULL` and feed `getSalesOpsSummary`, the dashboard and `computeSaleFinancials`, so a pre-proposta row would either lie with zeroes in every financial panel or force those three to learn a status that means "no numbers yet".
-- A lead carries the contact name, an OPTIONAL `client_id` plus a free-text company fallback, an estimated value in integer CENTS whose column name says `estimated` out loud, a description, `seller_person_id` and `stage_id`. Creating a lead NEVER creates a `sales_ops_clients` row; the resolve-or-create happens at conversion and not one moment earlier, which is why the lead dialog's company picker has no `onCreate` row.
-- Lead produtos live in a CHILD TABLE with a nullable `product_id` plus a name snapshot, mirroring `sales_ops_sale_items`. It is deliberately not `jsonb`, under the rule this file already states: an id must not dangle inside `jsonb`. `sales_ops_product_funcao_costs` is a table because it holds a `funcao_id`; `cost_split_bp` is `jsonb` because a split part holds no id at all. A lead produto holds one, so it is a table.
-- A lead's vendedor is resolved through `person_funcoes` against the `vendedor` SYSTEM função, never through the deprecated `is_seller` mirror. On the web side the one resolver is `hasFuncao(person, FUNCAO_SLUG_VENDEDOR)`, and the vendedor option list for every lead screen is built in `apps/web/src/sales-ops/SalesOpsApp.tsx` and passed down.
-  `hasFuncao`, `FUNCAO_SLUG_VENDEDOR` and `FUNCAO_SLUG_FINDER` were module-local to `SalesOpsApp.tsx` and now live in `apps/web/src/sales-ops/calculations.ts`; this line is the prose record of that move, and an earlier revision of this file claiming they are module-local is superseded. They moved because `react-refresh/only-export-components` allows only component exports from `SalesOpsApp.tsx`, so a SECOND consumer could never import them from there - and `apps/web/src/sales-ops/leads/conversion.ts` is that second consumer, since deciding whether a lead's vendedor may be seeded onto a real proposta is exactly the `vendedor` função question. Re-deriving it there would have been the per-call-site slug comparison this file forbids. The bodies are byte-identical; only the home moved.
-- Etapas live in their own org-scoped table with `is_system`, an order column and an archivable `status`, following the `sales_ops_funcoes` precedent exactly: a system etapa answers `409` the way `funcao_is_system` does today, an etapa is NEVER deleted but only archived, and `salesOpsRouter` still has no DELETE verb.
-- There is a terminal negative etapa, `Perdido`, that REQUIRES a reason. The API answers `validation_error` to a move into it with no reason, and the move dialog blocks the submit before the request is built. Both halves are load-bearing: the UI block is the one the operator meets, and the API refusal is the one that is true for a client that skips it.
-- A card shows how many days the lead has been PARKED in its current etapa, derived from `stage_changed_at`, which moves ONLY when the etapa changes. An ordinary edit to the lead's name, value or description leaves it alone, and so does a manual reorder inside the same column: a "stale for 12 days" badge that any keystroke resets is a badge nobody can act on.
-- Manual ordering inside a column persists in a position column and reordering does NOT touch `stage_changed_at`, for the same reason.
-- The keyboard `Mover para` dialog is the SINGLE EMITTER of a `MoveLeadPayload`; the drag layer calls that same emitter and installs no `KeyboardSensor` of its own, so deleting the whole `@dnd-kit` layer removes a convenience and not a capability. Drag is the convenience, the menu is the real control, and its oracles pass with the drag layer deleted - which is the test that proves the design rather than describes it.
-- Every movement is OPTIMISTIC and reverts the card to its exact prior etapa AND prior position when the API rejects, through the existing pattern in `apps/web/src/sales-ops/optimistic.ts`. The optimistic patch and the board read MUST derive their cache key from the SAME filters value, which is why `LeadsBoardContainer` memoizes one `filters` object and hands it to both `useLeadsBoard` and `useMoveLead`: a board reading the narrowed key while the mutation patches the unnarrowed one reverts nothing visible and leaves the card where the failed request put it.
-- Moving a lead into the CONVERSION etapa opens the proposta wizard prefilled with the empresa, the vendedor, the produtos, the value and the description. The card changes etapa ONLY after `POST /sales` answers `201`. Cancelling the wizard leaves the card exactly where it was, with no intermediate state persisted anywhere - no optimistic write, no request, nothing to clean up. That needs its own oracle, because the wizard already refuses to save without a cliente, an item carrying an área and `totalCents > 0`, so an incomplete lead must not be able to become a ghost card in a column with no proposta behind it.
-  The seam is ONE optional prop, `onRequestConversion` on `LeadsBoardContainer`, forwarded verbatim to `LeadsBoard`: resolve with the created sale id to commit the move, resolve with `null` when the operator cancelled and the board does nothing at all, reject to surface it like any other failed move. While the prop is absent the conversion etapa is not offered as a move target at all, so a half-wired door never exists.
-  The sequence is the cliente, then `POST /sales`, then the lead move, in that order, and the lead move is the BOARD's and never the handler's. `requestLeadConversion` in `SalesOpsApp.tsx` resolves an id or `null` and MUST never call a lead mutation itself; slice 06's `emitMove` awaits it before touching anything. "The card only moves after the proposta exists" is therefore the SHAPE of the control flow rather than a rule some guard enforces, and flattening that promise into a callback would silently destroy it. A `'convert'` request must always settle exactly once, including on unmount, or the board awaits forever and silently stops accepting moves.
-  A conversion is a CREATE and is NEVER expressed as a synthetic `editSale`. `editSale` is a behavioural discriminator, not merely data: it gates the produto-função seeding block, it marks every professional row `costManual`, it retitles the dialog `Editar proposta`, and it gates `submit` on the sale's status. A fake sale there disables all four and nothing in the type system notices. The seam is instead one optional `leadPrefill` prop on `SaleWizardDialog`, read by exactly five `useState` initializers, each strictly AFTER the existing `prefill?.x ??`, so the edit path is provably unaffected and the ordinary create path takes the branch it takes today.
-  The prefill relaxes NO wizard gate. `canSave`, `canSaveBasics`, `draftValid`, `createPayload` and `submit` are byte-unchanged, and a free-text lead produto seeds `areaId: ''` ON PURPOSE, because `draftValid` requires an área on a free row. That is the whole of the ghost-card guarantee: an incomplete lead is refused by the rules the wizard already had, and its oracle proves non-vacuity by picking an área and watching the same button become enabled.
-  The lead's vendedor is seeded only when the pessoa is active and carries the `vendedor` system função; otherwise the field is left BLANK and is deliberately NOT defaulted to `firstSeller`. Attributing a real proposta and every commission derived from it to whoever sorts first is the same class of bug as the deleted `allocatablePeople[0]` professional seed, and `canSave` already requires a vendedor, so a blank one costs one click rather than one silent misattribution.
-  The lead's estimated value is written onto item 0 ONLY when no produto supplies a price - every row free text, or every produto a Serviço with no base value - because then it is the only number anyone has. When the catalog speaks it is written nowhere, and it is NEVER split across rows: no defensible split exists, and `splitCentsByWeights` is a payment primitive rather than a pricing one.
-  `findClientByName` folds case, accents and whitespace, so `Construtora Ipe` and `Construtora Ipê` are one company. `sales_ops_clients` has NO unique index on `(org_id, name)`, so this is a BEST-EFFORT dedupe against a possibly stale snapshot and `ON CONFLICT` is not available: two operators converting the same empresa concurrently still create two clientes, each proposta correctly points at one of them, and `cadastros/clientes` can merge them by hand. Filed in `nexo/ROADMAP.md` rather than closed with a destructive migration against data that may already violate it.
-  `convertedSales`, keyed by lead id in `SalesOpsApp.tsx`, closes the duplicate-proposta window WITHIN a session: a conversion whose move failed is retried with the SAME sale and `POST /sales` is unreachable a second time for that lead. That matters because a proposta carries a code and a sequence and `salesOpsRouter` has no DELETE verb, so a second one is unrecoverable. Across a RELOAD the state is gone and slice 03's `409 already_converted` closes only the sub-case where the first move landed; the remaining case - failed move, reload, retry - leaves ONE orphaned rascunho, which is an accepted and filed cost rather than an undiscovered one.
-  `salesOpsApi.createSale` stays typed `{ sale: unknown; ledger: unknown }` and is deliberately NOT widened for this: the one place that needs the id uses `createdSaleIdentity`, a local runtime guard that fails CLOSED, because widening the type would be an unchecked assertion over a response nothing validates. No id means no move, which leaves a real proposta and an unmoved card - the recoverable direction.
-- READ-ONLY IS A PROPERTY OF THE CARD, NEVER OF A COLUMN. This is the ONE place the original request's wording ("depois de convertido, o card entra numa coluna final SOMENTE LEITURA") was SUPERSEDED rather than implemented, and the supersession is deliberate: there is no final read-only column and there is no `'converted'` stage kind, because a lead can only ever enter the `conversion` stage together with a resolved `sale_id`, which makes that one stage BOTH the door and the landing column. It therefore stays an ACTIVE drop target for a lead that has no proposta yet.
-  What is read-only is the CONVERTED CARD: `leadIsConverted(lead)` is `lead.saleId !== null`, such a card is not draggable and `moveTargetsFor` offers it nothing, and it is the CARD that mirrors `sale.status` (`draft|open|won|lost|cancelled`).
-  Re-keying that refusal on the COLUMN is the exact regression the oracle `keeps a NON-converted card in the conversion column fully movable` exists to catch - it puts a converted and a non-converted card in the SAME column, which a suite that separates them cannot do.
-  No board action ever calls `POST /sales/:id/transition`, and dragging a card can never materialize payables: winning or losing still happens on the propostas screen, which remains the only writer of `sale.status`. `SALE_TRANSITIONS` and its `EXPECTED_MATRIX` are byte-unchanged by this whole feature.
-  That fence is enforced by `board-write-surface.test.ts`, a SOURCE SCANNER, and its SCOPE rather than its mechanism is the thing to protect.
-  It originally read only `apps/web/src/sales-ops/leads/*`, where the board lives, while the real board-to-proposta path is `saveLeadConversion` in `SalesOpsApp.tsx`; injecting a `transitionSale.mutate` there left all 911 web tests GREEN, which this feature's mutation pass MEASURED rather than guessed, one `status: 'won'` away from materializing payables off a card drag.
-  That file cannot simply join the scanned list, because it also hosts the propostas screen, whose `onTransition` IS the rightful caller of that endpoint.
-  So the board-owned regions carry `BOARD-WRITE-FENCE:START/END` sentinels and ONLY the text between them is scanned: the fence travels with the code.
-  Those four comments are LOAD-BEARING - deleting one, or hoisting `saveLeadConversion` above a `START`, disarms the guard and nothing else notices.
-  Three properties stop that being silent: each fenced region must still contain the symbol it is named for; `does not overshoot onto the propostas screen` asserts the UNFENCED remainder still reaches a transition endpoint, so the narrow scope is PROVEN narrow rather than assumed; and the two wiring one-liners outside the fence are pinned to their exact delegating shape.
-- Stage movement writes NOTHING to `audit_log`. The ledger is hash-chained, every audited write queues behind a global tail lock and it is never purged, while a card move is high-frequency noise; only the archive/restore lifecycle is audited, exactly as for the other cadastros.
-- Leads do NOT travel in `/bootstrap`. They have their own paginated endpoint, because `getSalesOpsSnapshot` already dumps every sale, item and payable with no pagination at all and leads are the highest-volume entity in the product. No lead value enters `getSalesOpsSummary`, the dashboard or `computeSaleFinancials`, and a test proves that creating leads moves no existing financial number.
-- Seller scoping is applied on the SERVER, inside `withTenant`, and is proven in `apps/api/test/rls/`. It is NEVER a client-side filter. `showSellerFilter` on `LeadsBoardContainer` decides only whether an ADMIN is offered the vendedor narrowing picker under `operacional/leads`; it is not a scope switch, and setting it for a seller would add a control and never a row.
-- Routing: `operacional/leads` is the team board, `meus-dados/leads` is a seller's own, and `cadastros/etapas` is the admin cadastro. `leads` is ONE view id serving two workspaces, exactly as `vendas` and `comissoes` already do, distinguished by `titleForView`'s `personal` flag and by `workspaceForView`'s team-first precedence. A finder gains nothing: `meusDadosFinder` is byte-unchanged, because acceptance 15 scopes personal lead visibility to `seller` alone.
-  Both nav entries are APPENDED to their lists and never prepended, and `etapas` sits before `geral` rather than after it. `getDefaultSalesOpsRoute` lands on `getSalesOpsNavigation(workspace, roles)[0]`, so the first element of each list is a ROUTE: prepending `leads` would move every seller's session start off `Meu painel` and the admin's `Operacional` landing off `Propostas`. The accepted cost is that the sidebar reads `Propostas, Comissões, Prospecção` although prospecção precedes a proposta; decoupling the landing view from the first nav item is its own change with its own oracle, not a quiet array reshuffle.
-- The two lead screens live in `apps/web/src/sales-ops/leads/` and NEVER inside `SalesOpsApp.tsx`, which this feature left at 9235 lines (8946 before it). The number is here to justify the fence, not to be maintained: if it is stale, the fence still stands. That file's whole share of this feature is the mounting and the conversion WIRING and no screen body at all: the imports, two `titleForView` entries, one `useMemo` building the vendedor options, two conditional mount blocks, one `headerAction` guard, and then slice 08's `'convert'` union arm, its `convertedSales` state, `requestLeadConversion`, `saveLeadConversion`, `createdSaleIdentity`, `toSaleItemForm` and the five wizard initializers that read `leadPrefill`. The `headerAction` guard is not optional: that chain ends in a `'Nova proposta'` fallthrough, so without naming `leads` and `etapas` the shell would render a proposta button over a Kanban board and open the wizard from it.
-- `LeadStagesContainer` and `LeadsBoardContainer` exist so a lead query runs only on a lead view. A hook cannot be called conditionally, so mounting a bare presentational view from the shell would make `useLeadStages()` and `useLeadsBoard()` fire from the dashboard; a conditionally mounted container is the only way to keep them where they belong. Both are wiring and hold no logic, and every stage callback is `mutateAsync` and never `mutate`, because the optimistic revert and the "dialog stays open on 409" behaviour are both keyed on the REJECTION that `mutate` swallows.
+Full reference: `nexo/knowledge/reference/kanban-de-leads.md`.
+
+- A lead lives in `sales_ops_leads`, never in `sales_ops_sales`, and creating one consumes no proposta code. Leads never enter `/bootstrap`, summaries, the dashboard or `computeSaleFinancials`.
+- Estimated value is integer cents. Creating a lead never creates a cliente; that happens at conversion.
+- Lead produtos are a child table (nullable `product_id` plus name snapshot), not `jsonb`.
+- The vendedor is resolved via the `vendedor` system função (`hasFuncao`, `FUNCAO_SLUG_VENDEDOR`).
+- Etapas follow the funções precedent: org-scoped, `is_system`, ordered, archived never deleted. `Perdido` requires a reason, enforced in both UI and API.
+- `stage_changed_at` moves only when the etapa changes, never on edits or reorders.
+- The `Mover para` dialog is the single emitter of `MoveLeadPayload`; drag calls it. Moves are optimistic and revert exactly; board read and mutation share one memoized `filters` object.
+- Moving into the conversion etapa opens the proposta wizard via `leadPrefill` (never a synthetic `editSale`). The card moves only after `POST /sales` answers `201`; cancel changes nothing. `requestLeadConversion` never calls a lead mutation. The prefill relaxes no wizard gate; the vendedor seeds only if valid, never `firstSeller`.
+- `convertedSales` prevents a second proposta for the same lead within a session.
+- Read-only is a property of the CONVERTED CARD (`lead.saleId !== null`), never of a column.
+- No board code may call `POST /sales/:id/transition`. `board-write-surface.test.ts` scans the `BOARD-WRITE-FENCE:START/END` regions in `SalesOpsApp.tsx`; those sentinels are load-bearing.
+- Stage moves write nothing to `audit_log`.
+- Seller scoping is server-side inside `withTenant`, never a client filter.
+- Routes: `operacional/leads` (team), `meus-dados/leads` (seller), `cadastros/etapas`. Nav entries are appended, never prepended, because the first entry is the landing route.
+- Lead screens live in `apps/web/src/sales-ops/leads/`, never inside `SalesOpsApp.tsx`, mounted through `LeadStagesContainer` / `LeadsBoardContainer`, and use `mutateAsync`.
 
 ## Environments
 
@@ -619,9 +239,8 @@ Keep the repository folder name unchanged until the editor session can safely mo
 | production | `app.fxl-sales` production client | Coolify prod DB | Infisical `prod` env |
 
 Required API vars.
-ALL FIVE IDENTITY VARIABLES TOGETHER, OR NONE: they are one Client credential, so a partial set is a boot failure naming the missing FIELD (the SDK says `FXL_HUB_CONFIG.clientId` even to an operator who set the five discrete names - see the `nameDiscreteVar` record), while none of them set boots and answers `503 hub_auth_not_configured`.
-The block below therefore ships all five BLANK with the known-good local values alongside as comments, exactly as `apps/api/.env.example` and `apps/api/.env.dev.example` do.
-This block is copyable prose and a human does copy it wholesale, so it must not itself describe a partial configuration - that shape was a boot failure the moment the SDK became the only resolver.
+The five identity variables are all set or all blank; the block ships them blank with the local values as comments.
+`apps/api/src/config/__tests__/env-example-contract.test.ts` reads this block, so keep it copyable and valid.
 
 ```dotenv
 # FXL_HUB_API_URL=http://localhost:9016
@@ -633,21 +252,15 @@ FXL_HUB_CLIENT_SECRET=
 # FXL_HUB_AUDIENCE=app.fxl-sales
 FXL_HUB_AUDIENCE=
 
-# The four OPERATIONAL values. Always discrete variables of their own, in BOTH
-# forms, because they rotate independently of the Client credential;
-# FXL_HUB_CONFIG carrying any of them is a hard refusal at boot.
-# The fourth, FXL_HUB_SESSION_ENCRYPTION_KEY, has no line here on purpose: it
-# keys the SDK's own SqlHubSessionStore, which this repo does not use.
+# Operational values, always discrete variables. FXL_HUB_SESSION_ENCRYPTION_KEY
+# has no line on purpose: it keys an SDK store this repo does not use.
 FXL_HUB_HEALTH_TOKEN=
 FXL_HUB_REDIRECT_URI=http://localhost:8006/auth/callback
 FXL_HUB_TRUSTED_ORIGINS=http://localhost:8006
 
 PUBLIC_LINK_BASE_URL=http://localhost:3006
 
-# Development identity mode. COMMENTED here and commented in every .env example:
-# absent means the ordinary Hub path, which is what a copied block must
-# reproduce. Set it through `make dev-fake` rather than by hand. The API refuses
-# to boot with it set while NODE_ENV=production.
+# Development identity mode. Use `make dev-fake` instead of setting it by hand.
 # SALES_AUTH_FAKE=1
 ```
 
@@ -661,8 +274,7 @@ VITE_FXL_HUB_API_URL=http://localhost:9016
 VITE_FXL_HUB_ENVIRONMENT=development
 VITE_FXL_HUB_AUDIENCE=app.fxl-sales
 
-# Development identity mode. COMMENTED, for the same reason. The whole web half
-# is behind import.meta.env.DEV, so a production build eliminates it.
+# Development identity mode. Use `make dev-fake`.
 # VITE_AUTH_FAKE=1
 ```
 
@@ -671,65 +283,17 @@ Keep `PUBLIC_LINK_BASE_URL` pointed at the API public origin.
 
 ## Local database guard
 
-This section exists because of a measured incident on 2026-09-16, not a hypothesis.
-`apps/api/.env` carried an ACTIVE, uncommented `DATABASE_URL` pointing at the staging database with a write credential, over a Tailscale host that resolves and answers on a developer machine, so `make back`, `make migrate` and `make db-reset` all ran against STAGING with nothing on screen saying so.
-`make db-reset` was the worst of the three, because it drops the local docker volume and then chains `$(MAKE) migrate`, which applied DDL to staging.
-Everything below is the mechanism that stops the next occurrence, and every rule in it is load-bearing.
+Full reference: `nexo/knowledge/reference/local-database-guard.md`.
+It exists because `make db-reset` once applied DDL to STAGING through an active `DATABASE_URL` in `apps/api/.env`.
 
-- There are exactly THREE guarded entrypoints, `apps/api/src/server.ts`, `apps/api/src/db/migrate.ts` and `apps/api/scripts/seed-dev.ts`, and the number three is deliberate rather than incidental.
-  `migrate.ts` is the one that MATTERS most: it reads `process.env.DATABASE_URL` raw and never passes through `apps/api/src/env.ts`, so a check living in the zod schema would have missed exactly the path that applies DDL.
-  A fourth call site is not free - the guard's value is that all three doors are provably guarded by `scripts/__tests__/local-database-guard.test.mjs`, and that test names those three paths - so adding one means adding its assertion in the same change.
-  `apps/api/drizzle.config.ts` is a known UNGUARDED fourth door: it has its own `import 'dotenv/config'` and a `localhost:5006` fallback, so `db:studio` reaches a database without passing any of the three entrypoints.
-  It is out of scope by decision (read-mostly, no `make` target) rather than by oversight, and it is recorded here so a future `db:push` script does not inherit an unguarded path with a green suite over it.
-  `seed-dev.ts` is the THIRD entrypoint, added in v4.1.0: it seeds the dev-fake identity roster's orgs, and it DELETES rows before it inserts them, which makes it the second most dangerous door after `migrate.ts`.
-  Unlike the other two it does NOT accept `SALES_ENV_FILE`: it calls the guard with `namedEnvFile` hard-coded to `null`, because seeding a shared database is never the right thing to do on purpose, so the escape hatch that lets `make back-stg` reach staging does not apply here at all.
-- `apps/api/src/db/local-database-guard.ts` is PURE.
-  It imports NOTHING, performs no I/O, and never reads `process.env`; every input arrives as an argument.
-  That is what lets its unit test cover every branch with no database, no file and no ambient environment, and it is what keeps the module safe to import without making any importing test suite environment-dependent.
-  The guard DECIDES and returns a `string[]` of violation lines; it does not print and it does not exit, and the two entrypoints do both.
-- The local hosts are exactly `localhost`, `127.0.0.1`, `::1` and `db`, matched EXACTLY through a `Set`, with no suffix matching, no wildcard and no regex - `evil-localhost` is not local.
-  `db` is the docker compose SERVICE NAME and must pass, because inside the compose network that is what the API resolves the database as.
-  `::1` needs its bracket-stripping: `new URL('postgresql://u:p@[::1]:5432/x').hostname` yields `'[::1]'` with the brackets, which is the WHATWG serialization of an IPv6 literal and not a quirk of this code, and losing the strip breaks one of the four required hosts in the SAFE-looking direction, refusing an IPv6 loopback as remote.
-- A `DATABASE_URL` that does NOT PARSE is NOT a violation, and this must not be "tightened".
-  The guard answers ONE question: is the host local.
-  Refusing an unparseable URL here would produce a second, worse-worded version of the error the caller already raises (`DATABASE_URL is required`) or that the driver raises on connect, and it would attach that failure to the wrong cause.
-  A violation is returned only when all three hold together: `nodeEnv !== 'production'`, the host parses and is not local, and `namedEnvFile === null`.
-- `SALES_ENV_FILE` is the ONLY escape hatch.
-  There is no `ALLOW_REMOTE`, no CLI flag and no second variable, because two exits for one rule is divergence and the second one is always the one nobody remembers to guard.
-  It is one name per repository, with no alias and no fleet-wide name, and it mirrors the Hub's `HUB_ENV_FILE`: the standardization is in the PATTERN, not in the string.
-  It is typed by a human in front of a command, and it is deliberately not in the zod schema, because it is an operator input read before the schema exists rather than validated configuration.
-  `apps/api/test/unit-setup.ts` blanks it alongside the six Hub credential names, so a developer who happens to export it in a shell cannot decide the unit suite.
-- An unreadable named file THROWS, and it must never fall back to the default environment.
-  The fallback IS the original bug: an operator who asked for another environment being quietly handed the LOCAL one - or, in the mirror case, believing they are local while they are not.
-  Readability is checked BEFORE anything is loaded, so the refusal happens with `process.env` untouched; a half-loaded default environment plus a crash is worse to reason about than a crash.
-- `apps/api/src/env.ts` and `apps/api/src/db/migrate.ts` share ONE resolver, `loadEnvFiles` in `apps/api/src/config/env-files.ts`, so the two cannot diverge again.
-  It loads `.env`, then `.env.local` with override, then - only when the operator named one - that file LAST with override, and it returns `namedEnvFile`, which is the guard's third input.
-  `migrate.ts` must NEVER regain a bare `import 'dotenv/config'`.
-  That import read `.env` from the CWD, never saw `.env.local`, never saw a named file and never saw this ordering, so the one entrypoint that applies DDL reached a DIFFERENT environment from the API it migrates for.
-  `API_ROOT_DIR` is `resolve(import.meta.dirname, '../..')` and not `'..'`, because the module sits two directories below `apps/api` in BOTH `src/` and `dist/`; it is the single place in the tree that knows that depth, and `env.ts` no longer computes its own.
-  A real consequence of the merge, worth knowing: `db:migrate` now also reads `apps/api/.env.local`, which the old bare import ignored.
-- `server.ts` statically imports ONLY `./env.js` and `./db/local-database-guard.js`, and loads everything else with `await import(...)`.
-  This is NOT untidiness waiting to be cleaned up, and converting it back to plain static imports is exactly the change someone will make.
-  ESM evaluates the ENTIRE static import graph before the first statement of the module body runs, and `./middleware/app-auth.js` loads the Hub configuration at its own module top level and throws there.
-  With a static import list the guard's lines were NEVER printed - the first server run died on `HubConfigError` with the guard's verdict buried under an unrelated module-load failure, and any future module-scope database work anywhere in that graph would beat it the same way.
-  The two static imports are both pure with respect to the database, the dynamic imports keep the original ORDER and the original binding names because module top-level side effects run in that order, and the body is byte-identical from `const app = new Hono();` onward.
-  The ordering oracle is that a remote `DATABASE_URL` produces the three `[local-database-guard]` lines and exit 1 with `HubConfigError` never appearing at all, which is impossible with a static import list.
-  One accepted consequence: `server.ts` is now an async module, which is inert while nothing imports it.
-- Each guarded entrypoint prints exactly ONE boot line naming HOST and PORT, gated on `NODE_ENV !== 'production'`.
-  Its ABSENCE is what made the staging write invisible, and `describeDatabaseTarget` can only ever return `{host, port}` - never the user, the password, the database name or the whole URL - so the line is safe in any log and there is no second interpolation site to audit.
-- `make stg`, `make back-stg` and `make front-stg` are the named staging entrypoints, and `make migrate-stg` DELIBERATELY DOES NOT EXIST.
-  Applying DDL to staging is a DEPLOY step, run by the deploy pipeline against the deploy's own credentials, not a target sitting one typo away from `make migrate` on a developer's machine.
-  `back-stg` carries the ONLY `SALES_ENV_FILE` assignment in the tracked tree; nothing else may set it.
-  `db-reset` prints the host `migrate` is about to receive, before anything is destroyed.
-  That line is an ANNOUNCEMENT and not a guard - the enforcement is in `migrate.ts` and refuses by exit code - and it too is host and port only.
-- `scripts/__tests__/local-database-guard.test.mjs` is what makes all of the above IRREMOVABLE, and it runs on every `pnpm run test`.
-  It asks three questions about two named paths - does `server.ts` still invoke `assertLocalDatabase`, does `migrate.ts`, and did `migrate.ts` regain a raw `dotenv/config` - and it reads those two files rather than shelling out to `git grep`, because a repo-wide grep would pass with the call sitting in some third irrelevant file and would not notice either file being renamed away.
-  It proves itself by re-spawning against mutated fixture trees and asserting a NON-ZERO exit, never a message.
-  `runAgainst` strips every `NODE_TEST_`-prefixed key from the child env FOR A REASON: `node --test` sets `NODE_TEST_CONTEXT` in each test file's process, and spreading it into the grandchild makes node warn `run() is being called recursively within a test file`, run ZERO TESTS and exit `0`, so all four negative cases pass while proving nothing.
-  The positive control does not catch that, because a vacuous child exits 0 and that is precisely what the positive control asserts; the four negatives are what catch it.
-  A real run reports `# pass 17` and a fixture-mode run reports 8, so the count is itself a tripwire.
-- `SALES_ENV_FILE` is deliberately NOT in `scripts/no-legacy-env-names.mjs`.
-  That guard has a single purpose, retired names, and this is a NEW name.
+- Three guarded entrypoints: `apps/api/src/server.ts`, `apps/api/src/db/migrate.ts`, `apps/api/scripts/seed-dev.ts`. A new one needs its assertion in `scripts/__tests__/local-database-guard.test.mjs` in the same change. `drizzle.config.ts` is a known unguarded door.
+- `apps/api/src/db/local-database-guard.ts` is pure: no imports, no I/O, no `process.env`.
+- Local hosts are exactly `localhost`, `127.0.0.1`, `::1`, `db`. An unparseable URL is not a violation.
+- `SALES_ENV_FILE` is the only escape hatch (set only by `make back-stg`; `seed-dev.ts` ignores it). An unreadable named file throws and never falls back.
+- `env.ts` and `migrate.ts` share `loadEnvFiles` in `apps/api/src/config/env-files.ts`. `migrate.ts` must never regain `import 'dotenv/config'`.
+- `server.ts` statically imports only `./env.js` and `./db/local-database-guard.js` and loads the rest with `await import(...)`. Do not convert them back to static imports.
+- Each entrypoint prints one boot line with host and port only.
+- `make migrate-stg` deliberately does not exist; staging DDL is a deploy step.
 
 ## Commands
 
