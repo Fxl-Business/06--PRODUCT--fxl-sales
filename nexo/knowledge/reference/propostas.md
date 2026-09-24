@@ -46,6 +46,7 @@ Moved verbatim from `CLAUDE.md` on 2026-09-22 so the standing context stays shor
 - Leaving `won` (revert, lose, cancel) voids only `open` payables and receivables; `paid` rows are never touched.
 - Payment plans are explicit installments `[{dueDate, amountBrl, method}]` plus an optional recurring block `{monthlyBrl, startDate, cycles|null}` (`cycles: null` means indefinite, no bounded rows generated beyond any setup parcela).
 - Receivable label conventions `"N/M"` (installment N of M) and `"MN/M"` (recurring cycle N of M, `M` prefix) are load-bearing: `deriveWizardPrefill` in `apps/web/src/sales-ops/SalesOpsApp.tsx` parses the `M` prefix to split installment rows from recurring rows when prefilling the edit wizard.
+  The labels are display only and never identity: `buildSaleLedger` drops zero-amount installments before numbering, so zeroing one renumbers every later row.
 - Wizard step 2 is a DECLARATIVE builder, not a manual editor: `Entrada (nenhuma | % | R$ fixo)` plus `Restante em N x` plus `Recorrência (nenhuma | mensal)` regenerate the `Parcelas a receber` table live, and every generated row stays individually editable.
   The `Dividir em` / `Número de parcelas` / `+ parcela` / `Remover parcela N` / `Adicionar recorrência` controls are gone, and `not.toContain` guards in `apps/web/src/sales-ops/__tests__/sale-wizard-ui-contract.test.ts` fail if any of those strings comes back.
 - The generation rules are pure exported functions in `apps/web/src/sales-ops/calculations.ts` - `PaymentPlanShape`, `entradaCentsFor`, `generateInstallmentPlan`, `inferPaymentPlanShape`, `defaultPlanShapeForProduct` - and the wizard holds only state and calls them.
@@ -153,3 +154,18 @@ Moved verbatim from `CLAUDE.md` on 2026-09-22 so the standing context stays shor
 - Tests remove settlements only through `deleteSettlementsForOrgs` (`apps/api/src/db/__tests__/settlement-test-cleanup.ts`), and the dev seed removes them the same way inline in `seed-dev.ts`: both open a local-superuser session, set `session_replication_role = replica` for one statement, delete, and restore it, before any FK-checked delete of a ledger row or sale.
   `apps/api/test/rls/settlements-schema-migration.test.ts` proves the migration itself by running it against a scratch database created and migrated fresh for that one test file, owned by a throwaway NOSUPERUSER role, so FORCE RLS genuinely applies to the backfill exactly as it will in staging and production.
 - Oracle names: `apps/api/test/rls/settlements-schema.test.ts`, `apps/api/test/rls/settlements-schema-migration.test.ts`, `apps/api/src/db/__tests__/settlements-schema-contract.test.ts`, and `apps/api/scripts/__tests__/seed-plan.test.ts`'s `emits exactly one synthetic baixa per paid receivable and payable with a positive amount, and none for any other row`.
+
+## Editing in place (PC2, 2026-09-24)
+
+- Until v4.1.0 `updateSale` deleted every item, professional, receivable and payable of the proposta and re-inserted them with new uuids, which broke `sale_professional_id` on every edit and would have deleted a paid row.
+- The owner decided (audit section 10, PC2) that an edit alters the existing rows, because the Finance mirror keys each obligation by the Sales row id.
+- The wizard sends the id of every row it edits; the recurring block sends `receivableIds`, where index i is cycle i+1, and never more ids than cycles.
+- Identity is the id alone: a zeroed installment carries its id, falls out of the plan, and becomes `void`, while the surviving rows keep their ids and relabel.
+- Items and professionals have no status, so a removed one gets `removed_at` instead of a delete; a hard delete was impossible anyway, because the RESTRICT FK from `sales_ops_payables` pins every professional that ever had a payable.
+- Drafts take the same path as `open` and `won` (decision H2): a draft can be won directly, so its ids must already be stable, and void rows carry no money in any summary.
+- A won proposta is editable (decision H1); its payables are recomputed with `materializeWonPayables` over the final receivables and matched to the stored ones by `(kind, receivableId)` or `(saleProfessionalId, receivableId)`, with a legacy heal by receivable and beneficiary for pre-0018 rows.
+- A one-shot payable (`other_cost`, the professional fallback) keeps its stored due date, because recomputing it from the won day in São Paulo would move rows written with the old UTC day.
+- The row lock reads the settlement facts through the shared reducer (`activeSettlementTargetIds` in `settlement-locks.ts`) and also treats `status = 'paid'` as settled, so an inconsistent cache fails closed.
+- The lock is evaluated on the full plan before the first write and names every blocking row, receivables first; a payable's label is its beneficiary plus the receivable label in parentheses.
+- `revision` moves only when the row really changes, including method and label changes, because the integration publishes those fields too.
+- Oracles: `apps/api/src/domains/sales-ops/__tests__/ledger-reconcile.test.ts` and `apps/api/test/rls/update-sale-in-place.test.ts`.
