@@ -13,7 +13,6 @@ import {
   buildDevSeedPlan,
   DEV_SEED_ORG_PREFIX,
   SEED_DELETE_ORDER,
-  SEED_SETTLEMENT_ACTOR_NAME,
   SEED_WRITE_ORDER,
   seededFuncaoSlugsFor,
   type DevSeedPlan,
@@ -208,9 +207,6 @@ describe('buildDevSeedPlan - idempotence, structurally', () => {
     expect(index('salesOpsPersonFuncoes')).toBeLessThan(index('salesOpsFuncoes'));
     expect(index('salesOpsPayables')).toBeLessThan(index('salesOpsSaleProfessionals'));
     expect(index('salesOpsPayables')).toBeLessThan(index('salesOpsReceivables'));
-    expect(index('salesOpsSettlements')).toBeLessThan(index('salesOpsPayables'));
-    expect(index('salesOpsSettlements')).toBeLessThan(index('salesOpsReceivables'));
-    expect(index('salesOpsSettlements')).toBeLessThan(index('salesOpsSales'));
   });
 });
 
@@ -245,9 +241,6 @@ describe('buildDevSeedPlan - tenancy', () => {
     assertSameOrgReference(asRows(rows.salesOpsPayables), 'saleId', rows.salesOpsSales);
     assertSameOrgReference(asRows(rows.salesOpsPayables), 'receivableId', rows.salesOpsReceivables);
     assertSameOrgReference(asRows(rows.salesOpsPayables), 'saleProfessionalId', rows.salesOpsSaleProfessionals);
-    assertSameOrgReference(asRows(rows.salesOpsSettlements), 'saleId', rows.salesOpsSales);
-    assertSameOrgReference(asRows(rows.salesOpsSettlements), 'receivableId', rows.salesOpsReceivables);
-    assertSameOrgReference(asRows(rows.salesOpsSettlements), 'payableId', rows.salesOpsPayables);
     assertSameOrgReference(asRows(rows.salesOpsLeads), 'clientId', rows.salesOpsClients);
     assertSameOrgReference(asRows(rows.salesOpsLeads), 'sellerPersonId', rows.salesOpsPeople);
     assertSameOrgReference(asRows(rows.salesOpsLeads), 'stageId', rows.salesOpsLeadStages);
@@ -515,46 +508,6 @@ describe('buildDevSeedPlan - payables', () => {
     for (const payable of sellerCommissions) {
       const receivable = receivablesById.get(payable.receivableId as string)!;
       expect(payable.amountBrl).toBe(pctOfCents(receivable.amountBrl, 5));
-    }
-  });
-});
-
-describe('buildDevSeedPlan - settlements', () => {
-  const plan = buildDevSeedPlan(INPUT);
-
-  it('emits exactly one synthetic baixa per paid receivable and payable with a positive amount, and none for any other row', () => {
-    const paidReceivables = plan.rows.salesOpsReceivables.filter(
-      (row) => row.status === 'paid' && row.amountBrl > 0,
-    );
-    const paidPayables = plan.rows.salesOpsPayables.filter(
-      (row) => row.status === 'paid' && row.amountBrl > 0,
-    );
-    expect(plan.rows.salesOpsSettlements.length).toBe(
-      paidReceivables.length + paidPayables.length,
-    );
-
-    const receivablesById = new Map(plan.rows.salesOpsReceivables.map((row) => [row.id, row]));
-    const payablesById = new Map(plan.rows.salesOpsPayables.map((row) => [row.id, row]));
-    for (const settlement of plan.rows.salesOpsSettlements) {
-      expect(settlement.type).toBe('baixa');
-      expect(settlement.reversesSettlementId).toBeNull();
-      expect(settlement.actorUserId).toBe('system');
-      expect(settlement.actorName).toBe(SEED_SETTLEMENT_ACTOR_NAME);
-      if (settlement.targetKind === 'receivable') {
-        const row = receivablesById.get(settlement.receivableId as string)!;
-        expect(row).toBeTruthy();
-        expect(row.status).toBe('paid');
-        expect(settlement.amountBrl).toBe(row.amountBrl);
-        expect(settlement.paidOn).toBe(row.dueDate.slice(0, 10));
-        expect(settlement.payableId).toBeNull();
-      } else {
-        const row = payablesById.get(settlement.payableId as string)!;
-        expect(row).toBeTruthy();
-        expect(row.status).toBe('paid');
-        expect(settlement.amountBrl).toBe(row.amountBrl);
-        expect(settlement.paidOn).toBe(row.dueDate.slice(0, 10));
-        expect(settlement.receivableId).toBeNull();
-      }
     }
   });
 });

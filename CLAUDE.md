@@ -186,14 +186,6 @@ Statuses and payables:
 - `validarNovaBaixa` and `validarEstorno` in the same file are the only pre-write settlement checks; they take today as an argument and never read the clock. Web imports the `/liquidacao` subpath, never the root.
 - `liquidacao.ts` imports nothing; its parity table in `liquidacao.test.ts` must change in the same change as any Finance rule change.
 
-Settlements (schema):
-- `sales_ops_settlements` (migration `0024_sales_ops_settlements`) holds immutable `baixa`/`estorno` facts for one receivable or payable each. A trigger refuses every UPDATE and DELETE with SQLSTATE `FXS01`; an estorno that does not mirror its baixa (org, sale, kind, row, amount) fails with `FXS02`.
-- At most one estorno per baixa (`sales_ops_settlements_one_estorno_per_baixa_idx`, `23505`). Every FK is composite, leads with `org_id`, carries `sale_id` for the row FKs, and is `ON DELETE RESTRICT`: a settled row, its sale and a reversed baixa are never deleted.
-- `sales_ops_receivables` and `sales_ops_payables` carry `revision` (starts at 1, CHECK `>= 1`) and `updated_at`.
-- `sales_ops_sale_items` and `sales_ops_sale_professionals` carry a nullable `removed_at` (soft removal on edit; slice 04 writes the rules for it).
-- Product code has no DELETE path and no trigger bypass for settlements. Tests remove them only through `deleteSettlementsForOrgs` (`apps/api/src/db/__tests__/settlement-test-cleanup.ts`) and the dev seed only in replica mode as the local superuser, both before any ledger or sale delete.
-- Migrated paid rows got one synthetic baixa (`actor_user_id = 'system'`, `actor_name = 'Migração'`, `paid_on` = the UTC civil due day clamped to today in São Paulo); the dev seed writes the same shape with `actor_name = 'Seed de desenvolvimento'`.
-
 Professional split:
 - `cost_split_bp` is 1..120 basis points summing to exactly 10000 (enforced in `SaleProfessionalSchema`); `NULL` means pro rata. Parts bind front-aligned to installments in due-date order.
 - `splitCentsByWeights` in `packages/shared-utils/src/professional-split.ts` is the one distribution primitive (last part absorbs the remainder).

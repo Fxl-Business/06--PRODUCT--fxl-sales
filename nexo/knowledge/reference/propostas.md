@@ -132,24 +132,3 @@ Moved verbatim from `CLAUDE.md` on 2026-09-22 so the standing context stays shor
   `isAfterTodayInSaoPaulo` throws `RangeError` on a malformed day on purpose: callers validate with `isIsoDay` first and answer their own error code.
   The web never builds a `Date` from a stored day: `displayDate` slices the first ten characters, and `inputDateToday` is the São Paulo day.
   Oracles: `packages/shared-utils/src/__tests__/sao-paulo-day.test.ts`, `apps/api/test/rls/sao-paulo-day.test.ts`, `apps/api/src/domains/sales-ops/__tests__/sao-paulo-day-decisions.test.ts`, `apps/web/src/sales-ops/__tests__/civil-day.test.ts` and `apps/web/src/sales-ops/__tests__/sale-detail-civil-day.test.tsx`, the web ones running under `TZ=America/Sao_Paulo` with a `getDate()` positive control.
-
-## Settlements schema (migration 0024)
-
-- `sales_ops_settlements` holds immutable `baixa`/`estorno` facts, one receivable or payable each.
-  A row's paid state is a pure function of its facts, computed by the same rules as Finance's `reduzirLiquidacao`: the active baixa is one no estorno points at, paid is the sum of active amounts, and the displayed day is the greatest active `paid_on`.
-  `sales_ops_receivables.status` and `sales_ops_payables.status` stay as they are; `status = 'paid'` is a CACHE of the reducer, and `void` remains a decision the Sales service layer makes, never this table.
-- DELETE is refused as well as UPDATE, unlike Finance's `lancamento_baixas`, which refuses only UPDATE.
-  Finance can allow DELETE because its org restore deletes rows through cascading FKs; Sales has neither: nothing in this product deletes a sale, and every foreign key on `sales_ops_settlements` is `ON DELETE RESTRICT`, so a settled row, its sale and a reversed baixa can never disappear.
-- Every foreign key is COMPOSITE and leads with `org_id`, because a single-column FK does not consult the RLS predicate; the row FKs also carry `sale_id`, which makes a cross-sale settlement unrepresentable at the database level.
-  Consequently a settlement's `sale_id` MUST equal its target row's `sale_id`; slice 06 copies it from the row rather than trusting a caller's input.
-- SQLSTATEs: `FXS01` (a BEFORE UPDATE OR DELETE trigger refuses every mutation), `FXS02` (a BEFORE INSERT trigger refuses an estorno that does not mirror its baixa - same org, sale, target_kind, row and amount, and the target must itself be a baixa), `FXS03` (the migration's own backfill verification aborts the whole file on divergence).
-  `23505` on `sales_ops_settlements_one_estorno_per_baixa_idx` is the "second estorno of the same baixa" case; slice 06 maps it to `409 already_reversed`.
-- The backfill gives every pre-existing paid row with `amount_brl > 0` one synthetic baixa: `paid_on = LEAST((due_date AT TIME ZONE 'UTC')::date, (now() AT TIME ZONE 'America/Sao_Paulo')::date)`, `origin = 'manual'`, `actor_user_id = 'system'`, `actor_name = 'Migração'`.
-  The cast is deliberately `AT TIME ZONE 'UTC'` and never a bare `due_date::date`, because a bare cast uses the session's own `TimeZone` GUC and turns `2026-03-01T00:00:00Z` into `2026-02-28` inside a São Paulo session.
-  The backfill also runs `SELECT set_config('app.fxl_admin', 'true', true)` first, because FORCE ROW LEVEL SECURITY binds the migrating table owner too; without it the INSERT...SELECT would silently see zero rows in staging and production.
-  Before migration 0024 no production code wrote `status = 'paid'` (only test fixtures and the dev seed did), so the backfill is expected to be empty outside local data.
-- There is no database guard against a future `paid_on`: the application clock and the database clock can straddle midnight in opposite directions, and a guard would turn a legitimate default "today" into an occasional `500`.
-  The API (slice 06) and the web UI own the "never in the future" rule instead.
-- Tests remove settlements only through `deleteSettlementsForOrgs` (`apps/api/src/db/__tests__/settlement-test-cleanup.ts`), and the dev seed removes them the same way inline in `seed-dev.ts`: both open a local-superuser session, set `session_replication_role = replica` for one statement, delete, and restore it, before any FK-checked delete of a ledger row or sale.
-  `apps/api/test/rls/settlements-schema-migration.test.ts` proves the migration itself by running it against a scratch database created and migrated fresh for that one test file, owned by a throwaway NOSUPERUSER role, so FORCE RLS genuinely applies to the backfill exactly as it will in staging and production.
-- Oracle names: `apps/api/test/rls/settlements-schema.test.ts`, `apps/api/test/rls/settlements-schema-migration.test.ts`, `apps/api/src/db/__tests__/settlements-schema-contract.test.ts`, and `apps/api/scripts/__tests__/seed-plan.test.ts`'s `emits exactly one synthetic baixa per paid receivable and payable with a positive amount, and none for any other row`.

@@ -50,7 +50,6 @@ import type {
   SaleRow,
   SeedIdentity,
   SettingsRow,
-  SettlementRow,
 } from './seed/plan.js';
 
 const SEED_CUTOFF_DEFAULT = '2026-09-01';
@@ -66,7 +65,6 @@ function resolveCutoffIso(): string {
 // plan's order and this writer's operations throws immediately rather than
 // silently reordering deletes or inserts around a restrict FK.
 const EXPECTED_DELETE_ORDER = [
-  'salesOpsSettlements',
   'salesOpsPayables',
   'salesOpsReceivables',
   'salesOpsSaleProfessionals',
@@ -100,7 +98,6 @@ const EXPECTED_WRITE_ORDER = [
   'salesOpsSaleProfessionals',
   'salesOpsReceivables',
   'salesOpsPayables',
-  'salesOpsSettlements',
   'salesOpsLeads',
   'salesOpsLeadProducts',
 ] as const;
@@ -207,10 +204,6 @@ function toPayableInsert(row: PayableRow) {
   return { ...row, dueDate: new Date(row.dueDate) };
 }
 
-function toSettlementInsert(row: SettlementRow) {
-  return { ...row, recordedAt: new Date(row.recordedAt) };
-}
-
 function toLeadInsert(row: LeadRow) {
   return {
     ...row,
@@ -296,7 +289,7 @@ async function main(): Promise<void> {
   const { getDb, closeDb } = await import('../src/db/client.js');
   const { withTenant } = await import('../src/domains/sales-ops/service.js');
   const schema = await import('../src/db/schema.js');
-  const { eq, sql } = await import('drizzle-orm');
+  const { eq } = await import('drizzle-orm');
 
   const db = getDb();
 
@@ -304,17 +297,6 @@ async function main(): Promise<void> {
     await withTenant(db, orgId, async (tx) => {
       // Deletes: children first, every one scoped by org_id, in
       // SEED_DELETE_ORDER.
-      //
-      // sales_ops_settlements refuses DELETE (FXS01) and its RESTRICT FKs block
-      // the ledger deletes below. The dev seed runs only against the local
-      // database (the guard above) as the local superuser, so it may skip
-      // ordinary triggers for this one statement and then restore them at once,
-      // before any FK-checked delete runs.
-      await tx.execute(sql`SET LOCAL session_replication_role = replica`);
-      await tx
-        .delete(schema.salesOpsSettlements)
-        .where(eq(schema.salesOpsSettlements.orgId, orgId));
-      await tx.execute(sql`SET LOCAL session_replication_role = origin`);
       await tx.delete(schema.salesOpsPayables).where(eq(schema.salesOpsPayables.orgId, orgId));
       await tx
         .delete(schema.salesOpsReceivables)
@@ -427,13 +409,6 @@ async function main(): Promise<void> {
       const orgPayables = plan.rows.salesOpsPayables.filter((row) => row.orgId === orgId);
       if (orgPayables.length > 0) {
         await tx.insert(schema.salesOpsPayables).values(orgPayables.map(toPayableInsert));
-      }
-
-      const orgSettlements = plan.rows.salesOpsSettlements.filter((row) => row.orgId === orgId);
-      if (orgSettlements.length > 0) {
-        await tx
-          .insert(schema.salesOpsSettlements)
-          .values(orgSettlements.map(toSettlementInsert));
       }
 
       const orgLeads = plan.rows.salesOpsLeads.filter((row) => row.orgId === orgId);
