@@ -25,6 +25,7 @@ import {
   bigserial,
   boolean,
   check,
+  date,
   foreignKey,
   index,
   integer,
@@ -844,6 +845,8 @@ export const salesOpsSaleItems = pgTable(
     quantity: integer('quantity').notNull().default(1),
     unitBrl: integer('unit_brl').notNull(),
     subtotalBrl: integer('subtotal_brl').notNull(),
+    /** Soft removal (PC2): set when the line leaves the proposta on edit; readers filter removed_at IS NULL. Never deleted: sales_ops_payables pins professionals with a RESTRICT FK. */
+    removedAt: timestamp('removed_at', { withTimezone: true }),
   },
   (t) => [index('sales_ops_sale_items_sale_id_idx').on(t.saleId)],
 );
@@ -884,6 +887,8 @@ export const salesOpsSaleProfessionals = pgTable(
      * CHECK constraint may not contain.
      */
     costSplitBp: jsonb('cost_split_bp'),
+    /** Soft removal (PC2): set when the line leaves the proposta on edit; readers filter removed_at IS NULL. Never deleted: sales_ops_payables pins professionals with a RESTRICT FK. */
+    removedAt: timestamp('removed_at', { withTimezone: true }),
   },
   (t) => [
     index('sales_ops_sale_professionals_sale_id_idx').on(t.saleId),
@@ -1124,8 +1129,20 @@ export const salesOpsReceivables = pgTable(
     amountBrl: integer('amount_brl').notNull(),
     method: text('method').notNull().default('pix'), // 'pix' | 'card' | 'boleto' | 'transfer'
     status: text('status').notNull().default('open'), // 'open' | 'paid' | 'void'
+    /**
+     * Monotonic per-row revision (contract C7): starts at 1 and is bumped by
+     * exactly 1, together with updated_at, in the same statement as any change of
+     * amount, due date, counterparty or status. The integration will publish it.
+     */
+    revision: integer('revision').notNull().default(1),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
-  (t) => [index('sales_ops_receivables_sale_id_idx').on(t.saleId)],
+  (t) => [
+    index('sales_ops_receivables_sale_id_idx').on(t.saleId),
+    // Composite-FK target for sales_ops_settlements.(org_id, sale_id, receivable_id).
+    uniqueIndex('sales_ops_receivables_org_sale_id_id_idx').on(t.orgId, t.saleId, t.id),
+    check('sales_ops_receivables_revision_check', sql`${t.revision} >= 1`),
+  ],
 );
 
 export const salesOpsPayables = pgTable(
@@ -1145,11 +1162,17 @@ export const salesOpsPayables = pgTable(
     dueDate: timestamp('due_date', { withTimezone: true }).notNull(),
     amountBrl: integer('amount_brl').notNull(),
     status: text('status').notNull().default('open'), // 'open' | 'paid' | 'void'
+    // See salesOpsReceivables.revision.
+    revision: integer('revision').notNull().default(1),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [
     index('sales_ops_payables_org_status_idx').on(t.orgId, t.status),
     index('sales_ops_payables_sale_id_idx').on(t.saleId),
     index('sales_ops_payables_sale_professional_id_idx').on(t.saleProfessionalId),
+    // Composite-FK target for sales_ops_settlements.(org_id, sale_id, payable_id).
+    uniqueIndex('sales_ops_payables_org_sale_id_id_idx').on(t.orgId, t.saleId, t.id),
+    check('sales_ops_payables_revision_check', sql`${t.revision} >= 1`),
     foreignKey({
       columns: [t.orgId, t.saleId, t.saleProfessionalId],
       foreignColumns: [
@@ -1158,6 +1181,122 @@ export const salesOpsPayables = pgTable(
         salesOpsSaleProfessionals.id,
       ],
       name: 'sales_ops_payables_org_sale_professional_fk',
+    }).onDelete('restrict'),
+  ],
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// sales_ops_settlements - immutable baixa/estorno facts for the ledger.
+//
+// A row here records a real payment or reversal FACT, never an edit: a `baixa`
+// pins one receivable or payable at a real day and amount, and an `estorno`
+// reverses exactly one baixa (at most one estorno per baixa). A row's paid
+// state is always a pure function of its facts (active baixa = a baixa no
+// estorno points at; paid = sum of active amounts; displayed day = the
+// greatest active paid_on), computed by the same rules as Finance's
+// reduzirLiquidacao. sales_ops_receivables.status / sales_ops_payables.status
+// stay as they are; `paid` is a CACHE of the reducer, `void` is still Sales'
+// own decision, made by the service layer, never by this table.
+//
+// IMMUTABLE: correcting a mistake is an estorno plus a new baixa, never an
+// UPDATE. A BEFORE UPDATE OR DELETE trigger refuses every change with
+// SQLSTATE FXS01. Unlike Finance (which refuses only UPDATE, because its org
+// restore deletes rows with cascading FKs), Sales refuses DELETE too: nothing
+// in this product deletes a sale, and every FK below is RESTRICT, so a
+// settled row, its sale and a reversed baixa can never disappear. The only
+// way past the trigger is a local superuser session with
+// session_replication_role = replica, used solely by test cleanup
+// (settlement-test-cleanup.ts) and the dev seed; product code has no such
+// path. A BEFORE INSERT trigger refuses, with SQLSTATE FXS02, an estorno that
+// does not mirror its baixa (same org, sale, target_kind, row and amount; the
+// target must itself be a baixa).
+//
+// TENANCY: org_id text NOT NULL, ENABLE + FORCE ROW LEVEL SECURITY with the
+// same two policies every sales_ops table carries (0008, 0022). Every foreign
+// key is COMPOSITE and leads with org_id (a single-column FK does not consult
+// the RLS predicate), and the row FKs also carry sale_id, so a settlement can
+// never point at another org's row or at a row of a different sale, even
+// through the admin context. Consequently a settlement's sale_id MUST equal
+// its target row's sale_id - callers copy it from the row, never from input.
+//
+// ONE ESTORNO PER BAIXA: a partial UNIQUE INDEX on reverses_settlement_id
+// (WHERE NOT NULL). A second estorno of the same baixa fails with 23505.
+//
+// No product code DELETEs a settlement, ever.
+// ─────────────────────────────────────────────────────────────────────────────
+export const SETTLEMENT_TYPES = ['baixa', 'estorno'] as const;
+export const SETTLEMENT_TARGET_KINDS = ['receivable', 'payable'] as const;
+export const SETTLEMENT_ORIGINS = ['manual', 'finance'] as const;
+
+export const salesOpsSettlements = pgTable(
+  'sales_ops_settlements',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: text('org_id').notNull(),
+    saleId: uuid('sale_id').notNull(),
+    targetKind: text('target_kind').notNull(), // 'receivable' | 'payable'
+    receivableId: uuid('receivable_id'),
+    payableId: uuid('payable_id'),
+    type: text('type').notNull(), // 'baixa' | 'estorno'
+    reversesSettlementId: uuid('reverses_settlement_id'),
+    /** Civil São Paulo day `YYYY-MM-DD`; for an estorno, the reversal day. */
+    paidOn: date('paid_on', { mode: 'string' }).notNull(),
+    amountBrl: integer('amount_brl').notNull(),
+    origin: text('origin').notNull().default('manual'), // 'manual' | 'finance'
+    actorUserId: text('actor_user_id').notNull(),
+    actorName: text('actor_name'),
+    recordedAt: timestamp('recorded_at', { withTimezone: true }).defaultNow().notNull(),
+    reason: text('reason'),
+  },
+  (t) => [
+    uniqueIndex('sales_ops_settlements_org_id_id_idx').on(t.orgId, t.id),
+    index('sales_ops_settlements_org_sale_idx').on(t.orgId, t.saleId),
+    index('sales_ops_settlements_org_receivable_idx')
+      .on(t.orgId, t.receivableId)
+      .where(sql`${t.receivableId} is not null`),
+    index('sales_ops_settlements_org_payable_idx')
+      .on(t.orgId, t.payableId)
+      .where(sql`${t.payableId} is not null`),
+    uniqueIndex('sales_ops_settlements_one_estorno_per_baixa_idx')
+      .on(t.reversesSettlementId)
+      .where(sql`${t.reversesSettlementId} is not null`),
+    check('sales_ops_settlements_target_kind_check', sql`${t.targetKind} in ('receivable', 'payable')`),
+    check(
+      'sales_ops_settlements_target_check',
+      sql`(${t.targetKind} = 'receivable' and ${t.receivableId} is not null and ${t.payableId} is null) or (${t.targetKind} = 'payable' and ${t.payableId} is not null and ${t.receivableId} is null)`,
+    ),
+    check('sales_ops_settlements_type_check', sql`${t.type} in ('baixa', 'estorno')`),
+    check(
+      'sales_ops_settlements_reverses_check',
+      sql`(${t.type} = 'estorno') = (${t.reversesSettlementId} is not null)`,
+    ),
+    check(
+      'sales_ops_settlements_reverses_not_self_check',
+      sql`${t.reversesSettlementId} is null or ${t.reversesSettlementId} <> ${t.id}`,
+    ),
+    check('sales_ops_settlements_amount_check', sql`${t.amountBrl} > 0`),
+    check('sales_ops_settlements_origin_check', sql`${t.origin} in ('manual', 'finance')`),
+    check('sales_ops_settlements_reason_check', sql`${t.type} = 'estorno' or ${t.reason} is null`),
+    check('sales_ops_settlements_actor_check', sql`length(btrim(${t.actorUserId})) > 0`),
+    foreignKey({
+      columns: [t.orgId, t.saleId],
+      foreignColumns: [salesOpsSales.orgId, salesOpsSales.id],
+      name: 'sales_ops_settlements_org_sale_fk',
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [t.orgId, t.saleId, t.receivableId],
+      foreignColumns: [salesOpsReceivables.orgId, salesOpsReceivables.saleId, salesOpsReceivables.id],
+      name: 'sales_ops_settlements_org_sale_receivable_fk',
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [t.orgId, t.saleId, t.payableId],
+      foreignColumns: [salesOpsPayables.orgId, salesOpsPayables.saleId, salesOpsPayables.id],
+      name: 'sales_ops_settlements_org_sale_payable_fk',
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [t.orgId, t.reversesSettlementId],
+      foreignColumns: [t.orgId, t.id],
+      name: 'sales_ops_settlements_org_reverses_fk',
     }).onDelete('restrict'),
   ],
 );
