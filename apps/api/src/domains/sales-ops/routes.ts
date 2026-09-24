@@ -50,6 +50,14 @@ import {
   updateSale,
   upsertSettings,
 } from './service.js';
+import {
+  RecordSettlementSchema,
+  ReverseSettlementSchema,
+  SETTLEMENT_ERROR_STATUS,
+  listSaleSettlements,
+  recordSettlement,
+  reverseSettlement,
+} from './settlements.js';
 
 const saleIdSchema = z.string().uuid();
 
@@ -327,6 +335,9 @@ salesOpsRouter.post('/sales/:id/transition', async (c) => {
   }
   const result = await transitionSale(getDb(), c.get('orgId'), id.data, parsed.data.status);
   if (!result.ok && result.reason === 'not_found') return c.json({ error: 'not_found' }, 404);
+  if (!result.ok && result.reason === 'sale_has_active_settlements') {
+    return c.json({ error: 'sale_has_active_settlements', rows: result.rows }, 409);
+  }
   if (!result.ok) {
     return c.json({ error: 'invalid_transition', from: result.from, to: result.to }, 409);
   }
@@ -342,6 +353,9 @@ salesOpsRouter.post('/sales/:id/cancel-contract', async (c) => {
   }
   const result = await cancelContract(getDb(), c.get('orgId'), id.data, parsed.data.effectiveDate);
   if (!result.ok && result.reason === 'not_found') return c.json({ error: 'not_found' }, 404);
+  if (!result.ok && result.reason === 'sale_has_active_settlements') {
+    return c.json({ error: 'sale_has_active_settlements', rows: result.rows }, 409);
+  }
   if (!result.ok) return c.json({ error: 'contract_not_cancellable' }, 409);
   return c.json({
     sale: result.sale,
@@ -377,6 +391,43 @@ salesOpsRouter.put('/sales/:id', async (c) => {
     }
     throw error;
   }
+});
+
+// Baixas and estornos (C6). Admin only; the actor comes from the verified context.
+salesOpsRouter.post('/settlements', requireAdmin, async (c) => {
+  const parsed = RecordSettlementSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) {
+    return c.json({ error: 'validation_error', issues: parsed.error.flatten() }, 400);
+  }
+  const result = await recordSettlement(getDb(), c.get('orgId'), cadastroActor(c), parsed.data);
+  if (!result.ok) return c.json({ error: result.reason }, SETTLEMENT_ERROR_STATUS[result.reason]);
+  return c.json({ settlement: result.settlement, row: result.row }, 201);
+});
+
+salesOpsRouter.post('/settlements/:id/reverse', requireAdmin, async (c) => {
+  const id = saleIdSchema.safeParse(c.req.param('id'));
+  if (!id.success) return c.json({ error: 'not_found' }, 404);
+  const parsed = ReverseSettlementSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) {
+    return c.json({ error: 'validation_error', issues: parsed.error.flatten() }, 400);
+  }
+  const result = await reverseSettlement(
+    getDb(),
+    c.get('orgId'),
+    cadastroActor(c),
+    id.data,
+    parsed.data,
+  );
+  if (!result.ok) return c.json({ error: result.reason }, SETTLEMENT_ERROR_STATUS[result.reason]);
+  return c.json({ settlement: result.settlement, row: result.row }, 201);
+});
+
+salesOpsRouter.get('/sales/:id/settlements', requireAdmin, async (c) => {
+  const id = saleIdSchema.safeParse(c.req.param('id'));
+  if (!id.success) return c.json({ error: 'not_found' }, 404);
+  const result = await listSaleSettlements(getDb(), c.get('orgId'), id.data);
+  if (!result.ok) return c.json({ error: 'not_found' }, 404);
+  return c.json({ settlements: result.settlements });
 });
 
 salesOpsRouter.get('/settings', async (c) => {

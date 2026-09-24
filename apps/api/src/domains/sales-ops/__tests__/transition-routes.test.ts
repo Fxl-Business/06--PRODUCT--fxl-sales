@@ -146,3 +146,36 @@ describe('POST /sales/:id/cancel-contract', () => {
     expect(await notCancellableResponse.json()).toEqual({ error: 'contract_not_cancellable' });
   });
 });
+
+describe('sale_has_active_settlements', () => {
+  const rows = [
+    { kind: 'receivable', id: '66666666-6666-4666-8666-666666666666', label: '1/2' },
+    { kind: 'payable', id: '77777777-7777-4777-8777-777777777777', label: 'Ana Martins (1/2)' },
+  ];
+
+  it('maps sale_has_active_settlements on transition to 409 with the rows', async () => {
+    serviceMocks.transitionSale.mockResolvedValueOnce({
+      ok: false,
+      reason: 'sale_has_active_settlements',
+      rows,
+    });
+
+    const response = await postJson(`/sales/${saleId}/transition`, { status: 'open' });
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: 'sale_has_active_settlements', rows });
+  });
+
+  it('maps sale_has_active_settlements on cancel-contract to 409 with the rows', async () => {
+    serviceMocks.cancelContract.mockResolvedValueOnce({
+      ok: false,
+      reason: 'sale_has_active_settlements',
+      rows,
+    });
+
+    const response = await postJson(`/sales/${saleId}/cancel-contract`, {});
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: 'sale_has_active_settlements', rows });
+  });
+});

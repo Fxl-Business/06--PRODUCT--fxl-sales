@@ -37,6 +37,12 @@ import {
 import { payableRevisionBump, receivableRevisionBump } from './ledger-revision.js';
 import { applySaleEditPlan, loadSaleEditState } from './sale-edit-writes.js';
 import { activeSettlementTargetIds } from './settlement-locks.js';
+import {
+  attachSettlementState,
+  findActiveSettlementRows,
+  selectOrgSettlements,
+  type ActiveSettlementRow,
+} from './settlements.js';
 
 export type Db = ReturnType<typeof getDb>;
 type Tx = { execute: (query: SQL) => Promise<unknown> };
@@ -2653,7 +2659,8 @@ export function canTransition(from: string, to: TransitionTarget): boolean {
 export type TransitionResult =
   | { ok: true; sale: typeof salesOpsSales.$inferSelect }
   | { ok: false; reason: 'not_found' }
-  | { ok: false; reason: 'invalid_transition'; from: string; to: TransitionTarget };
+  | { ok: false; reason: 'invalid_transition'; from: string; to: TransitionTarget }
+  | { ok: false; reason: 'sale_has_active_settlements'; rows: ActiveSettlementRow[] };
 
 export async function transitionSale(
   db: Db,
@@ -2673,6 +2680,12 @@ export async function transitionSale(
 
     if (!canTransition(sale.status, to)) {
       return { ok: false, reason: 'invalid_transition', from: sale.status, to };
+    }
+
+    // C5: leaving won is locked while any row carries an active baixa. Before any write.
+    if (sale.status === 'won' && to !== 'won') {
+      const rows = await findActiveSettlementRows(tx, orgId, saleId);
+      if (rows.length > 0) return { ok: false, reason: 'sale_has_active_settlements', rows };
     }
 
     let patch: Partial<typeof salesOpsSales.$inferInsert>;
@@ -2774,7 +2787,8 @@ export async function transitionSale(
 export type CancelContractResult =
   | { ok: true; sale: typeof salesOpsSales.$inferSelect; voidedReceivables: number; voidedPayables: number }
   | { ok: false; reason: 'not_found' }
-  | { ok: false; reason: 'not_cancellable' };
+  | { ok: false; reason: 'not_cancellable' }
+  | { ok: false; reason: 'sale_has_active_settlements'; rows: ActiveSettlementRow[] };
 
 export async function cancelContract(
   db: Db,
@@ -2795,6 +2809,44 @@ export async function cancelContract(
 
     const effective = effectiveDate ?? todayInSaoPaulo(now);
     const cutoff = dateFromIsoDay(effective);
+
+    // H5: any NON-VOID row the cancellation would void (and its linked payables)
+    // must carry no active baixa. Checked before any write.
+    const candidateReceivables = await tx
+      .select({ id: salesOpsReceivables.id })
+      .from(salesOpsReceivables)
+      .where(
+        and(
+          eq(salesOpsReceivables.orgId, orgId),
+          eq(salesOpsReceivables.saleId, saleId),
+          ne(salesOpsReceivables.status, 'void'),
+          gt(salesOpsReceivables.dueDate, cutoff),
+        ),
+      );
+    const candidateReceivableIds = candidateReceivables.map((r) => r.id);
+    const candidatePayableIds =
+      candidateReceivableIds.length === 0
+        ? []
+        : (
+            await tx
+              .select({ id: salesOpsPayables.id })
+              .from(salesOpsPayables)
+              .where(
+                and(
+                  eq(salesOpsPayables.orgId, orgId),
+                  eq(salesOpsPayables.saleId, saleId),
+                  ne(salesOpsPayables.status, 'void'),
+                  inArray(salesOpsPayables.receivableId, candidateReceivableIds),
+                ),
+              )
+          ).map((p) => p.id);
+    const settledRows = await findActiveSettlementRows(tx, orgId, saleId, {
+      receivableIds: candidateReceivableIds,
+      payableIds: candidatePayableIds,
+    });
+    if (settledRows.length > 0) {
+      return { ok: false, reason: 'sale_has_active_settlements', rows: settledRows };
+    }
 
     const future = await tx
       .select({ id: salesOpsReceivables.id })
@@ -2915,6 +2967,7 @@ export async function getSalesOpsSnapshot(db: Db, orgId: string) {
           isNull(salesOpsSaleProfessionals.removedAt),
         ),
       );
+    const settlements = await selectOrgSettlements(tx, orgId);
     return {
       sales,
       products,
@@ -2923,10 +2976,10 @@ export async function getSalesOpsSnapshot(db: Db, orgId: string) {
       people,
       funcoes,
       personFuncoes,
-      payables,
+      payables: attachSettlementState(payables, settlements, 'payable'),
       saleItems,
       areas,
-      receivables,
+      receivables: attachSettlementState(receivables, settlements, 'receivable'),
       saleProfessionals,
       settings: settings[0] ?? null,
     };

@@ -179,12 +179,21 @@ Full reference: `nexo/knowledge/reference/propostas.md`.
 Statuses and payables:
 - Statuses `draft|open|won|lost|cancelled` (Rascunho, Aberta, Ganha, Perdida, Cancelada). Transitions only via `POST /sales/:id/transition` and `POST /sales/:id/cancel-contract`; `PUT /sales/:id` may only move between `draft` and `open` and keeps a `won` proposta `won` (`409 invalid_status_change`).
 - Payables materialize only on `won`. Commissions and tax are per receivable; `professional_cost` is split over INSTALLMENT receivables only (never `M`-prefixed recurring ones) by `resolveProfessionalSplit`, falling back to one-shot when none exist; `other_cost` is one-shot.
-- Leaving `won` voids only `open` payables and receivables, never `paid` ones.
+- Leaving `won` is refused with `409 sale_has_active_settlements` (naming the rows) while any row of the proposta has an active baixa; the operator reverses first, manually.
+  Without one, the revert voids the `open` payables and leaves the receivables.
+- `cancel-contract` refuses with the same 409 when any non-void row it would void has an active baixa.
 - Receivable labels `N/M` and `MN/M` are load-bearing (`deriveWizardPrefill` parses the `M`) but are NEVER row identity: they renumber when a parcela is zeroed.
 - `sales_ops_settings.commission_on_recurring` is dead; commissions are generated for every non-void receivable.
 - `reduzirLiquidacao` in `packages/shared-utils/src/liquidacao.ts` is the ONE settlement rule and mirrors the Finance reducer: a baixa is active while no estorno cites it, paid is the sum of active baixas, and the displayed date is the GREATEST active date.
 - `validarNovaBaixa` and `validarEstorno` in the same file are the only pre-write settlement checks; they take today as an argument and never read the clock. Web imports the `/liquidacao` subpath, never the root.
 - `liquidacao.ts` imports nothing; its parity table in `liquidacao.test.ts` must change in the same change as any Finance rule change.
+
+Baixas (settlements):
+- A baixa or estorno is an immutable fact in `sales_ops_settlements`, written only by `apps/api/src/domains/sales-ops/settlements.ts` behind `requireAdmin` (`POST /settlements`, `POST /settlements/:id/reverse`, `GET /sales/:id/settlements`).
+- A baixa is allowed only on a non-void row of a `won` proposta, its amount is always the whole open amount (never from the body), and `paidOn` defaults to `todayInSaoPaulo()` and is never in the future.
+- Row `status` `paid` is a cache of `reduzirLiquidacao` written with `revision + 1` only when it changes; `void` stays a Sales decision the cache never overwrites.
+- Settlement writes lock the sale `FOR SHARE` and then the row `FOR UPDATE`, the same order (sale first) as every sale write; the rules come only from `validarNovaBaixa` / `validarEstorno` / `statusCacheDaLinha`.
+- The history projects `actorName` only, never `actor_user_id`.
 
 Editing a proposta (PC2):
 - `updateSale` never deletes and recreates. Rows are reconciled by the ids the payload carries (`items[].id`, `professionals[].id`, `installments[].id`, `recurring.receivableIds[i]` for cycle i+1); a row without an id is new and gets a server uuid.
