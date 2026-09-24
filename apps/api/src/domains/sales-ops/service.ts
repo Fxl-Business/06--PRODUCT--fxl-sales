@@ -4,6 +4,7 @@ import {
   pctOfCents,
   resolveProfessionalSplit,
 } from '@fxl-sales/shared-utils';
+import { isIsoDay, saoPauloDayOf, todayInSaoPaulo } from '@fxl-sales/shared-utils/sao-paulo-day';
 import { and, asc, desc, eq, gt, inArray, ne, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { getDb } from '../../db/client.js';
@@ -145,7 +146,7 @@ async function auditCadastroLifecycle(
 const uuid = z.string().uuid();
 const money = z.number().int().nonnegative();
 const pct = z.number().min(0).max(100);
-const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const isoDate = z.string().refine(isIsoDay, { message: 'invalid_iso_day' });
 // Declared here rather than beside the sale schemas below because the product
 // default-payment block also uses it, and a `const` referenced above its own
 // declaration line would hit the temporal dead zone at module evaluation.
@@ -597,6 +598,7 @@ export type SalesOpsSnapshot = {
   saleProfessionals?: unknown[];
 };
 
+/** STORED civil day of a due_date/base_date value (UTC slice, the storage convention). Never pass the clock: "today" is saoPauloDayOf / todayInSaoPaulo. */
 function asDateOnly(value: string | Date): string {
   if (value instanceof Date) return value.toISOString().slice(0, 10);
   return value.slice(0, 10);
@@ -2419,7 +2421,7 @@ export async function createSale(
           label: r.label,
         })),
         // No `existingPayables`: a sale created straight into `won` has none.
-        wonDate: asDateOnly(now),
+        wonDate: saoPauloDayOf(now),
       });
       if (payables.length > 0) {
         await tx.insert(salesOpsPayables).values(
@@ -2554,6 +2556,7 @@ export async function transitionSale(
   orgId: string,
   saleId: string,
   to: TransitionTarget,
+  now: Date = new Date(),
 ): Promise<TransitionResult> {
   return withTenant(db, orgId, async (tx): Promise<TransitionResult> => {
     const [sale] = await tx
@@ -2568,7 +2571,6 @@ export async function transitionSale(
       return { ok: false, reason: 'invalid_transition', from: sale.status, to };
     }
 
-    const now = new Date();
     let patch: Partial<typeof salesOpsSales.$inferInsert>;
 
     if (to === 'won') {
@@ -2625,7 +2627,7 @@ export async function transitionSale(
           amountBrl: p.amountBrl,
           saleProfessionalId: p.saleProfessionalId,
         })),
-        wonDate: asDateOnly(now),
+        wonDate: saoPauloDayOf(now),
       });
 
       if (drafts.length > 0) {
@@ -2673,6 +2675,7 @@ export async function cancelContract(
   orgId: string,
   saleId: string,
   effectiveDate?: string,
+  now: Date = new Date(),
 ): Promise<CancelContractResult> {
   return withTenant(db, orgId, async (tx): Promise<CancelContractResult> => {
     const [sale] = await tx
@@ -2684,7 +2687,7 @@ export async function cancelContract(
     if (!sale) return { ok: false, reason: 'not_found' };
     if (sale.status !== 'won') return { ok: false, reason: 'not_cancellable' };
 
-    const effective = effectiveDate ?? new Date().toISOString().slice(0, 10);
+    const effective = effectiveDate ?? todayInSaoPaulo(now);
     const cutoff = dateFromIsoDay(effective);
 
     const future = await tx
