@@ -160,11 +160,13 @@ export const SEED_WRITE_ORDER = [
   'salesOpsSaleProfessionals',
   'salesOpsReceivables',
   'salesOpsPayables',
+  'salesOpsSettlements',
   'salesOpsLeads',
   'salesOpsLeadProducts',
 ] as const;
 
 export const SEED_DELETE_ORDER = [
+  'salesOpsSettlements',
   'salesOpsPayables',
   'salesOpsReceivables',
   'salesOpsSaleProfessionals',
@@ -417,6 +419,78 @@ export interface PayableRow {
   status: 'open' | 'paid' | 'void';
 }
 
+export interface SettlementRow {
+  id: string;
+  orgId: string;
+  saleId: string;
+  targetKind: 'receivable' | 'payable';
+  receivableId: string | null;
+  payableId: string | null;
+  type: 'baixa';
+  reversesSettlementId: null;
+  paidOn: string; // YYYY-MM-DD
+  amountBrl: number;
+  origin: 'manual';
+  actorUserId: string;
+  actorName: string;
+  recordedAt: string; // ISO date-time
+  reason: null;
+}
+
+export const SEED_SETTLEMENT_ACTOR_NAME = 'Seed de desenvolvimento';
+
+/** One synthetic baixa per paid ledger row with a positive amount, mirroring
+ *  migration 0024's backfill: amount = the row amount, paid_on = the row's due
+ *  day, actor 'system'. Pure: reads only its arguments. */
+export function buildSeedSettlements(
+  receivables: readonly ReceivableRow[],
+  payables: readonly PayableRow[],
+  cutoff: SeedCutoff,
+): SettlementRow[] {
+  const rows: SettlementRow[] = [];
+  for (const row of receivables) {
+    if (row.status !== 'paid' || row.amountBrl <= 0) continue;
+    rows.push({
+      id: deterministicUuid(`${row.orgId}:settlement:receivable:${row.id}`),
+      orgId: row.orgId,
+      saleId: row.saleId,
+      targetKind: 'receivable',
+      receivableId: row.id,
+      payableId: null,
+      type: 'baixa',
+      reversesSettlementId: null,
+      paidOn: row.dueDate.slice(0, 10),
+      amountBrl: row.amountBrl,
+      origin: 'manual',
+      actorUserId: 'system',
+      actorName: SEED_SETTLEMENT_ACTOR_NAME,
+      recordedAt: isoDateTime(cutoff.iso),
+      reason: null,
+    });
+  }
+  for (const row of payables) {
+    if (row.status !== 'paid' || row.amountBrl <= 0) continue;
+    rows.push({
+      id: deterministicUuid(`${row.orgId}:settlement:payable:${row.id}`),
+      orgId: row.orgId,
+      saleId: row.saleId,
+      targetKind: 'payable',
+      receivableId: null,
+      payableId: row.id,
+      type: 'baixa',
+      reversesSettlementId: null,
+      paidOn: row.dueDate.slice(0, 10),
+      amountBrl: row.amountBrl,
+      origin: 'manual',
+      actorUserId: 'system',
+      actorName: SEED_SETTLEMENT_ACTOR_NAME,
+      recordedAt: isoDateTime(cutoff.iso),
+      reason: null,
+    });
+  }
+  return rows;
+}
+
 export interface LeadRow {
   id: string;
   orgId: string;
@@ -461,6 +535,7 @@ export interface DevSeedPlan {
     salesOpsSaleProfessionals: readonly SaleProfessionalRow[];
     salesOpsReceivables: readonly ReceivableRow[];
     salesOpsPayables: readonly PayableRow[];
+    salesOpsSettlements: readonly SettlementRow[];
     salesOpsLeads: readonly LeadRow[];
     salesOpsLeadProducts: readonly LeadProductRow[];
   };
@@ -1583,6 +1658,8 @@ export function buildDevSeedPlan(input: {
     leadProducts.push(...org.leadProducts);
   }
 
+  const settlements = buildSeedSettlements(receivables, payables, input.cutoff);
+
   return {
     rows: {
       salesOpsSettings: settings,
@@ -1599,6 +1676,7 @@ export function buildDevSeedPlan(input: {
       salesOpsSaleProfessionals: saleProfessionals,
       salesOpsReceivables: receivables,
       salesOpsPayables: payables,
+      salesOpsSettlements: settlements,
       salesOpsLeads: leads,
       salesOpsLeadProducts: leadProducts,
     },
