@@ -74,3 +74,13 @@ The full reasoning lives in `nexo/plans/20260924T013019Z-finance-prereqs/00-OVER
 - 09: Closing a detail pops history when opened in-app and replaces the URL otherwise.
 - 09: The lead board's converted-card link now opens the proposta detail.
 - overview H7: One page-level mutation error surface (`MutationErrorBanner`); dialog errors stay in their dialog (plan-check).
+
+## Incidents
+
+- 2026-09-24 ~00:05-01:40 (-03): an account usage limit (HTTP 429) killed four live agents at once (wave-1 verify, slice 04 verify, slice 05 and 06 executors).
+  The wave-1 verify result never landed, so the wait inside `nexo-wave-exec.sh` hit its 3600 s timeout, which the script reads as a FAIL: it appended revert commits for all three merges and began the serial recovery (it had re-applied slice 01 when the orchestrator stopped its process group).
+  The FAIL was not real: every per-slice Gate 2 had passed and the verify agent's last output reported 233/233 integration tests green.
+  Repaired append-only (no reset, no force): `git revert` of the two remaining revert commits, giving master a tree byte-identical to the merged wave `bdbb450`; the wave-verify agent was resumed against that same tree.
+  The outage also consumed about 1.5 h of the run's 4 h active-time budget; the budget was NOT expanded, so the slices that cannot finish inside it are parked with reason `budget`.
+- Process gap found: a wave-verify wait timeout is indistinguishable from a real FAIL to `nexo-wave-exec.sh`; a lost dispatch (exit 3) should escalate, not revert.
+- Waves 2 (slice 04) and 3 (slices 05, 06) share ONE integrated full-suite wave-verify after wave 3 merges, to fit the budget left after the outage; slice 04 was merged with its per-slice Gate 2 PASS only.

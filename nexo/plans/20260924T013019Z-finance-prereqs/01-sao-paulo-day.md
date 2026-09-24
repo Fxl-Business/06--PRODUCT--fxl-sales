@@ -1,7 +1,7 @@
 ---
 id: 01-sao-paulo-day
 milestone: v4.1.0
-status: todo
+status: done
 depends_on: []
 files_modified: [packages/shared-utils/src/sao-paulo-day.ts, packages/shared-utils/src/index.ts, packages/shared-utils/package.json, packages/shared-utils/src/__tests__/sao-paulo-day.test.ts, apps/api/src/domains/sales-ops/service.ts, apps/api/src/domains/sales-ops/__tests__/sao-paulo-day-decisions.test.ts, apps/api/test/rls/sao-paulo-day.test.ts, apps/web/src/sales-ops/civil-day.ts, apps/web/src/sales-ops/calculations.ts, apps/web/src/sales-ops/SalesOpsApp.tsx, apps/web/src/sales-ops/__tests__/civil-day.test.ts, apps/web/src/sales-ops/__tests__/sale-detail-civil-day.test.tsx, CLAUDE.md, nexo/knowledge/reference/propostas.md]
 goal: "C1 São Paulo day helper in shared-utils, and every API/web 'today' decision and due-date display uses the São Paulo civil day with no one-day slip"

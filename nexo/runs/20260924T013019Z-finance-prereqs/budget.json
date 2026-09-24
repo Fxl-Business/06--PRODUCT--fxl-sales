@@ -2,7 +2,7 @@
   "active_accumulated_seconds": 0,
   "active_since": 1790213585,
   "counters": {
-    "agent_dispatches": 10,
+    "agent_dispatches": 26,
     "initial_slices": 9,
     "replans": 1,
     "total_slices": 9,
@@ -21,7 +21,14 @@
   },
   "paused": false,
   "scoped_counters": {
-    "verify_attempts": {}
+    "verify_attempts": {
+      "01-sao-paulo-day": 1,
+      "02-liquidacao-reducer": 1,
+      "03-ledger-schema": 2,
+      "04-update-sale-in-place": 1,
+      "05-wizard-row-ids": 1,
+      "06-settlements-api": 1
+    }
   },
   "version": 1
 }

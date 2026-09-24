@@ -1,7 +1,7 @@
 ---
 id: 04-update-sale-in-place
 milestone: v4.1.0
-status: todo
+status: done
 depends_on: [01-sao-paulo-day, 02-liquidacao-reducer, 03-ledger-schema]
 files_modified: [apps/api/src/domains/sales-ops/ledger-reconcile.ts, apps/api/src/domains/sales-ops/ledger-revision.ts, apps/api/src/domains/sales-ops/ledger-dates.ts, apps/api/src/domains/sales-ops/settlement-locks.ts, apps/api/src/domains/sales-ops/sale-edit-writes.ts, apps/api/src/domains/sales-ops/service.ts, apps/api/src/domains/sales-ops/routes.ts, apps/api/src/domains/sales-ops/leads/lead-service.ts, apps/api/src/domains/sales-ops/__tests__/ledger-reconcile.test.ts, apps/api/src/domains/sales-ops/__tests__/settlement-locks.test.ts, apps/api/src/domains/sales-ops/__tests__/update-sale-schema.test.ts, apps/api/src/domains/sales-ops/__tests__/service.test.ts, apps/api/src/domains/sales-ops/__tests__/routes.test.ts, apps/api/test/rls/update-sale-in-place.test.ts, apps/api/test/rls/proposal-write.test.ts, CLAUDE.md, nexo/knowledge/reference/propostas.md]
 goal: "PUT /sales/:id reconciles items, professionals, receivables and (on won) payables in place by the ids the payload carries, voids or soft-removes what left the plan, refuses with 409 row_has_active_settlement when a settled row would change, and bumps revision only on a real change."

@@ -1,7 +1,7 @@
 ---
 id: 05-wizard-row-ids
 milestone: v4.1.0
-status: todo
+status: done
 depends_on: [04-update-sale-in-place]
 files_modified: [apps/web/src/sales-ops/row-identity.ts, apps/web/src/sales-ops/sale-save-error.ts, apps/web/src/sales-ops/types.ts, apps/web/src/sales-ops/calculations.ts, apps/web/src/sales-ops/SalesOpsApp.tsx, apps/web/src/lib/api-client.ts, apps/web/src/lib/__tests__/api-client-token-guard.test.ts, apps/web/src/sales-ops/__tests__/row-identity.test.ts, apps/web/src/sales-ops/__tests__/sale-save-error.test.ts, apps/web/src/sales-ops/__tests__/sale-wizard-row-ids.test.tsx, apps/web/src/sales-ops/__tests__/sale-wizard-save-error.test.tsx, apps/web/src/sales-ops/__tests__/sale-wizard-edit.test.tsx, apps/web/src/sales-ops/__tests__/sales-transition-actions.test.tsx, CLAUDE.md, nexo/knowledge/reference/propostas.md]
 goal: "The proposta wizard carries the persisted id of every item, professional, installment and recurring row it loaded through every edit and sends it back on PUT, opens a won proposta for edit, and names the blocking row of a 409 row_has_active_settlement inside the still-open wizard."

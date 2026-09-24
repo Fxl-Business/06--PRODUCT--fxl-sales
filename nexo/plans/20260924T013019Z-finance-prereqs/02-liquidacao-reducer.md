@@ -1,7 +1,7 @@
 ---
 id: 02-liquidacao-reducer
 milestone: v4.1.0
-status: todo
+status: done
 depends_on: []
 files_modified: [packages/shared-utils/src/liquidacao.ts, packages/shared-utils/src/__tests__/liquidacao.test.ts, packages/shared-utils/src/index.ts, packages/shared-utils/package.json, CLAUDE.md, nexo/knowledge/reference/propostas.md]
 goal: "Pure settlement reducer reduzirLiquidacao (Finance parity) plus pure pre-write validators validarNovaBaixa / validarEstorno in packages/shared-utils/src/liquidacao.ts, exported as @fxl-sales/shared-utils/liquidacao and from the root index."

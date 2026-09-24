@@ -1,7 +1,7 @@
 ---
 id: 06-settlements-api
 milestone: v4.1.0
-status: todo
+status: done
 depends_on: [04-update-sale-in-place]
 files_modified: [apps/api/src/domains/sales-ops/settlements.ts, apps/api/src/domains/sales-ops/routes.ts, apps/api/src/domains/sales-ops/service.ts, apps/api/src/domains/sales-ops/__tests__/settlements.test.ts, apps/api/src/domains/sales-ops/__tests__/settlements.integration.test.ts, apps/api/src/domains/sales-ops/__tests__/sale-transitions.integration.test.ts, apps/api/src/domains/sales-ops/__tests__/transition-routes.test.ts, CLAUDE.md, nexo/knowledge/reference/propostas.md]
 goal: "Settlement API (C6): admin-only baixa, estorno and history routes over the immutable ledger, reducer-backed paid cache with revision bumps, leave-won lock (C5) and cancel-contract lock (H5), bootstrap rows gain revision, updatedAt and paidOn."

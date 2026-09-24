@@ -1,7 +1,7 @@
 ---
 id: 03-ledger-schema
 milestone: v4.1.0
-status: todo
+status: done
 depends_on: []
 files_modified: [apps/api/drizzle/0024_sales_ops_settlements.sql, apps/api/drizzle/meta/_journal.json, apps/api/drizzle/meta/0024_snapshot.json, apps/api/src/db/schema.ts, apps/api/src/db/__tests__/settlements-schema-contract.test.ts, apps/api/src/db/__tests__/settlement-test-cleanup.ts, apps/api/test/rls/scratch-database.ts, apps/api/test/rls/settlements-schema.test.ts, apps/api/test/rls/settlements-schema-migration.test.ts, apps/api/scripts/seed/plan.ts, apps/api/scripts/seed-dev.ts, apps/api/scripts/__tests__/seed-plan.test.ts, CLAUDE.md, nexo/knowledge/reference/propostas.md]
 goal: "Contract C3 as one ordinary migration 0024_sales_ops_settlements: revision and updated_at on receivables and payables, removed_at on sale items and sale professionals, the immutable FORCE-RLS sales_ops_settlements table, and one synthetic baixa per pre-existing paid row, with the Drizzle mirror, the dev seed and the test cleanup kept coherent."

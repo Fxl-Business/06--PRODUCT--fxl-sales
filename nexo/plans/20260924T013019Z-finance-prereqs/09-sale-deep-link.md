@@ -1,7 +1,7 @@
 ---
 id: 09-sale-deep-link
 milestone: v4.1.0
-status: todo
+status: parked
 depends_on: [08-settlements-ui]
 files_modified: [apps/web/src/sales-ops/navigation.ts, apps/web/src/router.tsx, apps/web/src/sales-ops/SalesOpsApp.tsx, apps/web/src/sales-ops/__tests__/navigation.test.ts, apps/web/src/sales-ops/__tests__/sale-deep-link.test.tsx, apps/web/src/sales-ops/__tests__/sales-view.test.tsx, apps/web/src/sales-ops/__tests__/sales-transition-actions.test.tsx, apps/web/src/__tests__/sale-deep-link-route.test.ts, apps/web/src/__tests__/session-journey.test.tsx, apps/web/src/auth/__tests__/session-recovery.test.ts, CLAUDE.md, nexo/knowledge/reference/sales-ops-routing.md]
 goal: "C8: /operacional/vendas/:saleId opens that proposta's detail from the URL, including cold entry through login, with a pt-BR not-found state and the URL as the only source of the open detail"

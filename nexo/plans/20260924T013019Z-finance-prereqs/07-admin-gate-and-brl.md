@@ -1,7 +1,7 @@
 ---
 id: 07-admin-gate-and-brl
 milestone: v4.1.0
-status: todo
+status: parked
 depends_on: [05-wizard-row-ids, 06-settlements-api]
 files_modified: [apps/api/src/middleware/require-admin.ts, apps/api/src/domains/sales-ops/routes.ts, apps/api/src/domains/sales-ops/service.ts, apps/api/src/domains/sales-ops/__tests__/financial-admin-gate.test.ts, apps/api/src/domains/sales-ops/__tests__/routes.test.ts, apps/api/src/domains/sales-ops/__tests__/transition-routes.test.ts, apps/web/src/sales-ops/api.ts, apps/web/src/sales-ops/SalesOpsApp.tsx, apps/web/src/sales-ops/mutation-error-copy.ts, apps/web/src/sales-ops/MutationErrorBanner.tsx, apps/web/src/sales-ops/__tests__/settings-currency-brl.test.tsx, apps/web/src/sales-ops/__tests__/mutation-error-banner.test.tsx, apps/web/src/sales-ops/__tests__/financial-mutation-forbidden.test.tsx, apps/web/src/sales-ops/sale-save-error.ts, apps/web/src/sales-ops/__tests__/sale-save-error.test.ts, CLAUDE.md, nexo/knowledge/reference/propostas.md, nexo/knowledge/reference/auth-model.md]
 goal: "PC23 admin gate on the financial proposta and settings routes (POST /sales stays open except status won), a pt-BR in-page error for a 403 on those mutations, and currency locked to BRL in API and UI"

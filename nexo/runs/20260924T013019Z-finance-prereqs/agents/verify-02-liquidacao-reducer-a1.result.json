@@ -1,0 +1,1 @@
+{"agent":"verify","slice":"02-liquidacao-reducer","status":"PASS","done":true,"summary":"66/66 oracle tests and full shared-utils suite (155) pass, type-check/build/build-contract/lint clean, 3 mutations each killed a named test and were reverted, exports/docs match plan and Finance parity.","findings":[]}
