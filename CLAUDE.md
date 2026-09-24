@@ -182,9 +182,6 @@ Statuses and payables:
 - Leaving `won` voids only `open` payables and receivables, never `paid` ones.
 - Receivable labels `N/M` and `MN/M` are load-bearing (`deriveWizardPrefill` parses the `M`).
 - `sales_ops_settings.commission_on_recurring` is dead; commissions are generated for every non-void receivable.
-- `reduzirLiquidacao` in `packages/shared-utils/src/liquidacao.ts` is the ONE settlement rule and mirrors the Finance reducer: a baixa is active while no estorno cites it, paid is the sum of active baixas, and the displayed date is the GREATEST active date.
-- `validarNovaBaixa` and `validarEstorno` in the same file are the only pre-write settlement checks; they take today as an argument and never read the clock. Web imports the `/liquidacao` subpath, never the root.
-- `liquidacao.ts` imports nothing; its parity table in `liquidacao.test.ts` must change in the same change as any Finance rule change.
 
 Professional split:
 - `cost_split_bp` is 1..120 basis points summing to exactly 10000 (enforced in `SaleProfessionalSchema`); `NULL` means pro rata. Parts bind front-aligned to installments in due-date order.
