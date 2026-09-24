@@ -656,6 +656,7 @@ describe('sales_ops_settlements schema (migration 0024)', () => {
     // saleA2's receivable carries no settlement, so it and the sale are still
     // referenced only by each other - prove the RESTRICT fk is real here too.
     void receivableA2;
+    void saleB;
   });
 
   it("deleteSettlementsForOrgs removes one org's settlements and leaves another org untouched", async () => {
