@@ -4,21 +4,28 @@
        migrate db-up db-down db-reset db-seed docker-up docker-down docker-build \
        clean preview help doctor
 
-# A bare `make` lists every target, grouped by section, so the development
-# identity targets (dev-fake and friends) are always one keystroke away.
-.DEFAULT_GOAL := help
+# A bare `make` is the numbered selector over the ways to run the app, the
+# development-identity ones included. `make help` lists every target. Staging is
+# deliberately absent from the selector: it is opt-in by name (`make stg`).
+.DEFAULT_GOAL := dev
 
 # --- Development ---
 
-dev: ## Interactive app selector - pick api or web to run
+dev: ## Interactive run selector (the default goal) - api, web, or either without the Hub
 	@printf "Which app do you want to run?\n"
-	@printf "  1) api     (http://localhost:3006)\n"
-	@printf "  2) web     (http://localhost:8006)\n"
-	@printf "Selection [1-2]: "
+	@printf "  1) api            (http://localhost:3006)\n"
+	@printf "  2) web            (http://localhost:8006)\n"
+	@printf "  3) dev-fake       api + web, no Hub\n"
+	@printf "  4) back-fake      api only, no Hub\n"
+	@printf "  5) front-fake     web only, no Hub\n"
+	@printf "Selection [1-5]: "
 	@read choice; \
 	case "$$choice" in \
 		1) $(MAKE) back ;; \
 		2) $(MAKE) front ;; \
+		3) $(MAKE) dev-fake ;; \
+		4) $(MAKE) back-fake ;; \
+		5) $(MAKE) front-fake ;; \
 		*) echo "Invalid choice: $$choice"; exit 1 ;; \
 	esac
 
@@ -199,7 +206,7 @@ clean: ## Remove all node_modules and build artifacts
 
 # Section headers are the `# --- Name ---` lines above; a target shows up when
 # its line carries a `## description`.
-help: ## Show this help (the default goal)
+help: ## Show this help
 	@awk '/^# --- .* ---$$/ { sub(/^# --- /, ""); sub(/ ---$$/, ""); printf "\n\033[1m%s\033[0m\n", $$0; next } \
 	/^[a-zA-Z_-]+:.*## / { split($$0, parts, "## "); target = $$0; sub(/:.*/, "", target); \
 	printf "  \033[36m%-15s\033[0m %s\n", target, parts[2] }' $(MAKEFILE_LIST)
