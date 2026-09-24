@@ -313,6 +313,8 @@ export type DashboardModel = {
 };
 
 export type SaleDraftItem = {
+  /** The persisted item id on an edit; `null` or absent is a new row. */
+  id?: string | null;
   productId?: string;
   areaId?: string;
   productName: string;
@@ -322,6 +324,8 @@ export type SaleDraftItem = {
 };
 
 export type SaleDraftProfessional = {
+  /** The persisted professional id on an edit; `null` or absent is a new row. */
+  id?: string | null;
   personId?: string;
   personName: string;
   funcaoId?: string;
@@ -339,12 +343,17 @@ export type SaleDraftProfessional = {
   costSplitBp?: number[] | null;
 };
 
-export type SaleDraftInstallment = { dueDate: string; amountBrl: string | number; method: PaymentMethod };
+export type SaleDraftInstallment = {
+  /** The persisted receivable id on an edit; `null` or absent is a new row. */
+  id?: string | null;
+  dueDate: string; amountBrl: string | number; method: PaymentMethod };
 export type SaleDraftRecurring = {
   monthlyBrl: string | number;
   startDate: string;
   cycles: number | null;
   method?: PaymentMethod;
+  /** The stored non-void `M` receivable ids in cycle order (edit path only). */
+  receivableIds?: string[];
 };
 
 export type SaleDraft = {
@@ -367,6 +376,10 @@ export type SaleDraft = {
   professionals: SaleDraftProfessional[];
 };
 
+/**
+ * `id` fields are sent only on `PUT /sales/:id`; an absent `id` is a new row.
+ * The API never matches by `label`.
+ */
 export type CreateSalePayload = {
   clientId?: string;
   clientName: string;
@@ -381,9 +394,16 @@ export type CreateSalePayload = {
   finderCommissionPct: number;
   taxPct: number;
   otherCostsBrl: number;
-  installments: Array<{ dueDate: string; amountBrl: number; method: PaymentMethod }>;
-  recurring: { monthlyBrl: number; startDate: string; cycles: number | null; method?: PaymentMethod } | null;
+  installments: Array<{ id?: string; dueDate: string; amountBrl: number; method: PaymentMethod }>;
+  recurring: {
+    monthlyBrl: number;
+    startDate: string;
+    cycles: number | null;
+    method?: PaymentMethod;
+    receivableIds?: string[];
+  } | null;
   items: Array<{
+    id?: string;
     productId?: string;
     areaId?: string;
     productName: string;
@@ -392,6 +412,7 @@ export type CreateSalePayload = {
     unitBrl: number;
   }>;
   professionals: Array<{
+    id?: string;
     personId?: string;
     personName: string;
     funcaoId?: string;
