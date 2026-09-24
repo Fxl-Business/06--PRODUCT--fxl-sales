@@ -130,6 +130,7 @@ import { SPLIT_BP_TOTAL } from '@fxl-sales/shared-utils/professional-split';
 import { CadastroHistorySection } from './CadastroHistoryPanel';
 import { ForbiddenPanel } from './ForbiddenPanel';
 import { MissingEntitlementPanel } from './MissingEntitlementPanel';
+import { displayDate, inputDateToday } from './civil-day';
 import { ProfessionalSplitPanel } from './ProfessionalSplitPanel';
 import { buildLeadConversionPrefill, findClientByName } from './leads/conversion';
 import type { LeadConversionItem, LeadConversionPrefill } from './leads/conversion';
@@ -145,7 +146,6 @@ import {
   describeFuncaoCostBasis,
   describeProfessionalCostBase,
   entradaCentsFor,
-  formatIsoDateBr,
   formatMoneyBrl,
   FUNCAO_SLUG_FINDER,
   FUNCAO_SLUG_VENDEDOR,
@@ -702,19 +702,6 @@ function CadastroArchiveConfirm({
       </AlertDialogContent>
     </AlertDialog>
   );
-}
-
-function dateOnly(value: string) {
-  return value.slice(0, 10);
-}
-
-/** Accepts a timestamp or a date-only string; `formatIsoDateBr` owns the formatting. */
-function displayDate(value: string) {
-  return formatIsoDateBr(dateOnly(value));
-}
-
-function inputDateToday() {
-  return new Date().toISOString().slice(0, 10);
 }
 
 function parseCurrencyToCents(value: string | number | undefined): number {
