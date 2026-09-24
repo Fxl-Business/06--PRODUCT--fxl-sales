@@ -13,8 +13,9 @@ import { test } from 'node:test';
  * tailnet or a Docker network could open the app - and under `make dev-fake`
  * enter it as `team-owner` with no login at all.
  *
- * It also pins the operator's entry point: a bare `make` prints the grouped
- * target list, so the development-identity targets are always discoverable.
+ * It also pins the operator's entry point: a bare `make` is the numbered run
+ * selector (development-identity targets included), and `make help` prints the
+ * grouped list of every target.
  */
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -49,15 +50,32 @@ test('the containerised API listens on every interface INSIDE its container', ()
   assert.match(read('docker-compose.yml'), /^\s*- SALES_LISTEN_HOST=0\.0\.0\.0$/m);
 });
 
-test('a bare `make` prints every target, the development-identity ones included', () => {
-  const run = spawnSync('make', ['--no-print-directory'], { cwd: ROOT, encoding: 'utf8' });
+test('a bare `make` opens the numbered selector over exactly the five ways to run the app', () => {
+  // Empty stdin makes the prompt's `read` fail, so the selector prints its menu
+  // and exits non-zero without starting anything.
+  const run = spawnSync('make', ['--no-print-directory'], { cwd: ROOT, encoding: 'utf8', input: '' });
+  const options = [...run.stdout.matchAll(/^\s+(\d)\)\s+(\S+)/gm)].map((m) => [m[1], m[2]]);
+  assert.deepEqual(options, [
+    ['1', 'api'],
+    ['2', 'web'],
+    ['3', 'dev-fake'],
+    ['4', 'back-fake'],
+    ['5', 'front-fake'],
+  ]);
+  assert.match(run.stdout, /Selection \[1-5\]:/);
+  // Staging is opt-in by name only (`make stg`), never from the default menu.
+  assert.doesNotMatch(run.stdout, /stg|staging/i);
+});
+
+test('`make help` prints every target, the development-identity ones included', () => {
+  const run = spawnSync('make', ['--no-print-directory', 'help'], { cwd: ROOT, encoding: 'utf8' });
   assert.equal(run.status, 0, run.stderr);
   const plain = run.stdout.replace(/\x1b\[[0-9;]*m/g, '');
   const makefile = read('Makefile');
   const documented = [...makefile.matchAll(/^([a-zA-Z_-]+):.*?## /gm)].map((m) => m[1]);
   assert.ok(documented.length > 20, `expected the full target list, found ${documented.length}`);
   for (const target of documented) {
-    assert.match(plain, new RegExp(`^\\s+${target}\\s`, 'm'), `bare make does not list ${target}`);
+    assert.match(plain, new RegExp(`^\\s+${target}\\s`, 'm'), `make help does not list ${target}`);
   }
   for (const target of ['dev-fake', 'back-fake', 'front-fake', 'dev-fake-setup']) {
     assert.ok(documented.includes(target), `${target} lost its ## description`);
