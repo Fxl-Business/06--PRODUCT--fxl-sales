@@ -5,7 +5,8 @@ import {
   resolveProfessionalSplit,
 } from '@fxl-sales/shared-utils';
 import { isIsoDay, saoPauloDayOf, todayInSaoPaulo } from '@fxl-sales/shared-utils/sao-paulo-day';
-import { and, asc, desc, eq, gt, inArray, ne, sql, type SQL } from 'drizzle-orm';
+import { randomUUID } from 'node:crypto';
+import { and, asc, desc, eq, gt, inArray, isNull, ne, sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { getDb } from '../../db/client.js';
 import {
@@ -25,6 +26,17 @@ import {
 } from '../../db/schema.js';
 import { setTenantContext } from '../../middleware/auth.js';
 import { writeAuditEntry, type CadastroEntityType } from '../audit/service.js';
+import { asDateOnly, dateFromIsoDay } from './ledger-dates.js';
+import {
+  checkEditableStatusChange,
+  findUnknownRowId,
+  liveRowIds,
+  planSaleEdit,
+  type BlockedLedgerRow,
+} from './ledger-reconcile.js';
+import { payableRevisionBump, receivableRevisionBump } from './ledger-revision.js';
+import { applySaleEditPlan, loadSaleEditState } from './sale-edit-writes.js';
+import { activeSettlementTargetIds } from './settlement-locks.js';
 
 export type Db = ReturnType<typeof getDb>;
 type Tx = { execute: (query: SQL) => Promise<unknown> };
@@ -451,23 +463,29 @@ export const SaleRecurringSchema = z.object({
   method: MethodSchema.default('pix'),
 });
 
-export const SaleItemSchema = z
-  .object({
+const SaleItemFieldsSchema = z.object({
     productId: uuid.optional(),
     productName: z.string().trim().min(1).max(140),
     areaId: uuid.optional(),
     quantity: z.number().int().positive(),
     unitBrl: money,
-  })
-  .superRefine((item, ctx) => {
-    if (!item.productId && !item.areaId) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['areaId'],
-        message: 'areaId is required when productId is absent',
-      });
-    }
-  });
+});
+
+function refineSaleItem(item: z.infer<typeof SaleItemFieldsSchema>, ctx: z.RefinementCtx): void {
+  if (!item.productId && !item.areaId) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['areaId'],
+      message: 'areaId is required when productId is absent',
+    });
+  }
+}
+
+export const SaleItemSchema = SaleItemFieldsSchema.superRefine(refineSaleItem);
+/** `id` names the live item row this entry edits; absent means a new row. */
+export const UpdateSaleItemSchema = SaleItemFieldsSchema.extend({ id: uuid.optional() }).superRefine(
+  refineSaleItem,
+);
 
 /**
  * `funcaoNameSnapshot` is deliberately absent: the snapshot is derived server-side
@@ -475,8 +493,7 @@ export const SaleItemSchema = z
  * proposta stores. `role` stays accepted but optional, which keeps a legacy
  * free-text payload legal while a funcaoId-only payload becomes legal too.
  */
-export const SaleProfessionalSchema = z
-  .object({
+const SaleProfessionalFieldsSchema = z.object({
     personId: uuid.optional(),
     personName: z.string().min(1),
     funcaoId: uuid.optional(),
@@ -490,26 +507,46 @@ export const SaleProfessionalSchema = z
       parcelas it binds to.
     */
     costSplitBp: z.array(z.number().int().min(0).max(10_000)).min(1).max(120).nullish(),
-  })
-  .superRefine((row, ctx) => {
-    if (!row.funcaoId && !row.role?.trim()) {
+});
+
+function refineSaleProfessional(
+  row: z.infer<typeof SaleProfessionalFieldsSchema>,
+  ctx: z.RefinementCtx,
+): void {
+  if (!row.funcaoId && !row.role?.trim()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['funcaoId'],
+      message: 'funcao_or_role_required',
+    });
+  }
+  if (row.costSplitBp) {
+    const total = row.costSplitBp.reduce((sum, part) => sum + part, 0);
+    if (total !== 10_000) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ['funcaoId'],
-        message: 'funcao_or_role_required',
+        path: ['costSplitBp'],
+        message: 'cost_split_sum_mismatch',
       });
     }
-    if (row.costSplitBp) {
-      const total = row.costSplitBp.reduce((sum, part) => sum + part, 0);
-      if (total !== 10_000) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ['costSplitBp'],
-          message: 'cost_split_sum_mismatch',
-        });
-      }
-    }
-  });
+  }
+}
+
+export const SaleProfessionalSchema = SaleProfessionalFieldsSchema.superRefine(refineSaleProfessional);
+/** `id` names the live sale professional row this entry edits; absent means a new row. */
+export const UpdateSaleProfessionalSchema = SaleProfessionalFieldsSchema.extend({
+  id: uuid.optional(),
+}).superRefine(refineSaleProfessional);
+
+/** `id` names the live receivable this installment edits; absent means a new row. */
+export const UpdateSaleInstallmentSchema = SaleInstallmentSchema.extend({ id: uuid.optional() });
+/**
+ * `receivableIds[i]` is the live receivable of cycle `i + 1`. Never more ids than
+ * `cycles` (none for an indefinite recorrencia); unlisted live rows become void.
+ */
+export const UpdateSaleRecurringSchema = SaleRecurringSchema.extend({
+  receivableIds: z.array(uuid).max(120).optional(),
+});
 
 function validatePaymentPlan(
   data: {
@@ -551,9 +588,58 @@ const SaleWriteBaseSchema = z.object({
 
 export const CreateSaleSchema = SaleWriteBaseSchema.superRefine(validatePaymentPlan);
 
+/**
+ * Row identity for an in-place edit (PC2): every id is unique within its array,
+ * installments and recurring rows share one id space (both are receivables),
+ * and the recurring block never names more rows than it has cycles.
+ */
+function validateRowIds(
+  data: {
+    items: Array<{ id?: string }>;
+    professionals: Array<{ id?: string }>;
+    installments: Array<{ id?: string }>;
+    recurring?: { cycles: number | null; receivableIds?: string[] } | null;
+  },
+  ctx: z.RefinementCtx,
+): void {
+  const duplicate = (path: Array<string | number>) =>
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path, message: 'duplicate_row_id' });
+  const scan = (ids: Array<string | undefined>, seen: Set<string>, pathOf: (i: number) => Array<string | number>) => {
+    ids.forEach((id, index) => {
+      if (id === undefined) return;
+      if (seen.has(id)) duplicate(pathOf(index));
+      seen.add(id);
+    });
+  };
+  scan(data.items.map((row) => row.id), new Set(), (i) => ['items', i, 'id']);
+  scan(data.professionals.map((row) => row.id), new Set(), (i) => ['professionals', i, 'id']);
+  const receivableIds = new Set<string>();
+  scan(data.installments.map((row) => row.id), receivableIds, (i) => ['installments', i, 'id']);
+  const recurringIds = data.recurring?.receivableIds ?? [];
+  scan(recurringIds, receivableIds, (i) => ['recurring', 'receivableIds', i]);
+  if (recurringIds.length > (data.recurring?.cycles ?? 0)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['recurring', 'receivableIds'],
+      message: 'recurring_ids_exceed_cycles',
+    });
+  }
+}
+
+/**
+ * `PUT /sales/:id`. `won` is accepted so a won proposta can be saved as won;
+ * moving into or out of `won` through PUT is refused by `updateSale`
+ * (`invalid_status_change`), because the transition route owns it.
+ */
 export const UpdateSaleSchema = SaleWriteBaseSchema.extend({
-  status: z.enum(['draft', 'open']),
-}).superRefine(validatePaymentPlan);
+  status: z.enum(['draft', 'open', 'won']),
+  items: z.array(UpdateSaleItemSchema).min(1),
+  professionals: z.array(UpdateSaleProfessionalSchema).default([]),
+  installments: z.array(UpdateSaleInstallmentSchema).min(1).max(120),
+  recurring: UpdateSaleRecurringSchema.nullish(),
+})
+  .superRefine(validatePaymentPlan)
+  .superRefine(validateRowIds);
 
 export const SaleTransitionSchema = z.object({
   status: z.enum(['open', 'won', 'lost', 'cancelled']),
@@ -597,16 +683,6 @@ export type SalesOpsSnapshot = {
   receivables?: unknown[];
   saleProfessionals?: unknown[];
 };
-
-/** STORED civil day of a due_date/base_date value (UTC slice, the storage convention). Never pass the clock: "today" is saoPauloDayOf / todayInSaoPaulo. */
-function asDateOnly(value: string | Date): string {
-  if (value instanceof Date) return value.toISOString().slice(0, 10);
-  return value.slice(0, 10);
-}
-
-function dateFromIsoDay(value: string): Date {
-  return new Date(`${value}T00:00:00.000Z`);
-}
 
 function addMonths(value: string, months: number): string {
   const [yearRaw, monthRaw, dayRaw] = value.split('-').map(Number);
@@ -709,10 +785,16 @@ export class SaleInputError extends Error {
       | 'seller_not_found'
       | 'finder_not_found'
       | 'person_not_found'
-      | 'funcao_not_found',
+      | 'funcao_not_found'
+      | 'item_not_found'
+      | 'professional_not_found'
+      | 'installment_not_found'
+      | 'recurring_row_not_found',
     /**
      * The offending `items[]` index, or the offending `professionals[]` index for
-     * `person_not_found` / `funcao_not_found`. `-1` means the error is not about
+     * `person_not_found` / `funcao_not_found` / `professional_not_found`, or the
+     * `installments[]` / `recurring.receivableIds[]` index for
+     * `installment_not_found` / `recurring_row_not_found`. `-1` means the error is not about
      * an array row at all, which is the case for `seller_not_found` and
      * `finder_not_found`.
      */
@@ -859,6 +941,8 @@ async function resolvePartyContexts(
 }
 
 export type ReceivableDraft = {
+  /** The live receivable this row edits (`installments[].id`, `recurring.receivableIds[i]`); null is a new row. Never inserted. */
+  sourceId: string | null;
   label: string;
   dueDate: string;
   amountBrl: number;
@@ -873,7 +957,7 @@ export const EMPTY_PARTY_CONTEXTS: ResolvedPartyContexts = {
 };
 
 export function buildSaleLedger(
-  input: CreateSaleInput,
+  input: UpdateSaleInput,
   itemContexts: ResolvedItemContext[],
   parties: ResolvedPartyContexts = EMPTY_PARTY_CONTEXTS,
 ) {
@@ -885,6 +969,7 @@ export function buildSaleLedger(
 
   const keptInstallments = input.installments.filter((row) => row.amountBrl > 0);
   const receivables: ReceivableDraft[] = keptInstallments.map((row, index) => ({
+    sourceId: row.id ?? null,
     label: `${index + 1}/${keptInstallments.length}`,
     dueDate: row.dueDate,
     amountBrl: row.amountBrl,
@@ -896,6 +981,7 @@ export function buildSaleLedger(
   if (recurring && recurring.cycles !== null) {
     for (let i = 0; i < recurring.cycles; i++) {
       receivables.push({
+        sourceId: recurring.receivableIds?.[i] ?? null,
         label: `M${i + 1}/${recurring.cycles}`,
         dueDate: addMonths(recurring.startDate, i),
         amountBrl: recurring.monthlyBrl,
@@ -2378,10 +2464,13 @@ export async function createSale(
         .insert(salesOpsReceivables)
         .values(
           ledger.receivables.map((receivable) => ({
-            ...receivable,
+            label: receivable.label,
+            dueDate: dateFromIsoDay(receivable.dueDate),
+            amountBrl: receivable.amountBrl,
+            method: receivable.method,
+            status: receivable.status,
             orgId,
             saleId: sale.id,
-            dueDate: dateFromIsoDay(receivable.dueDate),
           })),
         )
         .returning({
@@ -2442,43 +2531,88 @@ export async function createSale(
 export type UpdateSaleResult =
   | { ok: true; sale: typeof salesOpsSales.$inferSelect; ledger: SaleLedger }
   | { ok: false; reason: 'not_found' }
-  | { ok: false; reason: 'not_editable'; status: string };
+  | { ok: false; reason: 'not_editable'; status: string }
+  | { ok: false; reason: 'invalid_status_change'; from: string; to: string }
+  | { ok: false; reason: 'row_has_active_settlement'; rows: BlockedLedgerRow[] };
 
+/**
+ * Edits a proposta IN PLACE (PC2). Rows are reconciled by the ids the payload
+ * carries by the pure `planSaleEdit`; nothing is deleted. The settlement lock is
+ * evaluated on the whole plan before the first write, so a refusal changes
+ * nothing, not even the sale row.
+ */
 export async function updateSale(
   db: Db,
   orgId: string,
   saleId: string,
   input: UpdateSaleInput,
+  now: Date = new Date(),
 ): Promise<UpdateSaleResult> {
   return withTenant(db, orgId, async (tx): Promise<UpdateSaleResult> => {
     const [existing] = await tx
       .select()
       .from(salesOpsSales)
       .where(and(eq(salesOpsSales.orgId, orgId), eq(salesOpsSales.id, saleId)))
+      .for('update')
       .limit(1);
     if (!existing) return { ok: false, reason: 'not_found' };
-    if (existing.status === 'won' || existing.status === 'lost' || existing.status === 'cancelled') {
+    const gate = checkEditableStatusChange(existing.status, input.status);
+    if (!gate.ok && gate.reason === 'not_editable') {
       return { ok: false, reason: 'not_editable', status: existing.status };
+    }
+    if (!gate.ok) {
+      return { ok: false, reason: 'invalid_status_change', from: existing.status, to: input.status };
     }
 
     const itemContexts = await resolveSaleItemContexts(tx, orgId, input.items);
     const parties = await resolvePartyContexts(tx, orgId, input);
     const ledger = buildSaleLedger(input, itemContexts, parties);
 
-    await tx
-      .delete(salesOpsPayables)
-      .where(and(eq(salesOpsPayables.orgId, orgId), eq(salesOpsPayables.saleId, saleId)));
-    await tx
-      .delete(salesOpsReceivables)
-      .where(and(eq(salesOpsReceivables.orgId, orgId), eq(salesOpsReceivables.saleId, saleId)));
-    await tx
-      .delete(salesOpsSaleProfessionals)
-      .where(
-        and(eq(salesOpsSaleProfessionals.orgId, orgId), eq(salesOpsSaleProfessionals.saleId, saleId)),
-      );
-    await tx
-      .delete(salesOpsSaleItems)
-      .where(and(eq(salesOpsSaleItems.orgId, orgId), eq(salesOpsSaleItems.saleId, saleId)));
+    const state = await loadSaleEditState(tx, orgId, saleId);
+    const unknown = findUnknownRowId(input, liveRowIds(state));
+    if (unknown) throw new SaleInputError(unknown.code, unknown.index);
+    const active = activeSettlementTargetIds(state.settlements);
+    const wonDate = saoPauloDayOf(existing.wonAt ?? now);
+
+    const plan = planSaleEdit({
+      state,
+      desiredItems: ledger.items.map((row, i) => ({ sourceId: input.items[i]?.id ?? null, row })),
+      desiredProfessionals: ledger.professionals.map((row, i) => ({
+        sourceId: input.professionals[i]?.id ?? null,
+        row,
+      })),
+      desiredReceivables: ledger.receivables,
+      // Payables exist only on a won proposta; a draft or open edit leaves them alone.
+      derivePayables:
+        existing.status === 'won'
+          ? ({ receivables, professionalIds }) =>
+              materializeWonPayables({
+                sale: {
+                  sellerName: ledger.sale.sellerNameSnapshot,
+                  finderName: ledger.sale.finderNameSnapshot,
+                  hasFinder: input.finderPersonId != null,
+                  sellerCommissionPct: input.sellerCommissionPct,
+                  finderCommissionPct: input.finderCommissionPct,
+                  taxPct: input.taxPct,
+                  otherCostsBrl: input.otherCostsBrl,
+                },
+                professionals: ledger.professionals.map((p, i) => ({
+                  id: professionalIds[i]!,
+                  personName: p.personNameSnapshot,
+                  costBrl: p.costBrl,
+                  costSplitBp: p.costSplitBp,
+                })),
+                receivables,
+                wonDate,
+              })
+          : null,
+      activeReceivableIds: active.receivableIds,
+      activePayableIds: active.payableIds,
+      newId: randomUUID,
+    });
+    if (plan.blocked.length > 0) {
+      return { ok: false, reason: 'row_has_active_settlement', rows: plan.blocked };
+    }
 
     const [sale] = await tx
       .update(salesOpsSales)
@@ -2489,42 +2623,12 @@ export async function updateSale(
         finderPersonId: ledger.sale.finderPersonId ?? null,
         baseDate: dateFromIsoDay(ledger.sale.baseDate),
         netMarginPct: ledger.sale.netMarginPct,
-        updatedAt: new Date(),
+        updatedAt: now,
       })
       .where(and(eq(salesOpsSales.orgId, orgId), eq(salesOpsSales.id, saleId)))
       .returning();
     if (!sale) throw new Error('sale_update_failed');
-
-    if (ledger.items.length > 0) {
-      await tx.insert(salesOpsSaleItems).values(
-        ledger.items.map((item) => ({
-          ...item,
-          orgId,
-          saleId: sale.id,
-          productId: item.productId ?? null,
-        })),
-      );
-    }
-    if (ledger.professionals.length > 0) {
-      await tx.insert(salesOpsSaleProfessionals).values(
-        ledger.professionals.map((professional) => ({
-          ...professional,
-          orgId,
-          saleId: sale.id,
-          personId: professional.personId ?? null,
-        })),
-      );
-    }
-    if (ledger.receivables.length > 0) {
-      await tx.insert(salesOpsReceivables).values(
-        ledger.receivables.map((receivable) => ({
-          ...receivable,
-          orgId,
-          saleId: sale.id,
-          dueDate: dateFromIsoDay(receivable.dueDate),
-        })),
-      );
-    }
+    await applySaleEditPlan(tx, orgId, saleId, plan, now);
 
     return { ok: true, sale, ledger };
   });
@@ -2586,6 +2690,8 @@ export async function transitionSale(
           and(
             eq(salesOpsSaleProfessionals.orgId, orgId),
             eq(salesOpsSaleProfessionals.saleId, saleId),
+            // A professional removed by an edit earns nothing on a later win.
+            isNull(salesOpsSaleProfessionals.removedAt),
           ),
         );
       const existingPayableRows = await tx
@@ -2640,7 +2746,7 @@ export async function transitionSale(
       if (sale.status === 'won') {
         await tx
           .update(salesOpsPayables)
-          .set({ status: 'void' })
+          .set({ status: 'void', ...payableRevisionBump() })
           .where(
             and(
               eq(salesOpsPayables.orgId, orgId),
@@ -2712,12 +2818,12 @@ export async function cancelContract(
     if (futureIds.length > 0) {
       voidedReceivables = await tx
         .update(salesOpsReceivables)
-        .set({ status: 'void' })
+        .set({ status: 'void', ...receivableRevisionBump() })
         .where(and(eq(salesOpsReceivables.orgId, orgId), inArray(salesOpsReceivables.id, futureIds)))
         .returning({ id: salesOpsReceivables.id });
       voidedPayables = await tx
         .update(salesOpsPayables)
-        .set({ status: 'void' })
+        .set({ status: 'void', ...payableRevisionBump() })
         .where(
           and(
             eq(salesOpsPayables.orgId, orgId),
@@ -2785,7 +2891,7 @@ export async function getSalesOpsSnapshot(db: Db, orgId: string) {
     const saleItems = await tx
       .select()
       .from(salesOpsSaleItems)
-      .where(eq(salesOpsSaleItems.orgId, orgId));
+      .where(and(eq(salesOpsSaleItems.orgId, orgId), isNull(salesOpsSaleItems.removedAt)));
     const settings = await tx
       .select()
       .from(salesOpsSettings)
@@ -2803,7 +2909,12 @@ export async function getSalesOpsSnapshot(db: Db, orgId: string) {
     const saleProfessionals = await tx
       .select()
       .from(salesOpsSaleProfessionals)
-      .where(eq(salesOpsSaleProfessionals.orgId, orgId));
+      .where(
+        and(
+          eq(salesOpsSaleProfessionals.orgId, orgId),
+          isNull(salesOpsSaleProfessionals.removedAt),
+        ),
+      );
     return {
       sales,
       products,

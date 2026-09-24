@@ -756,11 +756,11 @@ describe('Sales Ops sale write routes', () => {
     expect(await response.json()).toEqual(saleResult);
   });
 
-  it('returns 409 when updating a won proposta', async () => {
+  it('returns 409 when updating a lost proposta', async () => {
     serviceMocks.updateSale.mockResolvedValueOnce({
       ok: false,
       reason: 'not_editable',
-      status: 'won',
+      status: 'lost',
     });
 
     const putResponse = await app.request('/sales/55555555-5555-4555-8555-555555555555', {
@@ -770,7 +770,79 @@ describe('Sales Ops sale write routes', () => {
     });
 
     expect(putResponse.status).toBe(409);
-    expect(await putResponse.json()).toEqual({ error: 'sale_not_editable', status: 'won' });
+    expect(await putResponse.json()).toEqual({ error: 'sale_not_editable', status: 'lost' });
+  });
+
+  it('maps invalid_status_change to 409 with from and to', async () => {
+    serviceMocks.updateSale.mockResolvedValueOnce({
+      ok: false,
+      reason: 'invalid_status_change',
+      from: 'won',
+      to: 'open',
+    });
+
+    const putResponse = await app.request('/sales/55555555-5555-4555-8555-555555555555', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(salePayload),
+    });
+
+    expect(putResponse.status).toBe(409);
+    expect(await putResponse.json()).toEqual({
+      error: 'invalid_status_change',
+      from: 'won',
+      to: 'open',
+    });
+  });
+
+  it('maps row_has_active_settlement to 409 with the blocking rows', async () => {
+    const rows = [
+      { kind: 'receivable', id: '77777777-7777-4777-8777-777777777777', label: '1/2' },
+      { kind: 'payable', id: '88888888-8888-4888-8888-888888888888', label: 'Ana Martins (2/2)' },
+    ];
+    serviceMocks.updateSale.mockResolvedValueOnce({
+      ok: false,
+      reason: 'row_has_active_settlement',
+      rows,
+    });
+
+    const putResponse = await app.request('/sales/55555555-5555-4555-8555-555555555555', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(salePayload),
+    });
+
+    expect(putResponse.status).toBe(409);
+    expect(await putResponse.json()).toEqual({ error: 'row_has_active_settlement', rows });
+  });
+
+  it('accepts a won status and row ids in the PUT body', async () => {
+    serviceMocks.updateSale.mockResolvedValueOnce({ ok: true, ...saleResult });
+    const itemId = '99999999-9999-4999-8999-999999999999';
+    const installmentId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+
+    const putResponse = await app.request('/sales/55555555-5555-4555-8555-555555555555', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        ...salePayload,
+        status: 'won',
+        items: [{ ...salePayload.items[0], id: itemId }],
+        installments: [{ ...salePayload.installments[0], id: installmentId }],
+      }),
+    });
+
+    expect(putResponse.status).toBe(200);
+    expect(serviceMocks.updateSale).toHaveBeenCalledWith(
+      mockedDb,
+      'verified-org',
+      '55555555-5555-4555-8555-555555555555',
+      expect.objectContaining({
+        status: 'won',
+        items: [expect.objectContaining({ id: itemId })],
+        installments: [expect.objectContaining({ id: installmentId })],
+      }),
+    );
   });
 
   it('returns 404 for an unknown or non-uuid sale id', async () => {

@@ -290,7 +290,7 @@ async function resolveLeadProducts(
   return resolved;
 }
 
-/** Full-set replacement, exactly the `replacePersonFuncoes` / `updateSale` shape. */
+/** Full-set replacement, exactly the `replacePersonFuncoes` shape. */
 async function replaceLeadProducts(
   tx: Db,
   orgId: string,
