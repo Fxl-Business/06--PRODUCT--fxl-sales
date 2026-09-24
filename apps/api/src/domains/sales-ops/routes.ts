@@ -360,7 +360,13 @@ salesOpsRouter.put('/sales/:id', async (c) => {
   try {
     const result = await updateSale(getDb(), c.get('orgId'), saleId, parsed.data);
     if (!result.ok && result.reason === 'not_found') return c.json({ error: 'not_found' }, 404);
-    if (!result.ok) return c.json({ error: 'sale_not_editable', status: result.status }, 409);
+    if (!result.ok && result.reason === 'not_editable') {
+      return c.json({ error: 'sale_not_editable', status: result.status }, 409);
+    }
+    if (!result.ok && result.reason === 'invalid_status_change') {
+      return c.json({ error: 'invalid_status_change', from: result.from, to: result.to }, 409);
+    }
+    if (!result.ok) return c.json({ error: 'row_has_active_settlement', rows: result.rows }, 409);
     return c.json({ sale: result.sale, ledger: result.ledger });
   } catch (error) {
     if (error instanceof SaleInputError) {

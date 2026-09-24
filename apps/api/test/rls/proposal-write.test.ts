@@ -220,7 +220,7 @@ describe('proposal write backend (create v2 + update + payable materialization)'
     expect(byKind.finder_commission).toBeUndefined();
   });
 
-  it('update fully replaces items, professionals, and receivables in one transaction', async () => {
+  it('update edits items and receivables in place and soft-removes a dropped professional', async () => {
     const orgId = `org_pw_update_${Date.now()}`;
     orgIds.push(orgId);
 
@@ -238,14 +238,27 @@ describe('proposal write backend (create v2 + update + payable materialization)'
       installments: [{ dueDate: '2026-07-29', amountBrl: 200000, method: 'pix' }],
     });
     const created = await createSale(db, orgId, draftInput);
+    const [originalItem] = await adminClient`
+      SELECT id FROM sales_ops_sale_items WHERE sale_id = ${created.sale.id}`;
+    const itemId = (originalItem as { id: string }).id;
+    const [originalReceivable] = await adminClient`
+      SELECT id FROM sales_ops_receivables WHERE sale_id = ${created.sale.id}`;
+    const oldReceivableId = (originalReceivable as { id: string }).id;
 
+    // The item carries its id; the installment does not, so it is a new row.
     const updateInput = UpdateSaleSchema.parse({
       clientName: 'Cliente Atualizado',
       sellerName: 'Ana Martins',
       status: 'open',
       baseDate: '2026-08-01',
       items: [
-        { productId: product.id, productName: 'Consultoria renovada', quantity: 1, unitBrl: 300000 },
+        {
+          id: itemId,
+          productId: product.id,
+          productName: 'Consultoria renovada',
+          quantity: 1,
+          unitBrl: 300000,
+        },
       ],
       professionals: [],
       installments: [{ dueDate: '2026-08-01', amountBrl: 300000, method: 'boleto' }],
@@ -258,23 +271,31 @@ describe('proposal write backend (create v2 + update + payable materialization)'
     expect(updated.sale.clientNameSnapshot).toBe('Cliente Atualizado');
 
     const items = await adminClient`
-      SELECT product_name_snapshot, unit_brl FROM sales_ops_sale_items WHERE sale_id = ${created.sale.id}`;
+      SELECT id, product_name_snapshot, unit_brl FROM sales_ops_sale_items WHERE sale_id = ${created.sale.id}`;
     expect(items).toEqual([
-      expect.objectContaining({ product_name_snapshot: 'Consultoria renovada', unit_brl: 300000 }),
+      expect.objectContaining({
+        id: itemId,
+        product_name_snapshot: 'Consultoria renovada',
+        unit_brl: 300000,
+      }),
     ]);
 
     const professionals = await adminClient`
-      SELECT * FROM sales_ops_sale_professionals WHERE sale_id = ${created.sale.id}`;
-    expect(professionals).toHaveLength(0);
+      SELECT removed_at FROM sales_ops_sale_professionals WHERE sale_id = ${created.sale.id}`;
+    expect(professionals).toHaveLength(1);
+    expect((professionals[0] as { removed_at: Date | null }).removed_at).not.toBeNull();
 
     const receivables = await adminClient`
-      SELECT label, amount_brl, method FROM sales_ops_receivables WHERE sale_id = ${created.sale.id}`;
+      SELECT id, label, amount_brl, method, status FROM sales_ops_receivables
+      WHERE sale_id = ${created.sale.id} ORDER BY status ASC`;
     expect(receivables).toEqual([
-      expect.objectContaining({ label: '1/1', amount_brl: 300000, method: 'boleto' }),
+      expect.objectContaining({ label: '1/1', amount_brl: 300000, method: 'boleto', status: 'open' }),
+      expect.objectContaining({ id: oldReceivableId, label: '1/1', amount_brl: 200000, status: 'void' }),
     ]);
+    expect((receivables[0] as { id: string }).id).not.toBe(oldReceivableId);
   });
 
-  it('update is rejected for a won proposta', async () => {
+  it('update refuses to move a won proposta out of won', async () => {
     const orgId = `org_pw_won_update_${Date.now()}`;
     orgIds.push(orgId);
 
@@ -309,7 +330,7 @@ describe('proposal write backend (create v2 + update + payable materialization)'
     });
     const result = await updateSale(db, orgId, wonSale.sale.id, attempt);
 
-    expect(result).toEqual({ ok: false, reason: 'not_editable', status: 'won' });
+    expect(result).toEqual({ ok: false, reason: 'invalid_status_change', from: 'won', to: 'open' });
 
     const after = await adminClient`
       SELECT count(*)::int AS n FROM sales_ops_sale_items WHERE sale_id = ${wonSale.sale.id}`;

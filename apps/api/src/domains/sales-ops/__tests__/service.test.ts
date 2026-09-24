@@ -129,10 +129,10 @@ describe('sales operations sale ledger', () => {
     const ledger = buildSaleLedger(parsed, singleContext);
 
     expect(ledger.receivables).toEqual([
-      { label: '1/4', dueDate: '2026-07-29', amountBrl: 2000000, method: 'pix', status: 'open' },
-      { label: '2/4', dueDate: '2026-08-29', amountBrl: 333333, method: 'boleto', status: 'open' },
-      { label: '3/4', dueDate: '2026-09-29', amountBrl: 333333, method: 'boleto', status: 'open' },
-      { label: '4/4', dueDate: '2026-10-29', amountBrl: 333333, method: 'boleto', status: 'open' },
+      { label: '1/4', dueDate: '2026-07-29', amountBrl: 2000000, method: 'pix', status: 'open', sourceId: null },
+      { label: '2/4', dueDate: '2026-08-29', amountBrl: 333333, method: 'boleto', status: 'open', sourceId: null },
+      { label: '3/4', dueDate: '2026-09-29', amountBrl: 333333, method: 'boleto', status: 'open', sourceId: null },
+      { label: '4/4', dueDate: '2026-10-29', amountBrl: 333333, method: 'boleto', status: 'open', sourceId: null },
     ]);
     expect(ledger.sale.totalBrl).toBe(2999999);
     expect(ledger.sale.sellerCommissionBrl).toBe(299999);
@@ -192,13 +192,14 @@ describe('sales operations sale ledger', () => {
     const ledger = buildSaleLedger(parsed, singleContext);
 
     expect(ledger.receivables).toEqual([
-      { label: '1/1', dueDate: '2026-08-01', amountBrl: 500000, method: 'pix', status: 'open' },
+      { label: '1/1', dueDate: '2026-08-01', amountBrl: 500000, method: 'pix', status: 'open', sourceId: null },
       {
         label: 'M1/3',
         dueDate: '2026-09-01',
         amountBrl: 1000000,
         method: 'boleto',
         status: 'open',
+        sourceId: null,
       },
       {
         label: 'M2/3',
@@ -206,6 +207,7 @@ describe('sales operations sale ledger', () => {
         amountBrl: 1000000,
         method: 'boleto',
         status: 'open',
+        sourceId: null,
       },
       {
         label: 'M3/3',
@@ -213,6 +215,7 @@ describe('sales operations sale ledger', () => {
         amountBrl: 1000000,
         method: 'boleto',
         status: 'open',
+        sourceId: null,
       },
     ]);
     expect(ledger.sale.totalBrl).toBe(3500000);
@@ -243,7 +246,7 @@ describe('sales operations sale ledger', () => {
     const ledger = buildSaleLedger(parsed, singleContext);
 
     expect(ledger.receivables).toEqual([
-      { label: '1/1', dueDate: '2026-08-01', amountBrl: 500000, method: 'pix', status: 'open' },
+      { label: '1/1', dueDate: '2026-08-01', amountBrl: 500000, method: 'pix', status: 'open', sourceId: null },
     ]);
     expect(ledger.sale.totalBrl).toBe(500000);
     expect(ledger.sale.recurringBrl).toBe(1000000);

@@ -177,14 +177,23 @@ Full reference: `nexo/knowledge/reference/produtos-e-servicos.md`.
 Full reference: `nexo/knowledge/reference/propostas.md`.
 
 Statuses and payables:
-- Statuses `draft|open|won|lost|cancelled` (Rascunho, Aberta, Ganha, Perdida, Cancelada). Transitions only via `POST /sales/:id/transition` and `POST /sales/:id/cancel-contract`.
+- Statuses `draft|open|won|lost|cancelled` (Rascunho, Aberta, Ganha, Perdida, Cancelada). Transitions only via `POST /sales/:id/transition` and `POST /sales/:id/cancel-contract`; `PUT /sales/:id` may only move between `draft` and `open` and keeps a `won` proposta `won` (`409 invalid_status_change`).
 - Payables materialize only on `won`. Commissions and tax are per receivable; `professional_cost` is split over INSTALLMENT receivables only (never `M`-prefixed recurring ones) by `resolveProfessionalSplit`, falling back to one-shot when none exist; `other_cost` is one-shot.
 - Leaving `won` voids only `open` payables and receivables, never `paid` ones.
-- Receivable labels `N/M` and `MN/M` are load-bearing (`deriveWizardPrefill` parses the `M`).
+- Receivable labels `N/M` and `MN/M` are load-bearing (`deriveWizardPrefill` parses the `M`) but are NEVER row identity: they renumber when a parcela is zeroed.
 - `sales_ops_settings.commission_on_recurring` is dead; commissions are generated for every non-void receivable.
 - `reduzirLiquidacao` in `packages/shared-utils/src/liquidacao.ts` is the ONE settlement rule and mirrors the Finance reducer: a baixa is active while no estorno cites it, paid is the sum of active baixas, and the displayed date is the GREATEST active date.
 - `validarNovaBaixa` and `validarEstorno` in the same file are the only pre-write settlement checks; they take today as an argument and never read the clock. Web imports the `/liquidacao` subpath, never the root.
 - `liquidacao.ts` imports nothing; its parity table in `liquidacao.test.ts` must change in the same change as any Finance rule change.
+
+Editing a proposta (PC2):
+- `updateSale` never deletes and recreates. Rows are reconciled by the ids the payload carries (`items[].id`, `professionals[].id`, `installments[].id`, `recurring.receivableIds[i]` for cycle i+1); a row without an id is new and gets a server uuid.
+- An id that is not a live row of this sale answers `400` (`item_not_found`, `professional_not_found`, `installment_not_found`, `recurring_row_not_found`) and is never used as an insert id.
+- A receivable or payable that left the plan becomes `void` and stays. An item or professional that left gets `removed_at`; every reader filters `removed_at IS NULL`.
+- `draft`, `open` and `won` share one path. On `won` payables are reconciled in place by `payableIdentityKey`, never by beneficiary name; a one-shot payable keeps its stored due date.
+- A settled row (active baixa or `status = 'paid'`) whose amount or due date would change, or that would be voided, fails the whole edit with `409 row_has_active_settlement` naming every blocking row; nothing is written.
+- The reconcile is the pure `planSaleEdit` in `apps/api/src/domains/sales-ops/ledger-reconcile.ts`; `service.ts` only wires it and `sale-edit-writes.ts` holds the writes.
+- Every UPDATE that changes a receivable or payable column spreads `receivableRevisionBump()` / `payableRevisionBump()` from `ledger-revision.ts`; an unchanged row gets no UPDATE.
 
 Settlements (schema):
 - `sales_ops_settlements` (migration `0024_sales_ops_settlements`) holds immutable `baixa`/`estorno` facts for one receivable or payable each. A trigger refuses every UPDATE and DELETE with SQLSTATE `FXS01`; an estorno that does not mirror its baixa (org, sale, kind, row, amount) fails with `FXS02`.
