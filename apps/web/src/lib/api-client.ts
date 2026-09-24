@@ -27,7 +27,16 @@ export type ApiError = {
   code?: string;
   message?: string;
   status: number;
+  /**
+   * The C5 `rows` of a 409 (`row_has_active_settlement`, `sale_has_active_settlements`):
+   * the ledger rows that blocked the write. Display data only; never used to
+   * classify auth failures, which key on `status` alone.
+   */
+  rows?: ApiErrorRow[];
 };
+
+/** One ledger row named by a 409 body. `id` is for logic only, never for display. */
+export type ApiErrorRow = { kind: 'receivable' | 'payable'; id: string; label: string };
 
 export async function apiFetch<T>(
   path: string,
@@ -52,6 +61,7 @@ export async function apiFetch<T>(
       code: body.code,
       message: body.message,
       status: res.status,
+      rows: Array.isArray(body.rows) ? (body.rows as ApiErrorRow[]) : undefined,
     };
     throw err;
   }
@@ -84,6 +94,7 @@ export async function apiFetchBlob(
       code: body.code,
       message: body.message,
       status: res.status,
+      rows: Array.isArray(body.rows) ? (body.rows as ApiErrorRow[]) : undefined,
     };
     throw err;
   }

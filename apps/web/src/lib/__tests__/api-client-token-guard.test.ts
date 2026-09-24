@@ -157,3 +157,26 @@ describe('403 forbidden classification', () => {
     expect(isEntitlementFailure({ error: 'forbidden', status: 403 })).toBe(false);
   });
 });
+
+describe('409 blocking rows on the thrown ApiError', () => {
+  const rows = [{ kind: 'receivable', id: 'rec-2', label: '2/2' }];
+  const conflict = () => ({
+    ok: false,
+    status: 409,
+    json: async () => ({ error: 'row_has_active_settlement', rows, secret: 'do-not-echo' }),
+  });
+
+  it('apiFetch keeps the rows of a 409 body on the thrown ApiError', async () => {
+    fetchMock.mockResolvedValue(conflict());
+    const error = await apiFetch('/x', { method: 'PUT', token: 'abc' }).catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ error: 'row_has_active_settlement', status: 409, rows });
+    expect(error).not.toHaveProperty('secret');
+  });
+
+  it('apiFetchBlob keeps the rows of a 409 body on the thrown ApiError', async () => {
+    fetchMock.mockResolvedValue(conflict());
+    const error = await apiFetchBlob('/x', { method: 'GET', token: 'abc' }).catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ error: 'row_has_active_settlement', status: 409, rows });
+    expect(error).not.toHaveProperty('secret');
+  });
+});

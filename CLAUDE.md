@@ -225,6 +225,13 @@ Payment plan builder (step 2):
 - `inferPaymentPlanShape` regenerates and compares; `matchesFormula: false` keeps rows verbatim.
 - `defaultPlanShapeForProduct` is the only seam from produto template to proposta.
 
+Row identity in the wizard:
+- The wizard carries the persisted `id` of every loaded item, professional and installment row, and the recurring `receivableIds` in cycle order, through every edit and sends them on `PUT /sales/:id`; a new row carries none.
+- A regenerated plan keeps ids by ROW INDEX through `carryRowIdsPositionally` in `apps/web/src/sales-ops/row-identity.ts`, never by label, date or amount; surplus old ids are omitted so the API voids those rows.
+- `buildSalePayload` never filters by amount, so a zero-amount row keeps its id.
+- A `won` proposta opens in the wizard (`isSaleEditableStatus`) and saves with `status: 'won'`; `lost` and `cancelled` never open.
+- A failed edit save renders `describeSaleSaveError` inside the still-open wizard; a `409 row_has_active_settlement` names each blocking row by its label and never by id.
+
 Items and defaults:
 - Áreas are required on every product and item. Free-form items are `productId: null` with `productName` and an `areaId`.
 - Produto commercial numbers are per-proposta DEFAULTS; hand-typed values are pinned in `manualOverrides`, and `Restaurar padrão` unpins.

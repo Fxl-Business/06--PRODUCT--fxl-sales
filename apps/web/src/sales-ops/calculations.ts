@@ -1,4 +1,5 @@
 import { SPLIT_BP_TOTAL } from '@fxl-sales/shared-utils/professional-split';
+import { payloadReceivableIds, payloadRowId } from './row-identity';
 import type {
   CommissionType,
   CreateSalePayload,
@@ -11,6 +12,7 @@ import type {
   SalesOpsProductFuncaoCost,
   SalesOpsSale,
   SalesOpsSettings,
+  SalesOpsStatus,
 } from './types';
 
 const wonStatuses = new Set<string>(['won']);
@@ -799,6 +801,11 @@ export function defaultPlanShapeForProduct(
   };
 }
 
+/** H1: draft, open and won open in the wizard for edit; lost and cancelled never do. */
+export function isSaleEditableStatus(status: SalesOpsStatus): boolean {
+  return status === 'draft' || status === 'open' || status === 'won';
+}
+
 export function buildSalePayload(draft: SaleDraft): CreateSalePayload {
   return {
     clientId: cleanId(draft.clientId),
@@ -814,7 +821,9 @@ export function buildSalePayload(draft: SaleDraft): CreateSalePayload {
     finderCommissionPct: toNumber(draft.finderCommissionPct),
     taxPct: toNumber(draft.taxPct),
     otherCostsBrl: Math.max(0, Math.floor(toNumber(draft.otherCostsBrl))),
+    // Never filtered by amount: a zero-amount row keeps its id so the API voids it.
     installments: draft.installments.map((row) => ({
+      id: payloadRowId(row.id),
       dueDate: row.dueDate,
       amountBrl: Math.max(0, Math.floor(toNumber(row.amountBrl))),
       method: row.method,
@@ -825,9 +834,11 @@ export function buildSalePayload(draft: SaleDraft): CreateSalePayload {
           startDate: draft.recurring.startDate,
           cycles: draft.recurring.cycles === null ? null : Math.max(1, Math.floor(draft.recurring.cycles)),
           method: draft.recurring.method ?? 'pix',
+          receivableIds: payloadReceivableIds(draft.recurring.receivableIds, draft.recurring.cycles),
         }
       : null,
     items: draft.items.map((item) => ({
+      id: payloadRowId(item.id),
       productId: cleanId(item.productId),
       areaId: cleanId(item.areaId),
       productName: item.productName.trim(),
@@ -836,6 +847,7 @@ export function buildSalePayload(draft: SaleDraft): CreateSalePayload {
       unitBrl: Math.max(0, Math.floor(toNumber(item.unitBrl))),
     })),
     professionals: draft.professionals.map((professional) => ({
+      id: payloadRowId(professional.id),
       personId: cleanId(professional.personId),
       personName: professional.personName.trim(),
       funcaoId: cleanId(professional.funcaoId),

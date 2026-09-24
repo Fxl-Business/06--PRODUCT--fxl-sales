@@ -68,11 +68,19 @@ Moved verbatim from `CLAUDE.md` on 2026-09-22 so the standing context stays shor
 - `addMonthsToIsoDate` clamps to the last valid day of the target month, matching the API's `addMonths` in `apps/api/src/domains/sales-ops/service.ts`; before this it rolled `2026-01-31` over to `2026-03-03` while the API persisted `2026-02-28`.
   Every due date is recomputed from the anchor with an absolute month offset, never stepped one month at a time, so a clamped February cannot drift the months after it.
 - Manual plan edits are governed by one whole-plan `planDirty` flag, never per-row pinning, because recomputing an entrada or a restante redistributes value across every row to hold the exact-sum invariant.
-  A row date or amount edit sets it and freezes the rows; a `Forma` edit does NOT, because methods are carried positionally through a regeneration.
+  A row date or amount edit sets it and freezes the rows; a `Forma` edit does NOT, because methods and row ids are carried positionally through a regeneration.
   Changing a header control while dirty raises an amber confirm bar (`Aplicar` / `Manter parcelas`) instead of regenerating, and both `Aplicar` and the header's `Regerar plano` clear the flag AND `appliedPlanKey`, because a row edit alone leaves the key untouched and the guard would otherwise find nothing to do.
 - `inferPaymentPlanShape` reads a shape back out of stored rows by regenerate-and-compare over three ordered candidates (`none`, a clean percentage, a fixed value), comparing `dueDate` and `amountBrl` but not `method`.
   `matchesFormula: false` means the rows are hand-tuned: they are kept verbatim, the header only describes them, and nothing but an explicit `Aplicar` or `Regerar plano` click overwrites them.
   A false negative costs one extra `Plano ajustado manualmente` line; a false positive is impossible, because `matchesFormula` is only true after a full regenerate-and-compare.
+- The wizard carries row identity as a REQUIRED `id: string | null` on `SaleItemForm`, `InstallmentRowForm` and `ProfessionalForm`, for the same reason `costSplitBp` is required: TypeScript then flags every row constructor, so none can forget it.
+  `deriveWizardPrefill` is the only constructor that writes a non-null id; the recurring `M` rows travel as `recurring.receivableIds`, in due-date order, because the wizard holds the recorrência as a block and never as rows.
+- A regeneration maps ids POSITIONALLY by row index, exactly like `Forma`, so ids and methods can never disagree about which row is which.
+  Label matching is impossible because the API renumbers `N/M`; due-date matching would void the whole plan on an anchor move; amount matching is ambiguous on an even split.
+  The cost is that a position whose amount or date changes keeps its id and is updated in place; when that row has an active baixa the API answers `409 row_has_active_settlement`, which is the intended "estorne antes" rule.
+  `Manter parcelas` and `matchesFormula: false` never regenerate, so their ids stay verbatim.
+- `planRowsValid` still refuses a zero-amount parcela, so the UI cannot send one; the id guarantee for a zeroed row lives in `carryRowIdsPositionally` and `buildSalePayload`, which never read the amount, and is pinned in `row-identity.test.ts`.
+- `apiFetch` keeps the C5 `rows` of an error body as `ApiError.rows` (and nothing else extra) so the 409 blocking rows reach the UI; auth classification still keys on `status` alone.
 - A blank `Número de ciclos` is the only way to express prazo indeterminado in the wizard too, exactly as in the product dialog; there is no `Prazo indeterminado` checkbox anywhere.
 - `defaultPlanShapeForProduct` is the single seam by which a produto's `defaultEntradaMode` / `defaultEntradaPct` / `defaultEntradaBrl` / `defaultRemainingInstallments` reach a proposta, applied through a render-phase guard keyed on the product ID and its template and skipped while `planDirty` is true.
   `defaultPaymentMethod` and `defaultRecurringCycles` are persisted and editable in the cadastro but are not read by the wizard yet.
