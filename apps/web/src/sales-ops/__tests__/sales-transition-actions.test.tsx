@@ -298,12 +298,14 @@ describe('sales transition row actions', () => {
     expect(onCancelContract).toHaveBeenCalledWith(wonRecurringSale);
   });
 
-  it('routes edit to the wizard for draft and open only', async () => {
+  it('routes edit to the wizard for draft, open and won only', async () => {
     const draftRow = rowByCode('P-001');
     await click(buttonByTextIn(draftRow, 'Editar'));
     expect(onEdit).toHaveBeenCalledWith(draftSale);
 
-    expect(buttonByTextInOrNull(rowByCode('P-003'), 'Editar')).toBeNull();
+    await click(buttonByTextIn(rowByCode('P-003'), 'Editar'));
+    expect(onEdit).toHaveBeenLastCalledWith(wonRecurringSale);
+
     expect(buttonByTextInOrNull(rowByCode('P-004'), 'Editar')).toBeNull();
     expect(buttonByTextInOrNull(rowByCode('P-005'), 'Editar')).toBeNull();
   });

@@ -154,6 +154,7 @@ import {
   inferPaymentPlanShape,
   initials,
   installmentSumCents,
+  isSaleEditableStatus,
   isServiceProduct,
   MAX_PLAN_INSTALLMENTS,
   maxRemainingInstallments,
@@ -170,6 +171,8 @@ import {
   type PaymentPlanShape,
   type ProfessionalCostUnit,
 } from './calculations';
+import { carryRowIdsPositionally, type RowId } from './row-identity';
+import { describeSaleSaveError } from './sale-save-error';
 import type {
   CadastroResource,
   CadastroStatus,
@@ -1222,6 +1225,8 @@ export function SalesOpsApp() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [modal, setModal] = useState<ModalState>(null);
   const [saleWizard, setSaleWizard] = useState<SaleWizardRequest | null>(null);
+  /** pt-BR lines of a failed edit save, rendered inside the still-open wizard. */
+  const [saleWizardSaveError, setSaleWizardSaveError] = useState<string[] | null>(null);
   /**
    * The proposta a conversion has ALREADY created but whose lead move has not
    * landed. It exists so a failed move is retried with the SAME sale, never by
@@ -2277,6 +2282,7 @@ export function SalesOpsApp() {
           */
           onClose={() => {
             if (saleWizard?.mode === 'convert') saleWizard.settle.resolve(null);
+            setSaleWizardSaveError(null);
             setSaleWizard(null);
           }}
           onCreateArea={createAreaByName}
@@ -2285,9 +2291,24 @@ export function SalesOpsApp() {
           onCreateProduct={(name) => setModal({ kind: 'product', prefillName: name })}
           onSave={(payload) => {
             if (saleWizard?.mode === 'edit') {
+              const saleId = saleWizard.sale.id;
+              setSaleWizardSaveError(null);
               updateSale.mutate(
-                { saleId: saleWizard.sale.id, payload },
-                { onSuccess: () => setSaleWizard(null) },
+                { saleId, payload },
+                {
+                  onSuccess: () => setSaleWizard(null),
+                  /*
+                    The wizard stays open with the operator's edits; the error is
+                    painted inside it. The ref check stops a late error from an
+                    abandoned wizard from painting the next one.
+                  */
+                  onError: (error) => {
+                    const current = saleWizardRef.current;
+                    if (current?.mode === 'edit' && current.sale.id === saleId) {
+                      setSaleWizardSaveError(describeSaleSaveError(error));
+                    }
+                  },
+                },
               );
             } else if (saleWizard?.mode === 'convert') {
               void saveLeadConversion(saleWizard, payload);
@@ -2296,6 +2317,7 @@ export function SalesOpsApp() {
             }
           }}
           open={saleWizard !== null}
+          saveError={saleWizardSaveError}
           saving={createSale.isPending || updateSale.isPending}
         />
       ) : null}
@@ -2670,6 +2692,7 @@ export function SalesView({
                           ) : null}
                           {sale.status === 'won' ? (
                             <>
+                              <DropdownMenuItem onSelect={() => onEdit(sale)}>Editar</DropdownMenuItem>
                               <DropdownMenuItem
                                 onSelect={() => setPendingAction({ kind: 'reopen-won', sale })}
                               >
@@ -5908,6 +5931,12 @@ function PersonDialogBody({
 }
 
 type SaleItemForm = {
+  /**
+   * The persisted item id, or `null` for a row the API has never seen. REQUIRED for
+   * the same reason `ProfessionalForm.costSplitBp` is: TypeScript then flags every
+   * row constructor, so none can forget it. Only `deriveWizardPrefill` writes one.
+   */
+  id: RowId;
   kind: 'product' | 'free';
   productId: string; // '' on free rows
   areaId: string; // '' on product rows (derived from the product); picked on free rows
@@ -5923,9 +5952,12 @@ type SaleItemForm = {
   descriptionOpen: boolean;
 };
 
-type InstallmentRowForm = { dueDate: string; amountBrl: string; method: PaymentMethod };
+/** `id` is the persisted receivable id or `null`; see `SaleItemForm.id`. */
+type InstallmentRowForm = { id: RowId; dueDate: string; amountBrl: string; method: PaymentMethod };
 
 type ProfessionalForm = {
+  /** The persisted sale professional id or `null`; see `SaleItemForm.id`. */
+  id: RowId;
   personId: string;
   personName: string;
   /** `''` on a legacy row whose stored função is only a free-text snapshot. */
@@ -6030,6 +6062,11 @@ type WizardPrefill = {
   items: SaleItemForm[];
   professionals: ProfessionalForm[];
   installmentRows: InstallmentRowForm[];
+  /**
+   * The stored non-void `M` receivable ids in cycle order. The wizard holds the
+   * recorrência as a block, never as rows, so the ids ride on the block.
+   */
+  recurringReceivableIds: string[];
   /** The formula the stored rows were read back as, seeding the step-2 header. */
   planShape: PaymentPlanShape;
   /** True when no formula reproduces the stored rows, i.e. they were hand-tuned. */
@@ -6057,6 +6094,7 @@ type WizardPrefill = {
 function toSaleItemForm(item: LeadConversionItem): SaleItemForm {
   return item.kind === 'product'
     ? {
+        id: null,
         kind: 'product',
         productId: item.productId,
         areaId: '',
@@ -6066,6 +6104,7 @@ function toSaleItemForm(item: LeadConversionItem): SaleItemForm {
         descriptionOpen: false,
       }
     : {
+        id: null,
         kind: 'free',
         productId: '',
         areaId: '',
@@ -6181,6 +6220,7 @@ function deriveWizardPrefill(sale: SalesOpsSale, bootstrap: SalesOpsBootstrap): 
     .map((item) => {
       if (!item.productId) {
         return {
+          id: item.id ?? null,
           kind: 'free' as const,
           productId: '',
           areaId: item.areaId ?? '',
@@ -6195,6 +6235,7 @@ function deriveWizardPrefill(sale: SalesOpsSale, bootstrap: SalesOpsBootstrap): 
       }
       const product = bootstrap.products.find((candidate) => candidate.id === item.productId);
       return {
+        id: item.id ?? null,
         kind: 'product' as const,
         productId: item.productId,
         areaId: '',
@@ -6210,6 +6251,7 @@ function deriveWizardPrefill(sale: SalesOpsSale, bootstrap: SalesOpsBootstrap): 
   const hasRecurring = sale.recurringBrl > 0;
   const bounded = hasRecurring && recurringRows.length > 0;
   const storedInstallments = installmentReceivables.map((row) => ({
+    id: row.id,
     dueDate: row.dueDate.slice(0, 10),
     amountBrl: row.amountBrl,
     method: row.method,
@@ -6236,6 +6278,7 @@ function deriveWizardPrefill(sale: SalesOpsSale, bootstrap: SalesOpsBootstrap): 
     professionals: bootstrap.saleProfessionals
       .filter((row) => row.saleId === sale.id)
       .map((row) => ({
+        id: row.id ?? null,
         personId: row.personId ?? '',
         personName: row.personNameSnapshot,
         funcaoId: row.funcaoId ?? '',
@@ -6260,10 +6303,13 @@ function deriveWizardPrefill(sale: SalesOpsSale, bootstrap: SalesOpsBootstrap): 
     // Verbatim, so reopening and saving an untouched proposta round-trips the plan
     // byte for byte. The inference above only describes these rows, it never edits them.
     installmentRows: storedInstallments.map((row) => ({
+      id: row.id,
       dueDate: row.dueDate,
       amountBrl: centsToInput(row.amountBrl),
       method: row.method,
     })),
+    // `recurringRows` is already non-void and sorted by due date, so this IS cycle order.
+    recurringReceivableIds: recurringRows.map((row) => row.id),
     planShape: inferred.shape,
     planDirty: !inferred.matchesFormula,
     recurringEnabled: hasRecurring,
@@ -6315,10 +6361,12 @@ export function SaleWizardDialog(props: {
   onCreateFuncao?: (name: string) => Promise<SalesOpsFuncao | null>;
   onCreateProduct?: (name: string) => void;
   onSave: (payload: CreateSalePayload) => void;
+  /** pt-BR lines of a failed save (`describeSaleSaveError`), shown inside the wizard. */
+  saveError?: string[] | null;
   saving: boolean;
 }) {
   if (!props.open) return null;
-  if (props.editSale && props.editSale.status !== 'draft' && props.editSale.status !== 'open') return null;
+  if (props.editSale && !isSaleEditableStatus(props.editSale.status)) return null;
   return (
     <SaleWizardDialogBody
       // Wizard session identity only. Folding bootstrap rows into this key made any
@@ -6337,6 +6385,7 @@ export function SaleWizardDialog(props: {
       onCreateFuncao={props.onCreateFuncao}
       onCreateProduct={props.onCreateProduct}
       onSave={props.onSave}
+      saveError={props.saveError ?? null}
       saving={props.saving}
     />
   );
@@ -6354,6 +6403,7 @@ function SaleWizardDialogBody({
   onCreateFuncao,
   onCreateProduct,
   onSave,
+  saveError,
   saving,
 }: {
   bootstrap: SalesOpsBootstrap;
@@ -6367,6 +6417,7 @@ function SaleWizardDialogBody({
   onCreateFuncao?: (name: string) => Promise<SalesOpsFuncao | null>;
   onCreateProduct?: (name: string) => void;
   onSave: (payload: CreateSalePayload) => void;
+  saveError: string[] | null;
   saving: boolean;
 }) {
   const settings = activeSettings(bootstrap.settings);
@@ -6528,6 +6579,7 @@ function SaleWizardDialogBody({
       : firstProduct
         ? [
             {
+              id: null,
               kind: 'product',
               productId: firstProduct.id,
               areaId: '',
@@ -6565,10 +6617,15 @@ function SaleWizardDialogBody({
    * selectable and visible on the trigger before the bootstrap refetch lands.
    */
   const [createdAreas, setCreatedAreas] = useState<SalesOpsArea[]>([]);
+  /**
+   * The stored recurring `M` receivable ids in cycle order. No setter: the wizard
+   * never edits the list; `buildSalePayload` sends only its first `cycles` ids.
+   */
+  const [recurringReceivableIds] = useState<string[]>(() => prefill?.recurringReceivableIds ?? []);
   const [installmentRows, setInstallmentRows] = useState<InstallmentRowForm[]>(() =>
     prefill && prefill.installmentRows.length > 0
       ? prefill.installmentRows
-      : [{ dueDate: inputDateToday(), amountBrl: '0', method: 'pix' }],
+      : [{ id: null, dueDate: inputDateToday(), amountBrl: '0', method: 'pix' }],
   );
   const initialPlanInputs = planShapeInputs(
     prefill?.planShape ??
@@ -6752,16 +6809,20 @@ function SaleWizardDialogBody({
   const currentPlanKey = planShapeKey(totalCents, planShape);
   if (!planDirty && currentPlanKey !== appliedPlanKey) {
     setAppliedPlanKey(currentPlanKey);
+    // Ids ride positionally, exactly like `Forma`: see `carryRowIdsPositionally`.
     setInstallmentRows(
-      generateInstallmentPlan(
-        totalCents,
-        planShape,
-        installmentRows.map((row) => row.method),
-      ).map((row) => ({
-        dueDate: row.dueDate,
-        amountBrl: centsToInput(row.amountBrl),
-        method: row.method,
-      })),
+      carryRowIdsPositionally(
+        installmentRows,
+        generateInstallmentPlan(
+          totalCents,
+          planShape,
+          installmentRows.map((row) => row.method),
+        ).map((row) => ({
+          dueDate: row.dueDate,
+          amountBrl: centsToInput(row.amountBrl),
+          method: row.method,
+        })),
+      ),
     );
   }
   /**
@@ -6894,6 +6955,7 @@ function SaleWizardDialogBody({
               the expression the seed used. `costManual: true` belongs to
               `deriveWizardPrefill`, where a persisted cost is a saved decision.
             */
+            id: null,
             costManual: false,
             // The produto declares WHAT a função costs, never WHEN it is paid, so a
             // seeded row starts on the default pro-rata like any other.
@@ -7310,6 +7372,7 @@ function SaleWizardDialogBody({
     setItems((current) => [
       ...current,
       {
+        id: null,
         kind: 'product',
         productId: product.id,
         areaId: '',
@@ -7326,6 +7389,7 @@ function SaleWizardDialogBody({
     setItems((current) => [
       ...current,
       {
+        id: null,
         kind: 'free',
         productId: '',
         areaId: activeAreas[0]!.id,
@@ -7546,14 +7610,15 @@ function SaleWizardDialogBody({
       setWizardStep((current) => (current + 1) as 2 | 3 | 4);
       return;
     }
-    submit('open');
+    // A won proposta is saved as won, so the PUT never doubles as a transition.
+    submit(editSale?.status === 'won' ? 'won' : 'open');
   }
 
   function goBack() {
     setWizardStep((current) => (current > 1 ? ((current - 1) as 1 | 2 | 3) : current));
   }
 
-  function createPayload(status: 'draft' | 'open'): CreateSalePayload {
+  function createPayload(status: 'draft' | 'open' | 'won'): CreateSalePayload {
     const seller = selectedSeller;
     const finder = selectedFinder;
     const draft: SaleDraft = {
@@ -7575,6 +7640,7 @@ function SaleWizardDialogBody({
       taxPct,
       otherCostsBrl: otherCents,
       installments: installmentRows.map((row) => ({
+        id: row.id,
         dueDate: row.dueDate,
         amountBrl: parseCurrencyToCents(row.amountBrl),
         method: row.method,
@@ -7586,11 +7652,13 @@ function SaleWizardDialogBody({
               startDate: recurringStartDate,
               cycles: recurringIndefinite ? null : recurringCyclesCount,
               method: recurringMethod,
+              receivableIds: recurringReceivableIds,
             }
           : null,
       items: items.map((item) => {
         if (item.kind === 'free') {
           return {
+            id: item.id,
             productId: undefined,
             areaId: item.areaId,
             productName: item.customLabel.trim() || 'Item avulso',
@@ -7601,6 +7669,7 @@ function SaleWizardDialogBody({
         }
         const product = selectedProduct(item);
         return {
+          id: item.id,
           productId: product?.id,
           areaId: product?.areaId ?? undefined,
           productName: saleItemDisplayName(item),
@@ -7637,6 +7706,7 @@ function SaleWizardDialogBody({
       */
       professionals: persistedProfessionals
         .map((professional) => ({
+          id: professional.id,
           personId: professional.personId,
           personName: professional.personName,
           funcaoId: professional.funcaoId,
@@ -7658,9 +7728,9 @@ function SaleWizardDialogBody({
     return buildSalePayload(draft);
   }
 
-  function submit(status: 'draft' | 'open') {
+  function submit(status: 'draft' | 'open' | 'won') {
     if (!canSave) return;
-    if (editSale && editSale.status !== 'draft' && editSale.status !== 'open') return;
+    if (editSale && !isSaleEditableStatus(editSale.status)) return;
     onSave(createPayload(status));
   }
 
@@ -8529,6 +8599,7 @@ function SaleWizardDialogBody({
                               // seed silently allocated whoever sorted first, and
                               // with the picker locked until the row names a função
                               // it could not be corrected in place anyway.
+                              id: null,
                               personId: '',
                               personName: '',
                               // No seeded função: the old hardcoded 'Operacional'
@@ -9219,6 +9290,17 @@ function SaleWizardDialogBody({
             </>
           )}
         </div>
+
+        {saveError && saveError.length > 0 ? (
+          <div
+            className="shrink-0 border-t border-[#f0dcd5] bg-[#fbeee9] px-[26px] py-3 text-[12.5px] font-semibold text-[#b23a22]"
+            role="alert"
+          >
+            {saveError.map((line) => (
+              <p key={line}>{line}</p>
+            ))}
+          </div>
+        ) : null}
 
         <div className={wizardFooterClass}>
           <button

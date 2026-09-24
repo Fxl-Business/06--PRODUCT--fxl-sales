@@ -425,10 +425,16 @@ describe('sale wizard edit path', () => {
         notes: 'nota interna',
         otherCostsBrl: 30000,
         installments: [
-          { dueDate: '2026-07-10', amountBrl: 150000, method: 'pix' },
-          { dueDate: '2026-08-10', amountBrl: 150000, method: 'boleto' },
+          { id: 'rec-1', dueDate: '2026-07-10', amountBrl: 150000, method: 'pix' },
+          { id: 'rec-2', dueDate: '2026-08-10', amountBrl: 150000, method: 'boleto' },
         ],
-        recurring: { monthlyBrl: 100000, startDate: '2026-08-10', cycles: 2, method: 'boleto' },
+        recurring: {
+          monthlyBrl: 100000,
+          startDate: '2026-08-10',
+          cycles: 2,
+          method: 'boleto',
+          receivableIds: ['rec-3', 'rec-4'],
+        },
       }),
     );
     const payload = onSave.mock.calls[0]![0];
@@ -535,10 +541,10 @@ describe('sale wizard edit path', () => {
     expect(onSave).toHaveBeenCalledWith(
       expect.objectContaining({
         installments: [
-          { dueDate: '2026-07-10', amountBrl: 200000, method: 'pix' },
-          { dueDate: '2026-08-10', amountBrl: 50000, method: 'boleto' },
+          { id: 'rec-1', dueDate: '2026-07-10', amountBrl: 200000, method: 'pix' },
+          { id: 'rec-2', dueDate: '2026-08-10', amountBrl: 50000, method: 'boleto' },
           // The date no formula would ever generate, persisted untouched.
-          { dueDate: '2026-11-30', amountBrl: 50000, method: 'boleto' },
+          { id: 'rec-3', dueDate: '2026-11-30', amountBrl: 50000, method: 'boleto' },
         ],
       }),
     );

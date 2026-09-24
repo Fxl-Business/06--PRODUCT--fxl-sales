@@ -12,6 +12,7 @@ import type {
   SalesOpsProductFuncaoCost,
   SalesOpsSale,
   SalesOpsSettings,
+  SalesOpsStatus,
 } from './types';
 
 const wonStatuses = new Set<string>(['won']);
@@ -798,6 +799,11 @@ export function defaultPlanShapeForProduct(
     ),
     anchorDate: baseDate,
   };
+}
+
+/** H1: draft, open and won open in the wizard for edit; lost and cancelled never do. */
+export function isSaleEditableStatus(status: SalesOpsStatus): boolean {
+  return status === 'draft' || status === 'open' || status === 'won';
 }
 
 export function buildSalePayload(draft: SaleDraft): CreateSalePayload {
