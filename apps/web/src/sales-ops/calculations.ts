@@ -470,9 +470,9 @@ export function formatMoneyBrl(
     .replace(/\u00a0/g, ' ');
 }
 
-/** `2026-07-13` -> `13/07/2026`. Date-only in; a timestamp must be sliced first. */
+/** `2026-07-13` -> `13/07/2026`. Accepts a date-only string or a full timestamp. */
 export function formatIsoDateBr(isoDate: string): string {
-  const [year, month, day] = isoDate.split('-');
+  const [year, month, day] = isoDate.slice(0, 10).split('-');
   if (!year || !month || !day) return isoDate;
   return `${day}/${month}/${year}`;
 }
