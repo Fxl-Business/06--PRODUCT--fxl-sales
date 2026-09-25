@@ -2,7 +2,11 @@ import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import { getDb } from '../../db/client.js';
 import { getHubActorDisplayName } from '../../middleware/app-auth.js';
-import { requireAdmin } from '../../middleware/require-admin.js';
+import {
+  ADMIN_ROLE_REQUIRED_BODY,
+  hasAdminRole,
+  requireAdmin,
+} from '../../middleware/require-admin.js';
 import { HISTORY_MAX_LIMIT, listOrgAuditHistory } from '../audit/history-service.js';
 import { leadsRouter } from './leads/lead-routes.js';
 import { leadStagesRouter } from './leads/stage-routes.js';
@@ -307,8 +311,23 @@ salesOpsRouter.get('/sales', async (c) => {
   return c.json({ sales });
 });
 
+function isWonRequest(body: unknown): boolean {
+  return (
+    typeof body === 'object' && body !== null && (body as { status?: unknown }).status === 'won'
+  );
+}
+
 salesOpsRouter.post('/sales', async (c) => {
-  const parsed = CreateSaleSchema.safeParse(await c.req.json().catch(() => ({})));
+  const body: unknown = await c.req.json().catch(() => ({}));
+  // PC23: creating a proposta stays open (a seller's lead conversion on
+  // meus-dados/leads posts here), but creating one already `won` materialises
+  // payables, which is a financial act. Decided on the RAW body, before
+  // validation, so a non-admin asking for `won` never learns anything from a
+  // validation error and never reaches createSale.
+  if (isWonRequest(body) && !hasAdminRole(c)) {
+    return c.json(ADMIN_ROLE_REQUIRED_BODY, 403);
+  }
+  const parsed = CreateSaleSchema.safeParse(body);
   if (!parsed.success) {
     return c.json({ error: 'validation_error', issues: parsed.error.flatten() }, 400);
   }
@@ -326,7 +345,8 @@ salesOpsRouter.post('/sales', async (c) => {
   }
 });
 
-salesOpsRouter.post('/sales/:id/transition', async (c) => {
+// PC23: every route that moves ledger money or org-wide financial defaults is admin-only.
+salesOpsRouter.post('/sales/:id/transition', requireAdmin, async (c) => {
   const id = saleIdSchema.safeParse(c.req.param('id'));
   if (!id.success) return c.json({ error: 'not_found' }, 404);
   const parsed = SaleTransitionSchema.safeParse(await c.req.json().catch(() => ({})));
@@ -344,7 +364,7 @@ salesOpsRouter.post('/sales/:id/transition', async (c) => {
   return c.json({ sale: result.sale });
 });
 
-salesOpsRouter.post('/sales/:id/cancel-contract', async (c) => {
+salesOpsRouter.post('/sales/:id/cancel-contract', requireAdmin, async (c) => {
   const id = saleIdSchema.safeParse(c.req.param('id'));
   if (!id.success) return c.json({ error: 'not_found' }, 404);
   const parsed = CancelContractSchema.safeParse(await c.req.json().catch(() => ({})));
@@ -364,7 +384,7 @@ salesOpsRouter.post('/sales/:id/cancel-contract', async (c) => {
   });
 });
 
-salesOpsRouter.put('/sales/:id', async (c) => {
+salesOpsRouter.put('/sales/:id', requireAdmin, async (c) => {
   const saleId = c.req.param('id');
   if (!saleIdSchema.safeParse(saleId).success) return c.json({ error: 'not_found' }, 404);
   const parsed = UpdateSaleSchema.safeParse(await c.req.json().catch(() => ({})));
@@ -435,7 +455,7 @@ salesOpsRouter.get('/settings', async (c) => {
   return c.json({ settings });
 });
 
-salesOpsRouter.put('/settings', async (c) => {
+salesOpsRouter.put('/settings', requireAdmin, async (c) => {
   const parsed = SettingsSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) {
     return c.json({ error: 'validation_error', issues: parsed.error.flatten() }, 400);
