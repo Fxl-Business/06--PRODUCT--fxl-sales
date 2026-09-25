@@ -32,6 +32,7 @@ import {
   getSalesOpsSummary,
   transitionSale,
 } from '../../src/domains/sales-ops/service.js';
+import { firstRow } from './first-row.js';
 
 const APP_DB_URL =
   process.env.TEST_DATABASE_URL ??
@@ -159,8 +160,8 @@ describe('leads move no existing financial number', () => {
     }
 
     // The leads really exist, so the three assertions below are not vacuous.
-    const [{ count }] = await adminClient<{ count: string }[]>`
-      SELECT count(*)::text AS count FROM sales_ops_leads WHERE org_id = ${orgId}`;
+    const { count } = firstRow(await adminClient<{ count: string }[]>`
+      SELECT count(*)::text AS count FROM sales_ops_leads WHERE org_id = ${orgId}`, 'count');
     expect(count).toBe('3');
 
     expect(await getSalesOpsSummary(db, orgId)).toEqual(before.summary);

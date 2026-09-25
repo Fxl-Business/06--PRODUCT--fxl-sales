@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { LEAD_STAGE_SEEDS } from '../../src/domains/sales-ops/leads/stages-seed.js';
+import { firstRow } from './first-row.js';
 
 /**
  * Migration 0022 - the kanban pipeline persistence layer.
@@ -83,32 +84,32 @@ describe('leads schema migration 0022', () => {
   }
 
   async function insertPerson(orgId: string, displayName: string): Promise<string> {
-    const [row] = await adminClient<{ id: string }[]>`
+    const row = firstRow(await adminClient<{ id: string }[]>`
       INSERT INTO sales_ops_people (org_id, display_name)
       VALUES (${orgId}, ${displayName}) RETURNING id
-    `;
+    `, 'row');
     return row.id;
   }
 
   async function insertClient(orgId: string, name: string): Promise<string> {
-    const [row] = await adminClient<{ id: string }[]>`
+    const row = firstRow(await adminClient<{ id: string }[]>`
       INSERT INTO sales_ops_clients (org_id, name) VALUES (${orgId}, ${name}) RETURNING id
-    `;
+    `, 'row');
     return row.id;
   }
 
   async function insertProduct(orgId: string, name: string): Promise<string> {
-    const [row] = await adminClient<{ id: string }[]>`
+    const row = firstRow(await adminClient<{ id: string }[]>`
       INSERT INTO sales_ops_products (
         org_id, name, seller_commission_value, finder_commission_value,
         seller_with_finder_commission_value
       ) VALUES (${orgId}, ${name}, '10.00', '0.00', '0.00') RETURNING id
-    `;
+    `, 'row');
     return row.id;
   }
 
   async function insertSale(orgId: string, sequence: number, code: string): Promise<string> {
-    const [row] = await adminClient<{ id: string }[]>`
+    const row = firstRow(await adminClient<{ id: string }[]>`
       INSERT INTO sales_ops_sales (
         org_id, sequence, code, client_name_snapshot, seller_name_snapshot,
         payment_method, condition, base_date, total_brl,
@@ -117,7 +118,7 @@ describe('leads schema migration 0022', () => {
         ${orgId}, ${sequence}, ${code}, 'Cliente', 'Vendedor',
         'pix', 'cash', '2026-01-01', 100000, '10.00', '0.00', '6.00', '84.00'
       ) RETURNING id
-    `;
+    `, 'row');
     return row.id;
   }
 
@@ -128,11 +129,11 @@ describe('leads schema migration 0022', () => {
     isSystem: boolean,
     position: number,
   ): Promise<string> {
-    const [row] = await adminClient<{ id: string }[]>`
+    const row = firstRow(await adminClient<{ id: string }[]>`
       INSERT INTO sales_ops_lead_stages (org_id, name, kind, is_system, "position")
       VALUES (${orgId}, ${name}, ${kind}, ${isSystem}, ${position})
       RETURNING id
-    `;
+    `, 'row');
     return row.id;
   }
 
@@ -147,7 +148,7 @@ describe('leads schema migration 0022', () => {
       estimatedValueBrl?: number;
     } = {},
   ): Promise<string> {
-    const [row] = await adminClient<{ id: string }[]>`
+    const row = firstRow(await adminClient<{ id: string }[]>`
       INSERT INTO sales_ops_leads (
         org_id, contact_name, client_id, client_name_snapshot,
         estimated_value_brl, seller_person_id, stage_id, sale_id
@@ -156,7 +157,7 @@ describe('leads schema migration 0022', () => {
         ${extra.estimatedValueBrl ?? 0}, ${extra.sellerPersonId ?? null},
         ${stageId}, ${extra.saleId ?? null}
       ) RETURNING id
-    `;
+    `, 'row');
     return row.id;
   }
 
@@ -370,7 +371,7 @@ describe('leads schema migration 0022', () => {
     const remaining = await adminClient<{ count: string }[]>`
       SELECT count(*)::text AS count FROM sales_ops_lead_products WHERE lead_id = ${leadId}
     `;
-    expect(remaining[0].count).toBe('0');
+    expect(firstRow(remaining, 'the count').count).toBe('0');
 
     // Positive control: with no lead naming it, the produto deletes cleanly.
     await expect(

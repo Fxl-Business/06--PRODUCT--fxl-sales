@@ -5,6 +5,7 @@ import { eq } from 'drizzle-orm';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import * as schema from '../../src/db/schema.js';
+import { firstRow } from './first-row.js';
 
 const APP_DB_URL =
   process.env.TEST_DATABASE_URL ??
@@ -62,11 +63,11 @@ describe('proposal schema migration 0011', () => {
       createdAt,
     };
 
-    const [closedRow] = await db
+    const closedRow = firstRow(await db
       .insert(schema.salesOpsSales)
       .values({ ...baseSale, sequence: 1, code: 'MIG-CLOSED', status: 'closed', updatedAt })
-      .returning();
-    const [completedRow] = await db
+      .returning(), 'closedRow');
+    const completedRow = firstRow(await db
       .insert(schema.salesOpsSales)
       .values({
         ...baseSale,
@@ -75,23 +76,23 @@ describe('proposal schema migration 0011', () => {
         status: 'completed',
         updatedAt: null,
       })
-      .returning();
-    const [forecastRow] = await db
+      .returning(), 'completedRow');
+    const forecastRow = firstRow(await db
       .insert(schema.salesOpsSales)
       .values({ ...baseSale, sequence: 3, code: 'MIG-FORECAST', status: 'forecast' })
-      .returning();
-    const [inProgressRow] = await db
+      .returning(), 'forecastRow');
+    const inProgressRow = firstRow(await db
       .insert(schema.salesOpsSales)
       .values({ ...baseSale, sequence: 4, code: 'MIG-INPROGRESS', status: 'in_progress' })
-      .returning();
-    const [draftRow] = await db
+      .returning(), 'inProgressRow');
+    const draftRow = firstRow(await db
       .insert(schema.salesOpsSales)
       .values({ ...baseSale, sequence: 5, code: 'MIG-DRAFT', status: 'draft' })
-      .returning();
-    const [cancelledRow] = await db
+      .returning(), 'draftRow');
+    const cancelledRow = firstRow(await db
       .insert(schema.salesOpsSales)
       .values({ ...baseSale, sequence: 6, code: 'MIG-CANCELLED', status: 'cancelled' })
-      .returning();
+      .returning(), 'cancelledRow');
 
     const migrationFile = fs.readdirSync(DRIZZLE_DIR).find((f) => /^0011_.*\.sql$/.test(f));
     if (!migrationFile) throw new Error('migration 0011 file not found in drizzle directory');
@@ -147,7 +148,7 @@ describe('proposal schema migration 0011', () => {
     const orgId = `org_proposal_columns_${Date.now()}`;
     orgIds.push(orgId);
 
-    const [client] = await db
+    const client = firstRow(await db
       .insert(schema.salesOpsClients)
       .values({
         orgId,
@@ -158,15 +159,15 @@ describe('proposal schema migration 0011', () => {
         legalRepName: 'Fulano de Tal',
         legalRepDocument: '123.456.789-00',
       })
-      .returning();
+      .returning(), 'client');
 
-    const [area] = await db
+    const area = firstRow(await db
       .insert(schema.salesOpsAreas)
       .values({ orgId, name: 'FXL Tech' })
-      .returning();
+      .returning(), 'area');
 
     const wonAt = new Date('2026-02-01T10:00:00Z');
-    const [sale] = await db
+    const sale = firstRow(await db
       .insert(schema.salesOpsSales)
       .values({
         orgId,
@@ -187,9 +188,9 @@ describe('proposal schema migration 0011', () => {
         taxPct: '6.00',
         netMarginPct: '80.00',
       })
-      .returning();
+      .returning(), 'sale');
 
-    const [saleItem] = await db
+    const saleItem = firstRow(await db
       .insert(schema.salesOpsSaleItems)
       .values({
         orgId,
@@ -201,9 +202,9 @@ describe('proposal schema migration 0011', () => {
         unitBrl: 500000,
         subtotalBrl: 500000,
       })
-      .returning();
+      .returning(), 'saleItem');
 
-    const [receivable] = await db
+    const receivable = firstRow(await db
       .insert(schema.salesOpsReceivables)
       .values({
         orgId,
@@ -214,9 +215,9 @@ describe('proposal schema migration 0011', () => {
         method: 'boleto',
         status: 'void',
       })
-      .returning();
+      .returning(), 'receivable');
 
-    const [payable] = await db
+    const payable = firstRow(await db
       .insert(schema.salesOpsPayables)
       .values({
         orgId,
@@ -227,55 +228,55 @@ describe('proposal schema migration 0011', () => {
         dueDate: new Date('2026-02-10T00:00:00Z'),
         amountBrl: 50000,
       })
-      .returning();
+      .returning(), 'payable');
 
-    const [readClient] = await db
+    const readClient = firstRow(await db
       .select()
       .from(schema.salesOpsClients)
-      .where(eq(schema.salesOpsClients.id, client.id));
+      .where(eq(schema.salesOpsClients.id, client.id)), 'readClient');
     expect(readClient.legalName).toBe('Cliente Legal LTDA');
     expect(readClient.document).toBe('12.345.678/0001-99');
     expect(readClient.address).toBe('Rua Teste, 123');
     expect(readClient.legalRepName).toBe('Fulano de Tal');
     expect(readClient.legalRepDocument).toBe('123.456.789-00');
 
-    const [readSale] = await db
+    const readSale = firstRow(await db
       .select()
       .from(schema.salesOpsSales)
-      .where(eq(schema.salesOpsSales.id, sale.id));
+      .where(eq(schema.salesOpsSales.id, sale.id)), 'readSale');
     expect(readSale.status).toBe('won');
     expect(readSale.wonAt?.toISOString()).toBe(wonAt.toISOString());
     expect(readSale.lostAt).toBeNull();
 
-    const [readSaleItem] = await db
+    const readSaleItem = firstRow(await db
       .select()
       .from(schema.salesOpsSaleItems)
-      .where(eq(schema.salesOpsSaleItems.id, saleItem.id));
+      .where(eq(schema.salesOpsSaleItems.id, saleItem.id)), 'readSaleItem');
     expect(readSaleItem.areaId).toBe(area.id);
     expect(readSaleItem.areaNameSnapshot).toBe('FXL Tech');
 
-    const [readReceivable] = await db
+    const readReceivable = firstRow(await db
       .select()
       .from(schema.salesOpsReceivables)
-      .where(eq(schema.salesOpsReceivables.id, receivable.id));
+      .where(eq(schema.salesOpsReceivables.id, receivable.id)), 'readReceivable');
     expect(readReceivable.method).toBe('boleto');
     expect(readReceivable.status).toBe('void');
 
-    const [readPayable] = await db
+    const readPayable = firstRow(await db
       .select()
       .from(schema.salesOpsPayables)
-      .where(eq(schema.salesOpsPayables.id, payable.id));
+      .where(eq(schema.salesOpsPayables.id, payable.id)), 'readPayable');
     expect(readPayable.receivableId).toBe(receivable.id);
 
     await db.delete(schema.salesOpsReceivables).where(eq(schema.salesOpsReceivables.id, receivable.id));
 
-    const [payableAfterDelete] = await db
+    const payableAfterDelete = firstRow(await db
       .select()
       .from(schema.salesOpsPayables)
-      .where(eq(schema.salesOpsPayables.id, payable.id));
+      .where(eq(schema.salesOpsPayables.id, payable.id)), 'payableAfterDelete');
     expect(payableAfterDelete.receivableId).toBeNull();
 
-    const [defaultMethodReceivable] = await db
+    const defaultMethodReceivable = firstRow(await db
       .insert(schema.salesOpsReceivables)
       .values({
         orgId,
@@ -284,7 +285,7 @@ describe('proposal schema migration 0011', () => {
         dueDate: new Date('2026-03-10T00:00:00Z'),
         amountBrl: 100000,
       })
-      .returning();
+      .returning(), 'defaultMethodReceivable');
     expect(defaultMethodReceivable.method).toBe('pix');
   });
 });
