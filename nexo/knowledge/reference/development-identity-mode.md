@@ -40,6 +40,10 @@ Moved verbatim from `CLAUDE.md` on 2026-09-22 so the standing context stays shor
 - The browser seam is `requestHubAccessToken` in `apps/web/src/auth/refresh.ts` and NOT `HubClient.getToken()`, and that follows from a rule this file already states: the browser reads `/auth/refresh` itself and never through the client.
   Substituting the client, which is what the vendor recipe does, would deliver no token at all here, because the token path is the hand-rolled fetch.
   Anyone porting this mode from another FXL product will reach for the client seam first; that is the seam this repository does not have.
+- `applyHubAuthContext` in `apps/api/src/middleware/app-auth.ts` is the ONE seam that sets `c.get('hubAuth')` for both paths, before the legacy keys.
+  On the real path the SDK's `hubAuth()` middleware already set it and the second set is idempotent; the development adapter ends in the same function and has no other way to expose it.
+  Before 2026-09-25 it set only the legacy keys, so under `make dev-fake` a baixa showed `Autor não identificado` and a seller's lead scope had a null email.
+  The oracles are the `exposes the verified hub auth context` and `exposes the identity email` cases in `apps/api/src/auth/__tests__/dev-identity-no-hub.test.ts`.
 - The mode runs against the LOCAL Postgres and nothing else, under the `## Local database guard` rules unchanged.
   `apps/api/scripts/seed-dev.ts` is deterministic and idempotent and creates the `org_id` values the roster names, each with its `vendedor` and `finder` system funcoes and with pessoas attached, so `meus-dados` and `cadastros` open with rows instead of empty states.
   Tenancy is untouched: every query still filters on `eq(table.orgId, c.get('orgId'))`, the active org of a fake identity is an `org_id` that the seed created, and nothing on the fake path reads `user_id`, `org_id`, `account_id` or `workspace_id` out of a request body.
