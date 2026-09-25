@@ -257,6 +257,8 @@ export async function applyHubAuthContext(
   auth: MinimalHubAuthContext,
   next: Next,
 ): Promise<void> {
+  // The SDK already set this on the real path; the development adapter relies on this seam.
+  c.set('hubAuth', auth);
   const legacy = getHubLegacyAuthContext(auth);
   c.set('userId', legacy.userId);
   c.set('orgId', legacy.orgId);

@@ -70,6 +70,9 @@ beforeAll(async () => {
       orgId: c.get('orgId'),
       userRole: c.get('userRole'),
       userRoles: c.get('userRoles'),
+      actorName: appAuth.getHubActorDisplayName(c.get('hubAuth')),
+      // The value `leadScope` in domains/sales-ops/leads/lead-routes.ts reads.
+      email: c.get('hubAuth')?.claims?.email ?? null,
     }),
   );
 });
@@ -191,6 +194,34 @@ describe('the development identity adapter with no Hub configuration at all', ()
     const body = await res.json();
     expect(body.orgId).toBe(identity.activeWorkspaceId);
     expect(body.userId).toBe(identity.accountId);
+  });
+
+  it('exposes the verified hub auth context to handlers, so the actor name resolves', async () => {
+    const fake = await import('@fxl-sales/auth-fake');
+    const identity = fake.findIdentity('team-owner')!;
+
+    const res = await app.request('http://localhost/probe', {
+      headers: { 'x-fake-identity': identity.id },
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.actorName).not.toBeNull();
+    expect(body.actorName).toBe(identity.profile.name);
+  });
+
+  it('exposes the identity email to handlers, so the seller lead scope resolves', async () => {
+    const fake = await import('@fxl-sales/auth-fake');
+    const identity = fake.findIdentity('seller')!;
+
+    const res = await app.request('http://localhost/probe', {
+      headers: { 'x-fake-identity': identity.id },
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.email).not.toBeNull();
+    expect(body.email).toBe(identity.profile.email);
   });
 
   it('does not contact any Hub', async () => {
