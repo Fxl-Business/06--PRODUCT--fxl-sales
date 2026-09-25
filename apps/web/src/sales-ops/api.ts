@@ -9,6 +9,7 @@ import type {
   SalesOpsPerson,
   SalesOpsProduct,
   SalesOpsSettings,
+  SalesOpsSettlement,
 } from './types';
 
 type Token = string;
@@ -120,6 +121,17 @@ export type SaveSettingsPayload = Partial<
  * through `getAdminDb()` with no org filter and would hand one tenant every other
  * tenant's audit trail. The segment is `history`, not `audit`, for that reason.
  */
+/** A baixa of the whole open amount: the server derives the amount, so none is sent. */
+export type RecordSettlementPayload = {
+  targetKind: 'receivable' | 'payable';
+  targetId: string;
+  paidOn: string;
+};
+
+export type ReverseSettlementPayload = { settlementId: string; reason?: string };
+
+export type SaleSettlementsResponse = { settlements: SalesOpsSettlement[] };
+
 export const SALES_OPS_HISTORY_PATH = '/api/v1/sales-ops/history';
 
 export const salesOpsApi = {
@@ -215,4 +227,22 @@ export const salesOpsApi = {
       token,
       body: JSON.stringify({}),
     }),
+  // The body is built field by field and never spreads the payload, so an amount
+  // can never ride along: v1 is full payment only and the server derives it.
+  recordSettlement: ({ targetKind, targetId, paidOn }: RecordSettlementPayload, token: Token) =>
+    apiFetch<unknown>('/api/v1/sales-ops/settlements', {
+      method: 'POST',
+      token,
+      body: JSON.stringify({ targetKind, targetId, paidOn }),
+    }),
+  reverseSettlement: ({ settlementId, reason }: ReverseSettlementPayload, token: Token) =>
+    apiFetch<unknown>(
+      `/api/v1/sales-ops/settlements/${encodeURIComponent(settlementId)}/reverse`,
+      { method: 'POST', token, body: JSON.stringify(reason ? { reason } : {}) },
+    ),
+  saleSettlements: (saleId: string, token: Token) =>
+    apiFetch<SaleSettlementsResponse>(
+      `/api/v1/sales-ops/sales/${encodeURIComponent(saleId)}/settlements`,
+      { method: 'GET', token },
+    ),
 };

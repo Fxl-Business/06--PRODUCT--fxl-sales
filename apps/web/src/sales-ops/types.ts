@@ -225,6 +225,9 @@ export type SalesOpsReceivable = {
   status: 'open' | 'paid' | 'void';
   createdAt?: string;
   updatedAt?: string | null;
+  revision?: number;
+  /** Civil day of the latest active baixa (reducer output); `null` while unpaid. */
+  paidOn?: string | null;
 };
 
 export type SalesOpsSaleProfessional = {
@@ -261,6 +264,34 @@ export type SalesOpsPayable = {
   dueDate: string;
   amountBrl: number;
   status: 'open' | 'paid' | 'void';
+  revision?: number;
+  updatedAt?: string | null;
+  /** Civil day of the latest active baixa (reducer output); `null` while unpaid. */
+  paidOn?: string | null;
+};
+
+/**
+ * One baixa or estorno of `GET /sales/:id/settlements`: exactly the API's C6
+ * `SettlementEntry`. The API never projects `actor_user_id`, so this type
+ * declares none and nothing can render it.
+ */
+export type SalesOpsSettlement = {
+  id: string;
+  saleId: string;
+  targetKind: 'receivable' | 'payable';
+  receivableId: string | null;
+  payableId: string | null;
+  type: 'baixa' | 'estorno';
+  reversesSettlementId: string | null;
+  reversedBySettlementId: string | null;
+  /** Civil day `YYYY-MM-DD`. */
+  paidOn: string;
+  amountBrl: number;
+  origin: 'manual' | 'finance';
+  actorName: string | null;
+  /** ISO instant. */
+  recordedAt: string;
+  reason: string | null;
 };
 
 export type SalesOpsSettings = {
