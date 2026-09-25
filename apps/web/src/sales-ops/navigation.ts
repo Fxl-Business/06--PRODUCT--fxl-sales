@@ -135,6 +135,19 @@ export function getVisibleWorkspaces(roles: readonly AppRole[]): SalesOpsWorkspa
   return visible;
 }
 
+/**
+ * Baixa and estorno are admin actions of the `operacional` workspace only:
+ * `meus-dados` reuses the same views and stays read-only for everyone. Both terms
+ * are load-bearing; the admin one is belt and braces today because only an admin
+ * can stand in `operacional`.
+ */
+export function canSettleInWorkspace(
+  workspace: SalesOpsWorkspace,
+  roles: readonly AppRole[],
+): boolean {
+  return workspace === 'operacional' && roles.includes('admin');
+}
+
 export function getSalesOpsNavigation(
   workspace: SalesOpsWorkspace,
   roles: readonly AppRole[],

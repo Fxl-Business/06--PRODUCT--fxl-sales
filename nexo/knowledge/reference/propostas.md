@@ -150,6 +150,14 @@ Moved verbatim from `CLAUDE.md` on 2026-09-22 so the standing context stays shor
   `isAfterTodayInSaoPaulo` throws `RangeError` on a malformed day on purpose: callers validate with `isIsoDay` first and answer their own error code.
   The web never builds a `Date` from a stored day: `displayDate` slices the first ten characters, and `inputDateToday` is the São Paulo day.
   Oracles: `packages/shared-utils/src/__tests__/sao-paulo-day.test.ts`, `apps/api/test/rls/sao-paulo-day.test.ts`, `apps/api/src/domains/sales-ops/__tests__/sao-paulo-day-decisions.test.ts`, `apps/web/src/sales-ops/__tests__/civil-day.test.ts` and `apps/web/src/sales-ops/__tests__/sale-detail-civil-day.test.tsx`, the web ones running under `TZ=America/Sao_Paulo` with a `getDate()` positive control.
+- "No mês" is the São Paulo civil month of today (audit P7, slice 12).
+  No reference defined it, and both month cards summed everything ever: `Total pago no mês` in `CommissionsView` (shared by `operacional/comissoes` and `meus-dados/comissoes`) summed every `paid` payable, and `Receita ganha no mês` summed every `won` proposta.
+  Payments count by `paidOn`, the reducer's greatest active baixa day, through `sumPaidInSaoPauloMonth(payables, today)` in `calculations.ts`; a paid row without `paidOn` counts zero and `dueDate` is never read, because a row due this month but paid last month was not paid this month.
+  Won revenue counts by `saoPauloDayOf(new Date(sale.wonAt))`, so a proposta won at `2026-09-01T02:00:00Z` (23:00 on August 31 in São Paulo) belongs to August; a null `wonAt` is excluded.
+  `buildDashboardModel(bootstrap, today)` takes the day as an argument and reads no clock; `SalesOpsApp` and `CommissionsView` pass `todayInSaoPaulo()`.
+  The card's subtitle counts the same propostas its value sums (`wonThisMonthCount`); `Propostas ganhas`, `MRR ativo`, `Comissões a pagar`, the rankings and `Total a pagar` carry no "no mês" and keep their all-time meaning.
+  The sidebar's `A pagar este mês` is still every open payable; its label says `este mês` and changing what it counts is an open product question, not part of this rule.
+  Oracles: `São Paulo month totals` in `calculations.test.ts` and `month-totals.test.tsx`, which fixes the clock with `vi.setSystemTime` (including `2026-10-01T01:00:00Z`, still September in São Paulo).
 
 ## Settlements schema (migration 0024)
 
@@ -210,6 +218,9 @@ Moved verbatim from `CLAUDE.md` on 2026-09-22 so the standing context stays shor
 - The settlement UI lives in `apps/web/src/sales-ops/settlements/` so `SalesOpsApp.tsx` only mounts it; the precedent is `ProfessionalSplitPanel.tsx` and the leads screens.
   Actions appear where the rows already appear: `Plano de pagamento` and `Contas a pagar` in `SaleDetailDialog`, and the `operacional/comissoes` list.
   They are gated on `admin` AND the `operacional` workspace, because `SalesView` and `CommissionsView` also serve `meus-dados`, which is read-only for everyone, admins included; the server's `requireAdmin` stays the real gate and the UI only hides what would answer 403.
+  The gate is one predicate, `canSettleInWorkspace(workspace, roles)` in `apps/web/src/sales-ops/navigation.ts`, which `SalesOpsApp` reads as `canSettle`.
+  The shell oracle in `sales-settlement-visibility.test.tsx` renders the real `SalesOpsApp`: an admin in `operacional/comissoes` sees `Marcar como pago`, the same admin in `meus-dados/comissoes` and a seller-only profile see none.
+  Through the shell a non-admin can never stand in `operacional` (route resolution moves them first), so the admin term is pinned on the predicate itself.
   `Pago em` is shown to every viewer, because it is a fact about the row and comes from the bootstrap's reducer-backed `paidOn`.
 - `paidOn` and `dueDate` are civil days, so the UI formats them by splitting the string; `new Date('2026-09-23')` is UTC midnight and prints the 22nd in São Paulo.
   Only "today" is a São Paulo decision: `Marcar como pago` seeds and caps its date with `todayInSaoPaulo()`, which near UTC midnight is the previous UTC day; the oracle pins the clock at `2026-09-24T01:30:00Z` and expects `2026-09-23`.

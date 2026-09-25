@@ -1,4 +1,5 @@
 import { SPLIT_BP_TOTAL } from '@fxl-sales/shared-utils/professional-split';
+import { saoPauloDayOf } from '@fxl-sales/shared-utils/sao-paulo-day';
 import { payloadReceivableIds, payloadRowId } from './row-identity';
 import type {
   CommissionType,
@@ -6,6 +7,7 @@ import type {
   DashboardModel,
   PaymentMethod,
   SaleDraft,
+  SalesOpsPayable,
   SalesOpsBootstrap,
   SalesOpsPerson,
   SalesOpsProduct,
@@ -875,9 +877,46 @@ function saleTime(sale: SalesOpsSale): number {
   return new Date(sale.createdAt || sale.baseDate).getTime();
 }
 
-export function buildDashboardModel(bootstrap: SalesOpsBootstrap): DashboardModel {
+/**
+ * "No mês" is the America/Sao_Paulo civil month of `today` (a `YYYY-MM-DD` São
+ * Paulo day the caller takes from `todayInSaoPaulo()`). `day` is a civil day; a
+ * missing one is never in the month. Pure: nothing here reads the clock.
+ */
+export function isInSaoPauloMonth(day: string | null | undefined, today: string): boolean {
+  return typeof day === 'string' && day.length >= 7 && day.slice(0, 7) === today.slice(0, 7);
+}
+
+/**
+ * `Total pago no mês`: the paid payables whose `paidOn` (the reducer's greatest
+ * active baixa day) falls in the São Paulo month of `today`. `dueDate` never
+ * decides it: a row due this month but paid last month was not paid this month.
+ */
+export function sumPaidInSaoPauloMonth(
+  payables: ReadonlyArray<Pick<SalesOpsPayable, 'status' | 'paidOn' | 'amountBrl'>>,
+  today: string,
+): number {
+  return payables
+    .filter((payable) => payable.status === 'paid' && isInSaoPauloMonth(payable.paidOn, today))
+    .reduce((sum, payable) => sum + payable.amountBrl, 0);
+}
+
+/** A proposta counts as won this month by the São Paulo day of `wonAt`, never its UTC day. */
+function wonInSaoPauloMonth(sale: SalesOpsSale, today: string): boolean {
+  if (!sale.wonAt) return false;
+  const wonAt = new Date(sale.wonAt);
+  if (Number.isNaN(wonAt.getTime())) return false;
+  return isInSaoPauloMonth(saoPauloDayOf(wonAt), today);
+}
+
+/**
+ * `today` is the São Paulo day the caller took from `todayInSaoPaulo()`; only the
+ * `no mês` figures (`wonRevenueBrl`, `wonThisMonthCount`) read it. Every other
+ * figure keeps its all-time meaning.
+ */
+export function buildDashboardModel(bootstrap: SalesOpsBootstrap, today: string): DashboardModel {
   const activeSales = bootstrap.sales.filter((sale) => sale.status !== 'cancelled');
   const wonSales = activeSales.filter((sale) => wonStatuses.has(sale.status));
+  const wonThisMonth = wonSales.filter((sale) => wonInSaoPauloMonth(sale, today));
   const payableBrl = bootstrap.payables
     .filter((payable) => payable.status === 'open')
     .reduce((sum, payable) => sum + payable.amountBrl, 0);
@@ -920,7 +959,8 @@ export function buildDashboardModel(bootstrap: SalesOpsBootstrap): DashboardMode
 
   return {
     kpis: {
-      wonRevenueBrl: wonSales.reduce((sum, sale) => sum + sale.totalBrl, 0),
+      wonRevenueBrl: wonThisMonth.reduce((sum, sale) => sum + sale.totalBrl, 0),
+      wonThisMonthCount: wonThisMonth.length,
       activeMrrBrl: activeSales.reduce((sum, sale) => sum + sale.recurringBrl, 0),
       payableBrl,
       wonSalesCount: wonSales.length,
