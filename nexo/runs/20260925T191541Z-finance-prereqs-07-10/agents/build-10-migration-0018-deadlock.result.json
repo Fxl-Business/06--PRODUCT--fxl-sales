@@ -1,0 +1,12 @@
+{
+  "agent": "execute",
+  "slice": "10-migration-0018-deadlock",
+  "status": "PASS",
+  "report": "/Users/cauetpinciara/Documents/fxl/projects/06--PRODUCT--fxl-sales/.worktrees/20260925T191541Z-finance-prereqs-07-10/run/nexo/runs/20260925T191541Z-finance-prereqs-07-10/exec-10.md",
+  "summary": "Runner yields locks (lock_timeout=floor(deadlock_timeout/2), bounded whole-unit retry on 55P03/40P01); 3 new oracles red on base then green; flaky test 30/30 serial + 21/21 concurrent, 0 deadlocks; integration 272/272; unit, lint, type-check green",
+  "head": "ca69c31675b8ab3ca4b73d07c6aa92e8c128b7fa",
+  "done": true,
+  "started": "2026-09-25T19:35:02Z",
+  "ended": "2026-09-25T19:41:55Z",
+  "ts": "2026-09-25T19:41:55Z"
+}
