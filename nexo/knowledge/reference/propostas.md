@@ -207,3 +207,17 @@ Moved verbatim from `CLAUDE.md` on 2026-09-22 so the standing context stays shor
   Legacy rows are not migrated: every save now writes `BRL`, and a data-only `UPDATE` in a migration would run with no org context against a FORCE RLS table and could match nothing without failing.
   Any future reader of the currency, the sync's precondition included, must treat it as the constant BRL and never branch on the stored column.
   Oracles: `settings currency is locked to BRL` in `financial-admin-gate.test.ts` and `settings-currency-brl.test.tsx`.
+- The settlement UI lives in `apps/web/src/sales-ops/settlements/` so `SalesOpsApp.tsx` only mounts it; the precedent is `ProfessionalSplitPanel.tsx` and the leads screens.
+  Actions appear where the rows already appear: `Plano de pagamento` and `Contas a pagar` in `SaleDetailDialog`, and the `operacional/comissoes` list.
+  They are gated on `admin` AND the `operacional` workspace, because `SalesView` and `CommissionsView` also serve `meus-dados`, which is read-only for everyone, admins included; the server's `requireAdmin` stays the real gate and the UI only hides what would answer 403.
+  `Pago em` is shown to every viewer, because it is a fact about the row and comes from the bootstrap's reducer-backed `paidOn`.
+- `paidOn` and `dueDate` are civil days, so the UI formats them by splitting the string; `new Date('2026-09-23')` is UTC midnight and prints the 22nd in São Paulo.
+  Only "today" is a São Paulo decision: `Marcar como pago` seeds and caps its date with `todayInSaoPaulo()`, which near UTC midnight is the previous UTC day; the oracle pins the clock at `2026-09-24T01:30:00Z` and expects `2026-09-23`.
+  The recorded instant is an instant, so it alone goes through `Intl` with `timeZone: 'America/Sao_Paulo'`, assembled from `formatToParts` so the ICU separator cannot change the text.
+- The record body is built field by field (`targetKind`, `targetId`, `paidOn`) and never spreads a payload, because v1 is full payment only and the server derives the amount; the UI shows the open amount read-only.
+- The bootstrap deliberately carries no settlement id; `Estornar` reads the sale history and reverses the newest active baixa of that row, with "active" meaning no estorno points at it, the same rule as the reducer.
+  A paid row with no `paidOn` (a legacy row with no baixa; the migration and the dev seed give every paid row one, so it should not occur) offers no `Estornar`, because there is nothing to reverse.
+- A transition or `cancel-contract` refused with `409 sale_has_active_settlements` renders slice 07's `MutationErrorBanner` with its lines from `lockedRowLines`, naming each row from the bootstrap (`Parcela 1/3`, `Comissão do vendedor · Ana`) before falling back to the C5 server label, and never by id.
+  It reuses the banner on purpose: one page-level error surface, one 403 copy.
+  The reopen and cancel-contract confirmations now say to reverse a registered payment first, because a won proposta with an active baixa can no longer leave `won`.
+- Oracles: `settlements/__tests__/mark-paid-dialog.test.tsx`, `reverse-settlement-dialog.test.tsx`, `settlement-row-actions.test.tsx`, `settlement-history.test.tsx`, `settlements-api.test.ts`, `sale-action-error.test.tsx`, `settlement-format.test.ts`, and `__tests__/sales-settlement-visibility.test.tsx`.
