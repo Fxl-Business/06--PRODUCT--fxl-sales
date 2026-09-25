@@ -15,6 +15,7 @@ import {
   updateFuncao,
   updatePerson,
 } from '../../src/domains/sales-ops/service.js';
+import { firstRow } from './first-row.js';
 
 /**
  * The actor threaded through every sales-ops cadastro write. Only the
@@ -115,9 +116,9 @@ describe('sales operations funções persistence and RLS', () => {
     expect(await getFuncao(db, orgB, funcaoA.id)).toBeNull();
     expect(await updateFuncao(db, orgB, funcaoA.id, { name: 'hijack' }, TEST_ACTOR)).toBeNull();
 
-    const [unchanged] = await adminClient<
+    const unchanged = firstRow(await adminClient<
       { name: string }[]
-    >`SELECT name FROM sales_ops_funcoes WHERE id = ${funcaoA.id}`;
+    >`SELECT name FROM sales_ops_funcoes WHERE id = ${funcaoA.id}`, 'unchanged');
     expect(unchanged.name).toBe('Desenvolvedor');
 
     const archived = await updateFuncao(db, orgA, funcaoA.id, { status: 'archived' }, TEST_ACTOR);
@@ -172,11 +173,11 @@ describe('sales operations funções persistence and RLS', () => {
   it('updateFuncao refuses to rename or archive a system função', async () => {
     const [orgA] = newOrgPair('system');
 
-    const [seeded] = await adminClient<{ id: string }[]>`
+    const seeded = firstRow(await adminClient<{ id: string }[]>`
       INSERT INTO sales_ops_funcoes (org_id, name, slug, is_system)
       VALUES (${orgA}, 'Vendedor', 'vendedor', true)
       RETURNING id
-    `;
+    `, 'seeded');
 
     expect(await updateFuncao(db, orgA, seeded.id, { name: 'Outro' }, TEST_ACTOR)).toBe(
       'is_system',
@@ -185,9 +186,9 @@ describe('sales operations funções persistence and RLS', () => {
       'is_system',
     );
 
-    const [row] = await adminClient<{ name: string; status: string; updated_at: Date | null }[]>`
+    const row = firstRow(await adminClient<{ name: string; status: string; updated_at: Date | null }[]>`
       SELECT name, status, updated_at FROM sales_ops_funcoes WHERE id = ${seeded.id}
-    `;
+    `, 'row');
     expect(row.name).toBe('Vendedor');
     expect(row.status).toBe('active');
     expect(row.updated_at).toBeNull();
@@ -309,7 +310,7 @@ describe('sales operations funções persistence and RLS', () => {
     const peopleA = await listPeople(adminDb, orgA);
     expect(peopleA.map((person) => person.id)).toEqual([personA.id]);
     // The attached função set must be org-scoped too, not just the person rows.
-    expect(peopleA[0].funcoes.map((funcao) => funcao.slug)).toEqual(['vendedor']);
+    expect(firstRow(peopleA, 'the org A person').funcoes.map((funcao) => funcao.slug)).toEqual(['vendedor']);
     expect(
       await updatePerson(adminDb, orgA, personB.id, { displayName: 'hijack' }, TEST_ACTOR),
     ).toBeNull();
@@ -354,7 +355,7 @@ describe('sales operations funções persistence and RLS', () => {
     const assignments = await adminClient<{ count: string }[]>`
       SELECT count(*)::text AS count FROM sales_ops_person_funcoes WHERE org_id = ${orgA}
     `;
-    expect(assignments[0].count).toBe('0');
+    expect(firstRow(assignments, 'the count').count).toBe('0');
 
     // Positive control: org A's own função is accepted on the very same payload.
     const funcaoA = await createFuncao(db, orgA, { name: 'Desenvolvedor', status: 'active' });
@@ -384,7 +385,7 @@ describe('sales operations funções persistence and RLS', () => {
     });
     if (typeof person === 'string') throw new Error(`unexpected sentinel: ${person}`);
     expect(person.funcoes.map((funcao) => funcao.slug)).toEqual(['prestador']);
-    expect(person.funcoes[0].isSystem).toBe(false);
+    expect(firstRow(person.funcoes, 'the prestador função').isSystem).toBe(false);
   });
 
   it('listPeople returns each pessoa with its funções attached and the derived boolean mirrors', async () => {
@@ -416,7 +417,7 @@ describe('sales operations funções persistence and RLS', () => {
     );
     if (typeof updated === 'string') throw new Error(`unexpected sentinel: ${updated}`);
 
-    const [listed] = await listPeople(db, orgA);
+    const listed = firstRow(await listPeople(db, orgA), 'listed');
     expect(listed.funcoes).toHaveLength(2);
     // System funções lead, then alphabetical by name.
     expect(listed.funcoes.map((funcao) => funcao.slug)).toEqual(['vendedor', 'desenvolvedor']);
@@ -437,7 +438,7 @@ describe('sales operations funções persistence and RLS', () => {
       FROM sales_ops_person_funcoes
       WHERE org_id = ${orgA} AND person_id = ${seeded.id}
     `;
-    expect(rows[0].count).toBe('1');
+    expect(firstRow(rows, 'the count').count).toBe('1');
   });
 
   it('updatePerson leaves the assignment set alone when funcaoIds is omitted', async () => {
@@ -470,7 +471,7 @@ describe('sales operations funções persistence and RLS', () => {
       'funcao_required',
     );
     const stillThere = await listPeople(db, orgA);
-    expect(stillThere[0].funcaoIds).toHaveLength(2);
+    expect(firstRow(stillThere, 'the person').funcaoIds).toHaveLength(2);
 
     // A patch against another org still cannot resolve the row.
     const [, orgB] = newOrgPair('untouched_other');
@@ -520,9 +521,9 @@ describe('sales operations funções persistence and RLS', () => {
     );
     if (typeof cleared === 'string') throw new Error(`unexpected sentinel: ${cleared}`);
     expect(cleared?.contactEmail).toBeNull();
-    const [stored] = await adminClient<{ contact_email: string | null }[]>`
+    const stored = firstRow(await adminClient<{ contact_email: string | null }[]>`
       SELECT contact_email FROM sales_ops_people WHERE id = ${person.id}
-    `;
+    `, 'stored');
     expect(stored.contact_email).toBeNull();
 
     // Positive control: a real address still round-trips, and an explicit empty
@@ -547,17 +548,17 @@ describe('sales operations funções persistence and RLS', () => {
   it('a cross-org assignment is rejected by the composite foreign key even in the admin context', async () => {
     const [orgA, orgB] = newOrgPair('compositefk');
 
-    const [personA] = await adminClient<{ id: string }[]>`
+    const personA = firstRow(await adminClient<{ id: string }[]>`
       INSERT INTO sales_ops_people (org_id, display_name) VALUES (${orgA}, 'Sig') RETURNING id
-    `;
-    const [funcaoA] = await adminClient<{ id: string }[]>`
+    `, 'personA');
+    const funcaoA = firstRow(await adminClient<{ id: string }[]>`
       INSERT INTO sales_ops_funcoes (org_id, name, slug) VALUES (${orgA}, 'Designer', 'designer')
       RETURNING id
-    `;
-    const [funcaoB] = await adminClient<{ id: string }[]>`
+    `, 'funcaoA');
+    const funcaoB = firstRow(await adminClient<{ id: string }[]>`
       INSERT INTO sales_ops_funcoes (org_id, name, slug) VALUES (${orgB}, 'Designer', 'designer')
       RETURNING id
-    `;
+    `, 'funcaoB');
 
     // Org A's person paired with org B's função: the (org_id, funcao_id) FK has
     // no matching (orgA, funcaoB) target row, so the database refuses it. A plain

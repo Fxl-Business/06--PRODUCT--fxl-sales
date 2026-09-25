@@ -21,6 +21,7 @@ import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import * as schema from '../../src/db/schema.js';
 import { listOrgAuditHistory } from '../../src/domains/audit/history-service.js';
+import { firstRow } from './first-row.js';
 
 const APP_DB_URL =
   process.env.TEST_DATABASE_URL ??
@@ -63,7 +64,7 @@ type SeedRow = {
   action: string;
   entityType: string;
   entityId: string;
-  after: Record<string, unknown> | null;
+  after: Record<string, string | number>;
 };
 
 /**
@@ -179,16 +180,16 @@ describe('org-scoped audit history read', () => {
     db = drizzle(appClient, { schema });
 
     for (const row of SEED_ROWS) {
-      // `row.after` is bound as an OBJECT, never as JSON.stringify(row.after):
-      // postgres.js applies its own JSON serializer to a `::jsonb` parameter, so
-      // a pre-stringified value lands as a jsonb *string* scalar and every
-      // `->>` extraction against it silently returns NULL.
+      // `row.after` is bound through `adminClient.json(row.after)`, never as
+      // JSON.stringify(row.after): postgres.js applies its own JSON serializer to
+      // a json parameter, so a pre-stringified value lands as a jsonb *string*
+      // scalar and every `->>` extraction against it silently returns NULL.
       //
       // prev_hash / entry_hash are the documented pre-Phase-05 '' placeholder, so
       // these rows sit OUTSIDE the hash chain (verifyChain and /verify-chain both
       // filter on length(entry_hash) = 64) and cannot perturb the chain
       // assertions in the conversion suites that share this database.
-      const [inserted] = await adminClient<{ id: string }[]>`
+      const inserted = firstRow(await adminClient<{ id: string }[]>`
         INSERT INTO audit_log
           (actor_user_id, actor_org_id, action, entity_type, entity_id, after_jsonb, prev_hash, entry_hash)
         VALUES (
@@ -197,12 +198,12 @@ describe('org-scoped audit history read', () => {
           ${row.action},
           ${row.entityType},
           ${row.entityId},
-          ${row.after}::jsonb,
+          ${adminClient.json(row.after)}::jsonb,
           '',
           ''
         )
         RETURNING id::text AS id
-      `;
+      `, 'inserted');
       seededIds.set(row.entityId, inserted.id);
     }
 

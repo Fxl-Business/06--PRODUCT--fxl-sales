@@ -15,10 +15,8 @@
  */
 import { createHmac } from 'node:crypto';
 import { Hono } from 'hono';
-import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import * as schema from '../../src/db/schema.js';
 import { hmacVerifyMiddleware } from '../../src/domains/conversions/hmac-middleware.js';
 import { conversionsRouter } from '../../src/domains/conversions/routes.js';
 import { buildIdempotencyKey } from '../../src/domains/conversions/service.js';

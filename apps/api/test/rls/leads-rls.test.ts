@@ -4,6 +4,7 @@ import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import * as schema from '../../src/db/schema.js';
 import { ensureLeadStagesForOrg } from '../../src/domains/sales-ops/leads/stages-seed.js';
+import { firstRow } from './first-row.js';
 
 /**
  * Slice 01 ships exactly ONE service function for the leads domain,
@@ -68,32 +69,32 @@ describe('sales operations leads persistence and RLS', () => {
   }
 
   async function insertPerson(orgId: string, displayName: string): Promise<string> {
-    const [row] = await adminClient<{ id: string }[]>`
+    const row = firstRow(await adminClient<{ id: string }[]>`
       INSERT INTO sales_ops_people (org_id, display_name)
       VALUES (${orgId}, ${displayName}) RETURNING id
-    `;
+    `, 'row');
     return row.id;
   }
 
   async function insertClient(orgId: string, name: string): Promise<string> {
-    const [row] = await adminClient<{ id: string }[]>`
+    const row = firstRow(await adminClient<{ id: string }[]>`
       INSERT INTO sales_ops_clients (org_id, name) VALUES (${orgId}, ${name}) RETURNING id
-    `;
+    `, 'row');
     return row.id;
   }
 
   async function insertProduct(orgId: string, name: string): Promise<string> {
-    const [row] = await adminClient<{ id: string }[]>`
+    const row = firstRow(await adminClient<{ id: string }[]>`
       INSERT INTO sales_ops_products (
         org_id, name, seller_commission_value, finder_commission_value,
         seller_with_finder_commission_value
       ) VALUES (${orgId}, ${name}, '10.00', '0.00', '0.00') RETURNING id
-    `;
+    `, 'row');
     return row.id;
   }
 
   async function insertSale(orgId: string, sequence: number): Promise<string> {
-    const [row] = await adminClient<{ id: string }[]>`
+    const row = firstRow(await adminClient<{ id: string }[]>`
       INSERT INTO sales_ops_sales (
         org_id, sequence, code, client_name_snapshot, seller_name_snapshot,
         payment_method, condition, base_date, total_brl,
@@ -102,15 +103,15 @@ describe('sales operations leads persistence and RLS', () => {
         ${orgId}, ${sequence}, ${`LEAD-RLS-${randomUUID().slice(0, 8)}`}, 'Cliente', 'Vendedor',
         'pix', 'cash', '2026-01-01', 100000, '10.00', '0.00', '6.00', '84.00'
       ) RETURNING id
-    `;
+    `, 'row');
     return row.id;
   }
 
   async function insertStage(orgId: string, name: string): Promise<string> {
-    const [row] = await adminClient<{ id: string }[]>`
+    const row = firstRow(await adminClient<{ id: string }[]>`
       INSERT INTO sales_ops_lead_stages (org_id, name, kind, is_system, "position")
       VALUES (${orgId}, ${name}, 'normal', false, 1) RETURNING id
-    `;
+    `, 'row');
     return row.id;
   }
 
@@ -153,7 +154,7 @@ describe('sales operations leads persistence and RLS', () => {
 
     const second = await ensureLeadStagesForOrg(db, orgA);
     expect(second.map((stage) => stage.id)).toEqual(first.map((stage) => stage.id));
-    expect((await stageCount(orgA))[0].count).toBe('4');
+    expect(firstRow(await stageCount(orgA), 'the count').count).toBe('4');
   });
 
   it('ensureLeadStagesForOrg never re-inserts a stage the org has renamed or archived', async () => {
@@ -173,7 +174,7 @@ describe('sales operations leads persistence and RLS', () => {
     expect(again).toHaveLength(4);
     expect(again.some((stage) => stage.name === 'Novo')).toBe(false);
     expect(again.some((stage) => stage.name === 'Prospecção')).toBe(true);
-    expect((await stageCount(orgA))[0].count).toBe('4');
+    expect(firstRow(await stageCount(orgA), 'the count').count).toBe('4');
   });
 
   it('two concurrent first calls for the same org still leave exactly four stages', async () => {
@@ -189,7 +190,7 @@ describe('sales operations leads persistence and RLS', () => {
     expect(new Set(left.map((stage) => stage.id))).toEqual(
       new Set(right.map((stage) => stage.id)),
     );
-    expect((await stageCount(orgA))[0].count).toBe('4');
+    expect(firstRow(await stageCount(orgA), 'the count').count).toBe('4');
   });
 
   it('scopes the stage read by orgId even when RLS is not doing the scoping', async () => {
@@ -344,7 +345,7 @@ describe('sales operations leads persistence and RLS', () => {
     );
 
     // Positive control: the same shape, all in org A, lands.
-    const [leadA] = await insertLeadIn(orgA, stageA);
+    const leadA = firstRow(await insertLeadIn(orgA, stageA), 'leadA');
     expect(leadA.id).toEqual(expect.any(String));
 
     await expect(adminClient`
@@ -352,7 +353,7 @@ describe('sales operations leads persistence and RLS', () => {
       VALUES (${orgA}, ${leadA.id}, ${productB}, 'Produto B')
     `).rejects.toThrow(/sales_ops_lead_products_org_product_fk/);
 
-    const leadB = (await insertLeadIn(orgB, stageB))[0];
+    const leadB = firstRow(await insertLeadIn(orgB, stageB), 'leadB');
     await expect(adminClient`
       INSERT INTO sales_ops_lead_products (org_id, lead_id, product_name_snapshot)
       VALUES (${orgA}, ${leadB.id}, 'Produto livre')

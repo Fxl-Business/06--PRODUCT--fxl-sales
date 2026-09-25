@@ -35,6 +35,7 @@ import {
   updatePerson,
   updateProduct,
 } from '../../src/domains/sales-ops/service.js';
+import { firstRow } from './first-row.js';
 
 const APP_DB_URL =
   process.env.TEST_DATABASE_URL ??
@@ -95,9 +96,9 @@ describe('cadastro archive/restore audit ledger', () => {
   }
 
   async function auditCountForEntity(entityId: string): Promise<number> {
-    const [row] = await adminClient<{ count: string }[]>`
+    const row = firstRow(await adminClient<{ count: string }[]>`
       SELECT count(*)::text AS count FROM audit_log WHERE entity_id = ${entityId}
-    `;
+    `, 'row');
     return Number(row.count);
   }
 
@@ -337,11 +338,11 @@ describe('cadastro archive/restore audit ledger', () => {
 
   it('logs nothing when a system função is refused', async () => {
     const orgId = newOrg('system');
-    const [seeded] = await adminClient<{ id: string }[]>`
+    const seeded = firstRow(await adminClient<{ id: string }[]>`
       INSERT INTO sales_ops_funcoes (org_id, name, slug, is_system)
       VALUES (${orgId}, 'Vendedor', 'vendedor', true)
       RETURNING id
-    `;
+    `, 'seeded');
 
     expect(await updateFuncao(db, orgId, seeded.id, { status: 'archived' }, ACTOR)).toBe(
       'is_system',
@@ -364,9 +365,9 @@ describe('cadastro archive/restore audit ledger', () => {
 
     expect(await updateArea(db, orgB, area.id, { status: 'archived' }, ACTOR)).toBeNull();
 
-    const [raw] = await adminClient<{ status: string }[]>`
+    const raw = firstRow(await adminClient<{ status: string }[]>`
       SELECT status FROM sales_ops_areas WHERE id = ${area.id}
-    `;
+    `, 'raw');
     expect(raw.status).toBe('active');
     expect(await auditCountForEntity(area.id)).toBe(0);
     expect(await auditRowsFor(orgB)).toHaveLength(0);
@@ -397,9 +398,9 @@ describe('cadastro archive/restore audit ledger', () => {
         updateArea(db, orgId, area.id, { status: 'archived' }, ACTOR),
       );
 
-      const [raw] = await adminClient<{ status: string }[]>`
+      const raw = firstRow(await adminClient<{ status: string }[]>`
         SELECT status FROM sales_ops_areas WHERE id = ${area.id}
-      `;
+      `, 'raw');
       expect(raw.status).toBe('active');
       expect(await auditCountForEntity(area.id)).toBe(0);
     } finally {
@@ -428,9 +429,9 @@ describe('cadastro archive/restore audit ledger', () => {
         updateArea(db, orgId, area.id, { status: 'archived' }, ACTOR),
       );
 
-      const [raw] = await adminClient<{ status: string }[]>`
+      const raw = firstRow(await adminClient<{ status: string }[]>`
         SELECT status FROM sales_ops_areas WHERE id = ${area.id}
-      `;
+      `, 'raw');
       expect(raw.status).toBe('active');
       expect(await auditCountForEntity(area.id)).toBe(0);
     } finally {
@@ -475,9 +476,9 @@ describe('cadastro archive/restore audit ledger', () => {
         updateArea(db, orgId, area.id, { status: 'archived' }, ACTOR),
       );
 
-      const [raw] = await adminClient<{ status: string }[]>`
+      const raw = firstRow(await adminClient<{ status: string }[]>`
         SELECT status FROM sales_ops_areas WHERE id = ${area.id}
-      `;
+      `, 'raw');
       expect(raw.status).toBe('active');
       expect(
         await auditCountForEntity(area.id),

@@ -95,7 +95,7 @@ type SettlementFields = {
   id?: string;
 };
 
-async function insertSettlement(client: Sql, fields: SettlementFields): Promise<string> {
+async function insertSettlement(client: Sql | postgres.TransactionSql, fields: SettlementFields): Promise<string> {
   const row = {
     target_kind: 'receivable',
     type: 'baixa',

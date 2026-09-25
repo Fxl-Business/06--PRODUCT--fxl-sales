@@ -11,6 +11,7 @@ import {
   updateLeadStage,
 } from '../../src/domains/sales-ops/leads/stage-service.js';
 import { ensureLeadStagesForOrg } from '../../src/domains/sales-ops/leads/stages-seed.js';
+import { firstRow } from './first-row.js';
 
 const APP_DB_URL =
   process.env.TEST_DATABASE_URL ??
@@ -165,10 +166,10 @@ describe('sales operations lead stages persistence and RLS', () => {
 
     expect(await racing).toBe('duplicate');
 
-    const [{ count }] = await adminClient<{ count: string }[]>`
+    const { count } = firstRow(await adminClient<{ count: string }[]>`
       SELECT count(*)::text AS count FROM sales_ops_lead_stages
       WHERE org_id = ${orgA} AND name = 'Concorrente'
-    `;
+    `, 'count');
     expect(count).toBe('1');
   });
 
@@ -183,7 +184,9 @@ describe('sales operations lead stages persistence and RLS', () => {
     }
     expect(created.map((stage) => stage.position)).toEqual([0, 1, 2]);
 
-    const archived = await updateLeadStage(db, orgA, created[1].id, { status: 'archived' });
+    const second = created[1];
+    if (!second) throw new Error('expected three created stages');
+    const archived = await updateLeadStage(db, orgA, second.id, { status: 'archived' });
     if (archived === null || typeof archived === 'string') {
       throw new Error(`unexpected sentinel: ${archived}`);
     }
@@ -206,7 +209,10 @@ describe('sales operations lead stages persistence and RLS', () => {
     expect(await updateLeadStage(db, orgA, system.id, { name: 'Renomeada' })).toBe('is_system');
     expect(await updateLeadStage(db, orgA, system.id, { status: 'archived' })).toBe('is_system');
 
-    const [reread] = (await listLeadStages(db, orgA)).filter((stage) => stage.id === system.id);
+    const reread = firstRow(
+      (await listLeadStages(db, orgA)).filter((stage) => stage.id === system.id),
+      'the system stage',
+    );
     expect(reread.name).toBe(system.name);
     expect(reread.status).toBe('active');
     expect(reread.archivedAt).toBeNull();
@@ -239,13 +245,13 @@ describe('sales operations lead stages persistence and RLS', () => {
   it('reorderLeadStages leaves every lead stage_changed_at untouched', async () => {
     const [orgA] = newOrgPair('stagechanged');
     const seeded = await ensureLeadStagesForOrg(db, orgA);
-    const home = seeded[0];
+    const home = firstRow(seeded, 'a seeded stage');
 
-    const [lead] = await adminClient<{ id: string; stage_changed_at: Date }[]>`
+    const lead = firstRow(await adminClient<{ id: string; stage_changed_at: Date }[]>`
       INSERT INTO sales_ops_leads (org_id, contact_name, client_name_snapshot, stage_id)
       VALUES (${orgA}, 'Contato Um', 'Empresa Um', ${home.id})
       RETURNING id, stage_changed_at
-    `;
+    `, 'lead');
 
     const reordered = await reorderLeadStages(
       db,
@@ -254,9 +260,9 @@ describe('sales operations lead stages persistence and RLS', () => {
     );
     if (reordered === 'set_mismatch') throw new Error('unexpected set_mismatch');
 
-    const [after] = await adminClient<{ stage_changed_at: Date; updated_at: Date | null }[]>`
+    const after = firstRow(await adminClient<{ stage_changed_at: Date; updated_at: Date | null }[]>`
       SELECT stage_changed_at, updated_at FROM sales_ops_leads WHERE id = ${lead.id}
-    `;
+    `, 'after');
     // Byte-identical, not merely "the lead still exists": this is the sole oracle
     // for "a reorder never touches a lead".
     expect(after.stage_changed_at.toISOString()).toBe(lead.stage_changed_at.toISOString());
@@ -269,9 +275,9 @@ describe('sales operations lead stages persistence and RLS', () => {
     if (typeof stage === 'string') throw new Error(`unexpected sentinel: ${stage}`);
 
     const countEntries = async () => {
-      const [row] = await adminClient<{ count: string }[]>`
+      const row = firstRow(await adminClient<{ count: string }[]>`
         SELECT count(*)::text AS count FROM audit_log
-      `;
+      `, 'row');
       return row.count;
     };
 

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { firstRow } from './first-row.js';
 
 const APP_DB_URL =
   process.env.TEST_DATABASE_URL ??
@@ -56,7 +57,7 @@ describe('funções schema migration 0012', () => {
     displayName: string,
     flags: { isSeller?: boolean; isFinder?: boolean; isCollaborator?: boolean },
   ): Promise<string> {
-    const [row] = await adminClient<{ id: string }[]>`
+    const row = firstRow(await adminClient<{ id: string }[]>`
       INSERT INTO sales_ops_people (org_id, display_name, is_seller, is_finder, is_collaborator)
       VALUES (
         ${orgId},
@@ -66,7 +67,7 @@ describe('funções schema migration 0012', () => {
         ${flags.isCollaborator ?? false}
       )
       RETURNING id
-    `;
+    `, 'row');
     return row.id;
   }
 
@@ -152,7 +153,7 @@ describe('funções schema migration 0012', () => {
     const people = await adminClient<
       { count: string }[]
     >`SELECT count(*)::text AS count FROM sales_ops_people WHERE id = ${personId}`;
-    expect(people[0].count).toBe('1');
+    expect(firstRow(people, 'the count').count).toBe('1');
     expect(await assignmentsOf(orgId, personId)).toEqual([
       { person_id: personId, slug: 'vendedor' },
     ]);
@@ -245,7 +246,7 @@ describe('funções schema migration 0012', () => {
       isCollaborator: true,
     });
 
-    const [sale] = await adminClient<{ id: string }[]>`
+    const sale = firstRow(await adminClient<{ id: string }[]>`
       INSERT INTO sales_ops_sales (
         org_id, sequence, code, client_name_snapshot, seller_name_snapshot,
         seller_person_id, finder_person_id,
@@ -256,26 +257,26 @@ describe('funções schema migration 0012', () => {
         ${sellerId}, ${finderId},
         'pix', 'cash', '2026-01-01', 100000, '10.00', '3.00', '6.00', '81.00'
       ) RETURNING id
-    `;
-    const [professional] = await adminClient<{ id: string }[]>`
+    `, 'sale');
+    const professional = firstRow(await adminClient<{ id: string }[]>`
       INSERT INTO sales_ops_sale_professionals (
         org_id, sale_id, person_id, person_name_snapshot, role, cost_brl
       ) VALUES (
         ${orgId}, ${sale.id}, ${collaboratorId}, 'Joao Boldo', 'Operacional', 5000
       ) RETURNING id
-    `;
+    `, 'professional');
 
     await replayBackfill();
 
-    const [readSale] = await adminClient<
+    const readSale = firstRow(await adminClient<
       { seller_person_id: string; finder_person_id: string }[]
-    >`SELECT seller_person_id, finder_person_id FROM sales_ops_sales WHERE id = ${sale.id}`;
+    >`SELECT seller_person_id, finder_person_id FROM sales_ops_sales WHERE id = ${sale.id}`, 'readSale');
     expect(readSale.seller_person_id).toBe(sellerId);
     expect(readSale.finder_person_id).toBe(finderId);
 
-    const [readProfessional] = await adminClient<
+    const readProfessional = firstRow(await adminClient<
       { person_id: string; role: string }[]
-    >`SELECT person_id, role FROM sales_ops_sale_professionals WHERE id = ${professional.id}`;
+    >`SELECT person_id, role FROM sales_ops_sale_professionals WHERE id = ${professional.id}`, 'readProfessional');
     expect(readProfessional.person_id).toBe(collaboratorId);
     expect(readProfessional.role).toBe('Operacional');
 
