@@ -104,11 +104,14 @@ export type SaveSettingsPayload = Partial<
     | 'defaultSellerCommissionPct'
     | 'defaultFinderCommissionPct'
     | 'defaultTaxPct'
+    | 'currency'
   >
 > & {
   defaultSellerCommissionPct?: number;
   defaultFinderCommissionPct?: number;
   defaultTaxPct?: number;
+  /** Locked to BRL; a legacy stored value is never echoed back. */
+  currency?: 'BRL';
 };
 
 /**
