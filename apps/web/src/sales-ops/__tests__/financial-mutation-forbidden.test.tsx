@@ -1,18 +1,20 @@
 // @vitest-environment happy-dom
 
 /**
- * PC23 through the SHELL: a 403 on saving Configurações keeps the screen mounted
- * and shows the pt-BR admin-required banner, never `ForbiddenPanel` (which is the
- * app gate for the bootstrap read only).
+ * PC23 through the SHELL: a 403 on saving Configurações, on a status transition
+ * or on cancelling a contract keeps the screen mounted and shows the pt-BR
+ * admin-required banner, never `ForbiddenPanel` (which is the app gate for the
+ * bootstrap read only). Each action is driven through its REAL button, confirm
+ * step included, so removing `reportMutation` from any one call fails its case.
  */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import * as React from 'react';
-import type { HTMLAttributes } from 'react';
+import type { HTMLAttributes, ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MUTATION_ERROR_COPY } from '../mutation-error-copy';
-import type { SalesOpsBootstrap, SalesOpsSettings } from '../types';
+import type { SalesOpsBootstrap, SalesOpsSale, SalesOpsSettings } from '../types';
 
 const mocks = vi.hoisted(() => ({
   getToken: vi.fn(),
@@ -66,6 +68,40 @@ vi.mock('@/components/ui/dialog', () => ({
   ),
 }));
 
+// Radix menus and the confirm dialog, flattened exactly as in
+// sales-transition-actions.test.tsx so the row actions are plain buttons.
+vi.mock('@/components/ui/dropdown-menu', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/components/ui/dropdown-menu')>()),
+  DropdownMenu: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  DropdownMenuTrigger: ({ children }: { children: ReactNode }) => <>{children}</>,
+  DropdownMenuContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  DropdownMenuItem: ({ children, onSelect }: { children: ReactNode; onSelect?: () => void }) => (
+    <button onClick={() => onSelect?.()} type="button">
+      {children}
+    </button>
+  ),
+  DropdownMenuLabel: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  DropdownMenuSeparator: () => <hr />,
+}));
+
+vi.mock('@/components/ui/alert-dialog', () => ({
+  AlertDialog: ({ children, open }: { children: ReactNode; open: boolean }) =>
+    open ? <div>{children}</div> : null,
+  AlertDialogContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  AlertDialogHeader: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  AlertDialogFooter: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  AlertDialogTitle: ({ children }: { children: ReactNode }) => <h2>{children}</h2>,
+  AlertDialogDescription: ({ children }: { children: ReactNode }) => <p>{children}</p>,
+  AlertDialogAction: ({ children, onClick }: { children: ReactNode; onClick?: () => void }) => (
+    <button onClick={onClick} type="button">
+      {children}
+    </button>
+  ),
+  AlertDialogCancel: ({ children }: { children: ReactNode }) => (
+    <button type="button">{children}</button>
+  ),
+}));
+
 // NOT mocked: '../api', '@/lib/api-client' and '../hooks'. The 403 travels the REAL
 // apiFetch error path into the mutation's onError.
 import { SalesOpsApp } from '../SalesOpsApp';
@@ -93,8 +129,53 @@ const legacySettings: SalesOpsSettings = {
   updatedAt: null,
 };
 
+function sale(overrides: Partial<SalesOpsSale> & { id: string; code: string }): SalesOpsSale {
+  return {
+    orgId: 'org-a',
+    sequence: 1,
+    clientId: null,
+    clientNameSnapshot: 'SegPro',
+    sellerPersonId: null,
+    sellerNameSnapshot: 'Ana Martins',
+    finderPersonId: null,
+    finderNameSnapshot: null,
+    status: 'open',
+    paymentMethod: 'pix',
+    condition: 'installments',
+    installments: 1,
+    baseDate: '2026-07-10',
+    notes: null,
+    wonAt: null,
+    lostAt: null,
+    totalBrl: 300000,
+    recurringBrl: 0,
+    sellerCommissionPct: '8',
+    finderCommissionPct: '0',
+    taxPct: '6',
+    otherCostsBrl: 0,
+    professionalCostsBrl: 0,
+    sellerCommissionBrl: 24000,
+    finderCommissionBrl: 0,
+    taxBrl: 18000,
+    netMarginBrl: 258000,
+    netMarginPct: '86',
+    createdAt: '2026-07-10T12:00:00.000Z',
+    updatedAt: null,
+    ...overrides,
+  };
+}
+
+const openSale = sale({ id: 'sale-open', code: 'P-002', status: 'open' });
+const wonRecurringSale = sale({
+  id: 'sale-won-recurring',
+  code: 'P-003',
+  status: 'won',
+  recurringBrl: 100000,
+  wonAt: '2026-07-11T12:00:00.000Z',
+});
+
 const bootstrap: SalesOpsBootstrap = {
-  sales: [],
+  sales: [openSale, wonRecurringSale],
   products: [],
   clients: [],
   areas: [],
@@ -130,6 +211,13 @@ beforeEach(() => {
     }
     if (method === 'GET' && url.includes('/api/v1/sales-ops/history')) {
       return Promise.resolve(respond(200, { entries: [], nextCursor: null }));
+    }
+    if (
+      method === 'POST' &&
+      (url.endsWith(`/api/v1/sales-ops/sales/${openSale.id}/transition`) ||
+        url.endsWith(`/api/v1/sales-ops/sales/${wonRecurringSale.id}/cancel-contract`))
+    ) {
+      return Promise.resolve(respond(403, { error: 'forbidden', reason: 'admin_role_required' }));
     }
     if (method === 'PUT' && url.endsWith('/api/v1/sales-ops/settings')) {
       return Promise.resolve(respond(403, { error: 'forbidden', reason: 'admin_role_required' }));
@@ -182,6 +270,52 @@ function text() {
   return container.textContent ?? '';
 }
 
+function callsTo(method: string, suffix: string) {
+  return fetchMock.mock.calls.filter(
+    ([url, init]) =>
+      String(url).endsWith(suffix) && ((init as RequestInit | undefined)?.method ?? 'GET') === method,
+  );
+}
+
+function rowByCode(code: string): HTMLTableRowElement | null {
+  const row = [...container.querySelectorAll('tbody tr')].find((candidate) =>
+    candidate.textContent?.includes(code),
+  );
+  return row instanceof HTMLTableRowElement ? row : null;
+}
+
+function buttonIn(scope: Element, label: string): HTMLButtonElement {
+  const match = [...scope.querySelectorAll('button')].find(
+    (candidate) => candidate.textContent?.trim() === label,
+  );
+  if (!(match instanceof HTMLButtonElement)) throw new Error(`button not found: ${label}`);
+  return match;
+}
+
+// The confirm dialog renders after the table and shares its label with the row
+// action, so the confirm button is the LAST match in the document.
+function confirmButton(label: string): HTMLButtonElement {
+  const match = [...container.querySelectorAll('button')]
+    .filter((candidate) => candidate.textContent?.trim() === label)
+    .at(-1);
+  if (!(match instanceof HTMLButtonElement)) throw new Error(`confirm not found: ${label}`);
+  return match;
+}
+
+async function click(element: HTMLElement) {
+  await act(async () => element.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+  await flushReact();
+  await flushReact();
+}
+
+function expectRefusedInPlace() {
+  expect(text()).toContain(MUTATION_ERROR_COPY.adminRequired);
+  expect(container.querySelector('[data-forbidden]')).toBeNull();
+  // The vendas table is still mounted with both rows.
+  expect(rowByCode('P-002')).not.toBeNull();
+  expect(rowByCode('P-003')).not.toBeNull();
+}
+
 function settingsPuts() {
   return fetchMock.mock.calls.filter(
     ([url, init]) =>
@@ -207,5 +341,32 @@ describe('a 403 on a financial mutation is a refused action, not a refused app',
     expect(text()).toContain(MUTATION_ERROR_COPY.adminRequired);
     expect(text()).toContain('Dados da empresa');
     expect(container.querySelector('[data-forbidden]')).toBeNull();
+  });
+
+  it('keeps Vendas on screen and shows the admin copy when a transition answers 403', async () => {
+    await renderApp('/operacional/vendas');
+    const row = rowByCode('P-002');
+    expect(row).not.toBeNull();
+    expect(text()).not.toContain(MUTATION_ERROR_COPY.adminRequired);
+
+    await click(buttonIn(row as HTMLTableRowElement, 'Marcar como ganha'));
+
+    expect(callsTo('POST', `/api/v1/sales-ops/sales/${openSale.id}/transition`)).toHaveLength(1);
+    expectRefusedInPlace();
+  });
+
+  it('keeps Vendas on screen and shows the admin copy when cancel-contract answers 403', async () => {
+    await renderApp('/operacional/vendas');
+    const row = rowByCode('P-003');
+    expect(row).not.toBeNull();
+
+    await click(buttonIn(row as HTMLTableRowElement, 'Cancelar contrato'));
+    expect(text()).toContain('Cancelar contrato?');
+    await click(confirmButton('Cancelar contrato'));
+
+    expect(
+      callsTo('POST', `/api/v1/sales-ops/sales/${wonRecurringSale.id}/cancel-contract`),
+    ).toHaveLength(1);
+    expectRefusedInPlace();
   });
 });
