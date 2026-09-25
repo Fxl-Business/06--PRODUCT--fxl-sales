@@ -262,7 +262,8 @@ Civil days:
 - `due_date` stores a civil day `D` as `D T00:00:00Z` and is read back with the UTC slice (`asDateOnly` in the API, `displayDate` / `civilDayOf` in `apps/web/src/sales-ops/civil-day.ts`); never format it through `new Date(...)` in the browser timezone.
 - Every "today" decision is the `America/Sao_Paulo` day from `@fxl-sales/shared-utils/sao-paulo-day` (`todayInSaoPaulo`, `saoPauloDayOf`, `isAfterTodayInSaoPaulo`), never `new Date().toISOString().slice(0, 10)`. The won date and the `cancel-contract` default cut-off follow it.
 - Day inputs are validated with `isIsoDay` (a real calendar day), never a bare regex. The web imports the subpath, never the package root.
-- A "no mês" figure is the São Paulo month of today: payments by `paidOn` (`sumPaidInSaoPauloMonth`), won revenue by `saoPauloDayOf(wonAt)` (`buildDashboardModel(bootstrap, today)`), never by `dueDate`. The helpers take `today` and never read the clock; callers pass `todayInSaoPaulo()`.
+- A "no mês" figure is the São Paulo month of today: payments by `paidOn` (`sumPaidInSaoPauloMonth`), won revenue by `saoPauloDayOf(wonAt)` (`buildDashboardModel(bootstrap, today)`), never by `dueDate`.
+  The helpers take `today` and never read the clock; callers pass `todayInSaoPaulo()`.
 
 Financial role gate (PC23):
 - `requireAdmin` guards `POST /sales/:id/transition`, `POST /sales/:id/cancel-contract`, `PUT /sales/:id`, `PUT /settings` and every settlement route; a new route that moves ledger money or org-wide financial defaults gets it too.

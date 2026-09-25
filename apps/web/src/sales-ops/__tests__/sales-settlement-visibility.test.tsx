@@ -74,11 +74,24 @@ vi.mock('@/components/ui/dropdown-menu', () => ({
   DropdownMenuSeparator: () => null,
   DropdownMenuTrigger: ({ children }: { children: ReactNode }) => <>{children}</>,
   DropdownMenuContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  DropdownMenuItem: ({ children, onSelect }: { children: ReactNode; onSelect?: () => void }) => (
-    <button onClick={() => onSelect?.()} type="button">
-      {children}
-    </button>
-  ),
+  // `asChild` items (the shell's Organization rows) already render their own
+  // <button>; wrapping them in another would nest buttons.
+  DropdownMenuItem: ({
+    asChild,
+    children,
+    onSelect,
+  }: {
+    asChild?: boolean;
+    children: ReactNode;
+    onSelect?: () => void;
+  }) =>
+    asChild ? (
+      <>{children}</>
+    ) : (
+      <button onClick={() => onSelect?.()} type="button">
+        {children}
+      </button>
+    ),
 }));
 
 const act = (React as typeof React & { act: typeof import('react-dom/test-utils').act }).act;
