@@ -59,9 +59,32 @@ export function describeReceivable(row: Pick<SalesOpsReceivable, 'label' | 'dueD
   return `Parcela de ${displayDate(row.dueDate)}`;
 }
 
-export function describePayable(row: Pick<SalesOpsPayable, 'kind' | 'beneficiaryName'>): string {
-  if (row.kind === 'tax' || row.kind === 'other_cost') return PAYABLE_KIND_LABELS[row.kind] ?? '';
-  return `${PAYABLE_KIND_LABELS[row.kind] ?? 'Conta a pagar'} · ${row.beneficiaryName}`;
+/**
+ * `Comissão do vendedor · Ana · Parcela 1/3`. The suffix names WHICH of a
+ * beneficiary's payables this is (a sale pays the same person once per
+ * parcela): the linked receivable when there is one, otherwise the due day.
+ * Without row context it is the kind and beneficiary alone.
+ */
+export function describePayable(
+  row: Pick<SalesOpsPayable, 'kind' | 'beneficiaryName'> &
+    Partial<Pick<SalesOpsPayable, 'receivableId' | 'dueDate'>>,
+  receivableById?: ReadonlyMap<string, Pick<SalesOpsReceivable, 'label' | 'dueDate'>>,
+): string {
+  const base =
+    row.kind === 'tax' || row.kind === 'other_cost'
+      ? (PAYABLE_KIND_LABELS[row.kind] ?? '')
+      : `${PAYABLE_KIND_LABELS[row.kind] ?? 'Conta a pagar'} · ${row.beneficiaryName}`;
+  if (!receivableById) return base;
+  const linked = row.receivableId ? receivableById.get(row.receivableId) : undefined;
+  if (linked) return `${base} · ${describeReceivable(linked)}`;
+  return row.dueDate ? `${base} · vencimento ${displayDate(row.dueDate)}` : base;
+}
+
+/** Receivables by id, the lookup `describePayable` names a payable's parcela from. */
+export function receivablesById(
+  receivables: readonly SalesOpsReceivable[],
+): Map<string, SalesOpsReceivable> {
+  return new Map(receivables.map((row) => [row.id, row]));
 }
 
 export function receivableSettlementTarget(
@@ -84,6 +107,7 @@ export function receivableSettlementTarget(
 export function payableSettlementTarget(
   row: SalesOpsPayable & { id: string },
   sale: SalesOpsSale,
+  receivableById: ReadonlyMap<string, Pick<SalesOpsReceivable, 'label' | 'dueDate'>>,
 ): SettlementTarget {
   return {
     kind: 'payable',
@@ -91,7 +115,7 @@ export function payableSettlementTarget(
     saleId: sale.id,
     saleCode: sale.code,
     saleStatus: sale.status,
-    description: describePayable(row),
+    description: describePayable(row, receivableById),
     amountBrl: row.amountBrl,
     status: row.status,
     paidOn: row.paidOn ?? null,
@@ -150,9 +174,10 @@ export function buildTargetDescriptions(
   payables: readonly SalesOpsPayable[],
 ): Map<string, string> {
   const descriptions = new Map<string, string>();
+  const byId = receivablesById(receivables);
   for (const row of receivables) descriptions.set(row.id, describeReceivable(row));
   for (const row of payables) {
-    if (row.id) descriptions.set(row.id, describePayable(row));
+    if (row.id) descriptions.set(row.id, describePayable(row, byId));
   }
   return descriptions;
 }

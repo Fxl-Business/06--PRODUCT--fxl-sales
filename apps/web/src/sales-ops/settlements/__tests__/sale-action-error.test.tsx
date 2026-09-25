@@ -28,6 +28,15 @@ const DESCRIPTIONS = buildTargetDescriptions(
       method: 'pix',
       status: 'paid',
     },
+    {
+      id: 'rec-2',
+      saleId: 'sale-1',
+      label: '2/3',
+      dueDate: '2026-10-01T00:00:00.000Z',
+      amountBrl: 100000,
+      method: 'pix',
+      status: 'paid',
+    },
   ],
   [
     {
@@ -35,7 +44,18 @@ const DESCRIPTIONS = buildTargetDescriptions(
       saleId: 'sale-1',
       beneficiaryName: 'Ana Martins',
       kind: 'seller_commission',
+      receivableId: 'rec-1',
       dueDate: '2026-09-01T00:00:00.000Z',
+      amountBrl: 8000,
+      status: 'paid',
+    },
+    {
+      id: 'pay-2',
+      saleId: 'sale-1',
+      beneficiaryName: 'Ana Martins',
+      kind: 'seller_commission',
+      receivableId: 'rec-2',
+      dueDate: '2026-10-01T00:00:00.000Z',
       amountBrl: 8000,
       status: 'paid',
     },
@@ -67,6 +87,7 @@ describe('sale action error', () => {
       rows: [
         { kind: 'receivable', id: 'rec-1', label: '1/3' },
         { kind: 'payable', id: 'pay-1', label: 'Ana Martins (1/3)' },
+        { kind: 'payable', id: 'pay-2', label: 'Ana Martins (2/3)' },
         { kind: 'receivable', id: 'rec-9', label: '3/3' },
       ],
     };
@@ -86,8 +107,17 @@ describe('sale action error', () => {
       (node) => node.textContent,
     );
     expect(alert?.textContent).toContain(MUTATION_ERROR_COPY.saleHasActiveSettlements);
-    expect(lines).toEqual(['Parcela 1/3', 'Comissão do vendedor · Ana Martins', 'Parcela 3/3']);
-    for (const id of ['rec-1', 'pay-1', 'rec-9']) expect(alert?.textContent).not.toContain(id);
+    // Two commissions to the same person stay distinguishable by their parcela.
+    expect(lines).toEqual([
+      'Parcela 1/3',
+      'Comissão do vendedor · Ana Martins · Parcela 1/3',
+      'Comissão do vendedor · Ana Martins · Parcela 2/3',
+      'Parcela 3/3',
+    ]);
+    expect(new Set(lines).size).toBe(lines.length);
+    for (const id of ['rec-1', 'pay-1', 'pay-2', 'rec-9']) {
+      expect(alert?.textContent).not.toContain(id);
+    }
   });
 
   it('adds no lines for any other failure', async () => {

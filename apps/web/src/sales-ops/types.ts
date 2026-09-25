@@ -261,6 +261,8 @@ export type SalesOpsPayable = {
   saleId: string;
   beneficiaryName: string;
   kind: string;
+  /** The receivable this payable was computed from; `null` for a one-shot cost. */
+  receivableId?: string | null;
   dueDate: string;
   amountBrl: number;
   status: 'open' | 'paid' | 'void';

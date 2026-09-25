@@ -59,6 +59,33 @@ describe('settlement-format', () => {
     expect(describePayable({ kind: 'mystery', beneficiaryName: 'Bia' })).toBe(
       'Conta a pagar · Bia',
     );
+
+    // With row context, WHICH of a beneficiary's payables: the linked parcela,
+    // else the due day. Never an id.
+    const receivables = new Map([
+      ['rec-2', { label: '2/3', dueDate: '2026-10-01T00:00:00.000Z' }],
+      ['rec-m', { label: 'M3/12', dueDate: '2026-11-01T00:00:00.000Z' }],
+    ]);
+    expect(
+      describePayable(
+        { kind: 'seller_commission', beneficiaryName: 'Ana', receivableId: 'rec-2' },
+        receivables,
+      ),
+    ).toBe('Comissão do vendedor · Ana · Parcela 2/3');
+    expect(
+      describePayable({ kind: 'tax', beneficiaryName: 'Receita', receivableId: 'rec-m' }, receivables),
+    ).toBe('Imposto · Recorrência 3/12');
+    expect(
+      describePayable(
+        {
+          kind: 'other_cost',
+          beneficiaryName: 'X',
+          receivableId: null,
+          dueDate: '2026-09-01T00:00:00.000Z',
+        },
+        receivables,
+      ),
+    ).toBe('Outros custos · vencimento 01/09/2026');
   });
 
   it('finds the active baixas of one row, newest first, skipping reversed ones', () => {
@@ -111,6 +138,7 @@ describe('settlement-format', () => {
           saleId: 'sale-1',
           beneficiaryName: 'Ana Martins',
           kind: 'seller_commission',
+          receivableId: 'rec-1',
           dueDate: '2026-09-01T00:00:00.000Z',
           amountBrl: 1,
           status: 'paid',
@@ -139,7 +167,7 @@ describe('settlement-format', () => {
 
     expect(lines).toEqual([
       'Parcela 1/3',
-      'Comissão do vendedor · Ana Martins',
+      'Comissão do vendedor · Ana Martins · Parcela 1/3',
       'Parcela 3/3',
       'Bruno (2/3)',
       'Linha sem rótulo',

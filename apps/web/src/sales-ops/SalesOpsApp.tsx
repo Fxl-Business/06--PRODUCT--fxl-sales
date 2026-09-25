@@ -136,7 +136,9 @@ import {
   buildTargetDescriptions,
   payableSettlementTarget,
   receivableSettlementTarget,
+  receivablesById,
 } from './settlements/settlement-format';
+import { comparePayables, compareReceivables } from './ledger-order';
 import { SettlementHistorySection } from './settlements/SettlementHistory';
 import { PaidOnNote, SettlementRowActions } from './settlements/SettlementRowActions';
 import { displayDate, inputDateToday } from './civil-day';
@@ -2813,17 +2815,15 @@ function SaleDetailDialog({
 
   const meta = statusMeta(sale.status);
   const items = bootstrap.saleItems.filter((item) => item.saleId === sale.id);
-  const receivables = [...bootstrap.receivables]
+  // `ledger-order.ts`: a baixa or estorno rewrites the row, and the bootstrap
+  // order would then move it under the operator's cursor.
+  const receivables = bootstrap.receivables
     .filter((row) => row.saleId === sale.id)
-    // Ties on the due day break by label, then id, so a refetch (a baixa, an
-    // estorno) never swaps two same-day rows under the operator's cursor.
-    .sort(
-      (a, b) =>
-        a.dueDate.localeCompare(b.dueDate) ||
-        (a.label ?? '').localeCompare(b.label ?? '') ||
-        a.id.localeCompare(b.id),
-    );
-  const payables = bootstrap.payables.filter((payable) => payable.saleId === sale.id);
+    .sort(compareReceivables);
+  const payables = bootstrap.payables
+    .filter((payable) => payable.saleId === sale.id)
+    .sort(comparePayables);
+  const saleReceivablesById = receivablesById(receivables);
   const methodLabels = paymentMethodLabels;
   const receivableStatusMeta: Record<'open' | 'paid' | 'void', { label: string; className: string }> = {
     open: { label: 'Aberta', className: 'bg-[#fdf0cf] text-[#7a5a12]' },
@@ -2887,10 +2887,10 @@ function SaleDetailDialog({
                     <TableCell className="sales-ops-num px-4 py-3 text-right text-[13.5px]">
                       {item.quantity}
                     </TableCell>
-                    <TableCell className="sales-ops-num px-4 py-3 text-right text-[13.5px]">
+                    <TableCell className="sales-ops-num whitespace-nowrap px-4 py-3 text-right text-[13.5px]">
                       {formatMoneyBrl(item.unitBrl, { maximumFractionDigits: 0 })}
                     </TableCell>
-                    <TableCell className="sales-ops-num px-4 py-3 text-right text-[13.5px] font-bold">
+                    <TableCell className="sales-ops-num whitespace-nowrap px-4 py-3 text-right text-[13.5px] font-bold">
                       {formatMoneyBrl(item.subtotalBrl, { maximumFractionDigits: 0 })}
                     </TableCell>
                   </TableRow>
@@ -2920,9 +2920,11 @@ function SaleDetailDialog({
                       const rowMeta = receivableStatusMeta[row.status];
                       return (
                         <TableRow key={row.id}>
-                          <TableCell className={tableCellClass}>{displayDate(row.dueDate)}</TableCell>
+                          <TableCell className={`${tableCellClass} whitespace-nowrap`}>
+                            {displayDate(row.dueDate)}
+                          </TableCell>
                           <TableCell className={tableCellClass}>{methodLabels[row.method]}</TableCell>
-                          <TableCell className="sales-ops-num px-4 py-3 text-right text-[13.5px] font-bold">
+                          <TableCell className="sales-ops-num whitespace-nowrap px-4 py-3 text-right text-[13.5px] font-bold">
                             {formatMoneyBrl(row.amountBrl, { maximumFractionDigits: 0 })}
                           </TableCell>
                           <TableCell className="px-4 py-3">
@@ -3000,7 +3002,11 @@ function SaleDetailDialog({
                           <TableCell className="px-4 py-3">
                             {payable.id ? (
                               <SettlementRowActions
-                                target={payableSettlementTarget({ ...payable, id: payable.id }, sale)}
+                                target={payableSettlementTarget(
+                                  { ...payable, id: payable.id },
+                                  sale,
+                                  saleReceivablesById,
+                                )}
                                 withHistory={false}
                               />
                             ) : null}
@@ -3153,6 +3159,9 @@ export function CommissionsView({
   canSettle?: boolean;
 }) {
   const saleById = new Map(bootstrap.sales.map((sale) => [sale.id, sale]));
+  const allReceivablesById = receivablesById(bootstrap.receivables);
+  // One write-independent order (`ledger-order.ts`), shared with the sale detail.
+  const payables = [...bootstrap.payables].sort(comparePayables);
   const totalOpen = bootstrap.payables
     .filter((payable) => payable.status === 'open')
     .reduce((sum, payable) => sum + payable.amountBrl, 0);
@@ -3190,7 +3199,7 @@ export function CommissionsView({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {bootstrap.payables.map((payable, index) => {
+              {payables.map((payable, index) => {
                 const meta = payableTypeMeta(payable.kind);
                 const sale = saleById.get(payable.saleId);
                 return (
@@ -3229,7 +3238,11 @@ export function CommissionsView({
                       <TableCell className="px-4 py-3">
                         {payable.id && sale ? (
                           <SettlementRowActions
-                            target={payableSettlementTarget({ ...payable, id: payable.id }, sale)}
+                            target={payableSettlementTarget(
+                              { ...payable, id: payable.id },
+                              sale,
+                              allReceivablesById,
+                            )}
                             withHistory
                           />
                         ) : null}
