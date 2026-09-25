@@ -36,6 +36,7 @@ Access gate:
   - `503 {"error":"unavailable","code":"hub_auth_not_configured"}` means no Hub configuration at all.
 - `isAuthFailure` (401), `isEntitlementFailure` (402) and `isForbiddenFailure` (403) in `apps/web/src/lib/require-token.ts` key on the STATUS alone, never on the body `code`. `require-token.ts` imports nothing.
 - `SalesOpsApp` classifies in the order entitlement, forbidden, auth, generic. The generic `Verifique o servidor local` copy is reachable ONLY for an unclassified error. Oracle: `apps/web/src/sales-ops/__tests__/entitlement-dead-end.test.tsx`.
+- That classification is for the bootstrap READ only. A 403 on a mutation is `MutationErrorBanner` (`salesOpsMutationErrorMessage` in `apps/web/src/sales-ops/mutation-error-copy.ts`), keyed on the status like `isForbiddenFailure`.
 - `apps/api/src/middleware/__tests__/app-auth-access-gate.test.ts` drives the REAL verifier with an in-process keypair; keep it that way.
 
 Hub configuration:
@@ -247,6 +248,13 @@ Civil days:
 - `due_date` stores a civil day `D` as `D T00:00:00Z` and is read back with the UTC slice (`asDateOnly` in the API, `displayDate` / `civilDayOf` in `apps/web/src/sales-ops/civil-day.ts`); never format it through `new Date(...)` in the browser timezone.
 - Every "today" decision is the `America/Sao_Paulo` day from `@fxl-sales/shared-utils/sao-paulo-day` (`todayInSaoPaulo`, `saoPauloDayOf`, `isAfterTodayInSaoPaulo`), never `new Date().toISOString().slice(0, 10)`. The won date and the `cancel-contract` default cut-off follow it.
 - Day inputs are validated with `isIsoDay` (a real calendar day), never a bare regex. The web imports the subpath, never the package root.
+
+Financial role gate (PC23):
+- `requireAdmin` guards `POST /sales/:id/transition`, `POST /sales/:id/cancel-contract`, `PUT /sales/:id`, `PUT /settings` and every settlement route; a new route that moves ledger money or org-wide financial defaults gets it too.
+- `POST /sales` stays open because a seller's lead conversion on `meus-dados/leads` creates the proposta, but a raw body with `status: 'won'` from a non-admin answers the `requireAdmin` body before validation.
+- `hasAdminRole` and `ADMIN_ROLE_REQUIRED_BODY` in `apps/api/src/middleware/require-admin.ts` are the one predicate and the one body; never spell an admin check inline.
+- A 403 from a mutation renders `MutationErrorBanner` on the current screen and never `ForbiddenPanel`, which stays the app gate for reads.
+- Settings `currency` is `z.literal('BRL')`; the UI shows `Real (BRL)` read-only and always sends `BRL`. Legacy stored values are tolerated on read and rewritten by the next save; there is no data migration.
 
 Testing:
 - Integration tests use the local Docker test DB via the `fxl_sales_test` non-superuser role; `apps/api/test/rls/setup-env.ts` hard-overrides `DATABASE_URL`.
