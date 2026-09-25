@@ -3,8 +3,11 @@
 import * as React from 'react';
 import type { ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { CommissionsView } from '../SalesOpsApp';
+import type { AppRole } from '@/auth/claims';
+import { canSettleInWorkspace, SALES_OPS_ROUTE_PATTERN } from '../navigation';
+import { CommissionsView, SalesOpsApp } from '../SalesOpsApp';
 import { ControlledSalesView } from './controlled-sales-view';
 import type { SalesOpsBootstrap, SalesOpsSale } from '../types';
 
@@ -15,10 +18,50 @@ import type { SalesOpsBootstrap, SalesOpsSale } from '../types';
  * so the action is an explicit `canSettle` prop that defaults to OFF. `Pago em`
  * is a fact about the row and shows for every viewer. The sale detail runs
  * through the REAL `Dialog`; only the data hooks are mocked.
+ *
+ * The last block renders the REAL `SalesOpsApp` shell, so the `canSettle` wiring
+ * (admin AND operacional) is pinned where the operator meets it, not only on the
+ * views' props.
  */
+
+let profileRoles: AppRole[] = [];
+
+vi.mock('@/auth/react', () => ({
+  useAuthProfile: () => ({
+    isLoaded: true,
+    isSignedIn: true,
+    roles: profileRoles,
+    name: 'Test User',
+    email: 'test.user@fxl.example',
+  }),
+  useLogout: () => vi.fn(async () => undefined),
+  useOrganizations: () => ({
+    active: { id: 'org-primary', name: 'FXL Matriz' },
+    activeName: 'FXL Matriz',
+    organizations: [{ id: 'org-primary', name: 'FXL Matriz' }],
+    others: [],
+    setActive: vi.fn(async () => undefined),
+    client: { checkoutUrl: vi.fn(async () => 'https://hub.example/checkout') },
+  }),
+}));
+
+const idleMutation = { isPending: false, mutate: vi.fn(), mutateAsync: vi.fn(async () => ({})) };
 
 vi.mock('../hooks', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../hooks')>()),
+  useSalesOpsBootstrap: () => ({ data: bootstrap(), isLoading: false, isError: false }),
+  // The shell mounts every writer; none is exercised here.
+  useCreateSalesOpsSale: () => idleMutation,
+  useUpdateSalesOpsSale: () => idleMutation,
+  useTransitionSalesOpsSale: () => idleMutation,
+  useCancelSalesOpsContract: () => idleMutation,
+  useSaveSalesOpsArea: () => idleMutation,
+  useSaveSalesOpsClient: () => idleMutation,
+  useSaveSalesOpsFuncao: () => idleMutation,
+  useSaveSalesOpsPerson: () => idleMutation,
+  useSaveSalesOpsProduct: () => idleMutation,
+  useSaveSalesOpsSettings: () => idleMutation,
+  useSetSalesOpsCadastroStatus: () => idleMutation,
   useRecordSalesOpsSettlement: () => ({ mutateAsync: vi.fn(async () => ({})), isPending: false }),
   useReverseSalesOpsSettlement: () => ({ mutateAsync: vi.fn(async () => ({})), isPending: false }),
   useSaleSettlements: () => ({ data: [], isLoading: false, isError: false }),
@@ -26,6 +69,9 @@ vi.mock('../hooks', async (importOriginal) => ({
 
 vi.mock('@/components/ui/dropdown-menu', () => ({
   DropdownMenu: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  DropdownMenuGroup: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  DropdownMenuLabel: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  DropdownMenuSeparator: () => null,
   DropdownMenuTrigger: ({ children }: { children: ReactNode }) => <>{children}</>,
   DropdownMenuContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   DropdownMenuItem: ({ children, onSelect }: { children: ReactNode; onSelect?: () => void }) => (
@@ -395,5 +441,71 @@ describe('settlement visibility', () => {
         node.textContent?.includes('Confirmar pagamento'),
       ),
     ).toBe(false);
+  });
+});
+
+describe('settlement visibility in the SalesOpsApp shell', () => {
+  const team: AppRole[] = ['admin', 'seller', 'finder'];
+  const sellerOnly: AppRole[] = ['seller', 'finder'];
+
+  async function renderShell(path: string, roles: AppRole[]) {
+    profileRoles = [...roles];
+    await act(async () =>
+      root.render(
+        <MemoryRouter
+          future={{ v7_relativeSplatPath: true, v7_startTransition: true }}
+          initialEntries={[path]}
+        >
+          <Routes>
+            <Route element={<SalesOpsApp />} path={SALES_OPS_ROUTE_PATTERN} />
+          </Routes>
+        </MemoryRouter>,
+      ),
+    );
+    await settle();
+  }
+
+  function commissionsTotalLabel(): boolean {
+    return (container.textContent ?? '').includes('Total pago no mês');
+  }
+
+  it('an admin in operacional/comissoes sees Marcar como pago', async () => {
+    await renderShell('/operacional/comissoes', team);
+
+    expect(commissionsTotalLabel()).toBe(true);
+    // pay-1 is open, pay-2 is paid.
+    expect(actions(container, 'mark-paid')).toHaveLength(1);
+    expect(actions(container, 'reverse')).toHaveLength(1);
+  });
+
+  it('the same admin in meus-dados/comissoes sees no settlement action', async () => {
+    await renderShell('/meus-dados/comissoes', team);
+
+    expect(commissionsTotalLabel()).toBe(true);
+    expect(container.textContent).toContain('Pago em 20/09/2026');
+    expect(actionNames(container)).toEqual([]);
+  });
+
+  it('a seller-only profile sees no settlement action', async () => {
+    await renderShell('/meus-dados/comissoes', sellerOnly);
+
+    expect(commissionsTotalLabel()).toBe(true);
+    expect(container.textContent).toContain('Pago em 20/09/2026');
+    expect(actionNames(container)).toEqual([]);
+  });
+
+  /*
+    Through the shell a non-admin can never stand in `operacional`: the route
+    resolution sends them to their own workspace first. The admin term is pinned
+    on the predicate itself, the one place the shell reads it from.
+  */
+  it('canSettleInWorkspace needs both the admin role and the operacional workspace', () => {
+    expect(canSettleInWorkspace('operacional', team)).toBe(true);
+    expect(canSettleInWorkspace('operacional', ['admin'])).toBe(true);
+    expect(canSettleInWorkspace('operacional', sellerOnly)).toBe(false);
+    expect(canSettleInWorkspace('operacional', [])).toBe(false);
+    expect(canSettleInWorkspace('meus-dados', team)).toBe(false);
+    expect(canSettleInWorkspace('tatico', team)).toBe(false);
+    expect(canSettleInWorkspace('cadastros', team)).toBe(false);
   });
 });

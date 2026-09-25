@@ -93,6 +93,7 @@ import {
 import {
   buildSaleDetailPath,
   buildSalesOpsPath,
+  canSettleInWorkspace,
   getDefaultSalesOpsRoute,
   getSalesOpsNavigation,
   getVisibleWorkspaces,
@@ -1362,9 +1363,7 @@ export function SalesOpsApp() {
    * refuses the `cadastros` workspace to anyone without the role.
    */
   const canManageCadastros = workspace === 'cadastros' && profile.roles.includes('admin');
-  // Baixa and estorno are admin actions of the operacional workspace only:
-  // `meus-dados` reuses the same views and stays read-only for everyone.
-  const canSettle = workspace === 'operacional' && profile.roles.includes('admin');
+  const canSettle = canSettleInWorkspace(workspace, profile.roles);
   const canManagePeople = canManageCadastros && view === 'pessoas';
   const canManageFuncoes = canManageCadastros && view === 'funcoes';
   const personModalMatchesRoute = canManagePeople && modal?.kind === 'person';
