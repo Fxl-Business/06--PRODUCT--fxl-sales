@@ -131,6 +131,14 @@ import { CadastroHistorySection } from './CadastroHistoryPanel';
 import { ForbiddenPanel } from './ForbiddenPanel';
 import { MissingEntitlementPanel } from './MissingEntitlementPanel';
 import { MutationErrorBanner } from './MutationErrorBanner';
+import { lockedRowLines } from './settlements/settlement-errors';
+import {
+  buildTargetDescriptions,
+  payableSettlementTarget,
+  receivableSettlementTarget,
+} from './settlements/settlement-format';
+import { SettlementHistorySection } from './settlements/SettlementHistory';
+import { PaidOnNote, SettlementRowActions } from './settlements/SettlementRowActions';
 import { displayDate, inputDateToday } from './civil-day';
 import { ProfessionalSplitPanel } from './ProfessionalSplitPanel';
 import { buildLeadConversionPrefill, findClientByName } from './leads/conversion';
@@ -1335,6 +1343,9 @@ export function SalesOpsApp() {
    * refuses the `cadastros` workspace to anyone without the role.
    */
   const canManageCadastros = workspace === 'cadastros' && profile.roles.includes('admin');
+  // Baixa and estorno are admin actions of the operacional workspace only:
+  // `meus-dados` reuses the same views and stays read-only for everyone.
+  const canSettle = workspace === 'operacional' && profile.roles.includes('admin');
   const canManagePeople = canManageCadastros && view === 'pessoas';
   const canManageFuncoes = canManageCadastros && view === 'funcoes';
   const personModalMatchesRoute = canManagePeople && modal?.kind === 'person';
@@ -2049,6 +2060,17 @@ export function SalesOpsApp() {
           <div className="min-h-0 flex-1 overflow-y-auto px-[22px] py-5">
             <MutationErrorBanner
               error={mutationFailure?.view === view ? mutationFailure.error : null}
+              lines={
+                mutationFailure?.view === view
+                  ? lockedRowLines(
+                      mutationFailure.error,
+                      buildTargetDescriptions(
+                        persistedBootstrap.receivables,
+                        persistedBootstrap.payables,
+                      ),
+                    )
+                  : undefined
+              }
               onDismiss={() => setMutationFailure(null)}
             />
             {bootstrapQuery.isLoading ? <LoadingPanel /> : null}
@@ -2109,6 +2131,7 @@ export function SalesOpsApp() {
                   <SalesView
                     bootstrap={persistedBootstrap}
                     canManage={workspace === 'operacional' && profile.roles.includes('admin')}
+                    canSettle={canSettle}
                     onCancelContract={(sale) => cancelContract.mutate(sale.id, reportMutation)}
                     onEdit={(sale) => setSaleWizard({ mode: 'edit', sale })}
                     onTransition={(sale, status) =>
@@ -2123,7 +2146,9 @@ export function SalesOpsApp() {
                 {view === 'finders' ? (
                   <MeuPainelView bootstrap={persistedBootstrap} mode="finder" />
                 ) : null}
-                {view === 'comissoes' ? <CommissionsView bootstrap={persistedBootstrap} /> : null}
+                {view === 'comissoes' ? (
+                  <CommissionsView bootstrap={persistedBootstrap} canSettle={canSettle} />
+                ) : null}
                 {view === 'produtos' ? (
                   <ProductsView
                     areas={persistedBootstrap.areas}
@@ -2571,13 +2596,13 @@ const confirmCopy: Record<
   'reopen-won': {
     title: 'Reabrir proposta ganha?',
     description: (code) =>
-      `As contas a pagar em aberto geradas pela proposta ${code} serão anuladas. Pagamentos já baixados não são afetados.`,
+      `As contas a pagar em aberto geradas pela proposta ${code} serão anuladas. Se houver pagamento registrado, estorne-o antes de reabrir.`,
     action: 'Reabrir',
   },
   'cancel-contract': {
     title: 'Cancelar contrato?',
     description: (code) =>
-      `As parcelas futuras em aberto da proposta ${code} e as comissões vinculadas serão anuladas. Parcelas pagas não são afetadas.`,
+      `As parcelas futuras em aberto da proposta ${code} e as comissões vinculadas serão anuladas. Se alguma delas tiver pagamento registrado, estorne-o antes.`,
     action: 'Cancelar contrato',
   },
 };
@@ -2586,6 +2611,7 @@ export function SalesView({
   bootstrap,
   sales,
   canManage,
+  canSettle = false,
   onEdit,
   onTransition,
   onCancelContract,
@@ -2593,6 +2619,8 @@ export function SalesView({
   bootstrap: SalesOpsBootstrap;
   sales: SalesOpsSale[];
   canManage: boolean;
+  /** Baixa, estorno and history actions in the sale detail. Off unless the caller opts in. */
+  canSettle?: boolean;
   onEdit: (sale: SalesOpsSale) => void;
   onTransition: (sale: SalesOpsSale, status: TransitionSaleStatus) => void;
   onCancelContract: (sale: SalesOpsSale) => void;
@@ -2762,6 +2790,7 @@ export function SalesView({
 
       <SaleDetailDialog
         bootstrap={bootstrap}
+        canSettle={canSettle}
         onClose={() => setDetailSaleId(null)}
         sale={detailSale}
       />
@@ -2772,10 +2801,12 @@ export function SalesView({
 function SaleDetailDialog({
   bootstrap,
   sale,
+  canSettle,
   onClose,
 }: {
   bootstrap: SalesOpsBootstrap;
   sale: SalesOpsSale | null;
+  canSettle: boolean;
   onClose: () => void;
 }) {
   if (!sale) return null;
@@ -2784,7 +2815,14 @@ function SaleDetailDialog({
   const items = bootstrap.saleItems.filter((item) => item.saleId === sale.id);
   const receivables = [...bootstrap.receivables]
     .filter((row) => row.saleId === sale.id)
-    .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+    // Ties on the due day break by label, then id, so a refetch (a baixa, an
+    // estorno) never swaps two same-day rows under the operator's cursor.
+    .sort(
+      (a, b) =>
+        a.dueDate.localeCompare(b.dueDate) ||
+        (a.label ?? '').localeCompare(b.label ?? '') ||
+        a.id.localeCompare(b.id),
+    );
   const payables = bootstrap.payables.filter((payable) => payable.saleId === sale.id);
   const methodLabels = paymentMethodLabels;
   const receivableStatusMeta: Record<'open' | 'paid' | 'void', { label: string; className: string }> = {
@@ -2801,7 +2839,17 @@ function SaleDetailDialog({
 
   return (
     <Dialog onOpenChange={(open) => (!open ? onClose() : undefined)} open>
-      <DialogContent className="max-h-[92vh] w-[calc(100vw-48px)] max-w-[760px] gap-0 overflow-y-auto rounded-[20px] border-none bg-white p-0">
+      {/*
+        The `Ações` column adds a settlement button per ledger row, which pushes the
+        payables table past the 760px content box, so the settling view is wider.
+        `min-w-0` on the body lets a table scroll inside its own wrapper on a narrow
+        screen instead of dragging the whole dialog sideways.
+      */}
+      <DialogContent
+        className={`max-h-[92vh] w-[calc(100vw-48px)] ${
+          canSettle ? 'max-w-[820px]' : 'max-w-[760px]'
+        } gap-0 overflow-y-auto rounded-[20px] border-none bg-white p-0`}
+      >
         <DialogHeader className="border-b border-[#e8e8ec] px-6 py-5 text-left">
           <DialogTitle className="sales-ops-num flex items-center gap-3 text-[19px] font-bold text-[#201f24]">
             Proposta {sale.code}
@@ -2814,7 +2862,7 @@ function SaleDetailDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex flex-col gap-5 px-6 py-5">
+        <div className="flex min-w-0 flex-col gap-5 px-6 py-5">
           <div className="overflow-hidden rounded-[14px] border border-[#e8e8ec]">
             <div className="border-b border-[#eeeef1] bg-[#fafafb] px-4 py-[10px] text-[13px] font-bold">
               Itens
@@ -2864,6 +2912,7 @@ function SaleDetailDialog({
                       <TableHead className={tableHeadClass}>Método</TableHead>
                       <TableHead className={`${tableHeadClass} text-right`}>Valor</TableHead>
                       <TableHead className={tableHeadClass}>Status</TableHead>
+                      {canSettle ? <TableHead className={tableHeadClass}>Ações</TableHead> : null}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -2878,7 +2927,16 @@ function SaleDetailDialog({
                           </TableCell>
                           <TableCell className="px-4 py-3">
                             <Badge className={rowMeta.className}>{rowMeta.label}</Badge>
+                            <PaidOnNote paidOn={row.paidOn} status={row.status} />
                           </TableCell>
+                          {canSettle ? (
+                            <TableCell className="px-4 py-3">
+                              <SettlementRowActions
+                                target={receivableSettlementTarget(row, sale)}
+                                withHistory={false}
+                              />
+                            </TableCell>
+                          ) : null}
                         </TableRow>
                       );
                     })}
@@ -2913,6 +2971,7 @@ function SaleDetailDialog({
                     <TableHead className={tableHeadClass}>Vencimento</TableHead>
                     <TableHead className={`${tableHeadClass} text-right`}>Valor</TableHead>
                     <TableHead className={tableHeadClass}>Status</TableHead>
+                    {canSettle ? <TableHead className={tableHeadClass}>Ações</TableHead> : null}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -2927,19 +2986,39 @@ function SaleDetailDialog({
                         <TableCell className="px-4 py-3">
                           <Badge className={kindMeta.className}>{kindMeta.label}</Badge>
                         </TableCell>
-                        <TableCell className={tableCellClass}>{displayDate(payable.dueDate)}</TableCell>
-                        <TableCell className="sales-ops-num px-4 py-3 text-right text-[13.5px] font-bold">
+                        <TableCell className={`${tableCellClass} whitespace-nowrap`}>
+                          {displayDate(payable.dueDate)}
+                        </TableCell>
+                        <TableCell className="sales-ops-num whitespace-nowrap px-4 py-3 text-right text-[13.5px] font-bold">
                           {formatMoneyBrl(payable.amountBrl, { maximumFractionDigits: 0 })}
                         </TableCell>
                         <TableCell className="px-4 py-3">
                           <Badge className={rowMeta.className}>{rowMeta.label}</Badge>
+                          <PaidOnNote paidOn={payable.paidOn} status={payable.status} />
                         </TableCell>
+                        {canSettle ? (
+                          <TableCell className="px-4 py-3">
+                            {payable.id ? (
+                              <SettlementRowActions
+                                target={payableSettlementTarget({ ...payable, id: payable.id }, sale)}
+                                withHistory={false}
+                              />
+                            ) : null}
+                          </TableCell>
+                        ) : null}
                       </TableRow>
                     );
                   })}
                 </TableBody>
               </Table>
             </div>
+          ) : null}
+
+          {canSettle ? (
+            <SettlementHistorySection
+              descriptions={buildTargetDescriptions(receivables, payables)}
+              saleId={sale.id}
+            />
           ) : null}
 
           <div className="rounded-[14px] border border-[#e8e8ec] p-4">
@@ -3062,7 +3141,18 @@ function MeuPainelView({
   );
 }
 
-function CommissionsView({ bootstrap }: { bootstrap: SalesOpsBootstrap }) {
+/**
+ * The payables list behind `operacional/comissoes` AND `meus-dados/comissoes`, so
+ * settlement actions are an explicit opt-in (`canSettle`, admin in operacional).
+ */
+export function CommissionsView({
+  bootstrap,
+  canSettle = false,
+}: {
+  bootstrap: SalesOpsBootstrap;
+  canSettle?: boolean;
+}) {
+  const saleById = new Map(bootstrap.sales.map((sale) => [sale.id, sale]));
   const totalOpen = bootstrap.payables
     .filter((payable) => payable.status === 'open')
     .reduce((sum, payable) => sum + payable.amountBrl, 0);
@@ -3096,11 +3186,13 @@ function CommissionsView({ bootstrap }: { bootstrap: SalesOpsBootstrap }) {
                 <TableHead className={`${tableHeadClass} text-right`}>Valor</TableHead>
                 <TableHead className={`${tableHeadClass} text-right`}>Vencimento</TableHead>
                 <TableHead className={tableHeadClass}>Status</TableHead>
+                {canSettle ? <TableHead className={tableHeadClass}>Ações</TableHead> : null}
               </TableRow>
             </TableHeader>
             <TableBody>
               {bootstrap.payables.map((payable, index) => {
                 const meta = payableTypeMeta(payable.kind);
+                const sale = saleById.get(payable.saleId);
                 return (
                   <TableRow key={payable.id ?? `${payable.saleId}-${index}`}>
                     <TableCell className="px-4 py-3 text-[13.5px] font-semibold">
@@ -3131,7 +3223,18 @@ function CommissionsView({ bootstrap }: { bootstrap: SalesOpsBootstrap }) {
                             ? 'Anulado'
                             : 'Aberto'}
                       </Badge>
+                      <PaidOnNote paidOn={payable.paidOn} status={payable.status} />
                     </TableCell>
+                    {canSettle ? (
+                      <TableCell className="px-4 py-3">
+                        {payable.id && sale ? (
+                          <SettlementRowActions
+                            target={payableSettlementTarget({ ...payable, id: payable.id }, sale)}
+                            withHistory
+                          />
+                        ) : null}
+                      </TableCell>
+                    ) : null}
                   </TableRow>
                 );
               })}

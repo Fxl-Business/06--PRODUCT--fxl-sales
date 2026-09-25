@@ -78,6 +78,36 @@ describe('MutationErrorBanner', () => {
     expect(container.textContent).not.toContain(FORBIDDEN_COPY.title);
   });
 
+  it('renders the given lines as a list under the message', async () => {
+    await act(async () =>
+      root.render(
+        <MutationErrorBanner
+          error={{ error: 'sale_has_active_settlements', status: 409 }}
+          lines={['Parcela 1/3', 'Comissão do vendedor · Ana Martins']}
+          onDismiss={vi.fn()}
+        />,
+      ),
+    );
+
+    const alert = container.querySelector('[role="alert"]');
+    expect(alert?.textContent).toContain(MUTATION_ERROR_COPY.saleHasActiveSettlements);
+    const items = [...(alert?.querySelectorAll('[data-mutation-error-lines] li') ?? [])];
+    expect(items.map((node) => node.textContent)).toEqual([
+      'Parcela 1/3',
+      'Comissão do vendedor · Ana Martins',
+    ]);
+  });
+
+  it('renders no list for empty lines', async () => {
+    await act(async () =>
+      root.render(
+        <MutationErrorBanner error={{ error: 'forbidden', status: 403 }} lines={[]} onDismiss={vi.fn()} />,
+      ),
+    );
+
+    expect(container.querySelector('[data-mutation-error-lines]')).toBeNull();
+  });
+
   it('calls onDismiss from the close button', async () => {
     const onDismiss = vi.fn();
     await act(async () =>
