@@ -614,7 +614,9 @@ describe('phased professional payable identity migration', () => {
       const result = await runDatabaseMigrations({
         databaseUrl: scratch.ownerUrl,
         migrationsFolder: folder,
-        onPhaseComplete: (event) => events.push(event),
+        onPhaseComplete: (event) => {
+          events.push(event);
+        },
         throughTag: '0000_commit_probe',
       });
       const owner = scratchClient(scratch);
