@@ -27,6 +27,9 @@ function createTestApp() {
   app.use('*', async (c, next) => {
     c.set('userId', 'verified-account');
     c.set('orgId', 'verified-org');
+    // These tests cover the handler past PC23's requireAdmin; the gate itself is financial-admin-gate.test.ts.
+    c.set('userRole', 'admin');
+    c.set('userRoles', ['admin', 'seller', 'finder']);
     await next();
   });
   app.route('/', salesOpsRouter);

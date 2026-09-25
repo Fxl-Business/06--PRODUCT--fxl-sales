@@ -446,7 +446,8 @@ export const SettingsSchema = z.object({
   defaultSellerCommissionPct: pct.default(10),
   defaultFinderCommissionPct: pct.default(3),
   defaultTaxPct: pct.default(6),
-  currency: z.string().default('BRL'),
+  // Locked to BRL: the only currency the app formats and the Finance sync precondition. Legacy stored values are tolerated on read and rewritten by the next save.
+  currency: z.literal('BRL').default('BRL'),
   taxRegime: z.string().default('Simples Nacional'),
   periodClosingDay: z.number().int().min(1).max(31).default(1),
   tableDensity: z.enum(['comfortable', 'compact']).default('comfortable'),

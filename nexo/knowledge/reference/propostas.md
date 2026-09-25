@@ -186,3 +186,24 @@ Moved verbatim from `CLAUDE.md` on 2026-09-22 so the standing context stays shor
 - The lock is evaluated on the full plan before the first write and names every blocking row, receivables first; a payable's label is its beneficiary plus the receivable label in parentheses.
 - `revision` moves only when the row really changes, including method and label changes, because the integration publishes those fields too.
 - Oracles: `apps/api/src/domains/sales-ops/__tests__/ledger-reconcile.test.ts` and `apps/api/test/rls/update-sale-in-place.test.ts`.
+
+## Financial role gate and BRL lock (PC23, 2026-09-25)
+
+- PC23 (audit `nexo/knowledge/doubts/20260922-sales-finance-two-way-sync-audit.md`) found `POST /sales`, `POST /sales/:id/transition`, `POST /sales/:id/cancel-contract`, `PUT /sales/:id` and `PUT /settings` with no role gate, so any member could create a proposta already `won` and generate payables, or change the default tax.
+  The four financial routes now carry `requireAdmin`, and the settlement routes carry it from birth.
+  `POST /sales` could not be gated whole: `SalesOpsApp` mounts `LeadsBoardContainer` with `onRequestConversion` on `meus-dados/leads` too, and `saveLeadConversion` posts the proposta, so a seller converting their own lead must keep reaching it.
+  The wizard only ever POSTs `draft` or `open`; `createPayload` sends `won` only when editing a proposta that is already `won`, and that save goes to `PUT /sales/:id`, which is admin-only.
+  So refusing `status: 'won'` on `POST /sales` from a non-admin costs no legitimate flow.
+  The refusal is decided on the RAW body before `CreateSaleSchema` runs, so a non-admin asking for `won` never gets a validation error back and never reaches `createSale`.
+  Both decisions read `hasAdminRole` in `require-admin.ts`, and both answer `ADMIN_ROLE_REQUIRED_BODY`, so the gate has one predicate and one body.
+  There is no seller-only identity in `packages/auth-fake` (every roster entry yields the full-access set), so the non-admin cases are exercised by setting `userRole` on the Hono context in `financial-admin-gate.test.ts`.
+- A 403 from one of those mutations is a refused ACTION, not a refused APP, so it renders `MutationErrorBanner` on the current screen, scoped to the view it happened on, and never `ForbiddenPanel`, which replaces the whole screen and belongs to the bootstrap read.
+  In the UI the buttons are already unreachable for a non-admin (`operacional` is admin-only and `SalesView.canManage` now also requires `profile.roles.includes('admin')`), so the banner is what an operator sees when the Hub revoked their admin role while their cached token still said admin.
+  The wizard's save error (`describeSaleSaveError`) uses the same `MUTATION_ERROR_COPY.adminRequired` line for a 403, so every 403 copy in sales-ops is one sentence.
+  Oracles: `financial-admin-gate.test.ts`, `mutation-error-banner.test.tsx`, `financial-mutation-forbidden.test.tsx`.
+- `sales_ops_settings.currency` is locked to `BRL`: `SettingsSchema` declares `z.literal('BRL').default('BRL')`, so `PUT /settings` with `USD` is a 400, and `Configurações > Financeiro` shows `Real (BRL)` as read-only text instead of a picker.
+  The setting never had an effect (every formatter hard-codes BRL), and BRL is a precondition of the Finance sync.
+  The field stays visible because it states what every number on the screen is in; removing it would also leave the `Imposto padrão %` row half empty.
+  Legacy rows are not migrated: every save now writes `BRL`, and a data-only `UPDATE` in a migration would run with no org context against a FORCE RLS table and could match nothing without failing.
+  Any future reader of the currency, the sync's precondition included, must treat it as the constant BRL and never branch on the stored column.
+  Oracles: `settings currency is locked to BRL` in `financial-admin-gate.test.ts` and `settings-currency-brl.test.tsx`.

@@ -130,6 +130,7 @@ import { SPLIT_BP_TOTAL } from '@fxl-sales/shared-utils/professional-split';
 import { CadastroHistorySection } from './CadastroHistoryPanel';
 import { ForbiddenPanel } from './ForbiddenPanel';
 import { MissingEntitlementPanel } from './MissingEntitlementPanel';
+import { MutationErrorBanner } from './MutationErrorBanner';
 import { displayDate, inputDateToday } from './civil-day';
 import { ProfessionalSplitPanel } from './ProfessionalSplitPanel';
 import { buildLeadConversionPrefill, findClientByName } from './leads/conversion';
@@ -809,7 +810,7 @@ function activeSettings(settings: SalesOpsSettings | null): SaveSettingsPayload 
     defaultSellerCommissionPct: parseDecimal(settings?.defaultSellerCommissionPct, 10),
     defaultFinderCommissionPct: parseDecimal(settings?.defaultFinderCommissionPct, 3),
     defaultTaxPct: parseDecimal(settings?.defaultTaxPct, 6),
-    currency: settings?.currency ?? 'BRL',
+    currency: 'BRL',
     taxRegime: settings?.taxRegime ?? 'Simples Nacional',
     periodClosingDay: settings?.periodClosingDay ?? 1,
     tableDensity: settings?.tableDensity ?? 'comfortable',
@@ -1258,6 +1259,18 @@ export function SalesOpsApp() {
   );
   const resolution = resolveSalesOpsRoute(routeParams, profile.roles);
   const { workspace, view } = resolution.route;
+  // A refused financial mutation (PC23 403, or a 409 lock) is shown on the screen
+  // it happened on and nowhere else. Scoped to the view so navigating away drops
+  // it without an effect. Never ForbiddenPanel: that one replaces the screen and
+  // is the app gate for the bootstrap read only.
+  const [mutationFailure, setMutationFailure] = useState<{
+    error: unknown;
+    view: SalesOpsView;
+  } | null>(null);
+  const reportMutation = {
+    onError: (error: unknown) => setMutationFailure({ error, view }),
+    onSuccess: () => setMutationFailure(null),
+  };
   const bootstrap = bootstrapQuery.data ?? emptyBootstrap;
   /**
    * Optimistic rows carry a client-side placeholder id, so only the cadastro list
@@ -2034,6 +2047,10 @@ export function SalesOpsApp() {
           ) : null}
 
           <div className="min-h-0 flex-1 overflow-y-auto px-[22px] py-5">
+            <MutationErrorBanner
+              error={mutationFailure?.view === view ? mutationFailure.error : null}
+              onDismiss={() => setMutationFailure(null)}
+            />
             {bootstrapQuery.isLoading ? <LoadingPanel /> : null}
             {bootstrapQuery.isError ? (
               /*
@@ -2091,11 +2108,11 @@ export function SalesOpsApp() {
                 {view === 'vendas' ? (
                   <SalesView
                     bootstrap={persistedBootstrap}
-                    canManage={workspace === 'operacional'}
-                    onCancelContract={(sale) => cancelContract.mutate(sale.id)}
+                    canManage={workspace === 'operacional' && profile.roles.includes('admin')}
+                    onCancelContract={(sale) => cancelContract.mutate(sale.id, reportMutation)}
                     onEdit={(sale) => setSaleWizard({ mode: 'edit', sale })}
                     onTransition={(sale, status) =>
-                      transitionSale.mutate({ saleId: sale.id, status })
+                      transitionSale.mutate({ saleId: sale.id, status }, reportMutation)
                     }
                     sales={filteredSales}
                   />
@@ -2189,7 +2206,7 @@ export function SalesOpsApp() {
                     <SettingsView
                       key={bootstrap.settings?.updatedAt ?? bootstrap.settings?.createdAt ?? 'new'}
                       isSaving={saveSettings.isPending}
-                      onSave={(payload) => saveSettings.mutate(payload)}
+                      onSave={(payload) => saveSettings.mutate(payload, reportMutation)}
                       settings={bootstrap.settings}
                     />
                     <CadastroHistorySection bootstrap={persistedBootstrap} />
@@ -3815,7 +3832,7 @@ export function FuncoesView({
   );
 }
 
-function SettingsView({
+export function SettingsView({
   settings,
   onSave,
   isSaving,
@@ -3932,17 +3949,13 @@ function SettingsView({
                 />
               </Field>
               <FieldBlock label="Moeda">
-                <Combobox
-                  aria-label="Moeda"
-                  className={formSelectClass}
-                  onChange={(value) => set('currency', value)}
-                  options={[
-                    { value: 'BRL', label: 'Real (BRL)' },
-                    { value: 'USD', label: 'Dólar (USD)' },
-                  ]}
-                  searchPlaceholder="Buscar moeda..."
-                  value={form.currency ?? 'BRL'}
-                />
+                <div
+                  aria-readonly="true"
+                  className="flex h-11 items-center rounded-[10px] border border-[#dcdce2] bg-[#f4f4f6] px-3 text-[14px] font-semibold text-[#57575f]"
+                  data-settings-currency
+                >
+                  Real (BRL)
+                </div>
               </FieldBlock>
             </div>
             <FieldBlock label="Regime tributário">

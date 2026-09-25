@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { MUTATION_ERROR_COPY } from '../mutation-error-copy';
 import { describeSaleSaveError } from '../sale-save-error';
 
 describe('describeSaleSaveError', () => {
@@ -58,7 +59,7 @@ describe('describeSaleSaveError', () => {
       'Esta proposta não pode mais ser editada.',
     ]);
     expect(describeSaleSaveError({ status: 403, error: 'forbidden' })).toEqual([
-      'Somente administradores podem editar propostas.',
+      MUTATION_ERROR_COPY.adminRequired,
     ]);
     const generic = ['Não foi possível salvar a proposta. Tente novamente.'];
     expect(describeSaleSaveError({ status: 500, error: 'request_failed' })).toEqual(generic);

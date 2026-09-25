@@ -4,6 +4,8 @@
  * `require-token.ts`) and never prints a row id (CLAUDE.md UI Identifiers).
  */
 
+import { MUTATION_ERROR_COPY } from './mutation-error-copy';
+
 export type SettlementBlockingRow = { kind: 'receivable' | 'payable'; id: string; label: string };
 
 const GENERIC_FAILURE = 'Não foi possível salvar a proposta. Tente novamente.';
@@ -49,6 +51,6 @@ export function describeSaleSaveError(error: unknown): string[] {
     ];
   }
   if (status === 409 && code === 'sale_not_editable') return ['Esta proposta não pode mais ser editada.'];
-  if (status === 403) return ['Somente administradores podem editar propostas.'];
+  if (status === 403) return [MUTATION_ERROR_COPY.adminRequired];
   return [GENERIC_FAILURE];
 }

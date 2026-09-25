@@ -757,6 +757,7 @@ describe('Sales Ops sale write routes', () => {
   });
 
   it('returns 409 when updating a lost proposta', async () => {
+    currentRole = 'admin';
     serviceMocks.updateSale.mockResolvedValueOnce({
       ok: false,
       reason: 'not_editable',
@@ -774,6 +775,7 @@ describe('Sales Ops sale write routes', () => {
   });
 
   it('maps invalid_status_change to 409 with from and to', async () => {
+    currentRole = 'admin';
     serviceMocks.updateSale.mockResolvedValueOnce({
       ok: false,
       reason: 'invalid_status_change',
@@ -796,6 +798,7 @@ describe('Sales Ops sale write routes', () => {
   });
 
   it('maps row_has_active_settlement to 409 with the blocking rows', async () => {
+    currentRole = 'admin';
     const rows = [
       { kind: 'receivable', id: '77777777-7777-4777-8777-777777777777', label: '1/2' },
       { kind: 'payable', id: '88888888-8888-4888-8888-888888888888', label: 'Ana Martins (2/2)' },
@@ -817,6 +820,7 @@ describe('Sales Ops sale write routes', () => {
   });
 
   it('accepts a won status and row ids in the PUT body', async () => {
+    currentRole = 'admin';
     serviceMocks.updateSale.mockResolvedValueOnce({ ok: true, ...saleResult });
     const itemId = '99999999-9999-4999-8999-999999999999';
     const installmentId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -846,6 +850,7 @@ describe('Sales Ops sale write routes', () => {
   });
 
   it('returns 404 for an unknown or non-uuid sale id', async () => {
+    currentRole = 'admin';
     const nonUuidResponse = await app.request('/sales/not-a-uuid', {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
