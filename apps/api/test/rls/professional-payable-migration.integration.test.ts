@@ -349,6 +349,76 @@ async function waitFor(
   }
 }
 
+async function createLockOrderMigrationFolder(): Promise<string> {
+  const folder = await mkdtemp(join(tmpdir(), 'fxl-sales-lock-order-migrations-'));
+  await mkdir(join(folder, 'meta'));
+  await writeFile(
+    join(folder, 'meta/_journal.json'),
+    JSON.stringify({
+      dialect: 'postgresql',
+      entries: [
+        { breakpoints: true, idx: 0, tag: '0000_lock_order_tables', version: '7', when: 1 },
+        { breakpoints: true, idx: 1, tag: '0001_lock_order_alter', version: '7', when: 2 },
+      ],
+      version: '7',
+    }),
+  );
+  await writeFile(
+    join(folder, '0000_lock_order_tables.sql'),
+    [
+      'CREATE TABLE lock_order_first(id integer);',
+      '--> statement-breakpoint',
+      'CREATE TABLE lock_order_second(id integer);',
+    ].join('\n'),
+  );
+  await writeFile(
+    join(folder, '0001_lock_order_alter.sql'),
+    [
+      'ALTER TABLE lock_order_first ADD COLUMN marker integer;',
+      '--> statement-breakpoint',
+      'ALTER TABLE lock_order_second ADD COLUMN marker integer;',
+    ].join('\n'),
+  );
+  return folder;
+}
+
+async function createLockTimeoutProbeMigrationFolder(): Promise<string> {
+  const folder = await mkdtemp(join(tmpdir(), 'fxl-sales-lock-timeout-probe-'));
+  await mkdir(join(folder, 'meta'));
+  await writeFile(
+    join(folder, 'meta/_journal.json'),
+    JSON.stringify({
+      dialect: 'postgresql',
+      entries: [
+        { breakpoints: true, idx: 0, tag: '0000_lock_timeout_probe', version: '7', when: 1 },
+      ],
+      version: '7',
+    }),
+  );
+  await writeFile(
+    join(folder, '0000_lock_timeout_probe.sql'),
+    [
+      'CREATE TABLE lock_timeout_probe(value text);',
+      '--> statement-breakpoint',
+      "INSERT INTO lock_timeout_probe SELECT current_setting('lock_timeout');",
+    ].join('\n'),
+  );
+  return folder;
+}
+
+async function waitForMigrationLockWait(scratch: ScratchDatabase, relation: string): Promise<void> {
+  await waitFor(async () => {
+    const rows = await scratch.adminScratch<Array<{ waiting: number }>>`
+      SELECT count(*)::integer AS waiting
+      FROM pg_locks
+      WHERE NOT granted
+        AND mode = 'AccessExclusiveLock'
+        AND relation = to_regclass(${relation})
+    `;
+    return (rows[0]?.waiting ?? 0) > 0;
+  }, 5_000);
+}
+
 afterEach(async () => {
   const cleanupErrors: unknown[] = [];
   for (const scratch of scratches.splice(0)) {
@@ -544,7 +614,9 @@ describe('phased professional payable identity migration', () => {
       const result = await runDatabaseMigrations({
         databaseUrl: scratch.ownerUrl,
         migrationsFolder: folder,
-        onPhaseComplete: (event) => events.push(event),
+        onPhaseComplete: (event) => {
+          events.push(event);
+        },
         throughTag: '0000_commit_probe',
       });
       const owner = scratchClient(scratch);
@@ -1039,6 +1111,140 @@ describe('phased professional payable identity migration', () => {
     `;
     expect(journal?.count).toBe(1);
   }, 60_000);
+
+  it('yields its locks instead of deadlocking when live traffic takes them in the opposite order', async () => {
+    const scratch = await createScratchDatabase();
+    const folder = await createLockOrderMigrationFolder();
+    const retries: Array<{ attempt: number; code: string; tag: string }> = [];
+    const traffic = scratchClient(scratch);
+    let trafficOpen = false;
+    let migrationRun: Promise<unknown> | undefined;
+    try {
+      await runDatabaseMigrations({
+        databaseUrl: scratch.ownerUrl,
+        migrationsFolder: folder,
+        throughTag: '0000_lock_order_tables',
+      });
+      await traffic.unsafe('BEGIN');
+      trafficOpen = true;
+      await traffic.unsafe('SELECT count(*) FROM lock_order_second');
+
+      migrationRun = runDatabaseMigrations({
+        databaseUrl: scratch.ownerUrl,
+        migrationsFolder: folder,
+        testControls: {
+          lockContentionMaxAttempts: 20,
+          lockContentionRetryMs: 25,
+          onLockContentionRetry: (event) => {
+            retries.push(event);
+          },
+        },
+      });
+      await waitForMigrationLockWait(scratch, 'lock_order_second');
+
+      const [deadlock] = await scratch.adminScratch<Array<{ ms: number }>>`
+        SELECT setting::integer AS ms FROM pg_settings WHERE name = 'deadlock_timeout'
+      `;
+      const started = Date.now();
+      await traffic.unsafe('SELECT count(*) FROM lock_order_first');
+      const waitedMs = Date.now() - started;
+      await traffic.unsafe('COMMIT');
+      trafficOpen = false;
+      await migrationRun;
+
+      expect(waitedMs).toBeLessThan(deadlock?.ms ?? 0);
+      expect(retries.length).toBeGreaterThan(0);
+      expect(retries[0]).toEqual({ attempt: 1, code: '55P03', tag: '0001_lock_order_alter' });
+      const owner = scratchClient(scratch);
+      const columns = await owner<Array<{ table_name: string }>>`
+        SELECT table_name FROM information_schema.columns
+        WHERE column_name = 'marker' ORDER BY table_name
+      `;
+      const [journal] = await owner<Array<{ count: number }>>`
+        SELECT count(*)::integer AS count FROM drizzle.__drizzle_migrations
+      `;
+      expect(columns).toEqual([
+        { table_name: 'lock_order_first' },
+        { table_name: 'lock_order_second' },
+      ]);
+      expect(journal?.count).toBe(2);
+    } finally {
+      if (trafficOpen) await traffic.unsafe('ROLLBACK');
+      await Promise.allSettled([migrationRun].filter(Boolean));
+      await rm(folder, { force: true, recursive: true });
+    }
+  }, 30_000);
+
+  it('stops after the lock contention budget and never journals the contended migration', async () => {
+    const scratch = await createScratchDatabase();
+    const folder = await createLockOrderMigrationFolder();
+    const traffic = scratchClient(scratch);
+    let trafficOpen = false;
+    try {
+      await runDatabaseMigrations({
+        databaseUrl: scratch.ownerUrl,
+        migrationsFolder: folder,
+        throughTag: '0000_lock_order_tables',
+      });
+      await traffic.unsafe('BEGIN');
+      trafficOpen = true;
+      await traffic.unsafe('SELECT count(*) FROM lock_order_second');
+
+      await expect(
+        runDatabaseMigrations({
+          databaseUrl: scratch.ownerUrl,
+          migrationsFolder: folder,
+          testControls: { lockContentionMaxAttempts: 3, lockContentionRetryMs: 1 },
+        }),
+      ).rejects.toThrow('migration 0001_lock_order_alter could not acquire its locks after 3 attempts');
+      await traffic.unsafe('COMMIT');
+      trafficOpen = false;
+
+      const owner = scratchClient(scratch);
+      const columns = await owner`
+        SELECT table_name FROM information_schema.columns WHERE column_name = 'marker'
+      `;
+      const [journal] = await owner<Array<{ count: number }>>`
+        SELECT count(*)::integer AS count FROM drizzle.__drizzle_migrations
+      `;
+      expect(columns).toHaveLength(0);
+      expect(journal?.count).toBe(1);
+
+      // The advisory lock was released, so the failed migration resumes cleanly.
+      await runDatabaseMigrations({
+        databaseUrl: scratch.ownerUrl,
+        migrationsFolder: folder,
+        testControls: { advisoryLockMaxAttempts: 1 },
+      });
+      const [resumed] = await owner<Array<{ count: number }>>`
+        SELECT count(*)::integer AS count FROM drizzle.__drizzle_migrations
+      `;
+      const resumedColumns = await owner`
+        SELECT table_name FROM information_schema.columns WHERE column_name = 'marker'
+      `;
+      expect(resumed?.count).toBe(2);
+      expect(resumedColumns).toHaveLength(2);
+    } finally {
+      if (trafficOpen) await traffic.unsafe('ROLLBACK');
+      await rm(folder, { force: true, recursive: true });
+    }
+  }, 30_000);
+
+  it('derives the migration lock_timeout from the server deadlock_timeout', async () => {
+    const scratch = await createScratchDatabase();
+    await scratch.admin.unsafe(
+      `ALTER DATABASE ${exactIdentifier(scratch.databaseName)} SET deadlock_timeout = '1400ms'`,
+    );
+    const folder = await createLockTimeoutProbeMigrationFolder();
+    try {
+      await runDatabaseMigrations({ databaseUrl: scratch.ownerUrl, migrationsFolder: folder });
+      const owner = scratchClient(scratch);
+      const rows = await owner<Array<{ value: string }>>`SELECT value FROM lock_timeout_probe`;
+      expect(rows).toEqual([{ value: '700ms' }]);
+    } finally {
+      await rm(folder, { force: true, recursive: true });
+    }
+  }, 30_000);
 
   it('keeps the journal timestamp and phased SQL source authoritative for migration 0018', async () => {
     const journal = JSON.parse(
