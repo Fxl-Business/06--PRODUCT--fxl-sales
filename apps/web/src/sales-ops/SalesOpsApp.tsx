@@ -33,7 +33,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from 'react';
-import { Navigate, useNavigate, useParams } from 'react-router-dom';
+import { Navigate, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useAuthProfile, useLogout, useOrganizations } from '@/auth/react';
 import {
   AlertDialog,
@@ -91,6 +91,7 @@ import {
   useUpdateSalesOpsSale,
 } from './hooks';
 import {
+  buildSaleDetailPath,
   buildSalesOpsPath,
   getDefaultSalesOpsRoute,
   getSalesOpsNavigation,
@@ -1215,6 +1216,7 @@ function AccountOrganizationSection({ onSwitched }: { onSwitched: () => void }) 
 
 export function SalesOpsApp() {
   const navigate = useNavigate();
+  const location = useLocation();
   const routeParams = useParams();
   const profile = useAuthProfile();
   const logout = useLogout();
@@ -1269,6 +1271,21 @@ export function SalesOpsApp() {
   );
   const resolution = resolveSalesOpsRoute(routeParams, profile.roles);
   const { workspace, view } = resolution.route;
+  /** The open proposta detail. URL state only (`/:workspace/vendas/:saleId`). */
+  const detailSaleId = resolution.route.saleId ?? null;
+
+  function openSaleDetail(saleId: string) {
+    navigate(buildSalesOpsPath({ workspace, view: 'vendas', saleId }), {
+      state: SALE_DETAIL_OPENED_IN_APP,
+    });
+  }
+
+  function closeSaleDetail() {
+    // Popping an in-app entry means Back never reopens the closed detail; a detail
+    // entered from outside has no list entry behind it, so it is replaced instead.
+    if (isSaleDetailOpenedInApp(location.state)) navigate(-1);
+    else navigate(buildSalesOpsPath({ workspace, view: 'vendas' }), { replace: true });
+  }
   // A refused financial mutation (PC23 403, or a 409 lock) is shown on the screen
   // it happened on and nowhere else. Scoped to the view so navigating away drops
   // it without an effect. Never ForbiddenPanel: that one replaces the screen and
@@ -1532,9 +1549,12 @@ export function SalesOpsApp() {
    *
    * It writes nothing and transitions nothing. The propostas screen remains the
    * only writer of `sale.status`.
+   *
+   * The link opens the proposta itself (`/operacional/vendas/:saleId`), still
+   * writing nothing; closing it returns to the board through Back semantics.
    */
-  function openSaleFromBoard(_saleId: string) {
-    navigate(buildSalesOpsPath({ workspace: 'operacional', view: 'vendas' }));
+  function openSaleFromBoard(saleId: string) {
+    navigate(buildSaleDetailPath(saleId), { state: SALE_DETAIL_OPENED_IN_APP });
   }
   /* BOARD-WRITE-FENCE:END conversion-handlers */
 
@@ -2134,8 +2154,11 @@ export function SalesOpsApp() {
                     bootstrap={persistedBootstrap}
                     canManage={workspace === 'operacional' && profile.roles.includes('admin')}
                     canSettle={canSettle}
+                    detailSaleId={detailSaleId}
                     onCancelContract={(sale) => cancelContract.mutate(sale.id, reportMutation)}
+                    onCloseDetail={closeSaleDetail}
                     onEdit={(sale) => setSaleWizard({ mode: 'edit', sale })}
+                    onOpenDetail={openSaleDetail}
                     onTransition={(sale, status) =>
                       transitionSale.mutate({ saleId: sale.id, status }, reportMutation)
                     }
@@ -2609,11 +2632,31 @@ const confirmCopy: Record<
   },
 };
 
+/**
+ * History-entry marker for a detail opened by an in-app click. Closing such a detail
+ * POPS history so Back never reopens it; a detail entered from outside (Finance's
+ * "Editar no Sales", a pasted link, a restored returnTo) carries no marker and is closed
+ * by REPLACING the entry with the list. The marker decides history mechanics only; what
+ * is on screen is decided by the URL alone.
+ */
+const SALE_DETAIL_OPENED_IN_APP = { saleDetailOpenedInApp: true } as const;
+
+function isSaleDetailOpenedInApp(state: unknown): boolean {
+  return (
+    typeof state === 'object' &&
+    state !== null &&
+    (state as { saleDetailOpenedInApp?: unknown }).saleDetailOpenedInApp === true
+  );
+}
+
 export function SalesView({
   bootstrap,
   sales,
   canManage,
   canSettle = false,
+  detailSaleId,
+  onOpenDetail,
+  onCloseDetail,
   onEdit,
   onTransition,
   onCancelContract,
@@ -2623,16 +2666,41 @@ export function SalesView({
   canManage: boolean;
   /** Baixa, estorno and history actions in the sale detail. Off unless the caller opts in. */
   canSettle?: boolean;
+  /**
+   * The proposta the URL names (`/:workspace/vendas/:saleId`), or null. The open
+   * detail is URL state owned by `SalesOpsApp`, never component state here.
+   */
+  detailSaleId: string | null;
+  onOpenDetail: (saleId: string) => void;
+  onCloseDetail: () => void;
   onEdit: (sale: SalesOpsSale) => void;
   onTransition: (sale: SalesOpsSale, status: TransitionSaleStatus) => void;
   onCancelContract: (sale: SalesOpsSale) => void;
 }) {
   const [pendingAction, setPendingAction] = useState<PendingSaleAction | null>(null);
-  const [detailSaleId, setDetailSaleId] = useState<string | null>(null);
   const detailSale =
-    sales.find((sale) => sale.id === detailSaleId) ??
-    bootstrap.sales.find((sale) => sale.id === detailSaleId) ??
-    null;
+    detailSaleId === null
+      ? null
+      : (sales.find((sale) => sale.id === detailSaleId) ??
+        bootstrap.sales.find((sale) => sale.id === detailSaleId) ??
+        null);
+  /*
+    Rendered by EVERY return branch: a deep link must open even when the filters
+    hide every row or the organization has no proposta at all. An id the
+    org-scoped bootstrap does not hold (unknown, or another organization's) gets
+    one not-found state that never names the id.
+  */
+  const detailLayer =
+    detailSaleId === null ? null : detailSale ? (
+      <SaleDetailDialog
+        bootstrap={bootstrap}
+        canSettle={canSettle}
+        onClose={onCloseDetail}
+        sale={detailSale}
+      />
+    ) : (
+      <SaleNotFoundDialog onBack={onCloseDetail} />
+    );
 
   function confirmPendingAction() {
     if (!pendingAction) return;
@@ -2645,19 +2713,25 @@ export function SalesView({
 
   if (bootstrap.sales.length === 0) {
     return (
-      <EmptyPanel
-        text="As propostas são carregadas da API de operações comerciais. Use Nova proposta para registrar a primeira."
-        title="Nenhuma proposta registrada"
-      />
+      <>
+        <EmptyPanel
+          text="As propostas são carregadas da API de operações comerciais. Use Nova proposta para registrar a primeira."
+          title="Nenhuma proposta registrada"
+        />
+        {detailLayer}
+      </>
     );
   }
 
   if (sales.length === 0) {
     return (
-      <EmptyPanel
-        text="Ajuste os filtros de status e área para ver outras propostas."
-        title="Nenhuma proposta encontrada"
-      />
+      <>
+        <EmptyPanel
+          text="Ajuste os filtros de status e área para ver outras propostas."
+          title="Nenhuma proposta encontrada"
+        />
+        {detailLayer}
+      </>
     );
   }
 
@@ -2683,7 +2757,7 @@ export function SalesView({
               <TableRow
                 className="cursor-pointer"
                 key={sale.id}
-                onClick={() => setDetailSaleId(sale.id)}
+                onClick={() => onOpenDetail(sale.id)}
               >
                 <TableCell className="px-4 py-3">
                   <span className="sales-ops-num rounded-md bg-[#eef3f9] px-2 py-1 text-xs font-bold tracking-[0.04em] text-[#3f6ea3]">
@@ -2790,13 +2864,37 @@ export function SalesView({
         </AlertDialogContent>
       </AlertDialog>
 
-      <SaleDetailDialog
-        bootstrap={bootstrap}
-        canSettle={canSettle}
-        onClose={() => setDetailSaleId(null)}
-        sale={detailSale}
-      />
+      {detailLayer}
     </div>
+  );
+}
+
+/**
+ * A proposta URL whose id the org-scoped bootstrap does not hold. Unknown and
+ * other-organization ids share this one state on purpose (no existence oracle
+ * across tenants), and the copy never names the id (`## UI Identifiers`). It can
+ * only mount after the bootstrap has loaded, so a slow load never flashes it.
+ */
+function SaleNotFoundDialog({ onBack }: { onBack: () => void }) {
+  return (
+    <Dialog onOpenChange={(open) => (!open ? onBack() : undefined)} open>
+      <DialogContent className="w-[calc(100vw-48px)] max-w-[440px] gap-0 rounded-[20px] border-none bg-white p-0">
+        <DialogHeader className="border-b border-[#e8e8ec] px-6 py-5 text-left">
+          <DialogTitle className="text-[19px] font-bold text-[#201f24]">
+            Proposta não encontrada
+          </DialogTitle>
+          <DialogDescription className="text-[13px] text-[#8b8b92]">
+            Esta proposta não existe ou não pertence à organização ativa. Confira a organização
+            selecionada ou volte para a lista.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex justify-end px-6 py-4">
+          <button className={wizardPrimaryButtonClass} onClick={onBack} type="button">
+            Voltar para a lista
+          </button>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

@@ -9,6 +9,7 @@ import { NoRolePage } from './pages/errors/NoRolePage';
 import { Protected } from '@/auth/react';
 import { RouteErrorPage } from './pages/errors/RouteErrorPage';
 import { SalesOpsApp } from './sales-ops/SalesOpsApp';
+import { SALES_OPS_ROUTE_PATTERN } from './sales-ops/navigation';
 
 // Lazy-loaded pages - low traffic, keeps the initial bundle small.
 const AppsPage = lazy(() => import('./admin/apps/AppsPage').then((m) => ({ default: m.AppsPage })));
@@ -69,7 +70,7 @@ const SellerDealsPlaceholderPage = lazy(() =>
   })),
 );
 
-const routes: RouteObject[] = [
+export const routes: RouteObject[] = [
   {
     path: '/',
     errorElement: <RouteErrorPage />,
@@ -153,7 +154,9 @@ const routes: RouteObject[] = [
     ),
   },
   {
-    path: '/:workspace/:view',
+    // One route object for the list AND the proposta detail (`:saleId?`), inside
+    // `Protected`, so a cold entry captures the full deep link before login.
+    path: SALES_OPS_ROUTE_PATTERN,
     errorElement: <RouteErrorPage />,
     element: (
       <Protected>

@@ -114,8 +114,11 @@ Full reference: `nexo/knowledge/reference/ui-controls.md`.
 
 Full reference: `nexo/knowledge/reference/sales-ops-routing.md`.
 
-- Routes: `tatico/dashboard`, `operacional/vendas|comissoes|leads`, `cadastros/produtos|areas|clientes|pessoas|funcoes|etapas|geral`, `meus-dados/vendedores|comissoes|leads|finders|vendas`.
+- Routes: `tatico/dashboard`, `operacional/vendas|comissoes|leads`, `cadastros/produtos|areas|clientes|pessoas|funcoes|etapas|geral`, `meus-dados/vendedores|comissoes|leads|finders|vendas`, plus the proposta detail `operacional/vendas/:saleId` (and `meus-dados/vendas/:saleId`).
 - The URL is the single source of truth for the active workspace and page.
+- The open proposta detail is URL state too: one route `SALES_OPS_ROUTE_PATTERN` (`/:workspace/:view/:saleId?`) and `saleId` is honoured only on the `vendas` view; never hold the open detail in component state.
+- `buildSaleDetailPath` builds `/operacional/vendas/<id>`, the Finance `deepLinkPath`; an invisible workspace drops the id through the ordinary role default.
+- An unknown or other-org id renders `Proposta não encontrada` without the id; closing pops history when opened in-app (`SALE_DETAIL_OPENED_IN_APP`) and otherwise replaces the URL with the list.
 - `cadastros/vendedores` and `cadastros/finders` redirect to `/cadastros/pessoas`; `aliasLegacyView` only fires in `cadastros`.
 - Visibility comes only from `profile.roles` via `getVisibleWorkspaces`: `admin` sees `tatico`, `operacional`, `cadastros`; `seller` or `finder` adds `meus-dados`; no roles keeps `/no-role`. `admin` is synthesized from the Hub workspace `owner`/`admin` flag in `getRolesFromHubClaims`.
 - OPEN PRODUCT QUESTION: every admin-bearing claim shape also returns `seller` and `finder`, so "team-only without `meus-dados`" is unreachable. Do not resolve it by changing `claims.ts` without a product decision.

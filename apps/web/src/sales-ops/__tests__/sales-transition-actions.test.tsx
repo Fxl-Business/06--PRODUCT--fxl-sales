@@ -187,8 +187,11 @@ beforeEach(async () => {
       <SalesView
         bootstrap={bootstrap()}
         canManage
+        detailSaleId={null}
         onCancelContract={onCancelContract}
+        onCloseDetail={vi.fn()}
         onEdit={onEdit}
+        onOpenDetail={vi.fn()}
         onTransition={onTransition}
         sales={allSales}
       />,

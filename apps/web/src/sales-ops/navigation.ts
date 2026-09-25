@@ -41,14 +41,24 @@ export type SalesOpsNavigationItem = {
   icon: LucideIcon;
 };
 
+/**
+ * The ONE Sales Ops route. The optional `saleId` segment keeps the list and the
+ * proposta detail on the same route object, so moving between them never remounts
+ * `SalesOpsApp` (filters, an open wizard and `convertedSales` survive).
+ */
+export const SALES_OPS_ROUTE_PATTERN = '/:workspace/:view/:saleId?';
+
 export type SalesOpsRoute = Readonly<{
   workspace: SalesOpsWorkspace;
   view: SalesOpsView;
+  /** The open proposta. Only ever present on the `vendas` view. */
+  saleId?: string;
 }>;
 
 export type SalesOpsRouteParams = Readonly<{
   workspace?: string;
   view?: string;
+  saleId?: string;
 }>;
 
 export type SalesOpsRouteResolution = Readonly<{
@@ -147,7 +157,13 @@ export function getSalesOpsNavigation(
 }
 
 export function buildSalesOpsPath(route: SalesOpsRoute): string {
-  return `/${route.workspace}/${route.view}`;
+  const base = `/${route.workspace}/${route.view}`;
+  return route.saleId === undefined ? base : `${base}/${encodeURIComponent(route.saleId)}`;
+}
+
+/** The Finance `deepLinkPath` (audit 11.4): the team proposta detail. */
+export function buildSaleDetailPath(saleId: string): string {
+  return buildSalesOpsPath({ workspace: 'operacional', view: 'vendas', saleId });
 }
 
 export function getDefaultSalesOpsRoute(
@@ -204,10 +220,18 @@ export function resolveSalesOpsRoute(
     : undefined;
 
   if (workspace && view) {
-    const route = { workspace, view };
-    // An aliased view differs from what the URL asked for, which is exactly when
-    // the caller must rewrite the address bar. A canonical route stays `false`.
-    return { route, path: buildSalesOpsPath(route), redirect: view !== params.view };
+    // The proposta id is honoured on the `vendas` view only. Never write the key
+    // as `saleId: undefined`: a present-but-undefined key trips `toStrictEqual`.
+    const saleId = view === 'vendas' && params.saleId ? params.saleId : undefined;
+    const route: SalesOpsRoute = saleId === undefined ? { workspace, view } : { workspace, view, saleId };
+    const droppedSaleId = params.saleId !== undefined && saleId === undefined;
+    // An aliased view or a dropped id differs from what the URL asked for, which is
+    // exactly when the caller must rewrite the address bar. A canonical route stays `false`.
+    return {
+      route,
+      path: buildSalesOpsPath(route),
+      redirect: view !== params.view || droppedSaleId,
+    };
   }
 
   const route = getDefaultSalesOpsRoute(roles);

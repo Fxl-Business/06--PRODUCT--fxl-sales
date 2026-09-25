@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AppRole } from '@/auth/claims';
 import {
+  buildSaleDetailPath,
   buildSalesOpsPath,
   getDefaultSalesOpsRoute,
   getSalesOpsNavigation,
@@ -17,6 +18,7 @@ const seller: AppRole[] = ['seller'];
 const finder: AppRole[] = ['finder'];
 const sellerFinder: AppRole[] = ['seller', 'finder'];
 const everything: AppRole[] = ['admin', 'seller', 'finder'];
+const SALE_ID = '5b0e7c1e-3f4a-4c2d-9e8b-1a2b3c4d5e6f';
 
 describe('sales operations navigation', () => {
   it('exposes the exact workspace catalogue including meus-dados', () => {
@@ -451,5 +453,72 @@ describe('sales operations navigation', () => {
       path: '/cadastros/pessoas',
       redirect: true,
     });
+  });
+  it('builds the proposta detail path with the id as its own segment', () => {
+    expect(buildSalesOpsPath({ workspace: 'operacional', view: 'vendas', saleId: SALE_ID })).toBe(
+      `/operacional/vendas/${SALE_ID}`,
+    );
+    expect(buildSaleDetailPath(SALE_ID)).toBe(`/operacional/vendas/${SALE_ID}`);
+    expect(buildSalesOpsPath({ workspace: 'operacional', view: 'vendas', saleId: 'a/b' })).toBe(
+      '/operacional/vendas/a%2Fb',
+    );
+    expect(buildSalesOpsPath({ workspace: 'operacional', view: 'vendas' })).toBe(
+      '/operacional/vendas',
+    );
+  });
+
+  it('keeps a proposta id only on the vendas view', () => {
+    expect(
+      resolveSalesOpsRoute({ workspace: 'operacional', view: 'vendas', saleId: SALE_ID }, everything),
+    ).toEqual({
+      route: { workspace: 'operacional', view: 'vendas', saleId: SALE_ID },
+      path: `/operacional/vendas/${SALE_ID}`,
+      redirect: false,
+    });
+    expect(
+      resolveSalesOpsRoute({ workspace: 'meus-dados', view: 'vendas', saleId: SALE_ID }, finder),
+    ).toEqual({
+      route: { workspace: 'meus-dados', view: 'vendas', saleId: SALE_ID },
+      path: `/meus-dados/vendas/${SALE_ID}`,
+      redirect: false,
+    });
+
+    const comissoes = resolveSalesOpsRoute(
+      { workspace: 'operacional', view: 'comissoes', saleId: SALE_ID },
+      everything,
+    );
+    expect(comissoes).toEqual({
+      route: { workspace: 'operacional', view: 'comissoes' },
+      path: '/operacional/comissoes',
+      redirect: true,
+    });
+    expect('saleId' in comissoes.route).toBe(false);
+
+    const legacy = resolveSalesOpsRoute(
+      { workspace: 'cadastros', view: 'vendedores', saleId: SALE_ID },
+      everything,
+    );
+    expect(legacy.path).toBe('/cadastros/pessoas');
+    expect(legacy.redirect).toBe(true);
+    expect('saleId' in legacy.route).toBe(false);
+  });
+
+  it('drops a proposta id for an operator who cannot see the workspace', () => {
+    const params = { workspace: 'operacional', view: 'vendas', saleId: SALE_ID };
+
+    const asFinder = resolveSalesOpsRoute(params, finder);
+    expect(asFinder.path).toBe('/meus-dados/finders');
+    expect(asFinder.redirect).toBe(true);
+    expect('saleId' in asFinder.route).toBe(false);
+
+    const asSeller = resolveSalesOpsRoute(params, seller);
+    expect(asSeller.path).toBe('/meus-dados/vendedores');
+    expect(asSeller.redirect).toBe(true);
+    expect('saleId' in asSeller.route).toBe(false);
+
+    const asNobody = resolveSalesOpsRoute(params, []);
+    expect(asNobody.path).toBe('/tatico/dashboard');
+    expect(asNobody.redirect).toBe(true);
+    expect('saleId' in asNobody.route).toBe(false);
   });
 });

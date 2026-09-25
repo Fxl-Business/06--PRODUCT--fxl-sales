@@ -28,7 +28,7 @@ import type { HubClient } from '@fxl-business/hub-sdk/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import * as React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
+import { MemoryRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const act = (
@@ -99,6 +99,52 @@ const bootstrapFixture = {
   settings: null,
 };
 
+/** The Finance `deepLinkPath` target: one won proposta, `P-003`. */
+const SALE_ID = '5b0e7c1e-3f4a-4c2d-9e8b-1a2b3c4d5e6f';
+
+const saleBootstrapFixture: SalesOpsBootstrap = {
+  ...bootstrapFixture,
+  sales: [
+    {
+      id: SALE_ID,
+      orgId: 'org-test',
+      sequence: 3,
+      code: 'P-003',
+      clientId: null,
+      clientNameSnapshot: 'SegPro',
+      sellerPersonId: null,
+      sellerNameSnapshot: 'Ana Martins',
+      finderPersonId: null,
+      finderNameSnapshot: null,
+      status: 'won',
+      paymentMethod: 'pix',
+      condition: 'installments',
+      installments: 1,
+      baseDate: '2026-07-10',
+      notes: null,
+      wonAt: '2026-07-11T12:00:00.000Z',
+      lostAt: null,
+      totalBrl: 300000,
+      recurringBrl: 0,
+      sellerCommissionPct: '8',
+      finderCommissionPct: '0',
+      taxPct: '6',
+      otherCostsBrl: 0,
+      professionalCostsBrl: 0,
+      sellerCommissionBrl: 24000,
+      finderCommissionBrl: 0,
+      taxBrl: 18000,
+      netMarginBrl: 258000,
+      netMarginPct: '86',
+      createdAt: '2026-07-10T12:00:00.000Z',
+      updatedAt: null,
+    },
+  ],
+};
+
+/** Reset to the empty fixture before every test, so older cases keep their exact world. */
+let bootstrapData: SalesOpsBootstrap = bootstrapFixture;
+
 const mutation = {
   isPending: false,
   mutate: vi.fn(),
@@ -107,13 +153,16 @@ const mutation = {
 
 vi.mock('@/sales-ops/hooks', () => ({
   useSalesOpsBootstrap: () => ({
-    data: bootstrapFixture,
+    data: bootstrapData,
     isLoading: false,
     isError: false,
     isFetching: false,
     isSuccess: true,
     error: null,
   }),
+  useSaleSettlements: () => ({ data: [], isLoading: false, isError: false, error: null }),
+  useRecordSalesOpsSettlement: () => mutation,
+  useReverseSalesOpsSettlement: () => mutation,
   useCreateSalesOpsSale: () => mutation,
   useUpdateSalesOpsSale: () => mutation,
   useTransitionSalesOpsSale: () => mutation,
@@ -134,6 +183,8 @@ import { RETURN_TO_KEY } from '@/auth/session-recovery';
 import { NoRoleGuard } from '@/components/auth/RoleGuard';
 import { NoRolePage } from '@/pages/errors/NoRolePage';
 import { SalesOpsApp } from '@/sales-ops/SalesOpsApp';
+import { SALES_OPS_ROUTE_PATTERN } from '@/sales-ops/navigation';
+import type { SalesOpsBootstrap } from '@/sales-ops/types';
 
 /**
  * `expired` is the BFF's own `401` verdict, the only result that may tear a session down,
@@ -220,9 +271,12 @@ type MountedApp = {
 let mountedApps: MountedApp[] = [];
 
 /**
- * ONE document's worth of app, mirroring `router.tsx`: `/no-role` and the two Sales Ops
- * routes are separate route objects, each with its own `Protected`, and `/no-role` really
- * is `NoRoleGuard` wrapping `NoRolePage`.
+ * ONE document's worth of app, mirroring `router.tsx`: `/no-role`, `/` and the Sales Ops
+ * route with its optional proposta segment (`SALES_OPS_ROUTE_PATTERN`) are separate route
+ * objects, each with its own `Protected`, `/no-role` really is `NoRoleGuard` wrapping
+ * `NoRolePage`, and the `*` catch-all sits OUTSIDE `Protected` exactly as in `router.tsx`.
+ * That catch-all is load-bearing: a path no route serves is rewritten to `/` before any
+ * `Protected` can capture it for the login round trip.
  *
  * A fresh `QueryClient` per mount, because a full-page navigation destroys the module-level
  * singleton along with the rest of the document. `sessionStorage` is the one thing that
@@ -280,8 +334,9 @@ function mountApp(entry: string): MountedApp {
                     <SalesOpsApp />
                   </Protected>
                 }
-                path="/:workspace/:view"
+                path={SALES_OPS_ROUTE_PATTERN}
               />
+              <Route element={<Navigate replace to="/" />} path="*" />
             </Routes>
           </MemoryRouter>
         </AppAuthProvider>
@@ -378,6 +433,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   sessionStorage.clear();
   visited = [];
+  bootstrapData = bootstrapFixture;
   vi.stubEnv('VITE_FXL_HUB_API_URL', 'http://hub.test');
   vi.stubEnv('VITE_FXL_HUB_ENVIRONMENT', 'development');
   vi.stubEnv('VITE_FXL_HUB_AUDIENCE', 'app.fxl-sales');
@@ -554,5 +610,48 @@ describe('the composed session journey', () => {
 
     expect(locationText(app.host)).toBe('/tatico/dashboard');
     expect(app.host.textContent).not.toContain(UNAUTHORIZED);
+  });
+
+  it('lands on the proposta deep link after a cold entry with no session and a login', async () => {
+    bootstrapData = saleBootstrapFixture;
+    mocks.cache.getToken.mockReset();
+    mocks.cache.getToken.mockResolvedValue(expired);
+
+    const app = mountApp(`/operacional/vendas/${SALE_ID}`);
+    await flushReact();
+
+    expect(mocks.client.login).toHaveBeenCalledTimes(1);
+    expect(sessionStorage.getItem(RETURN_TO_KEY)).toBe(`/operacional/vendas/${SALE_ID}`);
+
+    const next = await completeHubRoundTrip(app, adminToken);
+
+    expect(locationText(next.host)).toBe(`/operacional/vendas/${SALE_ID}`);
+    // The detail portals into `document.body`, outside the app host.
+    expect(document.body.textContent).toContain('Proposta P-003');
+  });
+
+  /*
+    An abandoned login earlier in the same tab can leave a returnTo behind, and a capture
+    that yields nothing (`/`) leaves that slot alone. The deep link must therefore reach
+    `Protected` intact: its capture overwrites the stale value, which is only true while the
+    Sales Ops route serves the id segment instead of the `*` redirect to `/`.
+  */
+  it('is not hijacked by a stale returnTo left by an abandoned login', async () => {
+    bootstrapData = saleBootstrapFixture;
+    sessionStorage.setItem(RETURN_TO_KEY, '/cadastros/produtos');
+    mocks.cache.getToken.mockReset();
+    mocks.cache.getToken.mockResolvedValue(expired);
+
+    const app = mountApp(`/operacional/vendas/${SALE_ID}`);
+    await flushReact();
+
+    expect(mocks.client.login).toHaveBeenCalledTimes(1);
+    expect(sessionStorage.getItem(RETURN_TO_KEY)).toBe(`/operacional/vendas/${SALE_ID}`);
+
+    const next = await completeHubRoundTrip(app, adminToken);
+
+    expect(locationText(next.host)).toBe(`/operacional/vendas/${SALE_ID}`);
+    expect(visited).not.toContain('/cadastros/produtos');
+    expect(document.body.textContent).toContain('Proposta P-003');
   });
 });

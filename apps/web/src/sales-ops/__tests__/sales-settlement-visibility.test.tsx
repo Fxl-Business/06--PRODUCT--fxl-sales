@@ -4,7 +4,8 @@ import * as React from 'react';
 import type { ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { CommissionsView, SalesView } from '../SalesOpsApp';
+import { CommissionsView } from '../SalesOpsApp';
+import { ControlledSalesView } from './controlled-sales-view';
 import type { SalesOpsBootstrap, SalesOpsSale } from '../types';
 
 /**
@@ -185,7 +186,7 @@ function actionNames(scope: ParentNode): string[] {
 async function renderSalesView(props: { canManage: boolean; canSettle?: boolean }) {
   await act(async () =>
     root.render(
-      <SalesView
+      <ControlledSalesView
         bootstrap={bootstrap()}
         onCancelContract={vi.fn()}
         onEdit={vi.fn()}
@@ -264,7 +265,7 @@ describe('settlement visibility', () => {
     ];
     await act(async () =>
       root.render(
-        <SalesView
+        <ControlledSalesView
           bootstrap={data}
           canManage={false}
           onCancelContract={vi.fn()}
@@ -340,7 +341,7 @@ describe('settlement visibility', () => {
 
       await act(async () =>
         root.render(
-          <SalesView
+          <ControlledSalesView
             bootstrap={data}
             canManage
             canSettle

@@ -6,7 +6,7 @@ import * as React from 'react';
 import type { HTMLAttributes, ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { SalesView } from '../SalesOpsApp';
+import { ControlledSalesView } from './controlled-sales-view';
 import type { SalesOpsBootstrap, SalesOpsSale } from '../types';
 
 vi.mock('@/components/ui/dialog', () => ({
@@ -217,7 +217,7 @@ async function renderSalesView() {
   const bootstrapValue = bootstrap();
   await act(async () => {
     root.render(
-      <SalesView
+      <ControlledSalesView
         bootstrap={bootstrapValue}
         canManage={true}
         onCancelContract={vi.fn()}
