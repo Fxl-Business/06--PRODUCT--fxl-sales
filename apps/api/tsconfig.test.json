@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "."
+  },
+  // Type-checks the test tree, which neither tsconfig.json (`src/**/*`) nor
+  // tsconfig.scripts.json (`src/**/*` plus `scripts/**/*`) roots. Vitest strips
+  // types without checking them, so before this project existed the
+  // integration suite under `test/` could accumulate type errors unseen.
+  // `src/**/*` stays a root for the same reason as in tsconfig.scripts.json:
+  // the `declare module 'hono'` augmentation in src/middleware/auth.ts only
+  // resolves when that file is a program root (TS2664 otherwise). `noEmit`
+  // stays true, so `dist/` is still built ONLY by the unmodified tsconfig.json.
+  "include": ["src/**/*", "test/**/*"]
+}
