@@ -1,5 +1,7 @@
 # Prompt para o FXL Sales: pré-requisitos locais da integração com o Finance
 
+> **EXECUTADO** pela run `20260924T013019Z-finance-prereqs` (slices 01 a 06). Não rode de novo; o restante está em `04-prompt-sales-slices-07-09.md`.
+
 Como rodar: `/nexo --feature --autopilot` com o bloco abaixo como pedido, a partir do `master`.
 
 > **Contexto**

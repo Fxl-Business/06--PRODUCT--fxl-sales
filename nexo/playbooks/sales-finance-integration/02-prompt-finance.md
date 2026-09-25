@@ -1,31 +1,35 @@
-# Prompt para o FXL Finance: revisão pós-implementação das baixas reais
+# Finance, agora: revisão pós-implementação das baixas reais
 
-Rodar DEPOIS que a implementação de "Baixas reais no For Business" (`lancamento_baixas`, `reduzirLiquidacao`, migração 073) estiver terminada e mergeada.
-Não rodar em paralelo com ela.
+Rodar no repo do Finance, em autopilot, depois que a run das baixas terminou (`20260924T011357Z-feedback-socio-financeiro`).
 
 > **Contexto**
 >
-> Vocês acabaram de implementar "Baixas reais no For Business": baixas e estornos como fatos imutáveis em `lancamento_baixas`, o redutor puro `reduzirLiquidacao` e as colunas do lançamento como cache.
-> Esse desenho foi escrito como resposta à PC3 da auditoria de uma integração futura de duas vias entre o FXL Sales (`/Users/cauetpinciara/Documents/fxl/projects/06--PRODUCT--fxl-sales`) e o FXL Finance.
+> Vocês implementaram "Baixas reais no For Business": baixas e estornos como fatos imutáveis em `lancamento_baixas` (migração 073), o redutor puro `reduzirLiquidacao` e as colunas do lançamento como cache.
+> Esse desenho foi a resposta à PC3 da auditoria de uma integração futura de duas vias entre o FXL Sales (`/Users/cauetpinciara/Documents/fxl/projects/06--PRODUCT--fxl-sales`) e o FXL Finance.
 > A auditoria está em `/Users/cauetpinciara/Documents/fxl/projects/06--PRODUCT--fxl-sales/nexo/knowledge/doubts/20260922-sales-finance-two-way-sync-audit.md`; a seção 11 (contrato consolidado v0) já incorpora o desenho de vocês.
-> O FXL Sales está implementando a baixa dele no MESMO modelo (fato imutável, estorno como fato novo, mesmas regras de cálculo).
+> O Sales já implementou a baixa dele no MESMO modelo.
+> As decisões de produto já foram tomadas; rode em autopilot e registre no `AUDIT.md` da run qualquer decisão que faltar, com a opção escolhida.
 >
 > **Esta tarefa continua sem NENHUM código de integração**: nada de API para o Sales, ids externos, outbox, feed, eventos ou chamadas ao Hub.
-> É uma revisão do que foi entregue, com correções só do lado do Finance.
 >
-> **1. Confirme no código entregue, com arquivo:linha, e corrija o que faltar**
+> **Passo 0: valide o estado do repo ANTES de planejar ou escrever qualquer coisa.** Relate o resultado de cada item no início da run.
 >
-> - **Baixa em dobro:** `POST .../baixas` não tem chave de idempotência, então um duplo clique ou duas abas podem criar duas baixas. Como a baixa é sempre integral, uma linha já paga deve recusar uma nova baixa (409), checado com a linha travada (`SELECT ... FOR UPDATE`), não só na UI.
-> - **Pago acima do original:** mesmo com o 409, duas baixas ativas vão poder existir no futuro (uma registrada em cada app ao mesmo tempo). Confirme que o redutor e todo agregado que lê `valor_pago` / `valor_recebido` (view unificada, Realizado, Fluxo de Caixa, Tático) se comportam bem com pago maior que o original, com um teste.
-> - **Quem pode dar baixa:** as rotas de manual-entries não têm `requireOrgEditor` (a manual-import tem). As rotas de baixa e estorno precisam do gate; proponha ao dono estender às de lançamento manual.
-> - **Edição que troca o ano do vencimento:** a edição recalculava `ano` sem trocar o `import_batch_id`, deixando a linha no lote do ano errado. Confirme se a nova função única de escrita resolveu; se não, corrija.
-> - **Redutor isolado:** `reduzirLiquidacao` deve continuar puro, sem depender de nada do resto do Finance, com teste que cubra todas as ordens possíveis de baixas e estornos. Ele vai servir de base para o redutor único que o Hub vai publicar no pacote do contrato.
-> - **Regras que o contrato já fixou e que o código precisa seguir:** data exibida com mais de uma baixa ativa é a MAIOR; data de pagamento nunca no futuro; "hoje" é o dia de São Paulo; valores em centavos inteiros, sem float em nenhum caminho de escrita; mudar o valor de um lançamento com baixa ativa é recusado.
+> 1. Você está no checkout principal, no `main`, sem mudanças sem commit. Havendo mudanças: PARE e relate, não faça stash, commit nem descarte.
+> 2. `main` contém `origin/main` (estar muito à frente, sem push, é esperado). Atrás ou divergente: PARE e relate.
+> 3. Nenhuma run viva: todo `.nexo/runs/*/status.json` tem `state = done`. Se houver outra, PARE e relate.
+> 4. Worktrees: liste `git worktree list`. Existem worktrees antigas em `.worktrees/` e uma workspace do Conductor (`victoria`). Não mexa na do Conductor. Remova uma worktree de `.worktrees/` só se a run dela está `done`, o branch já está contido no `main` e ela não tem mudanças; senão, deixe e relate.
+> 5. Leia o `report.md` e o `AUDIT.md` da run `20260924T011357Z-feedback-socio-financeiro` e monte uma tabela: cada item da seção "Confirme e corrija" abaixo contra o que a run já entregou (arquivo:linha). Não refaça o que já está feito.
+> 6. Linha de base: rode a suíte completa uma vez antes de mudar qualquer coisa e registre o resultado. Vermelho: PARE e relate antes de seguir.
 >
-> **2. Decisões do dono que afetam o Finance mais tarde (não implementar agora, só não fechar a porta)**
+> **Confirme no código e corrija o que faltar**
 >
-> - Linhas vindas do Sales não poderão ser editadas nem excluídas no Finance, e não haverá "Desvincular". Terão um link "Editar no Sales" que abre a proposta. Continuarão permitidos: registrar e estornar baixas, e os campos que só existem no Finance (categoria, conta bancária, observações). Confira que nada no desenho entregue impede um bloqueio por linha depois.
-> - A etapa de integração vai precisar de: colunas de referência externa únicas por org em `contas_*` e em `lancamento_baixas`; `origem = 'sales'`; um tipo de lote próprio para linhas sincronizadas; um estado "anulado" em `deriveLancamentoStatus`, na view e nos agregados (uma linha que o Sales anula não pode ser apagada nem contar como aberta).
-> - Se algo do que foi entregue dificultar qualquer um desses itens, registre no documento de resposta e avise o dono.
+> - **Baixa em dobro:** um duplo clique ou duas abas não podem criar duas baixas. Com baixa sempre integral, uma linha já paga recusa nova baixa (409), checado com a linha travada (`SELECT ... FOR UPDATE`), não só na UI.
+> - **Pago acima do original:** duas baixas ativas vão poder existir no futuro (uma registrada em cada app ao mesmo tempo). O redutor e todo agregado que lê `valor_pago` / `valor_recebido` (view unificada, Realizado, Fluxo de Caixa, Tático) precisam se comportar bem com pago maior que o original, com teste.
+> - **Quem pode dar baixa:** as rotas de baixa e estorno exigem `requireOrgEditor`; proponha ao dono estender às de lançamento manual (registre no `AUDIT.md`).
+> - **Edição que troca o ano do vencimento:** a linha precisa ir para o lote do ano novo (`import_batch_id`), não ficar no lote do ano antigo.
+> - **Redutor isolado:** `reduzirLiquidacao` puro, sem depender do resto do Finance, com teste que cubra todas as ordens possíveis de baixas e estornos. O Hub publicou `reduceSettlement` no pacote `@fxl-business/fxl-contracts` (ainda não no npm) com as mesmas regras; aponte qualquer diferença entre os dois (código do pacote em `/Users/cauetpinciara/Documents/fxl/projects/16--INTERNAL--fxl-hub/packages/fxl-contracts`).
+> - **Regras fixadas pelo contrato:** data exibida com mais de uma baixa ativa é a MAIOR; data de pagamento nunca no futuro; "hoje" é o dia de São Paulo; centavos inteiros sem float em nenhum caminho de escrita; mudar o valor de um lançamento com baixa ativa é recusado.
 >
-> Entregue um relatório curto: o que já estava certo (com arquivo:linha), o que foi corrigido e o que ficou como pendência.
+> **Não implementar agora, só não fechar a porta:** linhas vindas do Sales não poderão ser editadas nem excluídas no Finance, sem "Desvincular", com link "Editar no Sales" (continuam permitidos: baixa, estorno, categoria, conta bancária, observações); referência externa única por org em `contas_*` e `lancamento_baixas`; `origem = 'sales'`; lote próprio para linhas sincronizadas; estado "anulado" no status, na view e nos agregados. Se algo entregue dificultar esses itens, registre e avise o dono.
+>
+> Entregue um relatório curto: o que já estava certo (arquivo:linha), o que foi corrigido e o que ficou pendente.
