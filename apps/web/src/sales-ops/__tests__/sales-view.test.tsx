@@ -4,8 +4,8 @@ import * as React from 'react';
 import type { HTMLAttributes, ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { SalesView } from '../SalesOpsApp';
 import type { SalesOpsBootstrap, SalesOpsSale } from '../types';
+import { ControlledSalesView } from './controlled-sales-view';
 
 vi.mock('@/components/ui/dialog', () => ({
   Dialog: ({ children }: HTMLAttributes<HTMLDivElement>) => <div>{children}</div>,
@@ -201,11 +201,15 @@ function bootstrap(overrides: Partial<SalesOpsBootstrap> = {}): SalesOpsBootstra
 let container: HTMLDivElement;
 let root: Root;
 
-async function renderSalesView(props: {
+type RenderSalesViewProps = {
   bootstrapOverride?: SalesOpsBootstrap;
   sales?: SalesOpsSale[];
   canManage?: boolean;
-}) {
+  /** The proposta the URL names. `SalesOpsApp` owns it; `ControlledSalesView` stands in. */
+  detailSaleId?: string | null;
+};
+
+async function renderSalesView(props: RenderSalesViewProps) {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean })
     .IS_REACT_ACT_ENVIRONMENT = true;
   container = document.createElement('div');
@@ -214,9 +218,10 @@ async function renderSalesView(props: {
   const bootstrapValue = props.bootstrapOverride ?? bootstrap();
   await act(async () => {
     root.render(
-      <SalesView
+      <ControlledSalesView
         bootstrap={bootstrapValue}
         canManage={props.canManage ?? true}
+        initialDetailSaleId={props.detailSaleId ?? null}
         onCancelContract={vi.fn()}
         onEdit={vi.fn()}
         onTransition={vi.fn()}
@@ -301,5 +306,23 @@ describe('SalesView read-only mode', () => {
     await renderSalesView({ canManage: false });
     expect(container.querySelector('button[aria-label^="Ações da proposta"]')).toBeNull();
     expect(container.textContent).not.toContain('Marcar como ganha');
+  });
+});
+
+describe('SalesView open detail from the URL', () => {
+  it('renders the open proposta even when the filters hide every row', async () => {
+    await renderSalesView({ sales: [], detailSaleId: wonSale.id });
+    expect(container.textContent).toContain('Nenhuma proposta encontrada');
+    expect(container.textContent).toContain('Plano de pagamento');
+  });
+
+  it('renders the not-found state over an empty organization', async () => {
+    await renderSalesView({
+      bootstrapOverride: bootstrap({ sales: [] }),
+      detailSaleId: 'no-such-sale',
+    });
+    expect(container.textContent).toContain('Nenhuma proposta registrada');
+    expect(container.textContent).toContain('Proposta não encontrada');
+    expect(container.textContent).not.toContain('no-such-sale');
   });
 });

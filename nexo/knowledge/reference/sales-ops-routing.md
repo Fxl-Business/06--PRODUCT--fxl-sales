@@ -25,3 +25,15 @@ Moved verbatim from `CLAUDE.md` on 2026-09-22 so the standing context stays shor
   `keeps the unauthorized screen for a role the app does not recognize, and does not ping-pong` is the sole oracle separating the two conditions, and neither lint nor type-check catches the difference.
   `NoRoleGuard` lives beside `RoleGuard`, which is what sends operators INTO `/no-role`, and is mounted INSIDE `<Protected>`: outside it would judge an unresolved profile on a cold entry.
   It is inert during a live session loss, because the profile is then loaded with `roles: []`, so the overlay never has the URL pulled out from under it.
+- The proposta detail has a URL, added for the Finance "Editar no Sales" link (audit 11.4 `deepLinkPath`, contract C8 of feature `20260924T013019Z-finance-prereqs`).
+  Before it, `/operacional/vendas/<id>` matched only the `*` catch-all, which sits OUTSIDE `Protected` and rewrote the URL to `/` before a cold entry could capture it, so the id was lost on the way to login.
+  The fix is the route, not the auth code: the Sales Ops route became `/:workspace/:view/:saleId?` (`SALES_OPS_ROUTE_PATTERN`), one route object, so the list and the detail never remount `SalesOpsApp`.
+  `sanitizeReturnTo` already keeps any same-origin path, so the id survives the Hub round trip untouched; `lands on the proposta deep link after a cold entry with no session and a login` in `session-journey.test.tsx` is the oracle, and its harness mirrors the `*` route on purpose.
+  A capture that yields `null` (such as `/`) writes nothing and leaves an older returnTo in the slot, so a deep link that fell to the catch-all would also have been hijacked by a stale value from an abandoned login; a captured deep link overwrites it. `is not hijacked by a stale returnTo left by an abandoned login` pins that.
+  The segment is honoured on the `vendas` view of BOTH workspaces because `SalesView` is one component in both; restricting it to `operacional` would leave two mechanisms for one dialog. Only `/operacional/vendas/<id>` is ever published.
+  A finder-only or seller-only operator following the Finance link lands on their role default; it is deliberately not re-mapped to `meus-dados/vendas/<id>`, because the link's audience is an admin.
+  Closing pops history only when the entry carries the in-app marker; a cold-entered detail is replaced by the list, so Back never reopens a closed detail. The marker decides history mechanics only, never what is on screen.
+  The not-found dialog can only mount after the bootstrap loads, because `SalesView` mounts only then, so a slow load never flashes `Proposta não encontrada`.
+  The lead board's converted-card link opens `/operacional/vendas/<saleId>` itself, still writing nothing.
+  Harnesses that render `SalesView` alone use `ControlledSalesView` (`apps/web/src/sales-ops/__tests__/controlled-sales-view.tsx`) as their stand-in for the URL.
+  Oracles: `navigation.test.ts` (`keeps a proposta id only on the vendas view`, `drops a proposta id for an operator who cannot see the workspace`), `sale-deep-link-route.test.ts`, `sale-deep-link.test.tsx`.

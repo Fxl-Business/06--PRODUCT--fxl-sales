@@ -20,6 +20,8 @@ import {
 type StorageLike = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 
 const ORIGIN = 'https://app.example';
+/** A proposta deep link (`/operacional/vendas/:saleId`), the Finance `deepLinkPath`. */
+const SALE_DEEP_LINK = '/operacional/vendas/5b0e7c1e-3f4a-4c2d-9e8b-1a2b3c4d5e6f';
 
 function fakeStorage(initial: Record<string, string> = {}) {
   const map = new Map<string, string>(Object.entries(initial));
@@ -135,6 +137,10 @@ describe('sanitizeReturnTo', () => {
     expect(sanitizeReturnTo(value, ORIGIN)).toBeNull();
   });
 
+  it('keeps a proposta deep link with its id segment', () => {
+    expect(sanitizeReturnTo(SALE_DEEP_LINK, ORIGIN)).toBe(SALE_DEEP_LINK);
+  });
+
   it('rejects null and undefined', () => {
     expect(sanitizeReturnTo(null, ORIGIN)).toBeNull();
     expect(sanitizeReturnTo(undefined, ORIGIN)).toBeNull();
@@ -196,6 +202,27 @@ describe('captureReturnTo / consumeReturnTo', () => {
 
     expect(consumeReturnTo(ORIGIN, storage)).toBe('/cadastros/produtos?f=1');
     expect(consumeReturnTo(ORIGIN, storage)).toBeNull();
+  });
+
+  it('round-trips a proposta deep link with its id segment', () => {
+    const { storage } = fakeStorage();
+    captureReturnTo(SALE_DEEP_LINK, ORIGIN, storage);
+
+    expect(consumeReturnTo(ORIGIN, storage)).toBe(SALE_DEEP_LINK);
+    expect(consumeReturnTo(ORIGIN, storage)).toBeNull();
+  });
+
+  /**
+   * A capture that yields a path OVERWRITES whatever an abandoned login left in the slot,
+   * so a stale value can never win over a proposta deep link. (A capture that yields
+   * `null`, such as `/`, writes nothing and leaves the slot alone; that is why the deep
+   * link must reach `Protected` intact instead of falling to the `*` redirect to `/`.)
+   */
+  it('overwrites a stale slot when a proposta deep link is captured', () => {
+    const { storage } = fakeStorage({ [RETURN_TO_KEY]: '/cadastros/produtos' });
+    captureReturnTo(SALE_DEEP_LINK, ORIGIN, storage);
+
+    expect(consumeReturnTo(ORIGIN, storage)).toBe(SALE_DEEP_LINK);
   });
 
   it('destroys a hostile stored value on the read that rejects it', () => {
