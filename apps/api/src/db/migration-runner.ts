@@ -34,6 +34,13 @@ export type RunDatabaseMigrationsOptions = {
     advisoryLockRetryMs?: number;
     backfillMaxEmptyBatches?: number;
     backfillRetryMs?: number;
+    lockContentionMaxAttempts?: number;
+    lockContentionRetryMs?: number;
+    onLockContentionRetry?: (event: {
+      attempt: number;
+      code: string;
+      tag: string;
+    }) => void | Promise<void>;
     onAdvisoryLockPoll?: (event: {
       attempt: number;
       backendPid: number;
@@ -84,6 +91,9 @@ const defaultAdvisoryLockMaxAttempts = 3000;
 const defaultAdvisoryLockRetryMs = 100;
 const defaultBackfillMaxEmptyBatches = 50;
 const defaultBackfillRetryMs = 100;
+const lockContentionCodes = new Set(['55P03', '40P01']);
+const defaultLockContentionMaxAttempts = 50;
+const defaultLockContentionRetryMs = 200;
 
 const remainingCandidateSql = `
 SELECT count(*)::integer AS count
@@ -294,6 +304,63 @@ async function runCheckedTransaction<T>(
   return value;
 }
 
+function sqlStateOf(error: unknown): string | undefined {
+  if (typeof error !== 'object' || error === null || !('code' in error)) return undefined;
+  const code = (error as { code: unknown }).code;
+  return typeof code === 'string' ? code : undefined;
+}
+
+// A migration must never wait for a table lock as long as the server waits
+// before running its deadlock check. With lock_timeout below deadlock_timeout
+// the migration abandons a lock cycle (55P03) before the deadlock detector
+// fires, so it is always the migration that yields and never a live
+// transaction that is picked as the deadlock victim.
+async function migrationLockTimeoutMs(reserved: ReservedSql): Promise<number> {
+  const [row] = await reserved<Array<{ ms: number }>>`
+    SELECT setting::integer AS ms FROM pg_settings WHERE name = 'deadlock_timeout'
+  `;
+  if (!row || !Number.isInteger(row.ms) || row.ms < 2) {
+    throw new Error('deadlock_timeout could not be read');
+  }
+  return Math.floor(row.ms / 2);
+}
+
+// Runs one fully rolled-back unit of migration work again when it lost a lock
+// race (55P03 lock_not_available or 40P01 deadlock_detected). Any other error,
+// including an AggregateError from a failed ROLLBACK, is rethrown at once.
+async function retryOnLockContention<T>(
+  options: RunDatabaseMigrationsOptions,
+  tag: string,
+  attemptWork: () => Promise<T>,
+): Promise<T> {
+  const maxAttempts =
+    options.testControls?.lockContentionMaxAttempts ?? defaultLockContentionMaxAttempts;
+  const retryMs = options.testControls?.lockContentionRetryMs ?? defaultLockContentionRetryMs;
+  if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
+    throw new Error('lock contention max attempts must be a positive integer');
+  }
+  if (!Number.isInteger(retryMs) || retryMs < 0) {
+    throw new Error('lock contention retry interval must be a non-negative integer');
+  }
+
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await attemptWork();
+    } catch (error) {
+      const code = sqlStateOf(error);
+      if (code === undefined || !lockContentionCodes.has(code)) throw error;
+      await options.testControls?.onLockContentionRetry?.({ attempt, code, tag });
+      if (attempt >= maxAttempts) {
+        throw new Error(
+          `migration ${tag} could not acquire its locks after ${maxAttempts} attempts`,
+          { cause: error },
+        );
+      }
+      if (retryMs > 0) await new Promise((resolveDelay) => setTimeout(resolveDelay, retryMs));
+    }
+  }
+}
+
 async function runAutocommitPhase(
   reserved: ReservedSql,
   backendPid: number,
@@ -308,9 +375,10 @@ async function runLockBoundedPhase(
   reserved: ReservedSql,
   backendPid: number,
   statement: string,
+  lockTimeoutMs: number,
 ): Promise<void> {
   await assertBackendPid(reserved, backendPid);
-  await reserved.unsafe("SET lock_timeout = '5s'");
+  await reserved.unsafe(`SET lock_timeout = '${lockTimeoutMs}ms'`);
   try {
     await reserved.unsafe(statement);
   } finally {
@@ -405,6 +473,7 @@ async function runPhasedMigration(
   backendPid: number,
   migration: LoadedMigration,
   options: RunDatabaseMigrationsOptions,
+  lockTimeoutMs: number,
 ): Promise<void> {
   const phases = migration.phases;
   if (!phases) throw new Error(`${migration.tag} is missing its phased SQL contract`);
@@ -430,7 +499,9 @@ async function runPhasedMigration(
     throw new Error('backfill retry interval must be a non-negative integer');
   }
 
-  await runLockBoundedPhase(reserved, backendPid, phaseStatement('column'));
+  await retryOnLockContention(options, migration.tag, () =>
+    runLockBoundedPhase(reserved, backendPid, phaseStatement('column'), lockTimeoutMs),
+  );
   await emitPhase(options, event('column'));
 
   await ensureConcurrentIndex(
@@ -451,7 +522,9 @@ async function runPhasedMigration(
 
   await assertBackendPid(reserved, backendPid);
   if (!(await constraintExists(reserved))) {
-    await runLockBoundedPhase(reserved, backendPid, phaseStatement('constraint'));
+    await retryOnLockContention(options, migration.tag, () =>
+      runLockBoundedPhase(reserved, backendPid, phaseStatement('constraint'), lockTimeoutMs),
+    );
   }
   await assertBackendPid(reserved, backendPid);
   await emitPhase(options, event('post-constraint'));
@@ -548,6 +621,27 @@ async function appliedMigrationTimestamp(
   return latest;
 }
 
+async function runOrdinaryMigration(
+  reserved: ReservedSql,
+  backendPid: number,
+  migration: LoadedMigration,
+  options: RunDatabaseMigrationsOptions,
+  lockTimeoutMs: number,
+): Promise<void> {
+  await retryOnLockContention(options, migration.tag, () =>
+    runCheckedTransaction(reserved, backendPid, async (transaction) => {
+      await transaction.unsafe(`SET LOCAL lock_timeout = '${lockTimeoutMs}ms'`);
+      for (const statement of migration.statements) {
+        if (statement.trim().length > 0) await transaction.unsafe(statement);
+      }
+      await transaction`
+        INSERT INTO drizzle.__drizzle_migrations (hash, created_at)
+        VALUES (${migration.hash}, ${migration.when})
+      `;
+    }),
+  );
+}
+
 export async function runDatabaseMigrations(
   options: RunDatabaseMigrationsOptions,
 ): Promise<RunDatabaseMigrationsResult> {
@@ -585,23 +679,16 @@ export async function runDatabaseMigrations(
       )
     `);
     const latestApplied = await appliedMigrationTimestamp(reserved, migrations);
+    const lockTimeoutMs = await migrationLockTimeoutMs(reserved);
 
     for (const migration of migrations.slice(0, throughIndex + 1)) {
       if (latestApplied !== undefined && migration.when <= latestApplied) continue;
       if (migration.tag === phasedTag) {
-        await runPhasedMigration(reserved, backendPid, migration, options);
+        await runPhasedMigration(reserved, backendPid, migration, options, lockTimeoutMs);
         continue;
       }
       if (migration.phases) throw new Error(`unsupported phased migration ${migration.tag}`);
-      await runCheckedTransaction(reserved, backendPid, async (transaction) => {
-        for (const statement of migration.statements) {
-          if (statement.trim().length > 0) await transaction.unsafe(statement);
-        }
-        await transaction`
-          INSERT INTO drizzle.__drizzle_migrations (hash, created_at)
-          VALUES (${migration.hash}, ${migration.when})
-        `;
-      });
+      await runOrdinaryMigration(reserved, backendPid, migration, options, lockTimeoutMs);
       await emitPhase(options, {
         backendPid,
         phase: 'ordinary-commit',
