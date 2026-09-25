@@ -227,6 +227,8 @@ Settlement UI:
 - `Estornar` reverses the latest active baixa read from `GET /sales/:id/settlements`; the bootstrap carries no settlement id.
 - History renders `actor_name` (fallback `Autor não identificado`) and never `actor_user_id` or any row id.
 - A `409 sale_has_active_settlements` from a transition or `cancel-contract` renders `MutationErrorBanner` with one line per blocking row (`lockedRowLines`, from `ApiError.rows`); there is no second page-level error component.
+- Every ledger table sorts through `compareReceivables` / `comparePayables` in `apps/web/src/sales-ops/ledger-order.ts`; never render the bootstrap order verbatim, because a settlement UPDATE moves the row to the end of the unordered read.
+- A payable is described with its linked parcela (`Comissão do vendedor · Ana · Parcela 1/3`) or, without one, its due day, so two rows for the same beneficiary never read the same.
 
 Payment plan builder (step 2):
 - Declarative: entrada, restante and recorrência regenerate the table; rows stay editable. Pure generators live in `apps/web/src/sales-ops/calculations.ts`.
