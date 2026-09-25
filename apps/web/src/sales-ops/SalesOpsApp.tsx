@@ -129,6 +129,7 @@ import { computeSaleFinancials } from '@fxl-sales/shared-utils/sale-financials';
   above: the root re-exports the Node-only hmac module and will not bundle.
 */
 import { SPLIT_BP_TOTAL } from '@fxl-sales/shared-utils/professional-split';
+import { todayInSaoPaulo } from '@fxl-sales/shared-utils/sao-paulo-day';
 import { CadastroHistorySection } from './CadastroHistoryPanel';
 import { ForbiddenPanel } from './ForbiddenPanel';
 import { MissingEntitlementPanel } from './MissingEntitlementPanel';
@@ -180,6 +181,7 @@ import {
   resolveProfessionalCostCents,
   resolveSaleCommissionDefaults,
   restanteCountFor,
+  sumPaidInSaoPauloMonth,
   type PaymentPlanEntradaMode,
   type PaymentPlanShape,
   type ProfessionalCostUnit,
@@ -1320,7 +1322,12 @@ export function SalesOpsApp() {
         : { ...persistedBootstrap, funcoes: bootstrap.funcoes },
     [bootstrap.funcoes, persistedBootstrap],
   );
-  const dashboard = useMemo(() => buildDashboardModel(persistedBootstrap), [persistedBootstrap]);
+  // The São Paulo day, read once per render: the `no mês` cards follow its month.
+  const today = todayInSaoPaulo();
+  const dashboard = useMemo(
+    () => buildDashboardModel(persistedBootstrap, today),
+    [persistedBootstrap, today],
+  );
   /**
    * The vendedor options for the lead board and the lead dialog. `hasFuncao` and
    * `FUNCAO_SLUG_VENDEDOR` now live in `calculations.ts` and are IMPORTED here;
@@ -2400,8 +2407,9 @@ function DashboardView({
   dashboard: ReturnType<typeof buildDashboardModel>;
   go: (view: SalesOpsView) => void;
 }) {
+  const wonThisMonthCount = dashboard.kpis.wonThisMonthCount;
   const wonSalesLabel =
-    dashboard.kpis.wonSalesCount === 1 ? '1 proposta ganha' : `${dashboard.kpis.wonSalesCount} propostas ganhas`;
+    wonThisMonthCount === 1 ? '1 proposta ganha' : `${wonThisMonthCount} propostas ganhas`;
   return (
     <div className="flex flex-col gap-[14px]">
       <div className="grid gap-[14px] xl:grid-cols-4 md:grid-cols-2">
@@ -3262,9 +3270,8 @@ export function CommissionsView({
   const totalOpen = bootstrap.payables
     .filter((payable) => payable.status === 'open')
     .reduce((sum, payable) => sum + payable.amountBrl, 0);
-  const totalPaid = bootstrap.payables
-    .filter((payable) => payable.status === 'paid')
-    .reduce((sum, payable) => sum + payable.amountBrl, 0);
+  // `no mês` is the São Paulo month of today, by `paidOn`, never by `dueDate`.
+  const totalPaid = sumPaidInSaoPauloMonth(bootstrap.payables, todayInSaoPaulo());
 
   return (
     <div className="flex flex-col gap-4">

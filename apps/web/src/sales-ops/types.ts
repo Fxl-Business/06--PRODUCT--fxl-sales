@@ -334,9 +334,13 @@ export type SalesOpsBootstrap = {
 
 export type DashboardModel = {
   kpis: {
+    /** Won in the Sao Paulo month of `today` (by the Sao Paulo day of `wonAt`). */
     wonRevenueBrl: number;
+    /** How many propostas `wonRevenueBrl` sums. */
+    wonThisMonthCount: number;
     activeMrrBrl: number;
     payableBrl: number;
+    /** Every proposta whose status is `won`, whenever it was won. */
     wonSalesCount: number;
   };
   revenueByProduct: Array<{ name: string; amountBrl: number; widthPct: number }>;

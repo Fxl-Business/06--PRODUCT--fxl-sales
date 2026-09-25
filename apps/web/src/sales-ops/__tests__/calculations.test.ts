@@ -14,10 +14,12 @@ import {
   resolveProfessionalCostCents,
   resolveSaleCommissionDefaults,
   splitInstallmentsEqually,
+  sumPaidInSaoPauloMonth,
   type SaleCommissionDefaultsProduct,
 } from '../calculations';
 import type {
   SalesOpsBootstrap,
+  SalesOpsPayable,
   SalesOpsProduct,
   SalesOpsProductFuncaoCost,
   SalesOpsSale,
@@ -104,7 +106,7 @@ describe('sales operations web calculations', () => {
       settings: null,
     };
 
-    const model = buildDashboardModel(bootstrap);
+    const model = buildDashboardModel(bootstrap, '2026-07-15');
 
     expect(model.kpis.wonRevenueBrl).toBe(0);
     expect(model.revenueByProduct).toEqual([]);
@@ -115,7 +117,13 @@ describe('sales operations web calculations', () => {
   it('aggregates dashboard KPIs from won propostas only', () => {
     const bootstrap: SalesOpsBootstrap = {
       sales: [
-        saleFixture({ id: 'won-1', status: 'won', totalBrl: 100000, sellerNameSnapshot: 'Ana' }),
+        saleFixture({
+          id: 'won-1',
+          status: 'won',
+          totalBrl: 100000,
+          sellerNameSnapshot: 'Ana',
+          wonAt: '2026-07-11T12:00:00.000Z',
+        }),
         saleFixture({ id: 'open-1', status: 'open', totalBrl: 50000 }),
         saleFixture({ id: 'draft-1', status: 'draft', totalBrl: 20000 }),
         saleFixture({ id: 'lost-1', status: 'lost', totalBrl: 30000 }),
@@ -139,7 +147,7 @@ describe('sales operations web calculations', () => {
       settings: null,
     };
 
-    const model = buildDashboardModel(bootstrap);
+    const model = buildDashboardModel(bootstrap, '2026-07-15');
 
     expect(model.kpis.wonRevenueBrl).toBe(100000);
     expect(model.kpis.wonSalesCount).toBe(1);
@@ -680,5 +688,103 @@ describe('nextProductCodeSuffix', () => {
 
   it('bounds the domain at 99, matching the API regex and the input maxLength', () => {
     expect(MAX_PRODUCT_CODE_SUFFIX).toBe(99);
+  });
+});
+
+/**
+ * "No mês" is the America/Sao_Paulo civil month of `today`: payments by `paidOn`
+ * (the reducer's greatest active baixa day), won revenue by the Sao Paulo day of
+ * `wonAt`. `dueDate` never decides it, and neither helper reads the clock.
+ */
+describe('São Paulo month totals', () => {
+  const today = '2026-09-25';
+
+  function payable(overrides: Partial<SalesOpsPayable>): SalesOpsPayable {
+    return {
+      id: 'pay',
+      saleId: 'sale-1',
+      beneficiaryName: 'Ana',
+      kind: 'seller_commission',
+      dueDate: '2026-09-10T00:00:00.000Z',
+      amountBrl: 1000,
+      status: 'paid',
+      paidOn: '2026-09-10',
+      ...overrides,
+    };
+  }
+
+  function emptyBootstrap(sales: SalesOpsSale[]): SalesOpsBootstrap {
+    return {
+      sales,
+      products: [],
+      clients: [],
+      areas: [],
+      funcoes: [],
+      people: [],
+      payables: [],
+      saleItems: [],
+      receivables: [],
+      productFuncaoCosts: [],
+      saleProfessionals: [],
+      settings: null,
+    };
+  }
+
+  it('counts a paid payable only when paidOn falls in the São Paulo month of today', () => {
+    expect(sumPaidInSaoPauloMonth([payable({ paidOn: '2026-09-01', amountBrl: 100 })], today)).toBe(
+      100,
+    );
+    expect(sumPaidInSaoPauloMonth([payable({ paidOn: '2026-09-30', amountBrl: 100 })], today)).toBe(
+      100,
+    );
+    expect(sumPaidInSaoPauloMonth([payable({ paidOn: '2026-08-31', amountBrl: 100 })], today)).toBe(0);
+    expect(sumPaidInSaoPauloMonth([payable({ paidOn: '2025-09-25', amountBrl: 100 })], today)).toBe(0);
+    expect(sumPaidInSaoPauloMonth([payable({ paidOn: null, amountBrl: 100 })], today)).toBe(0);
+    expect(sumPaidInSaoPauloMonth([payable({ paidOn: undefined, amountBrl: 100 })], today)).toBe(0);
+  });
+
+  it('never reads dueDate: due in September but paid in August counts zero, and the reverse counts', () => {
+    const dueSeptemberPaidAugust = payable({
+      dueDate: '2026-09-05T00:00:00.000Z',
+      paidOn: '2026-08-20',
+      amountBrl: 700,
+    });
+    const dueAugustPaidSeptember = payable({
+      dueDate: '2026-08-05T00:00:00.000Z',
+      paidOn: '2026-09-02',
+      amountBrl: 300,
+    });
+    expect(sumPaidInSaoPauloMonth([dueSeptemberPaidAugust, dueAugustPaidSeptember], today)).toBe(300);
+  });
+
+  it('counts only paid rows, whatever an open or void row carries', () => {
+    const rows = [
+      payable({ amountBrl: 1000 }),
+      payable({ amountBrl: 2000, status: 'open' }),
+      payable({ amountBrl: 4000, status: 'void' }),
+    ];
+    expect(sumPaidInSaoPauloMonth(rows, today)).toBe(1000);
+  });
+
+  it('counts won revenue by the São Paulo day of wonAt, not its UTC day', () => {
+    const model = buildDashboardModel(
+      emptyBootstrap([
+        // 2026-08-31 23:00 in Sao Paulo: August, even though the UTC day is September 1.
+        saleFixture({ id: 'late-aug', status: 'won', totalBrl: 1, wonAt: '2026-09-01T02:00:00Z' }),
+        // 2026-09-01 00:00 in Sao Paulo.
+        saleFixture({ id: 'sep-1', status: 'won', totalBrl: 20, wonAt: '2026-09-01T03:00:00Z' }),
+        // 2026-09-30 23:30 in Sao Paulo, already October in UTC.
+        saleFixture({ id: 'sep-30', status: 'won', totalBrl: 300, wonAt: '2026-10-01T02:30:00Z' }),
+        saleFixture({ id: 'no-won-at', status: 'won', totalBrl: 4000, wonAt: null }),
+        saleFixture({ id: 'last-year', status: 'won', totalBrl: 50000, wonAt: '2025-09-10T12:00:00Z' }),
+      ]),
+      today,
+    );
+
+    expect(model.kpis.wonRevenueBrl).toBe(320);
+    expect(model.kpis.wonThisMonthCount).toBe(2);
+    // Figures without "no mês" in their label keep their all-time meaning.
+    expect(model.kpis.wonSalesCount).toBe(5);
+    expect(model.topSellers[0]?.totalBrl).toBe(54321);
   });
 });
