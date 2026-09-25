@@ -34,6 +34,11 @@ export const queryKeys = {
       Configurações history without that mutation knowing the panel exists.
     */
     cadastroHistory: (limit: number) => ['sales-ops', 'cadastro-history', limit] as const,
+    /*
+      Nested under `sales-ops` for the same reason: every sales-ops write, and the
+      settlement writes in particular, refresh a sale's settlement history by prefix.
+    */
+    saleSettlements: (saleId: string) => ['sales-ops', 'sale-settlements', saleId] as const,
   },
   adminApps: {
     all: ['admin', 'apps'] as const,

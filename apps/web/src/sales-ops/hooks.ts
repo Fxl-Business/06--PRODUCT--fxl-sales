@@ -5,6 +5,9 @@ import { queryKeys } from '@/lib/query-keys';
 import { requireToken } from '@/lib/require-token';
 import {
   salesOpsApi,
+  type RecordSettlementPayload,
+  type ReverseSettlementPayload,
+  type SaleSettlementsResponse,
   type SaveAreaPayload,
   type SaveClientPayload,
   type SaveFuncaoPayload,
@@ -36,6 +39,7 @@ import type {
   SalesOpsClient,
   SalesOpsFuncao,
   SalesOpsPerson,
+  SalesOpsSettlement,
 } from './types';
 
 /**
@@ -268,7 +272,8 @@ export function useTransitionSalesOpsSale() {
 export function useCancelSalesOpsContract() {
   const { getToken } = useAccessToken();
   // No optimistic write: mid-contract cancellation voids open ledger rows
-  // server-side and leaves paid rows untouched.
+  // server-side, and it is refused with 409 sale_has_active_settlements when a
+  // row it would void has an active baixa.
   return useAppMutation({
     mutationFn: async (saleId: string) =>
       salesOpsApi.cancelContract(saleId, await requireToken(getToken)),
@@ -284,6 +289,43 @@ export function useSaveSalesOpsSettings() {
     mutationFn: async (payload: SaveSettingsPayload) =>
       salesOpsApi.saveSettings(payload, await requireToken(getToken)),
     invalidates: [queryKeys.salesOps.all],
+  });
+}
+
+export function useRecordSalesOpsSettlement() {
+  const { getToken } = useAccessToken();
+  // No optimistic write: a row's `status` and `paidOn` are the server reducer's
+  // output. `salesOps.all` prefix-covers the bootstrap and every sale history.
+  return useAppMutation({
+    mutationFn: async (payload: RecordSettlementPayload) =>
+      salesOpsApi.recordSettlement(payload, await requireToken(getToken)),
+    invalidates: [queryKeys.salesOps.all],
+  });
+}
+
+export function useReverseSalesOpsSettlement() {
+  const { getToken } = useAccessToken();
+  // No optimistic write, for the same reason as `useRecordSalesOpsSettlement`.
+  return useAppMutation({
+    mutationFn: async (payload: ReverseSettlementPayload) =>
+      salesOpsApi.reverseSettlement(payload, await requireToken(getToken)),
+    invalidates: [queryKeys.salesOps.all],
+  });
+}
+
+/** Hoisted for a stable `select` identity (see `selectSalesOpsBootstrap`). */
+function selectSettlements(data: SaleSettlementsResponse): SalesOpsSettlement[] {
+  return Array.isArray(data.settlements) ? data.settlements : [];
+}
+
+/** The baixas and estornos of one proposta, newest first. Admin-only in the UI. */
+export function useSaleSettlements(saleId: string, enabled: boolean) {
+  const { getToken } = useAccessToken();
+  return useQuery({
+    queryKey: queryKeys.salesOps.saleSettlements(saleId),
+    queryFn: async () => salesOpsApi.saleSettlements(saleId, await requireToken(getToken)),
+    enabled,
+    select: selectSettlements,
   });
 }
 

@@ -219,6 +219,17 @@ Professional split:
 - `professional_cost` payables persist `sale_professional_id`; idempotency matches that id plus receivable id, never display name. Migrations use the shared phased runner, not the stock Drizzle one.
 - `Detalhe de pagamento` is an in-flow disclosure (no `useInlineLayer`) in `ProfessionalSplitPanel.tsx`. Parts are entered as percentages only. Step 3 gates on `professionalSplitsValid`; adding or removing a part never renormalizes.
 
+Settlement UI:
+- Baixa, estorno and history UI live in `apps/web/src/sales-ops/settlements/`; `SalesOpsApp.tsx` only mounts `PaidOnNote`, `SettlementRowActions` and `SettlementHistorySection`, and feeds `lockedRowLines` to the existing `MutationErrorBanner`.
+- Settlement actions render only for `admin` in the `operacional` workspace; `meus-dados` stays read-only for everyone and shows only `Pago em`.
+- `Marcar como pago` defaults to `todayInSaoPaulo()`, sets it as `max`, refuses a future day before the request, and never sends an amount.
+- `paidOn` is a civil day formatted by string (`formatCivilDay`), never through `new Date`.
+- `Estornar` reverses the latest active baixa read from `GET /sales/:id/settlements`; the bootstrap carries no settlement id.
+- History renders `actor_name` (fallback `Autor não identificado`) and never `actor_user_id` or any row id.
+- A `409 sale_has_active_settlements` from a transition or `cancel-contract` renders `MutationErrorBanner` with one line per blocking row (`lockedRowLines`, from `ApiError.rows`); there is no second page-level error component.
+- Every ledger table sorts through `compareReceivables` / `comparePayables` in `apps/web/src/sales-ops/ledger-order.ts`; never render the bootstrap order verbatim, because a settlement UPDATE moves the row to the end of the unordered read.
+- A payable is described with its linked parcela (`Comissão do vendedor · Ana · Parcela 1/3`) or, without one, its due day, so two rows for the same beneficiary never read the same.
+
 Payment plan builder (step 2):
 - Declarative: entrada, restante and recorrência regenerate the table; rows stay editable. Pure generators live in `apps/web/src/sales-ops/calculations.ts`.
 - `splitInstallmentsEqually` puts the remainder on the LAST row. `addMonthsToIsoDate` clamps to month end and computes from the anchor.

@@ -8,9 +8,12 @@ import { MUTATION_ERROR_COPY, salesOpsMutationErrorMessage } from './mutation-er
  */
 export function MutationErrorBanner({
   error,
+  lines,
   onDismiss,
 }: {
   error: unknown;
+  /** Detail lines under the message (the rows that blocked a write); never ids. */
+  lines?: readonly string[];
   onDismiss: () => void;
 }) {
   if (error === null || error === undefined) return null;
@@ -20,7 +23,16 @@ export function MutationErrorBanner({
       data-mutation-error
       role="alert"
     >
-      <span className="min-w-0 flex-1 leading-[1.4]">{salesOpsMutationErrorMessage(error)}</span>
+      <div className="min-w-0 flex-1 leading-[1.4]">
+        <span>{salesOpsMutationErrorMessage(error)}</span>
+        {lines && lines.length > 0 ? (
+          <ul className="mt-1 list-disc pl-5 font-medium" data-mutation-error-lines>
+            {lines.map((line, index) => (
+              <li key={`${index}-${line}`}>{line}</li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
       <button
         aria-label={MUTATION_ERROR_COPY.dismiss}
         className="flex-none rounded-md p-0.5 text-[#c93d32] hover:bg-[#f8e0dd]"
