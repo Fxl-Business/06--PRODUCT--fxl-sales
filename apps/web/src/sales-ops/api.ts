@@ -115,12 +115,6 @@ export type SaveSettingsPayload = Partial<
   currency?: 'BRL';
 };
 
-/**
- * The TENANT-scoped ledger read. Org-scoped by `c.get('orgId')` inside
- * `salesOpsRouter`. It is deliberately NOT `/api/v1/admin/audit`, which reads
- * through `getAdminDb()` with no org filter and would hand one tenant every other
- * tenant's audit trail. The segment is `history`, not `audit`, for that reason.
- */
 /** A baixa of the whole open amount: the server derives the amount, so none is sent. */
 export type RecordSettlementPayload = {
   targetKind: 'receivable' | 'payable';
@@ -132,6 +126,12 @@ export type ReverseSettlementPayload = { settlementId: string; reason?: string }
 
 export type SaleSettlementsResponse = { settlements: SalesOpsSettlement[] };
 
+/**
+ * The TENANT-scoped ledger read. Org-scoped by `c.get('orgId')` inside
+ * `salesOpsRouter`. It is deliberately NOT `/api/v1/admin/audit`, which reads
+ * through `getAdminDb()` with no org filter and would hand one tenant every other
+ * tenant's audit trail. The segment is `history`, not `audit`, for that reason.
+ */
 export const SALES_OPS_HISTORY_PATH = '/api/v1/sales-ops/history';
 
 export const salesOpsApi = {
