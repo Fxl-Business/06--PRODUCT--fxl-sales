@@ -295,6 +295,23 @@ Full reference: `nexo/knowledge/reference/kanban-de-leads.md`.
 - Routes: `operacional/leads` (team), `meus-dados/leads` (seller), `cadastros/etapas`. Nav entries are appended, never prepended, because the first entry is the landing route.
 - Lead screens live in `apps/web/src/sales-ops/leads/`, never inside `SalesOpsApp.tsx`, mounted through `LeadStagesContainer` / `LeadsBoardContainer`, and use `mutateAsync`.
 
+## Integração Sales-Finance (plano de controle)
+
+Full reference: `nexo/knowledge/reference/integracao-sales-finance.md`.
+
+- The Hub is the CONTROL PLANE and Sales a DATA PLANE: the Hub stores only event-type/Contract/Activation metadata and never a business payload. Sales writes its own outbox in the SAME transaction as the business act, exposes a cursor feed, and pulls the peer's feed directly.
+- `@fxl-business/fxl-contracts` is pinned EXACTLY `0.1.0` (no caret/tilde) in `apps/api` and `packages/auth-fake`, in the same commit as the lockfile. It has zero deps and reads no env (it takes a config). The fake authority is ONLY under the `@fxl-business/fxl-contracts/testing` subpath; never import it from the root barrel. A 404 on install is Gate G5: STOP, never vendor.
+- All integration code lives in `apps/api/src/domains/integration/`. All adapters are in `outbox-adapter.ts`: `createIntegrationTxAdapter(tx)` (wraps the in-progress business tx), `createIntegrationPooledAdapter()` (over `getAdminDb()`, carries the Drizzle tx for `drizzleTxOf`/`hasDrizzleTx`).
+- Migration `0025_integration_transport` owns the four transport tables. `integration_outbox.position` is NULL until the single elected publisher assigns it AFTER commit; never assign a position at INSERT. The three org-scoped tables get the two-policy RLS (`tenant_isolation` on `app.current_org_id` + `admin_context` on `app.fxl_admin`); the global counter is admin-only.
+- Event builders in `events.ts` are pure and carry NO origin logic. `recordedBy.app` is `app.fxl-sales` (with the `app.` prefix); `obligationRef` is `fxl-sales:<row uuid>`, never a label/parcela; `source.deepLinkPath` is `/operacional/vendas/<saleId>` (required by the v1 schema). `syncedObligationSubset` runs on the producer and excludes tax.
+- `producer-gate.ts` is the ONE gate: `isProducerFlowLive(orgId)` (default false) + `registerProducerFlowGate(fn)`; the boot registers it once. Every emission is inside the business tx and gated on it, so an unconnected org emits nothing and behaves exactly as today.
+- Anti-echo is ONE choke point, inside `applyBaixaTx`/`applyEstornoTx` in `sales-ops/settlements.ts`, guarded by `policy.mode === 'manual' && isProducerFlowLive(orgId)`; the finance path never emits. `sales_ops_settlements` still has exactly ONE writer (those two functions); the consumer applies remote facts through them with `policy.mode:'finance'`, `origin='finance'`, reusing the remote settlement uuid as the local id.
+- The consumer (`consumer.ts` `createFinanceConsumer`) accepts only `recordedBy.app === 'app.fxl-finance'`, versions N and N-1, and lets the cursor advance past a permanently-rejected event (counted in `rejectedCount`); only a reversal citing a not-yet-landed baixa retries. `deriveSettlementAnomaly` derives `disputed` / "registrada em duplicidade" with no new enum/column.
+- The feed route `GET /integration/v1/feed` (`feed-routes.ts`, mounted at base `/integration/v1`) takes the org ONLY from `organizationForFeedRead`, is S2S via ticket introspection (never `appAuthMiddleware`/`requireHubAuth`), 401s an inactive/absent ticket with no reason, and never logs the ticket.
+- Boot wiring is `start-integration.ts`, reached from `server.ts` via `await import(...)` (keep the static-import discipline). The fake authority is selected ONLY through `getIntegrationAuthority()` in `apps/api/src/auth/select.ts` (the one file `auth-fake-isolation` allows to import `@fxl-sales/auth-fake`). The puller auto-starts only in real mode; no loop starts under `NODE_ENV=test`. The nightly prune uses a fail-closed `null` low-water and never drops below `OUTBOX_MIN_RETENTION_DAYS`.
+- Fake-dev: the fixture org `org_fake_integrado` is `FIXTURE_INTEGRATED_ORGANIZATION_ID` (imported, never hand-typed) with the `integrated-owner` identity; `getFakeIntegrationAuthority()` is a memoized singleton (`environment:'development'`). No new `FXL_HUB_*` var is introduced for this integration.
+- NOT built (non-goals): `fxl-sales.ledger.checkpoint` emission, backfill, the cold-entry deep-link route, and any real cross-process/real-Hub path (the Finance side of the layer does not exist here yet).
+
 ## Environments
 
 | Level | Hub Client | Postgres | Secrets |

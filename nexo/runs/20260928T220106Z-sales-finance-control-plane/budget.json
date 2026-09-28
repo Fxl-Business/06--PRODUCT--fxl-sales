@@ -2,7 +2,7 @@
   "active_accumulated_seconds": 0,
   "active_since": 1790632866,
   "counters": {
-    "agent_dispatches": 11,
+    "agent_dispatches": 29,
     "initial_slices": 9,
     "replans": 1,
     "total_slices": 9,
@@ -21,7 +21,17 @@
   },
   "paused": false,
   "scoped_counters": {
-    "verify_attempts": {}
+    "verify_attempts": {
+      "01-pkg-and-transport-ddl": 1,
+      "02-hub-client-and-config": 1,
+      "03-producer-outbox-and-events": 1,
+      "04-consumer-inbox-puller": 1,
+      "05-feed-route": 1,
+      "06-fake-dev-fixture-authority": 1,
+      "07-wire-producer-emission": 1,
+      "08-wire-boot-and-prune": 1,
+      "09-e2e-fake-mode": 1
+    }
   },
   "version": 1
 }

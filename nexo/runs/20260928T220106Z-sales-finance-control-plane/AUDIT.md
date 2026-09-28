@@ -49,3 +49,14 @@ Autopilot run. This file records decisions taken without the human, drift from t
 - The boot timers (publisher, puller, heartbeat intervals): the test calls `publishPendingPositions` and `pullOnce` directly.
 - The Finance-side "registrada em duplicidade" surface: only Sales' derivation (`deriveSettlementAnomaly`, `reduceSettlement`) is asserted.
 - The feed ticket for the Sales feed uses a self-consumer fixture activation because the fake verifier only accepts tickets its own instance issued.
+
+## Feature-tier checks
+
+- **Mutation testing:** no mutation tool (stryker) is configured in this repo; the feature-tier mutation pass is skipped honestly (`not_applicable`), consistent with the Nexo policy for repos with no mutation tool.
+- **Fake-mode boot smoke (added to guard against a green-suite/dead-product gap):** the BUILT API (`node dist/server.js`) with `SALES_AUTH_FAKE=1` boots cleanly against the local dev DB, loads the fake roster including the new `integrated-owner` fixture identity, runs the integration boot wiring (`startIntegration` via server.ts's await-import) with NO integration error, and reaches the `listening on http://localhost:3006` line. The only error was an environmental `EADDRINUSE` on port 3006 at the final socket bind, because the operator already has their own `make dev-fake` running on that port; that is a port conflict, not a code defect, and the smoke node exited on it leaving no orphan. The operator's own live `dev-fake` (tsx-watch) has been hot-reloading the merged slices throughout and remained up, independently corroborating the integration boots in fake mode.
+
+## Final verification (all green on master)
+
+- Per-slice: each slice's named oracle + lint-on-diff by a separate Verify agent (Execute != Verify held throughout).
+- Per-wave integration gate (full suite + lint + type-check + build) after every wave. Two brittle pre-existing/isolation-dependent assertions were fixed-forward (the 0024 journal "last entry" test; the 0025 counter live-value assertions).
+- Final gate on master: unit 2000 (api 720 + web 1084 + auth-fake 41 + shared-utils 155), integration 305 (41 files), lint 0, type-check 0, build ok, web bundle clean.
