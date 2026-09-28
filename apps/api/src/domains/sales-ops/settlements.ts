@@ -9,7 +9,7 @@ import {
   type StatusLinhaLiquidavel,
   type StatusVendaLiquidavel,
 } from '@fxl-sales/shared-utils/liquidacao';
-import { todayInSaoPaulo } from '@fxl-sales/shared-utils/sao-paulo-day';
+import { isIsoDay, todayInSaoPaulo } from '@fxl-sales/shared-utils/sao-paulo-day';
 import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import {
@@ -58,7 +58,8 @@ export type SettlementErrorCode =
   | 'already_paid'
   | 'already_reversed'
   | 'invalid_paid_on'
-  | 'paid_on_in_future';
+  | 'paid_on_in_future'
+  | 'invalid_amount';
 
 export const SETTLEMENT_ERROR_STATUS: Record<SettlementErrorCode, 404 | 409 | 422> = {
   not_found: 404,
@@ -68,6 +69,7 @@ export const SETTLEMENT_ERROR_STATUS: Record<SettlementErrorCode, 404 | 409 | 42
   already_reversed: 409,
   invalid_paid_on: 422,
   paid_on_in_future: 422,
+  invalid_amount: 422,
 };
 
 /** C5 row shape of `sale_has_active_settlements`: slice 04's type, one vocabulary. */
@@ -378,6 +380,211 @@ async function writeStatusCache(
   };
 }
 
+/**
+ * Acceptance policy of the ONE baixa/estorno writers. `manual` runs the shared
+ * validators exactly as the HTTP routes always did. `finance` records an
+ * immutable remote fact: structural checks only (a real SP civil day, never in
+ * the future, safe integer cents), never `sale_not_won`, `row_void` or
+ * `already_paid`, so a duplicate or a settlement on a voided row is kept and
+ * later derived as `duplicidade` / `disputed`.
+ */
+export type SettlementPolicy = { mode: 'manual' } | { mode: 'finance'; amountCents: number };
+
+export type ApplyBaixaInput = {
+  target: { kind: SettlementTargetKind; id: string };
+  paidOn: string;
+  /** São Paulo today; the caller passes it, this module never reads the clock. */
+  today: string;
+  origin: 'manual' | 'finance';
+  actor: CadastroActor;
+  /** Finance only: the remote settlement uuid reused as the local row id. */
+  id?: string;
+};
+
+export type ApplyEstornoInput = {
+  baixaId: string;
+  reversedOn: string;
+  today: string;
+  origin: 'manual' | 'finance';
+  actor: CadastroActor;
+  reason: string | null;
+  /** Finance only: the remote reversal uuid reused as the local row id. */
+  id?: string;
+};
+
+function isSafePositiveCents(value: number): boolean {
+  return Number.isSafeInteger(value) && value > 0;
+}
+
+/**
+ * The ONE baixa writer. `tx` already carries the tenant context (withTenant, or
+ * `setTenantContext` in the consumer handler). Emission-free by design.
+ */
+export async function applyBaixaTx(
+  tx: Db,
+  orgId: string,
+  input: ApplyBaixaInput,
+  policy: SettlementPolicy,
+): Promise<SettlementWriteResult> {
+  const kind = input.target.kind;
+  const table = targetTable(kind);
+  const [target] = await tx
+    .select({ saleId: table.saleId })
+    .from(table)
+    .where(and(eq(table.orgId, orgId), eq(table.id, input.target.id)))
+    .limit(1);
+  if (!target) return { ok: false, reason: 'not_found' };
+
+  // Lock order: sale (FOR SHARE) then row (FOR UPDATE), like every sale write.
+  const sale = await lockSaleForShare(tx, orgId, target.saleId);
+  if (!sale) return { ok: false, reason: 'not_found' };
+  const row = await lockTargetRow(tx, orgId, kind, input.target.id);
+  if (!row) return { ok: false, reason: 'not_found' };
+
+  const facts = await selectTargetFacts(tx, orgId, kind, row.id);
+  let paidOn: string;
+  let amountBrl: number;
+  if (policy.mode === 'manual') {
+    const verdict = validarNovaBaixa({
+      valorOriginalCentavos: row.amountBrl,
+      eventos: facts.map(toEvent),
+      statusLinha: row.status as StatusLinhaLiquidavel,
+      statusVenda: sale.status as StatusVendaLiquidavel,
+      dataPagamento: input.paidOn,
+      hojeSaoPaulo: input.today,
+    });
+    if (!verdict.ok) return { ok: false, reason: verdict.codigo };
+    paidOn = verdict.data;
+    amountBrl = verdict.valorCentavos;
+  } else {
+    if (!isIsoDay(input.paidOn)) return { ok: false, reason: 'invalid_paid_on' };
+    if (input.paidOn > input.today) return { ok: false, reason: 'paid_on_in_future' };
+    if (!isSafePositiveCents(policy.amountCents)) return { ok: false, reason: 'invalid_amount' };
+    paidOn = input.paidOn;
+    amountBrl = policy.amountCents;
+  }
+
+  const [inserted] = await tx
+    .insert(salesOpsSettlements)
+    .values({
+      ...(input.id !== undefined ? { id: input.id } : {}),
+      orgId,
+      saleId: row.saleId,
+      targetKind: kind,
+      receivableId: kind === 'receivable' ? row.id : null,
+      payableId: kind === 'payable' ? row.id : null,
+      type: 'baixa',
+      reversesSettlementId: null,
+      paidOn,
+      amountBrl,
+      origin: input.origin,
+      actorUserId: input.actor.userId,
+      actorName: input.actor.displayName,
+      reason: null,
+    })
+    .returning();
+  const state = await writeStatusCache(tx, orgId, kind, row, [...facts, inserted!]);
+  // SLICE-07-EMISSION-HOOK (baixa): slice 07 fills this spot, gated on
+  // `policy.mode === 'manual'`. Nothing may be enqueued from here in slice 04.
+  return { ok: true, settlement: toEntry(inserted!, null), row: state };
+}
+
+/** The ONE estorno writer. Same contract as `applyBaixaTx`. */
+export async function applyEstornoTx(
+  tx: Db,
+  orgId: string,
+  input: ApplyEstornoInput,
+  policy: SettlementPolicy,
+): Promise<SettlementWriteResult> {
+  const [baixa] = await tx
+    .select()
+    .from(salesOpsSettlements)
+    .where(and(eq(salesOpsSettlements.orgId, orgId), eq(salesOpsSettlements.id, input.baixaId)))
+    .limit(1);
+  if (!baixa) return { ok: false, reason: 'not_found' };
+  const kind = baixa.targetKind as SettlementTargetKind;
+  const targetId = kind === 'receivable' ? baixa.receivableId : baixa.payableId;
+  if (targetId === null) return { ok: false, reason: 'not_found' };
+
+  const sale = await lockSaleForShare(tx, orgId, baixa.saleId);
+  if (!sale) return { ok: false, reason: 'not_found' };
+  const row = await lockTargetRow(tx, orgId, kind, targetId);
+  if (!row) return { ok: false, reason: 'not_found' };
+
+  const facts = await selectTargetFacts(tx, orgId, kind, targetId);
+  let estornaBaixaId: string;
+  let paidOn: string;
+  let amountBrl: number;
+  if (policy.mode === 'manual') {
+    const verdict = validarEstorno({
+      baixaId: input.baixaId,
+      eventos: facts.map(toEvent),
+      hojeSaoPaulo: input.today,
+    });
+    if (!verdict.ok) return { ok: false, reason: verdict.codigo };
+    estornaBaixaId = verdict.estornaBaixaId;
+    paidOn = verdict.data;
+    amountBrl = verdict.valorCentavos;
+  } else {
+    if (baixa.type !== 'baixa') return { ok: false, reason: 'not_found' };
+    if (!isIsoDay(input.reversedOn)) return { ok: false, reason: 'invalid_paid_on' };
+    if (input.reversedOn > input.today) return { ok: false, reason: 'paid_on_in_future' };
+    if (facts.some((fact) => fact.reversesSettlementId === baixa.id)) {
+      return { ok: false, reason: 'already_reversed' };
+    }
+    if (!isSafePositiveCents(policy.amountCents) || policy.amountCents !== baixa.amountBrl) {
+      return { ok: false, reason: 'invalid_amount' };
+    }
+    estornaBaixaId = baixa.id;
+    paidOn = input.reversedOn;
+    amountBrl = baixa.amountBrl;
+  }
+
+  const [inserted] = await tx
+    .insert(salesOpsSettlements)
+    .values({
+      ...(input.id !== undefined ? { id: input.id } : {}),
+      orgId,
+      saleId: baixa.saleId,
+      targetKind: kind,
+      receivableId: baixa.receivableId,
+      payableId: baixa.payableId,
+      type: 'estorno',
+      reversesSettlementId: estornaBaixaId,
+      paidOn,
+      amountBrl,
+      origin: input.origin,
+      actorUserId: input.actor.userId,
+      actorName: input.actor.displayName,
+      reason: input.reason,
+    })
+    .returning();
+  const state = await writeStatusCache(tx, orgId, kind, row, [...facts, inserted!]);
+  // SLICE-07-EMISSION-HOOK (estorno): slice 07 fills this spot, gated on
+  // `policy.mode === 'manual'`. Nothing may be enqueued from here in slice 04.
+  return { ok: true, settlement: toEntry(inserted!, null), row: state };
+}
+
+export type SettlementAnomaly = 'none' | 'disputed' | 'duplicidade';
+
+/**
+ * Pure derivation from the row's Sales-owned status and its immutable facts.
+ * `disputed`: an active baixa on a voided row. `duplicidade`: overpaid through
+ * more than one active baixa. No column, no enum: recoverable from the facts.
+ */
+export function deriveSettlementAnomaly(
+  rowStatus: StatusLinhaLiquidavel,
+  amountBrl: number,
+  facts: readonly FactLike[],
+): SettlementAnomaly {
+  const liquidacao = liquidacaoDaLinha(amountBrl, facts);
+  if (rowStatus === 'void') return liquidacao.baixasAtivas.length > 0 ? 'disputed' : 'none';
+  if (liquidacao.pagoCentavos > amountBrl && liquidacao.baixasAtivas.length > 1) {
+    return 'duplicidade';
+  }
+  return 'none';
+}
+
 export async function recordSettlement(
   db: Db,
   orgId: string,
@@ -388,55 +595,21 @@ export async function recordSettlement(
   const now = opts.now ?? new Date();
   const today = todayInSaoPaulo(now);
   const paidOn = input.paidOn ?? today;
-  const kind = input.targetKind;
 
-  return withTenant(db, orgId, async (tx): Promise<SettlementWriteResult> => {
-    const table = targetTable(kind);
-    const [target] = await tx
-      .select({ saleId: table.saleId })
-      .from(table)
-      .where(and(eq(table.orgId, orgId), eq(table.id, input.targetId)))
-      .limit(1);
-    if (!target) return { ok: false, reason: 'not_found' };
-
-    // Lock order: sale (FOR SHARE) then row (FOR UPDATE), like every sale write.
-    const sale = await lockSaleForShare(tx, orgId, target.saleId);
-    if (!sale) return { ok: false, reason: 'not_found' };
-    const row = await lockTargetRow(tx, orgId, kind, input.targetId);
-    if (!row) return { ok: false, reason: 'not_found' };
-
-    const facts = await selectTargetFacts(tx, orgId, kind, row.id);
-    const verdict = validarNovaBaixa({
-      valorOriginalCentavos: row.amountBrl,
-      eventos: facts.map(toEvent),
-      statusLinha: row.status as StatusLinhaLiquidavel,
-      statusVenda: sale.status as StatusVendaLiquidavel,
-      dataPagamento: paidOn,
-      hojeSaoPaulo: today,
-    });
-    if (!verdict.ok) return { ok: false, reason: verdict.codigo };
-
-    const [inserted] = await tx
-      .insert(salesOpsSettlements)
-      .values({
-        orgId,
-        saleId: row.saleId,
-        targetKind: kind,
-        receivableId: kind === 'receivable' ? row.id : null,
-        payableId: kind === 'payable' ? row.id : null,
-        type: 'baixa',
-        reversesSettlementId: null,
-        paidOn: verdict.data,
-        amountBrl: verdict.valorCentavos,
+  return withTenant(db, orgId, (tx) =>
+    applyBaixaTx(
+      tx,
+      orgId,
+      {
+        target: { kind: input.targetKind, id: input.targetId },
+        paidOn,
+        today,
         origin: 'manual',
-        actorUserId: actor.userId,
-        actorName: actor.displayName,
-        reason: null,
-      })
-      .returning();
-    const state = await writeStatusCache(tx, orgId, kind, row, [...facts, inserted!]);
-    return { ok: true, settlement: toEntry(inserted!, null), row: state };
-  });
+        actor,
+      },
+      { mode: 'manual' },
+    ),
+  );
 }
 
 export async function reverseSettlement(
@@ -452,51 +625,14 @@ export async function reverseSettlement(
   const reason = input.reason && input.reason !== '' ? input.reason : null;
 
   try {
-    return await withTenant(db, orgId, async (tx): Promise<SettlementWriteResult> => {
-      const [baixa] = await tx
-        .select()
-        .from(salesOpsSettlements)
-        .where(and(eq(salesOpsSettlements.orgId, orgId), eq(salesOpsSettlements.id, settlementId)))
-        .limit(1);
-      if (!baixa) return { ok: false, reason: 'not_found' };
-      const kind = baixa.targetKind as SettlementTargetKind;
-      const targetId = kind === 'receivable' ? baixa.receivableId : baixa.payableId;
-      if (targetId === null) return { ok: false, reason: 'not_found' };
-
-      const sale = await lockSaleForShare(tx, orgId, baixa.saleId);
-      if (!sale) return { ok: false, reason: 'not_found' };
-      const row = await lockTargetRow(tx, orgId, kind, targetId);
-      if (!row) return { ok: false, reason: 'not_found' };
-
-      const facts = await selectTargetFacts(tx, orgId, kind, targetId);
-      const verdict = validarEstorno({
-        baixaId: settlementId,
-        eventos: facts.map(toEvent),
-        hojeSaoPaulo: today,
-      });
-      if (!verdict.ok) return { ok: false, reason: verdict.codigo };
-
-      const [inserted] = await tx
-        .insert(salesOpsSettlements)
-        .values({
-          orgId,
-          saleId: baixa.saleId,
-          targetKind: kind,
-          receivableId: baixa.receivableId,
-          payableId: baixa.payableId,
-          type: 'estorno',
-          reversesSettlementId: verdict.estornaBaixaId,
-          paidOn: verdict.data,
-          amountBrl: verdict.valorCentavos,
-          origin: 'manual',
-          actorUserId: actor.userId,
-          actorName: actor.displayName,
-          reason,
-        })
-        .returning();
-      const state = await writeStatusCache(tx, orgId, kind, row, [...facts, inserted!]);
-      return { ok: true, settlement: toEntry(inserted!, null), row: state };
-    });
+    return await withTenant(db, orgId, (tx) =>
+      applyEstornoTx(
+        tx,
+        orgId,
+        { baixaId: settlementId, reversedOn: today, today, origin: 'manual', actor, reason },
+        { mode: 'manual' },
+      ),
+    );
   } catch (error) {
     // The violation aborts the transaction, so it is caught outside withTenant.
     if (isReversesUniqueViolation(error)) return { ok: false, reason: 'already_reversed' };
