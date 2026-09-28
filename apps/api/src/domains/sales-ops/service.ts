@@ -26,6 +26,13 @@ import {
 } from '../../db/schema.js';
 import { setTenantContext } from '../../middleware/auth.js';
 import { writeAuditEntry, type CadastroEntityType } from '../audit/service.js';
+import {
+  buildObligationUpsertedEvents,
+  buildObligationVoidedEvents,
+  type ObligationRowInput,
+} from '../integration/events.js';
+import { createIntegrationTxAdapter, enqueueSaleEvents } from '../integration/outbox-adapter.js';
+import { isProducerFlowLive } from '../integration/producer-gate.js';
 import { asDateOnly, dateFromIsoDay } from './ledger-dates.js';
 import {
   checkEditableStatusChange,
@@ -2391,6 +2398,112 @@ export async function getSettings(db: Db, orgId: string) {
   });
 }
 
+type EmissionRowIds = { receivableIds: readonly string[]; payableIds: readonly string[] };
+
+/**
+ * Producer emission (slice 07). Runs INSIDE the caller's tenant tx after the
+ * business writes: re-selects the affected rows by their STABLE ids (so the
+ * revision and status are the post-write ones) and enqueues one obligation
+ * event per surviving row. `ids: 'all'` means every row of the sale. An org
+ * whose producer flow is not live emits nothing and reads nothing.
+ * `active` emits non-void rows as `active`; `voided` emits void rows only.
+ */
+async function emitSaleObligationEvents(
+  tx: Db,
+  orgId: string,
+  saleId: string,
+  ids: EmissionRowIds | 'all',
+  mode: { state: 'active' } | { state: 'voided'; voidReason: string },
+  now: Date,
+): Promise<void> {
+  if (!isProducerFlowLive(orgId)) return;
+  if (ids !== 'all' && ids.receivableIds.length === 0 && ids.payableIds.length === 0) return;
+
+  const [sale] = await tx
+    .select({
+      id: salesOpsSales.id,
+      code: salesOpsSales.code,
+      clientNameSnapshot: salesOpsSales.clientNameSnapshot,
+    })
+    .from(salesOpsSales)
+    .where(and(eq(salesOpsSales.orgId, orgId), eq(salesOpsSales.id, saleId)))
+    .limit(1);
+  if (!sale) return;
+
+  const receivableFilters = [eq(salesOpsReceivables.orgId, orgId), eq(salesOpsReceivables.saleId, saleId)];
+  const payableFilters = [eq(salesOpsPayables.orgId, orgId), eq(salesOpsPayables.saleId, saleId)];
+  if (ids !== 'all') {
+    receivableFilters.push(
+      ids.receivableIds.length > 0
+        ? inArray(salesOpsReceivables.id, [...ids.receivableIds])
+        : sql`false`,
+    );
+    payableFilters.push(
+      ids.payableIds.length > 0 ? inArray(salesOpsPayables.id, [...ids.payableIds]) : sql`false`,
+    );
+  }
+  const wantVoid = mode.state === 'voided';
+  const statusMatches = (status: string) => (status === 'void') === wantVoid;
+  const receivableRows = (
+    await tx
+      .select()
+      .from(salesOpsReceivables)
+      .where(and(...receivableFilters))
+      .orderBy(asc(salesOpsReceivables.dueDate), asc(salesOpsReceivables.id))
+  ).filter((row) => statusMatches(row.status));
+  const payableRows = (
+    await tx
+      .select()
+      .from(salesOpsPayables)
+      .where(and(...payableFilters))
+      .orderBy(asc(salesOpsPayables.dueDate), asc(salesOpsPayables.id))
+  ).filter((row) => statusMatches(row.status));
+
+  const obligations: ObligationRowInput[] = [
+    ...receivableRows.map(
+      (row): ObligationRowInput => ({
+        direction: 'receivable',
+        row: {
+          id: row.id,
+          label: row.label,
+          dueDate: row.dueDate,
+          amountBrl: row.amountBrl,
+          method: row.method,
+          status: row.status as 'open' | 'paid' | 'void',
+          revision: row.revision,
+        },
+      }),
+    ),
+    ...payableRows.map(
+      (row): ObligationRowInput => ({
+        direction: 'payable',
+        row: {
+          id: row.id,
+          kind: row.kind as PayableKind,
+          beneficiaryName: row.beneficiaryName,
+          dueDate: row.dueDate,
+          amountBrl: row.amountBrl,
+          status: row.status as 'open' | 'paid' | 'void',
+          revision: row.revision,
+        },
+      }),
+    ),
+  ];
+  if (obligations.length === 0) return;
+
+  const base = {
+    organizationId: orgId,
+    source: { saleId: sale.id, saleCode: sale.code, clientName: sale.clientNameSnapshot },
+    obligations,
+    meta: { newId: randomUUID, occurredAt: now },
+  };
+  const events =
+    mode.state === 'active'
+      ? buildObligationUpsertedEvents(base)
+      : buildObligationVoidedEvents({ ...base, voidReason: mode.voidReason });
+  await enqueueSaleEvents(createIntegrationTxAdapter(tx), events);
+}
+
 export async function createSale(
   db: Db,
   orgId: string,
@@ -2531,6 +2644,10 @@ export async function createSale(
       }
     }
 
+    if (input.status === 'won') {
+      await emitSaleObligationEvents(tx, orgId, sale.id, 'all', { state: 'active' }, now);
+    }
+
     return { sale, ledger, payables };
   });
 }
@@ -2636,6 +2753,34 @@ export async function updateSale(
       .returning();
     if (!sale) throw new Error('sale_update_failed');
     await applySaleEditPlan(tx, orgId, saleId, plan, now);
+
+    if (existing.status === 'won') {
+      await emitSaleObligationEvents(
+        tx,
+        orgId,
+        saleId,
+        {
+          receivableIds: [
+            ...plan.receivables.inserts.map((row) => row.id),
+            ...plan.receivables.updates.map((row) => row.id),
+          ],
+          payableIds: [
+            ...plan.payables.inserts.map((row) => row.id),
+            ...plan.payables.updates.map((row) => row.id),
+          ],
+        },
+        { state: 'active' },
+        now,
+      );
+      await emitSaleObligationEvents(
+        tx,
+        orgId,
+        saleId,
+        { receivableIds: plan.receivables.voids, payableIds: plan.payables.voids },
+        { state: 'voided', voidReason: 'edited-out-of-plan' },
+        now,
+      );
+    }
 
     return { ok: true, sale, ledger };
   });
@@ -2758,7 +2903,7 @@ export async function transitionSale(
       patch = { status: 'won', wonAt: now, lostAt: null, updatedAt: now };
     } else if (to === 'open') {
       if (sale.status === 'won') {
-        await tx
+        const voidedPayables = await tx
           .update(salesOpsPayables)
           .set({ status: 'void', ...payableRevisionBump() })
           .where(
@@ -2767,7 +2912,16 @@ export async function transitionSale(
               eq(salesOpsPayables.saleId, saleId),
               eq(salesOpsPayables.status, 'open'),
             ),
-          );
+          )
+          .returning({ id: salesOpsPayables.id });
+        await emitSaleObligationEvents(
+          tx,
+          orgId,
+          saleId,
+          { receivableIds: [], payableIds: voidedPayables.map((row) => row.id) },
+          { state: 'voided', voidReason: 'contract-reverted' },
+          now,
+        );
       }
       patch = { status: 'open', wonAt: null, lostAt: null, updatedAt: now };
     } else if (to === 'lost') {
@@ -2781,6 +2935,9 @@ export async function transitionSale(
       .set(patch)
       .where(and(eq(salesOpsSales.orgId, orgId), eq(salesOpsSales.id, saleId)))
       .returning();
+    if (to === 'won') {
+      await emitSaleObligationEvents(tx, orgId, saleId, 'all', { state: 'active' }, now);
+    }
     return { ok: true, sale: updated! };
   });
 }
@@ -2887,6 +3044,18 @@ export async function cancelContract(
         )
         .returning({ id: salesOpsPayables.id });
     }
+
+    await emitSaleObligationEvents(
+      tx,
+      orgId,
+      saleId,
+      {
+        receivableIds: voidedReceivables.map((row) => row.id),
+        payableIds: voidedPayables.map((row) => row.id),
+      },
+      { state: 'voided', voidReason: 'contract-cancelled' },
+      now,
+    );
 
     return {
       ok: true,

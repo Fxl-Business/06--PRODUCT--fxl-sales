@@ -96,13 +96,18 @@ describe('isReversesUniqueViolation', () => {
 });
 
 describe('settlements.ts source guard', () => {
-  it('writes only manual facts and holds no integration code', () => {
+  it('writes only manual facts and emits only from the gated manual path', () => {
     const source = readFileSync(fileURLToPath(new URL('../settlements.ts', import.meta.url)), 'utf8');
     expect(source.length).toBeGreaterThan(1000);
     expect(source).toContain("origin: 'manual'");
     expect(source).not.toMatch(/origin:\s*'finance'/);
     expect(source).not.toMatch(/\bfetch\(/);
-    expect(source).not.toMatch(/outbox/i);
+    // Slice 07 anti-echo: the ONLY enqueue sites sit behind the manual + live gate.
+    const enqueues = source.match(/enqueueSaleEvents\(/g) ?? [];
+    const gates = source.match(/policy\.mode === 'manual' && isProducerFlowLive\(orgId\)/g) ?? [];
+    expect(enqueues.length).toBe(2);
+    expect(gates.length).toBe(2);
+    expect(source).not.toMatch(/insert\(integrationOutbox|integration_outbox/i);
     expect(source).not.toMatch(/FXL_FINANCE|FXL_HUB/);
   });
 });
