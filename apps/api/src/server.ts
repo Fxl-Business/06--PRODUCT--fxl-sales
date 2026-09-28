@@ -71,7 +71,8 @@ const { commissionsAdminRouter, commissionsRouter } = await import(
 const { payoutsAdminRouter, payoutsRouter } = await import('./domains/payouts/routes.js');
 const { salesOpsRouter } = await import('./domains/sales-ops/routes.js');
 const { auditRouter } = await import('./domains/audit/routes.js');
-const { setupNightlyJob } = await import('./jobs/nightly-job.js');
+const { setupNightlyJob, stopNightlyJob } = await import('./jobs/nightly-job.js');
+const { closeDb } = await import('./db/client.js');
 const { healthRouter } = await import('./routes/health.js');
 
 const app = new Hono();
@@ -156,6 +157,11 @@ app.get('/', (c) =>
 
 app.notFound((c) => c.json({ error: 'not_found', path: c.req.path }, 404));
 
+// Sales/Finance integration: resolved ONCE here. Null (nothing mounted, nothing
+// started) unless Hub credentials or SALES_AUTH_FAKE exist.
+const { startIntegration } = await import('./domains/integration/start-integration.js');
+const integration = await startIntegration({ app });
+
 // Nightly hold-promotion cron (Phase 05 T09, D-K/D1). Single scheduler instance.
 setupNightlyJob();
 
@@ -165,4 +171,24 @@ console.log(
   `[fxl-sales-api] listening on ${hostname ? `http://${hostname}:${port}` : `port ${port} on every interface`} (${env.NODE_ENV})`,
 );
 
-serve({ fetch: app.fetch, port, hostname });
+const server = serve({ fetch: app.fetch, port, hostname });
+
+// Graceful shutdown, idempotent: a second signal while draining is ignored.
+let shuttingDown = false;
+async function shutdown(signal: string): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[fxl-sales-api] ${signal} received, shutting down`);
+  try {
+    stopNightlyJob();
+    await integration?.stop();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await closeDb();
+  } catch (err) {
+    console.error('[fxl-sales-api] shutdown failed:', err);
+    process.exitCode = 1;
+  }
+  process.exit();
+}
+process.on('SIGTERM', () => void shutdown('SIGTERM'));
+process.on('SIGINT', () => void shutdown('SIGINT'));
