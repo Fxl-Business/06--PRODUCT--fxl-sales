@@ -1,6 +1,8 @@
 import cron, { type ScheduledTask } from 'node-cron';
 import { deleteExpiredHubBffSessions } from '../auth/hub-session-store.js';
+import { OUTBOX_MIN_RETENTION_DAYS, pruneIntegrationOutbox } from '@fxl-business/fxl-contracts';
 import { getAdminDb } from '../db/client.js';
+import { createIntegrationPooledAdapter } from '../domains/integration/outbox-adapter.js';
 import { promoteHoldExpired } from '../domains/commissions/service.js';
 import {
   formatCadastroPurgeReport,
@@ -18,8 +20,8 @@ import {
  *
  * Schedule: 03:00 UTC daily via node-cron (single scheduler instance in apps/api -
  * Phase 06 must register any payout job on THIS scheduler, not a second one).
- * Two more tasks share it: the Hub BFF session sweeper at 03:15 and the archived
- * cadastro purge at 03:30. Each has its own try/catch, so one failing task can
+ * Three more tasks share it: the Hub BFF session sweeper at 03:15, the archived
+ * cadastro purge at 03:30 and the integration outbox prune at 03:45. Each has its own try/catch, so one failing task can
  * never skip the others.
  * Manual trigger: POST /api/v1/admin/commissions/promote-locked (requireAdmin).
  * v1.1 upgrade path: extract to a BullMQ worker for distributed deploys.
@@ -28,6 +30,7 @@ import {
 let task: ScheduledTask | null = null;
 let sessionCleanupTask: ScheduledTask | null = null;
 let cadastroPurgeTask: ScheduledTask | null = null;
+let outboxPruneTask: ScheduledTask | null = null;
 
 export function setupNightlyJob(): void {
   if (task) return; // single instance guard
@@ -70,6 +73,36 @@ export function setupNightlyJob(): void {
       console.error('[nightly-job] archived cadastro purge failed:', err);
     }
   });
+
+  // Integration outbox prune, last: it is destructive too, and fail-closed while
+  // no consumer low-water mark is known (see resolveOutboxLowWater).
+  outboxPruneTask = cron.schedule('45 3 * * *', async () => {
+    try {
+      const pruned = await runIntegrationOutboxPrune();
+      console.log(`[nightly-job] integration outbox prune: ${pruned} events removed`);
+    } catch (err) {
+      console.error('[nightly-job] integration outbox prune failed:', err);
+    }
+  });
+}
+
+/**
+ * The lowest position every ACTIVE consumer has passed. FAIL CLOSED: there is no
+ * source for it yet (the Hub heartbeat read is not wired), and not knowing must
+ * never authorize deleting an event, so this returns `null` and the prune deletes
+ * nothing. Replace the body, not the null contract, when a real source exists.
+ */
+export async function resolveOutboxLowWater(): Promise<bigint | null> {
+  return null;
+}
+
+/** Extracted for testability. Never below the package's retention floor. */
+export async function runIntegrationOutboxPrune(): Promise<number> {
+  return pruneIntegrationOutbox({
+    adapter: createIntegrationPooledAdapter(),
+    lowWaterPosition: await resolveOutboxLowWater(),
+    minRetentionDays: OUTBOX_MIN_RETENTION_DAYS,
+  });
 }
 
 /** Extracted for testability + the manual admin trigger endpoint. */
@@ -109,5 +142,9 @@ export function stopNightlyJob(): void {
   if (cadastroPurgeTask) {
     cadastroPurgeTask.stop();
     cadastroPurgeTask = null;
+  }
+  if (outboxPruneTask) {
+    outboxPruneTask.stop();
+    outboxPruneTask = null;
   }
 }

@@ -253,3 +253,39 @@ export async function installFakeAuthIfRequested(
 
   return true;
 }
+
+/**
+ * The integration authority, resolved ONCE at boot by `start-integration.ts`.
+ *
+ * This lives here, and not in a module of its own, because this file is the ONLY
+ * one `scripts/__tests__/auth-fake-isolation.test.mjs` lets reach
+ * `@fxl-sales/auth-fake`. Like `installFakeAuthIfRequested`, the fake branch is a
+ * DYNAMIC import behind the flag and the production refusal, so the package never
+ * enters the production build graph. With the flag absent nothing dev-only is
+ * evaluated. Real: the slice-02 factory over the existing Hub config; `null` when
+ * the machine has no Hub credentials at all (integration stays off).
+ */
+export async function getIntegrationAuthority(
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<import('../domains/integration/hub-client.js').IntegrationAuthority | null> {
+  type Authority = import('../domains/integration/hub-client.js').IntegrationAuthority;
+
+  if (isFakeAuthRequested(env)) {
+    if (isProductionEnv(env)) {
+      const appAuth = await import('../middleware/app-auth.js');
+      throw new Error(appAuth.DEV_IDENTITY_ADAPTER_IN_PRODUCTION_MESSAGE);
+    }
+    const fake = (await import('@fxl-sales/auth-fake')) as unknown as {
+      getFakeIntegrationAuthority(): Authority;
+    };
+    return fake.getFakeIntegrationAuthority();
+  }
+
+  const { buildIntegrationConfig } = await import('../domains/integration/config.js');
+  const config = buildIntegrationConfig(env as Parameters<typeof buildIntegrationConfig>[0]);
+  if (config === null) {
+    return null;
+  }
+  const { createRealIntegrationAuthority } = await import('../domains/integration/hub-client.js');
+  return createRealIntegrationAuthority(config);
+}
