@@ -1,0 +1,11 @@
+{
+  "agent": "plan",
+  "slice": "04-consumer-inbox-puller",
+  "status": "PASS",
+  "report": "nexo/plans/sales-finance-control-plane/04-consumer-inbox-puller.md",
+  "summary": "Planned the consumer puller/inbox + finance settlement handlers, extracting one tx-accepting applyBaixaTx/applyEstornoTx in settlements.ts shared by route and consumer, with anti-echo, N/N-1 version policy, remote-ref->local-id mapping, and derived disputed/duplicidade marking.",
+  "done": true,
+  "started": "2026-09-28T22:17:14Z",
+  "ended": "2026-09-28T22:20:08Z",
+  "ts": "2026-09-28T22:20:08Z"
+}
