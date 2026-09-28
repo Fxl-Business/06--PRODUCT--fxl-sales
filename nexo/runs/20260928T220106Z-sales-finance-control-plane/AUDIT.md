@@ -39,3 +39,13 @@ Autopilot run. This file records decisions taken without the human, drift from t
 
 - The in-repo E2E (slice 09) drives the CONSUMER cases with a simulated Finance feed through the package's `fetchFeedPage` seam (real inbox/cursor/handler run; only the network fetch is doubled) and the PRODUCER cases against this app's own feed route with fake-authority tickets.
 - The fake authority's ticket verify is per-instance (a verifier accepts only tickets its own instance issued), so a true cross-process ticket handshake is not exercisable here. Untested until the Finance side of the layer and a shared/real Hub exist: true two-app cross-process delivery, cross-process ticket introspection, and end-to-end convergence with the real Finance producer/consumer. Slice 09 lists the exact cases verbatim.
+
+## Slice 09 untested cross-process cases
+
+- A real Finance app reading OUR feed over HTTP and reconciling on its side.
+- A real Finance app producing its feed: payload fidelity is only simulated through `fetchFeedPage`.
+- A real Hub: ticket issuance and introspection, activation and api_url discovery over the network, heartbeat delivery, the 401 ticket refresh path.
+- True simultaneity of the two integral baixas across two processes: case 5 applies them sequentially (row locks serialize a real race the same way).
+- The boot timers (publisher, puller, heartbeat intervals): the test calls `publishPendingPositions` and `pullOnce` directly.
+- The Finance-side "registrada em duplicidade" surface: only Sales' derivation (`deriveSettlementAnomaly`, `reduceSettlement`) is asserted.
+- The feed ticket for the Sales feed uses a self-consumer fixture activation because the fake verifier only accepts tickets its own instance issued.
