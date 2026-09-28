@@ -38,6 +38,13 @@
  * Access is readable with an empty `modules` array.
  */
 
+import {
+  FIXTURE_INTEGRATED_ORGANIZATION_ID,
+  createFakeIntegrationAuthority,
+  type FakeActivation,
+  type FakeIntegrationAuthority,
+} from '@fxl-business/fxl-contracts/testing';
+
 /** The Hub-authoritative Organization role, matching the SDK's HubWorkspaceRole. */
 export type FakeWorkspaceRole = 'owner' | 'admin' | 'member';
 
@@ -121,14 +128,16 @@ function asRole(org: FakeWorkspace, role: FakeWorkspaceRole): FakeWorkspace {
   return { ...org, role };
 }
 
-// Three Organizations, and exactly three. No accented characters in the org NAMES: these
+// Four Organizations, and exactly four. No accented characters in the org NAMES: these
 // strings travel through a hand-rolled base64url minter and a hand-rolled base64 decoder, and
 // keeping them ASCII removes an entire class of encoding question from a development fixture.
 const NORTE = workspace('org_fake_norte', 'Agencia Norte'); // entitled, the everyday org
 const SUL = workspace('org_fake_sul', 'Consultoria Sul'); // entitled, the switch target
 const SEM = workspace('org_fake_sem_acesso', 'Marca Sem Acesso', 'member', []); // NOT entitled
+// The shared Sales/Finance integration fixture. The id is imported, never hand-typed.
+const INTEGRADO = workspace(FIXTURE_INTEGRATED_ORGANIZATION_ID, 'Grupo Integrado'); // entitled
 
-// Nine identities, in this exact order. IDENTITIES[0] is the everyday driver, so
+// Ten identities, in this exact order. IDENTITIES[0] is the everyday driver, so
 // DEFAULT_IDENTITY_ID needs no separate concept.
 export const IDENTITIES: readonly FakeIdentity[] = [
   // 1. team-owner - the everyday path, and the `workspaceRole === 'owner'` literal in
@@ -290,6 +299,22 @@ export const IDENTITIES: readonly FakeIdentity[] = [
     workspaceRole: 'owner',
     profile: { name: 'Iris Multi', email: 'iris@fake.local' },
     workspaces: [NORTE, SUL],
+    expectedRoles: ['admin', 'seller', 'finder'],
+    expectedPaineis: ['tatico', 'operacional', 'cadastros', 'meus-dados'],
+  },
+  // 10. integrated-owner - owner of the shared Sales/Finance fixture Organization. Appended so
+  //     the default landing identity is unchanged.
+  {
+    id: 'integrated-owner',
+    label: 'Julia (organizacao integrada)',
+    exercises: 'dona da organizacao de fixture compartilhada com o Financeiro: acesso total',
+    accountId: 'user_fake_julia',
+    activeWorkspaceId: INTEGRADO.workspaceId,
+    hasAccess: true,
+    modules: [],
+    workspaceRole: 'owner',
+    profile: { name: 'Julia Integrada', email: 'julia@fake.local' },
+    workspaces: [INTEGRADO],
     expectedRoles: ['admin', 'seller', 'finder'],
     expectedPaineis: ['tatico', 'operacional', 'cadastros', 'meus-dados'],
   },
@@ -494,4 +519,136 @@ export function allFakeOrgIds(): string[] {
     }
   }
   return [...seen];
+}
+
+/** The Finance Application id, the counterpart of every fixture activation. */
+export const FINANCE_APPLICATION = 'app.fxl-finance';
+
+/** The v1 events Sales produces for Finance. */
+export const FAKE_SALES_PRODUCED_EVENTS: readonly string[] = [
+  'fxl-sales.obligation.upserted',
+  'fxl-sales.settlement.recorded',
+  'fxl-sales.settlement.reversed',
+];
+
+/** The v1 events Sales consumes from Finance. */
+export const FAKE_FINANCE_PRODUCED_EVENTS: readonly string[] = [
+  'fxl-finance.settlement.recorded',
+  'fxl-finance.settlement.reversed',
+];
+
+/** Both directions over the fixture Organization: Sales to Finance and Finance to Sales. */
+export const FAKE_INTEGRATION_ACTIVATIONS: readonly FakeActivation[] = [
+  {
+    organizationId: FIXTURE_INTEGRATED_ORGANIZATION_ID,
+    producerApplicationId: SALES_APPLICATION,
+    consumerApplicationId: FINANCE_APPLICATION,
+    eventNames: FAKE_SALES_PRODUCED_EVENTS,
+  },
+  {
+    organizationId: FIXTURE_INTEGRATED_ORGANIZATION_ID,
+    producerApplicationId: FINANCE_APPLICATION,
+    consumerApplicationId: SALES_APPLICATION,
+    eventNames: FAKE_FINANCE_PRODUCED_EVENTS,
+  },
+];
+
+/** Structural twin of the API's `IntegrationDiscovery`. Declared locally: this package imports
+ *  nothing from apps. */
+export interface FakeIntegrationDiscovery {
+  contracts(): Promise<
+    Array<{
+      contractId: string;
+      status: 'active';
+      role: 'producer' | 'consumer';
+      eventName: string;
+      eventVersion: number;
+      schemaDigest: string;
+      contractsPackageVersion: string;
+      counterpartApplicationId: string;
+      counterpart: { applicationId: string; apiUrl: null; webUrl: null };
+    }>
+  >;
+  activations(): Promise<Array<{ producerApplicationId: string; organizationId: string }>>;
+  producerActivations(): Promise<
+    Array<{
+      activationId: string;
+      organizationId: string;
+      role: 'producer' | 'consumer';
+      counterpartApplicationId: string;
+      createdAt: string;
+    }>
+  >;
+}
+
+export interface FakeSalesIntegrationAuthority {
+  ticketClient: FakeIntegrationAuthority['ticketClient'];
+  verifier: FakeIntegrationAuthority['verifier'];
+  reporter: FakeIntegrationAuthority['reporter'];
+  discovery: FakeIntegrationDiscovery;
+}
+
+const FAKE_ACTIVATION_CREATED_AT = '2026-01-01T00:00:00.000Z';
+
+function buildFakeDiscovery(activations: readonly FakeActivation[]): FakeIntegrationDiscovery {
+  const salesIsProducer = (a: FakeActivation) => a.producerApplicationId === SALES_APPLICATION;
+  const salesIsConsumer = (a: FakeActivation) => a.consumerApplicationId === SALES_APPLICATION;
+  return {
+    async contracts() {
+      return activations.flatMap((a) => {
+        const role = salesIsProducer(a) ? ('producer' as const) : ('consumer' as const);
+        const counterpart = salesIsProducer(a) ? a.consumerApplicationId : a.producerApplicationId;
+        return a.eventNames.map((eventName) => ({
+          contractId: `fake:${a.producerApplicationId}:${a.consumerApplicationId}:${eventName}`,
+          status: 'active' as const,
+          role,
+          eventName,
+          eventVersion: 1,
+          schemaDigest: 'fake-dev',
+          contractsPackageVersion: 'fake-dev',
+          counterpartApplicationId: counterpart,
+          counterpart: { applicationId: counterpart, apiUrl: null, webUrl: null },
+        }));
+      });
+    },
+    // Pull pairs: producers Sales consumes from.
+    async activations() {
+      return activations
+        .filter(salesIsConsumer)
+        .map((a) => ({ producerApplicationId: a.producerApplicationId, organizationId: a.organizationId }));
+    },
+    // Activations where Sales is a party, as the Hub lists them for Sales.
+    async producerActivations() {
+      return activations
+        .filter((a) => salesIsProducer(a) || salesIsConsumer(a))
+        .map((a) => ({
+          activationId: `fake:${a.producerApplicationId}:${a.consumerApplicationId}:${a.organizationId}`,
+          organizationId: a.organizationId,
+          role: salesIsProducer(a) ? ('producer' as const) : ('consumer' as const),
+          counterpartApplicationId: salesIsProducer(a) ? a.consumerApplicationId : a.producerApplicationId,
+          createdAt: FAKE_ACTIVATION_CREATED_AT,
+        }));
+    },
+  };
+}
+
+let fakeIntegrationAuthority: FakeSalesIntegrationAuthority | undefined;
+
+/** The fake Sales/Finance integration authority. Built ONCE and memoized for the life of the
+ *  process, never per request. `environment` is the literal 'development'. */
+export function getFakeIntegrationAuthority(): FakeSalesIntegrationAuthority {
+  if (!fakeIntegrationAuthority) {
+    const built = createFakeIntegrationAuthority({
+      activations: FAKE_INTEGRATION_ACTIVATIONS,
+      environment: 'development',
+      applicationId: SALES_APPLICATION,
+    });
+    fakeIntegrationAuthority = {
+      ticketClient: built.ticketClient,
+      verifier: built.verifier,
+      reporter: built.reporter,
+      discovery: buildFakeDiscovery(FAKE_INTEGRATION_ACTIVATIONS),
+    };
+  }
+  return fakeIntegrationAuthority;
 }

@@ -620,3 +620,24 @@ describe('buildDevSeedPlan - lead etapas', () => {
     }
   });
 });
+
+describe('buildDevSeedPlan - the integration fixture org', () => {
+  // Literal on purpose: this file never imports the roster. The id equals the package's
+  // FIXTURE_INTEGRATED_ORGANIZATION_ID, which the auth-fake roster test pins.
+  const FIXTURE_ORG = 'org_fake_integrado';
+  const plan = buildDevSeedPlan({
+    orgIds: [ORG_ALPHA, FIXTURE_ORG],
+    identities: IDENTITIES,
+    cutoff: CUTOFF,
+  });
+
+  it('seeds a won proposta with at least one parcela for the fixture org', () => {
+    const sales = asRows(plan.rows.salesOpsSales).filter((row) => row.orgId === FIXTURE_ORG);
+    const won = sales.filter((row) => row.status === 'won');
+    expect(won.length).toBeGreaterThan(0);
+    const receivables = asRows(plan.rows.salesOpsReceivables).filter(
+      (row) => row.orgId === FIXTURE_ORG && won.some((sale) => sale.id === row.saleId),
+    );
+    expect(receivables.length).toBeGreaterThan(0);
+  });
+});
