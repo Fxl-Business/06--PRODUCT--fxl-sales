@@ -11,6 +11,7 @@ import {
 } from '@fxl-sales/shared-utils/liquidacao';
 import { isIsoDay, todayInSaoPaulo } from '@fxl-sales/shared-utils/sao-paulo-day';
 import { and, asc, desc, eq, inArray } from 'drizzle-orm';
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import {
   salesOpsPayables,
@@ -18,6 +19,12 @@ import {
   salesOpsSales,
   salesOpsSettlements,
 } from '../../db/schema.js';
+import {
+  buildSettlementRecordedEvent,
+  buildSettlementReversedEvent,
+} from '../integration/events.js';
+import { createIntegrationTxAdapter, enqueueSaleEvents } from '../integration/outbox-adapter.js';
+import { isProducerFlowLive } from '../integration/producer-gate.js';
 import {
   payableRowLabel,
   receivableRowLabel,
@@ -484,8 +491,17 @@ export async function applyBaixaTx(
     })
     .returning();
   const state = await writeStatusCache(tx, orgId, kind, row, [...facts, inserted!]);
-  // SLICE-07-EMISSION-HOOK (baixa): slice 07 fills this spot, gated on
-  // `policy.mode === 'manual'`. Nothing may be enqueued from here in slice 04.
+  // Anti-echo choke point: only a manual (Sales-origin) settlement is published;
+  // a finance-origin fact applied by the consumer never goes back out.
+  if (policy.mode === 'manual' && isProducerFlowLive(orgId)) {
+    await enqueueSaleEvents(createIntegrationTxAdapter(tx), [
+      buildSettlementRecordedEvent({
+        organizationId: orgId,
+        row: settlementRowForEvent(inserted!),
+        meta: { newId: randomUUID, occurredAt: new Date() },
+      }),
+    ]);
+  }
   return { ok: true, settlement: toEntry(inserted!, null), row: state };
 }
 
@@ -560,9 +576,32 @@ export async function applyEstornoTx(
     })
     .returning();
   const state = await writeStatusCache(tx, orgId, kind, row, [...facts, inserted!]);
-  // SLICE-07-EMISSION-HOOK (estorno): slice 07 fills this spot, gated on
-  // `policy.mode === 'manual'`. Nothing may be enqueued from here in slice 04.
+  // Anti-echo choke point (see applyBaixaTx).
+  if (policy.mode === 'manual' && isProducerFlowLive(orgId)) {
+    await enqueueSaleEvents(createIntegrationTxAdapter(tx), [
+      buildSettlementReversedEvent({
+        organizationId: orgId,
+        row: settlementRowForEvent(inserted!),
+        meta: { newId: randomUUID, occurredAt: new Date() },
+      }),
+    ]);
+  }
   return { ok: true, settlement: toEntry(inserted!, null), row: state };
+}
+
+function settlementRowForEvent(row: typeof salesOpsSettlements.$inferSelect) {
+  return {
+    id: row.id,
+    type: row.type as SettlementType,
+    reversesSettlementId: row.reversesSettlementId,
+    paidOn: row.paidOn,
+    amountBrl: row.amountBrl,
+    targetKind: row.targetKind as SettlementTargetKind,
+    receivableId: row.receivableId,
+    payableId: row.payableId,
+    actorName: row.actorName,
+    reason: row.reason,
+  };
 }
 
 export type SettlementAnomaly = 'none' | 'disputed' | 'duplicidade';
