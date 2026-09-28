@@ -32,13 +32,15 @@ function columnByName(config: ReturnType<typeof getTableConfig>, name: string) {
 }
 
 describe('settlements schema contract (migration 0024)', () => {
-  it('journals 0024_sales_ops_settlements as the last entry after 0023', () => {
+  it('journals 0024_sales_ops_settlements immediately after 0023', () => {
     const entries = journal();
-    const last = entries[entries.length - 1];
-    const previous = entries[entries.length - 2];
-    expect(last).toMatchObject({ idx: 24, tag: '0024_sales_ops_settlements' });
+    const at = entries.findIndex((entry) => entry.tag === '0024_sales_ops_settlements');
+    expect(at).toBeGreaterThan(0);
+    const entry = entries[at];
+    const previous = entries[at - 1];
+    expect(entry).toMatchObject({ idx: 24, tag: '0024_sales_ops_settlements' });
     expect(previous).toMatchObject({ idx: 23, tag: '0023_lead_seller_identity' });
-    expect(last!.when).toBeGreaterThan(previous!.when);
+    expect(entry!.when).toBeGreaterThan(previous!.when);
   });
 
   it('ships the immutability trigger, the estorno trigger and forced RLS for sales_ops_settlements', () => {
