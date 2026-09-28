@@ -27,6 +27,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@fxl-business/fxl-contracts':
+        specifier: 0.1.0
+        version: 0.1.0
       '@fxl-business/hub-sdk':
         specifier: 2.3.0
         version: 2.3.0(hono@4.12.28)
@@ -250,6 +253,10 @@ importers:
         version: 3.2.7(@types/node@22.20.0)(happy-dom@20.10.6)(jiti@1.21.7)(tsx@4.23.0)
 
   packages/auth-fake:
+    dependencies:
+      '@fxl-business/fxl-contracts':
+        specifier: 0.1.0
+        version: 0.1.0
     devDependencies:
       typescript:
         specifier: ^5.7.3
@@ -790,6 +797,9 @@ packages:
 
   '@fontsource-variable/geist@5.2.9':
     resolution: {integrity: sha512-TP+QSBG3wxKGPE33CbMy/L0Nu3qvJ6Fy81Yc4LnQ95xH+i+cfEp8fyU8/kfV14YwszxIFPhnoMTbjL71waVpyQ==}
+
+  '@fxl-business/fxl-contracts@0.1.0':
+    resolution: {integrity: sha512-YRL8TbrRwHZTZ7WeFsZK1PbRJjeTBWokvlrQlt04Y96HKwZ+0HlGqfsxthTOFwRY7TbilyaNWoJKdvCmA6hevg==}
 
   '@fxl-business/hub-sdk@2.3.0':
     resolution: {integrity: sha512-DHUI/qvYMKMebY8LLxuo8tz6wRbYE4fPxxX9x6Q1AdtoKMBmldAx5+NdWOXnQoh0KdmBDB82RqMTZSAPh41rcA==}
@@ -3309,6 +3319,8 @@ snapshots:
   '@floating-ui/utils@0.2.11': {}
 
   '@fontsource-variable/geist@5.2.9': {}
+
+  '@fxl-business/fxl-contracts@0.1.0': {}
 
   '@fxl-business/hub-sdk@2.3.0(hono@4.12.28)':
     dependencies:

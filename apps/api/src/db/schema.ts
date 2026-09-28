@@ -22,6 +22,7 @@
 
 import { sql } from 'drizzle-orm';
 import {
+  bigint,
   bigserial,
   boolean,
   check,
@@ -32,6 +33,7 @@ import {
   jsonb,
   numeric,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -1359,4 +1361,85 @@ export const hubBffLoginTxns = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [index('hub_bff_login_txns_expires_at_idx').on(t.expiresAt)],
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Integration transport (Sales <-> Finance control plane, migration 0025).
+//
+// DDL transcribed VERBATIM from @fxl-business/fxl-contracts@0.1.0
+// schema/integration-transport.sql; do not invent columns. The three org-scoped
+// tables carry ENABLE+FORCE RLS with the sales_ops two-policy convention; the
+// global integration_outbox_position counter carries the admin-context policy
+// only (the hub_bff_* precedent). RLS lives in the .sql migration, never here,
+// exactly as every other tenant table in this schema. `position` is born NULL on
+// the outbox on purpose (see the migration header and the package's note).
+// ─────────────────────────────────────────────────────────────────────────────
+export const integrationOutbox = pgTable(
+  'integration_outbox',
+  {
+    id: text('id').primaryKey(),
+    organizationId: text('organization_id').notNull(),
+    eventName: text('event_name').notNull(),
+    eventVersion: integer('event_version').notNull(),
+    idempotencyKey: text('idempotency_key').notNull(),
+    payload: jsonb('payload').notNull(),
+    occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    position: bigint('position', { mode: 'number' }),
+    publishedAt: timestamp('published_at', { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex('integration_outbox_idempotency_key_uq').on(t.organizationId, t.idempotencyKey),
+    index('integration_outbox_pending_idx')
+      .on(t.occurredAt, t.id)
+      .where(sql`${t.position} is null`),
+    uniqueIndex('integration_outbox_position_uq')
+      .on(t.position)
+      .where(sql`${t.position} is not null`),
+    index('integration_outbox_feed_idx')
+      .on(t.organizationId, t.position)
+      .where(sql`${t.position} is not null`),
+  ],
+);
+
+export const integrationOutboxPosition = pgTable('integration_outbox_position', {
+  id: text('id').primaryKey(),
+  lastPosition: bigint('last_position', { mode: 'number' }).notNull().default(0),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const integrationInbox = pgTable(
+  'integration_inbox',
+  {
+    producerApplicationId: text('producer_application_id').notNull(),
+    organizationId: text('organization_id').notNull(),
+    idempotencyKey: text('idempotency_key').notNull(),
+    eventName: text('event_name').notNull(),
+    eventVersion: integer('event_version').notNull(),
+    position: bigint('position', { mode: 'number' }).notNull(),
+    occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
+    appliedAt: timestamp('applied_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    primaryKey({
+      name: 'integration_inbox_pkey',
+      columns: [t.producerApplicationId, t.organizationId, t.idempotencyKey],
+    }),
+  ],
+);
+
+export const integrationCursor = pgTable(
+  'integration_cursor',
+  {
+    producerApplicationId: text('producer_application_id').notNull(),
+    organizationId: text('organization_id').notNull(),
+    position: bigint('position', { mode: 'number' }).notNull().default(0),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    primaryKey({
+      name: 'integration_cursor_pkey',
+      columns: [t.producerApplicationId, t.organizationId],
+    }),
+  ],
 );
