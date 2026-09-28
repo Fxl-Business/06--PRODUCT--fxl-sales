@@ -1,3 +1,4 @@
+import { FIXTURE_INTEGRATED_ORGANIZATION_ID } from '@fxl-business/fxl-contracts/testing';
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_IDENTITY_ID,
@@ -369,10 +370,26 @@ describe('allFakeOrgIds', () => {
   it('lists every org id the roster references, deduplicated', () => {
     const ids = allFakeOrgIds();
     expect(new Set(ids).size).toBe(ids.length);
-    expect(ids.length).toBe(3);
+    expect(ids.length).toBe(4);
     expect(new Set(ids)).toEqual(
-      new Set(['org_fake_norte', 'org_fake_sul', 'org_fake_sem_acesso']),
+      new Set(['org_fake_norte', 'org_fake_sul', 'org_fake_sem_acesso', 'org_fake_integrado']),
     );
+  });
+
+  it('includes the shared integration fixture org, imported and not hand-typed', () => {
+    expect(allFakeOrgIds()).toContain(FIXTURE_INTEGRATED_ORGANIZATION_ID);
+    expect(FIXTURE_INTEGRATED_ORGANIZATION_ID).toBe('org_fake_integrado');
+  });
+
+  it('gives the fixture org an entitled full-access owner, and keeps the default identity', () => {
+    const identity = findIdentity('integrated-owner')!;
+    expect(identity.activeWorkspaceId).toBe(FIXTURE_INTEGRATED_ORGANIZATION_ID);
+    expect(identity.hasAccess).toBe(true);
+    expect(identity.expectedRoles).toEqual(['admin', 'seller', 'finder']);
+    expect(DEFAULT_IDENTITY_ID).toBe('team-owner');
+    const claims = toHubClaims(identity) as { workspaceId: string; entitlements: { access: boolean } };
+    expect(claims.workspaceId).toBe(FIXTURE_INTEGRATED_ORGANIZATION_ID);
+    expect(claims.entitlements.access).toBe(true);
   });
 
   it("covers every identity's active Organization", () => {
