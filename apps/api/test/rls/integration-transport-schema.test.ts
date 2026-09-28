@@ -152,13 +152,21 @@ describe('integration transport schema (migration 0025)', () => {
     });
   });
 
-  it('seeds exactly one integration_outbox_position row, default at 0', async () => {
-    const rows = await adminClient<{ id: string; last_position: string }[]>`
-      SELECT id, last_position FROM integration_outbox_position
+  it('seeds exactly one integration_outbox_position row with column default 0', async () => {
+    const rows = await adminClient<{ id: string }[]>`
+      SELECT id FROM integration_outbox_position
     `;
     expect(rows).toHaveLength(1);
     expect(rows[0]!.id).toBe('default');
-    expect(Number(rows[0]!.last_position)).toBe(0);
+    // The counter is a live global row other integration tests advance, so assert
+    // the seeded schema property (the migration's DEFAULT 0), never the mutable value.
+    const def = await adminClient<{ column_default: string | null }[]>`
+      SELECT column_default FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'integration_outbox_position'
+        AND column_name = 'last_position'
+    `;
+    expect(def[0]!.column_default).toBe('0');
   });
 
   it('enables and forces RLS on all four tables with the two-policy model (admin-only on the counter)', async () => {
@@ -237,6 +245,9 @@ describe('integration transport schema (migration 0025)', () => {
 
   it('gates the global counter to the admin context', async () => {
     const orgId = newOrgId('c');
+    const before = await adminClient<{ last_position: string }[]>`
+      SELECT last_position FROM integration_outbox_position WHERE id = 'default'
+    `;
     await appClient.begin(async (tx) => {
       await tx`SELECT set_config('app.current_org_id', ${orgId}, true)`;
       const rows = await tx`SELECT id FROM integration_outbox_position`;
@@ -244,8 +255,12 @@ describe('integration transport schema (migration 0025)', () => {
       const updated = await tx`UPDATE integration_outbox_position SET last_position = 5 RETURNING id`;
       expect(updated).toHaveLength(0);
     });
-    const adminRows = await adminClient`SELECT id, last_position FROM integration_outbox_position`;
+    // The tenant context sees and writes nothing, so the admin-visible counter is
+    // unchanged by the blocked write (its absolute value is other tests' business).
+    const adminRows = await adminClient<{ id: string; last_position: string }[]>`
+      SELECT id, last_position FROM integration_outbox_position
+    `;
     expect(adminRows).toHaveLength(1);
-    expect(Number(adminRows[0]!.last_position)).toBe(0);
+    expect(adminRows[0]!.last_position).toBe(before[0]!.last_position);
   });
 });
