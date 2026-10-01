@@ -30,16 +30,26 @@ This deliberately **reverses** the prior documented stance ("Hub account provisi
 - **Delivery stops at `master`.** No push, no promotion to staging/production (spec section 10 + repo rules). Gate 3 is not part of this flow.
 - Copy lives per-surface: hardcoded pt-BR in `SalesOpsApp.tsx`; the `MISSING_ENTITLEMENT_COPY` object for the panel; i18n JSON (`errors.noRole.*`, both `pt-BR.json` and `en.json`, kept in sync by `keys-resolve.test.ts`) for `NoRolePage`.
 
+## Reconciliation with master (2026-10-01)
+
+Run `20260928T220106Z-sales-finance-control-plane` merged to `master` after this plan was written (`ba0fd82` -> `e7d3fb6`). Diffing every slice's `files_modified` against that range:
+
+- **Slice 06 - renumbered.** `0025` now belongs to `0025_integration_transport.sql`. The seller migration is `0026_seller_invitation_state.sql`, journal `idx: 26`, snapshot derived from `meta/0025_snapshot.json`. Its oracle also asserts the journal order.
+- **Slice 01 - pin guard added.** The contract run created `scripts/__tests__/fxl-contracts-pin.test.mjs`, and the hub-sdk pin still has no guard (plan-check C8). Slice 01 adds `scripts/__tests__/hub-sdk-pin.test.mjs` in the same shape and wires it into the root `test` script, which makes its oracle non-vacuous. `packages/auth-fake` gained an `fxl-contracts` dependency but no hub-sdk dependency, so it needs no pin. hub-sdk 2.5.0's peer is still `hono >=4.12.28`, so the override does not move.
+- **Slices 07/08/09 - no-Hub mode pinned.** With no Hub config, or under `make dev-fake` (the development adapter installed), the invitations client is null and the outcome is the existing `503 {"error":"unavailable","code":"hub_auth_not_configured"}` body, the seller still saved. `getHubSdkConfig()` alone is NOT enough: with a valid local Hub config `dev-fake` keeps a non-null config, and the fake bearer would reach the real Hub (plan-check-2's blocking finding). Slice 07 therefore adds `isAppAuthAdapterInstalled()` to `app-auth.ts`. At Capture, `auth-model.md`/`development-identity-mode.md` note that this 503 body also answers invitations in dev identity mode.
+- **Unchanged, verified:** `apps/web/**` (slices 02-05, 09), `apps/api/src/middleware/app-auth.ts` (`getHubSdkConfig`; slice 07 adds one export), `apps/api/src/domains/admin/**` and `apps/api/src/domains/sellers/**` have no commits in the range. The contract run's boot changes (`server.ts`, `auth/select.ts`, `start-integration.ts`) touch no file any slice modifies. `schema.ts` is shared with slice 06 but only in the integration tables region.
+- **Already pinned before pausing:** revoke is `POST /:id/revoke` (C3), `locale` defaults to `pt-BR` (C4), `GET /` reconciles status from `list()` (C2).
+
 ## Slice index
 
 | # | slice | goal | depends_on | wave |
 |---|---|---|---|---|
-| 01 | sdk-bump-2.5.0 | Bump SDK 2.3.0->2.5.0 in both apps, install, fix pins/guards, prove suite still green, confirm 2.5.0 surface (`switchAccount`, `createHubInvitations`, `HubInvitationError`, `prompt=select_account` relay) | - | 1 |
+| 01 | sdk-bump-2.5.0 | Bump SDK 2.3.0->2.5.0 in both apps, install, add the `hub-sdk-pin` guard, fix pins, prove suite still green, confirm 2.5.0 surface (`switchAccount`, `createHubInvitations`, `HubInvitationError`, `prompt=select_account` relay) | - | 1 |
 | 02 | web-switchaccount-seam | Add `switchAccount` through the auth provider seam + dev-client shim + guard test that no route hand-builds `prompt=` | 01 | 2 |
 | 03 | trocar-conta-account-menu | "Trocar conta" in the SalesOps account menu; show active account name/email/avatar | 02 | 3 |
 | 04 | trocar-conta-entitlement-panel | "Trocar conta" in `MissingEntitlementPanel`; show active account | 02 | 3 |
 | 05 | trocar-conta-no-role | "Trocar conta" in `NoRolePage` (i18n) + show active account | 02 | 3 |
-| 06 | sellers-invitation-schema | Migration 0025 + schema: `sellers` gains invitation id/status + invited org id; web `SellerRow` type gains the fields | 01 | 2 |
+| 06 | sellers-invitation-schema | Migration 0026 + schema: `sellers` gains invitation id/status + invited org id; web `SellerRow` type gains the fields | 01 | 2 |
 | 07 | invitations-client-seam | Sales-side invitations interface wrapping `createHubInvitations(config)` (single instance) + `HubInvitationError` code->response mapper + injectable fake for tests | 01 | 2 |
 | 08 | seller-invite-server | `createSellerAndInvite` sends the invite (accessToken from header, appRoles `['seller']`, no org in body), persists id/state; add list/resend/revoke routes+service; failures keep the seller | 06, 07 | 3 |
 | 09 | admin-sellers-invite-ui | Admin sellers page shows invitation state per row + resend/revoke + create-result warnings (`application_url_missing`/`email_not_configured` show `acceptUrl`/`email_failed` offers resend); messages by `code` | 08 | 4 |
@@ -56,4 +66,4 @@ This deliberately **reverses** the prior documented stance ("Hub account provisi
 - Gate 2 per slice: the slice's named oracle test(s) + lint on the diff, by a **separate** Verify agent (never the implementer).
 - Per-wave: full suite + full lint + security on integrated `master`, by a separate Verify agent.
 - Merge queue runs **serially** on `master`: `nexo-wave-exec.sh` hardcodes the `main` trunk and pnpm worktrees lack per-worktree `node_modules`, so (as the last two runs did) slices build on `feat/*` branches off `master`, verify, and merge `--no-ff` serially; wave-verify runs separately. Gate 2 is not weakened.
-- No mutation tool is configured in this repo; the feature-boundary mutation pass closes honestly as `skip / not_applicable` (per-slice oracle + wave-verify carry test-quality assurance).
+- No mutation TOOL is configured in this repo. The human asked for mutation at the end (2026-10-01), so the feature boundary runs a MANUAL mutation battery by a separate agent on integrated `master`: one mutation per load-bearing rule (exact pin, `appRoles ['seller']`, bearer from header, no `organizationId`, no rollback on invite failure, mapper keyed on `code`, null-client 503 body, `switchAccount` threaded through the seam, the no-hand-built-prompt guard, journal order 0025->0026), each reverted after observing RED. A mutation that stays GREEN is reported, not buried.

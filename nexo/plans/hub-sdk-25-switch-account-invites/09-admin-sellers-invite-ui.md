@@ -21,6 +21,7 @@ rules:
   - "Messages by code per spec section 5.8; acceptUrl copyable, never logged."
   - "PINNED (plan-check C3): revoke calls POST /api/v1/admin/sellers/:id/revoke (matches slice 08)."
   - "PINNED (plan-check C2): the four invitation states (pending/accepted/expired/revoked) come from SellerRow.invitationStatus, which slice 08's GET / reconciles from the Hub. The UI renders whatever status the list returns; it does not compute accepted/expired itself."
+  - "RECONCILED 2026-10-01: an invite outcome or resend/revoke error with code `hub_auth_not_configured` (no Hub configured, or make dev-fake) renders an operator-item message on the create result and keeps the new seller row visible; it is never a generic failure. Add it to the code->copy map in BOTH locale files."
 ---
 
 # Slice 09 - admin sellers invitation UI

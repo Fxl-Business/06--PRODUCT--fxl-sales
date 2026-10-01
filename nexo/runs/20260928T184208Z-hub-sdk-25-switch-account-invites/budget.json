@@ -1,10 +1,10 @@
 {
-  "active_accumulated_seconds": 926,
-  "active_since": 1790622019,
+  "active_accumulated_seconds": 1278,
+  "active_since": 1790881201,
   "counters": {
-    "agent_dispatches": 4,
+    "agent_dispatches": 6,
     "initial_slices": 9,
-    "replans": 0,
+    "replans": 2,
     "total_slices": 9,
     "wave_recoveries": 0
   },
@@ -19,7 +19,7 @@
     "max_verify_attempts_per_slice": 3,
     "max_wave_recoveries": 1
   },
-  "paused": true,
+  "paused": false,
   "scoped_counters": {
     "verify_attempts": {}
   },
