@@ -53,3 +53,10 @@ This role and its grants live only in the local Docker Postgres volume; they are
 - Any new local Postgres volume (fresh `docker-compose up`, a wiped volume, a new machine) needs this role created once before `pnpm --filter @fxl-sales/api test:integration` can pass; a missing role reproduces as every RLS-guarded test file failing with `RLS tests must run as a non-superuser, non-BYPASSRLS role; got postgres`.
 - `apps/api/.env.dev.example` still does not set `TEST_*`/`ADMIN_DATABASE_URL`, so a fresh `.env` copied from the example needs these three lines added manually; a roadmap item tracks making the example env hermetic by default instead of requiring a manual pin (see `nexo/ROADMAP.md`).
 - Any future slice that adds a new `sales_ops_*` table is covered automatically by the `ALTER DEFAULT PRIVILEGES` grant; no per-table re-grant step is needed.
+
+## Addendum - 2026-10-01 (v4.1.0)
+
+The fallback chain described above is gone.
+`apps/api/test/rls/assert-test-role.ts` now requires `TEST_DATABASE_URL` and `ADMIN_DATABASE_URL`, lets `TEST_MIGRATE_DATABASE_URL` fall back only to `ADMIN_DATABASE_URL`, refuses any non-local host through `src/db/local-database-guard.ts`, and refuses a `SUPERUSER` or `BYPASSRLS` app role once per run.
+`apps/api/.env.dev.example` now ships the three lines with their local values, so the second Consequences bullet no longer holds.
+The integration files read the resolved URLs through `apps/api/src/db/__tests__/test-database-urls.ts` instead of their own fallbacks.

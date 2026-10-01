@@ -1,0 +1,56 @@
+{
+  "agent": "execute",
+  "slice": "15-mutation-survivors",
+  "status": "PASS",
+  "branch": "feat/15-mutation-survivors",
+  "worktree": "/Users/cauetpinciara/Documents/fxl/projects/06--PRODUCT--fxl-sales/.worktrees/hub25/15",
+  "commits": ["106cf5e fix(web): guard Trocar conta with a ref and kill mutation survivors X18, X19, X22, X25"],
+  "files": [
+    "apps/web/src/sales-ops/MissingEntitlementPanel.tsx",
+    "apps/web/src/sales-ops/__tests__/missing-entitlement-panel.test.tsx",
+    "apps/web/src/__tests__/no-role-redirect.test.tsx",
+    "apps/web/src/auth/__tests__/react.test.tsx",
+    "apps/api/src/domains/sellers/__tests__/invitations-client.test.ts"
+  ],
+  "survivors": [
+    {
+      "id": "X22",
+      "test": "missing-entitlement-panel.test.tsx > MissingEntitlementPanel - Trocar conta > ignores a second click that lands before React re-renders the button disabled",
+      "red": "On unmodified code (state-based guard): 'expected \"spy\" to be called 1 times, but got 2 times'. Fixed with leavingAccountRef in handleSwitchAccount (state kept for disabled rendering).",
+      "mutant_killed": "Removed 'if (leavingAccountRef.current) return;' -> 1 failed | 34 passed; reverted -> 35 passed."
+    },
+    {
+      "id": "X25",
+      "test": "no-role-redirect.test.tsx > renders an email-only account email exactly once, never repeated on a secondary line",
+      "red": "Code already correct (secondary = name ? email : undefined); RED shown by re-applying mutant 'secondary = email': split length 3 instead of 2.",
+      "mutant_killed": "Mutant -> 1 failed | 35 passed; reverted -> 36 passed. No source change needed."
+    },
+    {
+      "id": "X19",
+      "test": "react.test.tsx > active organization and the useOrganizations seam > treats an empty organization hint as absent and calls client.switchAccount with no options (new probe button seam-switch-account-empty passes {organization: ''})",
+      "red": "Code already correct (truthiness check); RED shown by re-applying mutant 'if (organization !== undefined)': expected [ { organization: '' } ] to deeply equal [].",
+      "mutant_killed": "Mutant -> 1 failed; reverted -> green. No source change needed."
+    },
+    {
+      "id": "X18",
+      "test": "invitations-client.test.ts > getInvitationsClient when the SDK refuses to build the client > returns null, never throws, and logs only the error name (createHubInvitations doMock throws; console.error asserted to carry only the error name, never the message)",
+      "red": "Code already correct; RED shown by re-applying mutant 'throw error' instead of 'return null': expected [Function] to not throw an error but 'HubConfigRefusedError' was thrown.",
+      "mutant_killed": "Mutant -> 1 failed | 9 passed; reverted -> 10 passed. No source change needed."
+    }
+  ],
+  "checks": {
+    "oracles": "missing-entitlement-panel 35/35, no-role-redirect 36/36, react.test.tsx green, invitations-client 10/10",
+    "web_unit": "100 files, 1185 tests passed",
+    "api_unit": "76 files, 811 tests passed",
+    "lint": "pass (exit 0)",
+    "type_check": "pass (exit 0)",
+    "test_integration": "not run (per instructions)"
+  },
+  "notes": [
+    "Only MissingEntitlementPanel.tsx needed a source change; X25, X19, X18 were correct code lacking an oracle.",
+    "react.tsx and NoRolePage.tsx unchanged (in files_modified but not needed).",
+    "No processes left running; no nexo/ notes; no merge, no push; no Co-Authored-By trailer."
+  ],
+  "done": true,
+  "ts": "2026-10-01T17:15:00Z"
+}

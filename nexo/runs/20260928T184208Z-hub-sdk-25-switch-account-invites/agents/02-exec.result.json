@@ -1,0 +1,33 @@
+{
+  "agent": "execute",
+  "slice": "02-web-switchaccount-seam",
+  "status": "DONE",
+  "branch": "feat/02-web-switchaccount-seam",
+  "commit": "ba658e7",
+  "files": [
+    "apps/web/src/auth/react.tsx",
+    "apps/web/src/auth/__tests__/react.test.tsx",
+    "apps/web/src/auth/__tests__/no-hand-built-prompt.test.ts",
+    "apps/web/src/dev/__tests__/dev-identity-switch-account.test.ts",
+    "apps/web/src/dev/install-dev-identity.ts"
+  ],
+  "checks": [
+    {"command": "pnpm exec vitest run src/auth/__tests__/react.test.tsx src/auth/__tests__/no-hand-built-prompt.test.ts src/dev/__tests__/dev-identity-switch-account.test.ts (RED before impl)", "exit": 1, "counts": "2 failed / 69 passed (switchAccount is not a function)"},
+    {"command": "same oracle set (GREEN after impl)", "exit": 0, "counts": "3 files, 71 passed"},
+    {"command": "pnpm run lint", "exit": 0, "counts": "all packages clean"},
+    {"command": "pnpm run type-check", "exit": 0, "counts": "all packages clean (dev client satisfies 2.5.0 HubClient)"},
+    {"command": "pnpm --filter @fxl-sales/web exec vitest run", "exit": 0, "counts": "98 files, 1090 passed"},
+    {"command": "node --test scripts/__tests__/auth-fake-isolation.test.mjs scripts/__tests__/no-legacy-auth.test.mjs", "exit": 0, "counts": "24 passed"}
+  ],
+  "notes": [
+    "switchAccount follows real 2.5.0 semantics (void, full-document navigation): wrapper is login-shaped, no queryClient.clear / tokenCache.seed / generation guard; setActive critical section untouched.",
+    "Provider wrapper normalizes an absent or empty organization hint to client.switchAccount() with no arguments, so callers may always pass { organization: active?.id }.",
+    "useHubOrganizations returns switchAccount by reference (from context), like setActive; it calls no queryClient.clear.",
+    "Dev shim member already existed from slice 01; only its comment was refined. Its oracle drives the real installDevIdentityIfEnabled + real auth-fake roster (multi-org) and was GREEN on arrival (characterization). Mutation check: a shim that adopts the organization hint turns it RED (hint is a real second org, because the minter ignores non-member ids).",
+    "Guard test parses product sources in apps/web/src and apps/api/src via the TypeScript AST and checks only string/template/JSX-text literals for prompt=, select_account or a bare 'prompt' key; tests are skipped; it asserts non-vacuity (>100 files, react.tsx and server.ts present) and has a positive-control table. Mutation check: injecting a prompt=select_account template literal into session-recovery.ts turned it RED.",
+    "Prettier was not run: the repo has no Prettier config and the touched baseline files are already not Prettier-default formatted.",
+    "test:integration not run per instructions."
+  ],
+  "done": true,
+  "ts": "2026-10-01T19:12:28Z"
+}

@@ -1,0 +1,35 @@
+{
+  "agent": "verify",
+  "slice": "04-trocar-conta-entitlement-panel",
+  "attempt": 2,
+  "status": "PASS",
+  "checks": {
+    "oracle_missing_entitlement_panel": "PASS (34/34)",
+    "oracle_entitlement_dead_end": "PASS (5/5)",
+    "lint": "PASS (exit 0)",
+    "type_check": "PASS (exit 0)",
+    "web_unit_suite": "PASS (98 files, 1118 tests)",
+    "no_em_dash_added": "PASS (0 added lines)",
+    "no_co_authored_by_trailer": "PASS (none in master..HEAD)",
+    "contract": "PASS: copy from MISSING_ENTITLEMENT_COPY; switchAccount via useOrganizations provider wrapper with {organization: active id} or no argument; panel passes no onRetry from Trocar conta and never reloads; distinct data-account-switch block after data-organization-switch and data-hub-checkout; no raw id rendered",
+    "git_status_clean_after_probes": "PASS"
+  },
+  "mutations": [
+    {"probe": "onRetry?.() in handleSwitchAccount (attempt-1 blocker)", "result": "RED", "killed_by": "calls the provider switchAccount once with the active Organization and never reloads"},
+    {"probe": "drop the organization option", "result": "RED", "killed_by": "calls the provider switchAccount once with the active Organization and never reloads"},
+    {"probe": "allow a second click (remove in-handler guard AND disabled={leavingAccount})", "result": "RED", "killed_by": "ignores a second click while the account switch is already navigating"},
+    {"probe": "allow a second click (remove only the in-handler guard)", "result": "GREEN (equivalent mutant: the disabled attribute still blocks the click)"},
+    {"probe": "render the raw active id in the account block", "result": "RED", "killed_by": "renders no raw Organization id in the account block"},
+    {"probe": "account block before the org switch", "result": "RED", "killed_by": "comes after the free Organization switch and the Hub checkout in document order"},
+    {"probe": "window.location.reload() in handleSwitchAccount", "result": "RED", "killed_by": "never reloads + source invariants"},
+    {"probe": "avatar without initials fallback on image error (drop onError)", "result": "RED", "killed_by": "falls back to the account initials when the avatar image fails to load"},
+    {"probe": "raw active id as avatar name/initials when name and email are missing", "result": "RED", "killed_by": "renders no account line at all when neither a name nor an email is known"}
+  ],
+  "findings": [
+    "NON-BLOCKING: AccountAvatar is duplicated verbatim in MissingEntitlementPanel.tsx and SalesOpsApp.tsx (identical classes, img attributes, onError keyed on URL, initials()). Recommend extracting it to a leaf module, e.g. apps/web/src/sales-ops/AccountAvatar.tsx (importing only initials from ./calculations), imported by both; a leaf module has no cycle because it imports neither SalesOpsApp nor the panel. Same treatment fits the duplicated mutedPanelClass/mutedStateClass/actionButtonClass constants (a sales-ops style-tokens module).",
+    "NON-BLOCKING: visual divergence is only behavioural, not stylistic: the panel copy adds data-account-avatar; the panel derives initials from the email when name is absent and hides the avatar entirely when both are absent, whereas the shell falls back to the name 'FXL'. Both are acceptable per the rule 'tolerate absence'.",
+    "NON-BLOCKING: the in-handler leavingAccount guard is redundant with disabled={leavingAccount}; removing only the guard is an equivalent mutant. Defense in depth, no action required."
+  ],
+  "done": true,
+  "ts": "2026-10-01T16:26:00-03:00"
+}

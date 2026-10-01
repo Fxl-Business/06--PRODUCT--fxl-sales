@@ -1,0 +1,31 @@
+{
+  "agent": "verify",
+  "slice": "05-trocar-conta-no-role",
+  "status": "PASS",
+  "checks": {
+    "named_oracle": "PASS - no-role-redirect.test.tsx (34) + keys-resolve.test.ts: 42/42",
+    "lint": "PASS - pnpm run lint exit 0",
+    "type_check": "PASS - pnpm run type-check exit 0",
+    "web_unit_suite": "PASS - 98 files, 1098 tests",
+    "no_role_guard_unchanged": "PASS - RoleGuard.tsx and navigation.ts not in diff; existing NoRoleGuard tests green",
+    "no_raw_ids": "PASS - account block shows name/email only, omitted when both absent; org id asserted absent from text",
+    "no_prompt_built": "PASS - page calls provider switchAccount from useOrganizations; no prompt= literal added",
+    "locales_in_sync": "PASS - errors.noRole.signedInAs and switchAccount added to both pt-BR.json and en.json",
+    "no_em_dash": "PASS - 0 added lines contain an em dash",
+    "no_co_authored_by": "PASS - commit 135646a has no trailer",
+    "git_status_clean": "PASS"
+  },
+  "mutations": [
+    {"id": "M1", "probe": "switchAccount({}) drops the organization option", "result": "RED (killed)"},
+    {"id": "M2", "probe": "remove errors.noRole.switchAccount from en.json only", "result": "RED (killed: keys-resolve + English copy test)"},
+    {"id": "M3", "probe": "fall back to active?.id when name and email are missing", "result": "RED (killed)"},
+    {"id": "M4", "probe": "hide Trocar conta when no active organization", "result": "RED (killed: 3 tests)"},
+    {"id": "M5", "probe": "call switchAccount twice per click", "result": "RED (killed: 2 tests)"}
+  ],
+  "findings": [
+    "Declared deviation accepted: errors.noRole.signedInAs is a needed label for the plan's optional active-account display and is present in both locales; Trocar conta as filled primary with Sair outlined matches the slice intent (switching is the recommended recovery).",
+    "NON-BLOCKING: the new test 'resolves the copy from i18n in English too' emits a React 'update to NoRolePage inside a test was not wrapped in act(...)' warning, caused by i18n.changeLanguage('pt-BR') in its finally block while the page is still mounted. Wrap that call in act() (or restore the language after unmount) to keep the suite output clean."
+  ],
+  "done": true,
+  "ts": "2026-10-01T16:25:00Z"
+}

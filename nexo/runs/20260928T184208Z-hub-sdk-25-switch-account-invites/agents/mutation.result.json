@@ -1,0 +1,540 @@
+{
+ "agent": "mutation",
+ "commit": "65fbec0",
+ "status": "PASS",
+ "mutants": [
+  {
+   "id": "M01",
+   "file": "apps/web/package.json",
+   "change": "hub-sdk pin 2.5.0 -> ^2.5.0",
+   "result": "KILLED",
+   "killing_test": "not ok 36 - apps/web/package.json pins @fxl-business/hub-sdk at exactly 2.5.0 under dependencies",
+   "killed_by_scope": "node"
+  },
+  {
+   "id": "M02",
+   "file": "apps/api/src/domains/sellers/admin-service.ts",
+   "change": "appRoles ['seller'] -> ['seller','admin']",
+   "result": "KILLED",
+   "killing_test": "× POST / creates the seller and sends the Hub invitation > invites with the raw bearer, email, exactly the seller role and no Organization 19ms",
+   "killed_by_scope": "api"
+  },
+  {
+   "id": "M03",
+   "file": "apps/api/src/domains/sellers/admin-routes.ts",
+   "change": "create: accessToken from request body instead of Authorization header",
+   "result": "KILLED",
+   "killing_test": "× POST / creates the seller and sends the Hub invitation > invites with the raw bearer, email, exactly the seller role and no Organization 15ms",
+   "killed_by_scope": "api"
+  },
+  {
+   "id": "M04",
+   "file": "apps/api/src/domains/sellers/admin-service.ts",
+   "change": "add organizationId: actor.orgId to invitations.create",
+   "result": "KILLED",
+   "killing_test": "× POST / creates the seller and sends the Hub invitation > invites with the raw bearer, email, exactly the seller role and no Organization 13ms",
+   "killed_by_scope": "api"
+  },
+  {
+   "id": "M05",
+   "file": "apps/api/src/domains/sellers/admin-service.ts",
+   "change": "delete the seller row when the invite fails",
+   "result": "KILLED",
+   "killing_test": "× POST / creates the seller and sends the Hub invitation > keeps the seller when the Hub refuses the invite and answers the mapped code 6ms",
+   "killed_by_scope": "api"
+  },
+  {
+   "id": "M06",
+   "file": "apps/api/src/domains/sellers/invitation-error.ts",
+   "change": "mapInvitationError keyed on err.message instead of err.code",
+   "result": "KILLED",
+   "killing_test": "× mapInvitationError > maps actor_not_member to its fixed response 6ms",
+   "killed_by_scope": "api"
+  },
+  {
+   "id": "M07",
+   "file": "apps/api/src/domains/sellers/invitation-error.ts",
+   "change": "INVITATIONS_UNAVAILABLE code -> 'hub_unavailable'",
+   "result": "KILLED",
+   "killing_test": "× INVITATIONS_UNAVAILABLE > is a 503 whose body is byte-identical to the existing hub_auth_not_configured body 7ms",
+   "killed_by_scope": "api"
+  },
+  {
+   "id": "M08",
+   "file": "apps/api/src/domains/sellers/invitations-client.ts",
+   "change": "getInvitationsClient ignores isAppAuthAdapterInstalled()",
+   "result": "KILLED",
+   "killing_test": "× getInvitationsClient with a VALID Hub config > is null while the development identity adapter is installed, and nothing contacts the Hub 38ms",
+   "killed_by_scope": "api"
+  },
+  {
+   "id": "M09",
+   "file": "apps/api/src/middleware/app-auth.ts",
+   "change": "isAppAuthAdapterInstalled always false",
+   "result": "KILLED",
+   "killing_test": "× getInvitationsClient with a VALID Hub config > is null while the development identity adapter is installed, and nothing contacts the Hub 53ms",
+   "killed_by_scope": "api"
+  },
+  {
+   "id": "M10",
+   "file": "apps/web/src/auth/react.tsx",
+   "change": "switchAccount seam drops the organization option",
+   "result": "KILLED",
+   "killing_test": "× active organization and the useOrganizations seam > reaches client.switchAccount once through the seam with the active organization 8ms",
+   "killed_by_scope": "web"
+  },
+  {
+   "id": "M11",
+   "file": "apps/web/src/auth/react.tsx",
+   "change": "seam switchAccount calls queryClient.clear()",
+   "result": "KILLED",
+   "killing_test": "× active organization and the useOrganizations seam > reaches client.switchAccount once through the seam with the active organization 7ms",
+   "killed_by_scope": "web"
+  },
+  {
+   "id": "M12",
+   "file": "apps/web/src/auth/__tests__/no-hand-built-prompt.test.ts",
+   "change": "no-hand-built-prompt guard scans an empty directory list",
+   "result": "KILLED",
+   "killing_test": "× no hand-built prompt parameter > finds no prompt= literal in any web or api product source file 13ms",
+   "killed_by_scope": "web"
+  },
+  {
+   "id": "M13",
+   "file": "apps/api/src/domains/sellers/__tests__/seller-invitation-schema.test.ts",
+   "change": "journal check: previous of 0026 expected 0024",
+   "result": "KILLED",
+   "killing_test": "× seller invitation schema (migration 0026) > journals 0026_seller_invitation_state immediately after 0025_integration_transport 21ms",
+   "killed_by_scope": "api"
+  },
+  {
+   "id": "M14",
+   "file": "apps/api/src/domains/sellers/admin-service.ts",
+   "change": "cross-org check on resend/revoke removed",
+   "result": "KILLED",
+   "killing_test": "× POST /:id/resend > answers 404 like an unknown seller when the invitation belongs to another Organization 10ms",
+   "killed_by_scope": "api"
+  },
+  {
+   "id": "M15",
+   "file": "apps/api/src/domains/sellers/admin-routes.ts",
+   "change": "resend/revoke error body without retryAfterSeconds",
+   "result": "KILLED",
+   "killing_test": "× POST /:id/resend > carries retryAfterSeconds in the body as well as the Retry-After header on a rate limit 6ms",
+   "killed_by_scope": "api"
+  },
+  {
+   "id": "M16",
+   "file": "apps/web/src/admin/sellers/hooks/useSellers.ts",
+   "change": "inviteLocaleOf: 'en' -> 'pt-BR'",
+   "result": "KILLED",
+   "killing_test": "× invite locale follows the active UI language > en: create and resend send locale en 57ms",
+   "killed_by_scope": "web"
+  },
+  {
+   "id": "M17",
+   "file": "apps/web/src/admin/sellers/AdminSellersPage.tsx",
+   "change": "admin UI reads create outcome from HTTP status (always 201) instead of body.inviteError",
+   "result": "KILLED",
+   "killing_test": "× create outcome > an inviteError renders the copy of its code, never the server message 36ms",
+   "killed_by_scope": "web"
+  },
+  {
+   "id": "M18",
+   "file": "apps/web/src/sales-ops/AccountAvatar.tsx",
+   "change": "AccountAvatar drops initials fallback on image error",
+   "result": "KILLED",
+   "killing_test": "× AccountAvatar > falls back to the initials when the image fails, and retries a NEW url 7ms",
+   "killed_by_scope": "web"
+  },
+  {
+   "id": "M19",
+   "file": "apps/web/src/sales-ops/MissingEntitlementPanel.tsx",
+   "change": "MissingEntitlementPanel's Trocar conta calls onRetry",
+   "result": "KILLED",
+   "killing_test": "× MissingEntitlementPanel - Trocar conta > calls the provider switchAccount once with the active Organization and never reloads 11ms",
+   "killed_by_scope": "web"
+  },
+  {
+   "id": "M20",
+   "file": "apps/web/src/pages/errors/NoRolePage.tsx",
+   "change": "NoRolePage Trocar conta allows a second call (ref guard removed)",
+   "result": "KILLED",
+   "killing_test": "× /no-role offers \"Trocar conta\" for a person signed in with the wrong account > ignores a second click while the account switch is already navigating 7ms",
+   "killed_by_scope": "web"
+  },
+  {
+   "id": "M21",
+   "file": "apps/api/src/domains/sellers/admin-service.ts",
+   "change": "GET /sellers reconcile calls list() once without status",
+   "result": "KILLED",
+   "killing_test": "× GET / reconciles invitation state from the Hub > asks the Hub with the bearer for every status and surfaces accepted and expired 5ms",
+   "killed_by_scope": "api"
+  },
+  {
+   "id": "M22",
+   "file": "apps/api/src/domains/sellers/admin-service.ts",
+   "change": "hub_auth_not_configured outcome on create replaced by throwing",
+   "result": "KILLED",
+   "killing_test": "× POST / creates the seller and sends the Hub invitation > with no invitations client, saves the seller and answers hub_auth_not_configured without calling the Hub 5ms",
+   "killed_by_scope": "api"
+  },
+  {
+   "id": "X01",
+   "file": "apps/api/src/domains/sellers/invitation-error.ts",
+   "change": "retryAfterSeconds attached for every code, not only rate_limited",
+   "result": "KILLED",
+   "killing_test": "× mapInvitationError > never carries retryAfterSeconds on a code other than rate_limited 3ms",
+   "killed_by_scope": "api"
+  },
+  {
+   "id": "X02",
+   "file": "apps/api/src/domains/sellers/invitation-error.ts",
+   "change": "isKnownCode uses `in` (prototype keys count as known)",
+   "result": "KILLED",
+   "killing_test": "× mapInvitationError > does not treat an inherited Object.prototype key as a known code 3ms",
+   "killed_by_scope": "api"
+  },
+  {
+   "id": "X03",
+   "file": "apps/api/src/domains/sellers/invitation-error.ts",
+   "change": "invalid_actor_token 401 -> 403",
+   "result": "KILLED",
+   "killing_test": "× mapInvitationError > maps invalid_actor_token to its fixed response 4ms",
+   "killed_by_scope": "api"
+  },
+  {
+   "id": "X04",
+   "file": "apps/api/src/domains/sellers/admin-service.ts",
+   "change": "reconcile writes even when status unchanged",
+   "result": "KILLED",
+   "killing_test": "× GET / reconciles invitation state from the Hub > asks the Hub with the bearer for every status and surfaces accepted and expired 4ms",
+   "killed_by_scope": "api"
+  },
+  {
+   "id": "X05",
+   "file": "apps/api/src/domains/sellers/admin-service.ts",
+   "change": "create records invitedOrgId null instead of actor org",
+   "result": "KILLED",
+   "killing_test": "× POST / creates the seller and sends the Hub invitation > persists the invitation id, pending status and the verified org 7ms",
+   "killed_by_scope": "api"
+  },
+  {
+   "id": "X06",
+   "file": "apps/api/src/domains/sellers/admin-service.ts",
+   "change": "resend keeps the old invitation id",
+   "result": "KILLED",
+   "killing_test": "× POST /:id/resend > stores the id the Hub answers with 8ms",
+   "killed_by_scope": "api"
+  },
+  {
+   "id": "X07",
+   "file": "apps/api/src/domains/sellers/admin-service.ts",
+   "change": "revoke does not persist revoked status",
+   "result": "KILLED",
+   "killing_test": "× POST /:id/revoke > revokes the stored invitation and records it as revoked 6ms",
+   "killed_by_scope": "api"
+  },
+  {
+   "id": "X08",
+   "file": "apps/api/src/domains/sellers/admin-service.ts",
+   "change": "non-Hub error logs message instead of name",
+   "result": "KILLED",
+   "killing_test": "× POST / creates the seller and sends the Hub invitation > never hands the accept URL to any console call 6ms",
+   "killed_by_scope": "api"
+  },
+  {
+   "id": "X09",
+   "file": "apps/api/src/domains/sellers/admin-service.ts",
+   "change": "deliveryOf drops acceptUrl",
+   "result": "KILLED",
+   "killing_test": "× POST / creates the seller and sends the Hub invitation > persists the invitation id, pending status and the verified org 5ms",
+   "killed_by_scope": "api"
+  },
+  {
+   "id": "X10",
+   "file": "apps/api/src/domains/sellers/admin-service.ts",
+   "change": "resend/revoke: missing invitationId answers not_found instead of 409",
+   "result": "KILLED",
+   "killing_test": "× POST /:id/resend > answers 409 seller_not_invited for a seller without a stored invitation 4ms",
+   "killed_by_scope": "api"
+  },
+  {
+   "id": "X11",
+   "file": "apps/api/src/domains/sellers/admin-service.ts",
+   "change": "withStoredInvitation: client check after seller lookup removed (null client -> not_found)",
+   "result": "KILLED",
+   "killing_test": "× POST /:id/resend > answers the unavailable body when there is no invitations client 4ms",
+   "killed_by_scope": "api"
+  },
+  {
+   "id": "X12",
+   "file": "apps/api/src/domains/sellers/admin-routes.ts",
+   "change": "create answers the invite failure status instead of 201",
+   "result": "KILLED",
+   "killing_test": "× POST / creates the seller and sends the Hub invitation > keeps the seller when the Hub refuses the invite and answers the mapped code 5ms",
+   "killed_by_scope": "api"
+  },
+  {
+   "id": "X13",
+   "file": "apps/api/src/domains/sellers/admin-routes.ts",
+   "change": "bearerOf keeps the Bearer prefix",
+   "result": "KILLED",
+   "killing_test": "× POST / creates the seller and sends the Hub invitation > invites with the raw bearer, email, exactly the seller role and no Organization 11ms",
+   "killed_by_scope": "api"
+  },
+  {
+   "id": "X14",
+   "file": "apps/api/src/domains/sellers/admin-routes.ts",
+   "change": "seller id uuid validation removed",
+   "result": "SURVIVED",
+   "killing_test": null,
+   "killed_by_scope": null
+  },
+  {
+   "id": "X15",
+   "file": "apps/api/src/domains/sellers/admin-routes.ts",
+   "change": "Retry-After header not set",
+   "result": "KILLED",
+   "killing_test": "× POST / creates the seller and sends the Hub invitation > carries Retry-After when the Hub rate-limits the invite 5ms",
+   "killed_by_scope": "api"
+  },
+  {
+   "id": "X16",
+   "file": "apps/api/src/domains/sellers/admin-routes.ts",
+   "change": "locale default 'pt-BR' -> 'en'",
+   "result": "KILLED",
+   "killing_test": "× POST / creates the seller and sends the Hub invitation > invites with the raw bearer, email, exactly the seller role and no Organization 11ms",
+   "killed_by_scope": "api"
+  },
+  {
+   "id": "X17",
+   "file": "apps/api/src/domains/sellers/invitations-client.ts",
+   "change": "no memoization: client rebuilt on each call",
+   "result": "KILLED",
+   "killing_test": "× getInvitationsClient with a VALID Hub config > positive control: builds ONE real client from getHubSdkConfig() with no network I/O 477ms",
+   "killed_by_scope": "api"
+  },
+  {
+   "id": "X18",
+   "file": "apps/api/src/domains/sellers/invitations-client.ts",
+   "change": "construction error rethrown instead of null",
+   "result": "SURVIVED",
+   "killing_test": null,
+   "killed_by_scope": null
+  },
+  {
+   "id": "X19",
+   "file": "apps/web/src/auth/react.tsx",
+   "change": "seam forwards an empty organization hint",
+   "result": "SURVIVED",
+   "killing_test": null,
+   "killed_by_scope": null
+  },
+  {
+   "id": "X20",
+   "file": "apps/web/src/sales-ops/MissingEntitlementPanel.tsx",
+   "change": "panel always forwards {organization: activeId}, even undefined",
+   "result": "KILLED",
+   "killing_test": "× MissingEntitlementPanel - Trocar conta > calls switchAccount with no Organization hint when none is active 8ms",
+   "killed_by_scope": "web"
+  },
+  {
+   "id": "X21",
+   "file": "apps/web/src/sales-ops/MissingEntitlementPanel.tsx",
+   "change": "panel switch button not disabled while leaving / switching",
+   "result": "KILLED",
+   "killing_test": "× MissingEntitlementPanel - Trocar conta > ignores a second click while the account switch is already navigating 7ms",
+   "killed_by_scope": "web"
+  },
+  {
+   "id": "X22",
+   "file": "apps/web/src/sales-ops/MissingEntitlementPanel.tsx",
+   "change": "panel switch guard removed (leavingAccount check)",
+   "result": "SURVIVED",
+   "killing_test": null,
+   "killed_by_scope": null
+  },
+  {
+   "id": "X23",
+   "file": "apps/web/src/pages/errors/NoRolePage.tsx",
+   "change": "NoRolePage button never disabled AND ref guard removed",
+   "result": "KILLED",
+   "killing_test": "× /no-role offers \"Trocar conta\" for a person signed in with the wrong account > ignores a second click while the account switch is already navigating 6ms",
+   "killed_by_scope": "web"
+  },
+  {
+   "id": "X24",
+   "file": "apps/web/src/pages/errors/NoRolePage.tsx",
+   "change": "NoRolePage drops organization hint",
+   "result": "KILLED",
+   "killing_test": "× /no-role offers \"Trocar conta\" for a person signed in with the wrong account > calls the provider switchAccount exactly once with the active Organization as the hint 6ms",
+   "killed_by_scope": "web"
+  },
+  {
+   "id": "X25",
+   "file": "apps/web/src/pages/errors/NoRolePage.tsx",
+   "change": "NoRolePage secondary shows email even without name",
+   "result": "SURVIVED",
+   "killing_test": null,
+   "killed_by_scope": null
+  },
+  {
+   "id": "X26",
+   "file": "apps/web/src/sales-ops/SalesOpsApp.tsx",
+   "change": "shell Trocar conta drops organization hint",
+   "result": "KILLED",
+   "killing_test": "× sales-ops account dropdown Trocar conta > calls the provider switchAccount once with the active Organization as the hint 16ms",
+   "killed_by_scope": "web"
+  },
+  {
+   "id": "X27",
+   "file": "apps/web/src/dev/install-dev-identity.ts",
+   "change": "dev identity switchAccount does not reload",
+   "result": "KILLED",
+   "killing_test": "× dev identity client switchAccount > exists on the stand-in client and reloads exactly like login 46ms",
+   "killed_by_scope": "web"
+  },
+  {
+   "id": "X28",
+   "file": "apps/web/src/sales-ops/AccountAvatar.tsx",
+   "change": "avatar fallback not re-keyed on a new URL",
+   "result": "KILLED",
+   "killing_test": "× AccountAvatar > falls back to the initials when the image fails, and retries a NEW url 8ms",
+   "killed_by_scope": "web"
+  },
+  {
+   "id": "X29",
+   "file": "apps/web/src/lib/api-client.ts",
+   "change": "retryAfterOf boundary >= 0 -> > 0",
+   "result": "SURVIVED",
+   "killing_test": null,
+   "killed_by_scope": null
+  },
+  {
+   "id": "X30",
+   "file": "apps/web/src/lib/api-client.ts",
+   "change": "Retry-After header fallback removed",
+   "result": "KILLED",
+   "killing_test": "× row resend and revoke > resend errors render by code: no Hub, not invited, rate limited 55ms",
+   "killed_by_scope": "web"
+  },
+  {
+   "id": "X31",
+   "file": "apps/web/src/admin/sellers/AdminSellersPage.tsx",
+   "change": "canResend drops expired",
+   "result": "KILLED",
+   "killing_test": "× invitation state per row > offers resend on pending and expired rows and revoke only on pending ones 17ms",
+   "killed_by_scope": "web"
+  },
+  {
+   "id": "X32",
+   "file": "apps/web/src/admin/sellers/AdminSellersPage.tsx",
+   "change": "canRevoke allows expired",
+   "result": "KILLED",
+   "killing_test": "× invitation state per row > offers resend on pending and expired rows and revoke only on pending ones 28ms",
+   "killed_by_scope": "web"
+  },
+  {
+   "id": "X33",
+   "file": "apps/web/src/admin/sellers/AdminSellersPage.tsx",
+   "change": "rate-limited wait copy ignores retryAfterSeconds",
+   "result": "KILLED",
+   "killing_test": "× create outcome > rate_limited shows the retry wait 39ms",
+   "killed_by_scope": "web"
+  },
+  {
+   "id": "X34",
+   "file": "apps/web/src/admin/sellers/AdminSellersPage.tsx",
+   "change": "problemOf keys on error instead of code",
+   "result": "KILLED",
+   "killing_test": "× row resend and revoke > resend errors render by code: no Hub, not invited, rate limited 23ms",
+   "killed_by_scope": "web"
+  },
+  {
+   "id": "X35",
+   "file": "apps/web/src/admin/sellers/hooks/useSellers.ts",
+   "change": "resend sends no fresh locale (always pt-BR)",
+   "result": "KILLED",
+   "killing_test": "× invite locale follows the active UI language > en: create and resend send locale en 46ms",
+   "killed_by_scope": "web"
+  },
+  {
+   "id": "X36",
+   "file": "apps/api/package.json",
+   "change": "api hub-sdk pin 2.5.0 -> ^2.5.0",
+   "result": "KILLED",
+   "killing_test": "not ok 35 - apps/api/package.json pins @fxl-business/hub-sdk at exactly 2.5.0 under dependencies",
+   "killed_by_scope": "node"
+  },
+  {
+   "id": "X37",
+   "file": "apps/api/src/domains/sellers/admin-service.ts",
+   "change": "listSellers: Hub read with any failure discards all statuses",
+   "result": "SURVIVED",
+   "killing_test": null,
+   "killed_by_scope": null
+  }
+ ],
+ "survivors": [
+  {
+   "id": "X14",
+   "file": "apps/api/src/domains/sellers/admin-routes.ts",
+   "change": "seller id uuid validation removed",
+   "analysis": "SellerIdSchema uuid check removed on /:id/resend and /:id/revoke. Unit tests use a fake db that never parses ids, so a non-uuid id reaching Postgres (22P02 -> 500 instead of 404) is invisible. Non-load-bearing: admin-only route, no data exposure, only the status code of a malformed id changes.",
+   "killing_test_to_add": "seller-invite.test.ts: POST /not-a-uuid/resend and /not-a-uuid/revoke answer 404 {error:'not_found'} and the fake db/Hub client records zero calls."
+  },
+  {
+   "id": "X18",
+   "file": "apps/api/src/domains/sellers/invitations-client.ts",
+   "change": "construction error rethrown instead of null",
+   "analysis": "resolveRealClient rethrows instead of returning null when createHubInvitations throws. The code comment states the path is unreachable because boot already validated the same config. Non-load-bearing (dead defensive branch).",
+   "killing_test_to_add": "invitations-client.test.ts: vi.mock createHubInvitations to throw with a valid config; expect getInvitationsClient() toBeNull() and console.error called with the error name only."
+  },
+  {
+   "id": "X19",
+   "file": "apps/web/src/auth/react.tsx",
+   "change": "seam forwards an empty organization hint",
+   "analysis": "Seam forwards {organization: ''} instead of normalizing an empty hint. Equivalent in practice: no caller can produce an empty-string org id (panel/NoRole/shell pass a real id or undefined).",
+   "killing_test_to_add": "react.test.tsx: useOrganizations().switchAccount({ organization: '' }) -> client.switchAccount toHaveBeenCalledWith() with zero arguments."
+  },
+  {
+   "id": "X22",
+   "file": "apps/web/src/sales-ops/MissingEntitlementPanel.tsx",
+   "change": "panel switch guard removed (leavingAccount check)",
+   "analysis": "Equivalent mutant: MissingEntitlementPanel's `if (leavingAccount) return;` reads stale state, so it is redundant with the button's disabled attribute; removing it changes nothing observable. PROBE (temporary, reverted): two .click() calls in ONE act on the panel's Trocar conta call seam.switchAccount TWICE on unmutated code, unlike NoRolePage which uses a ref. Latent defect, low impact (two full-document navigations to the same SDK URL), not on the load-bearing list. Recommend a follow-up: ref guard in the panel like NoRolePage.",
+   "killing_test_to_add": "missing-entitlement-panel.test.tsx 'ignores a second click...': click twice inside one act(...) (as no-role-redirect.test.tsx does); fails today until the panel uses a ref guard, after which removing the guard is killed."
+  },
+  {
+   "id": "X25",
+   "file": "apps/web/src/pages/errors/NoRolePage.tsx",
+   "change": "NoRolePage secondary shows email even without name",
+   "analysis": "NoRolePage secondary line shows the email even when there is no name, so an email-only profile renders the email twice. Cosmetic (pixel-level) only.",
+   "killing_test_to_add": "no-role-redirect.test.tsx: profile {name: undefined, email: 'a@b.c'} -> the no-role-active-account block contains the email exactly once."
+  },
+  {
+   "id": "X29",
+   "file": "apps/web/src/lib/api-client.ts",
+   "change": "retryAfterOf boundary >= 0 -> > 0",
+   "analysis": "retryAfterOf boundary `>= 0` -> `> 0`: a body retryAfterSeconds of 0 would be dropped (falling back to the header). Hub sending 0 on a 429 is not a realistic case. Non-load-bearing boundary.",
+   "killing_test_to_add": "api-client test: a 429 whose body has retryAfterSeconds: 0 and no Retry-After header rejects with ApiError.retryAfterSeconds === 0."
+  },
+  {
+   "id": "X37",
+   "file": "apps/api/src/domains/sellers/admin-service.ts",
+   "change": "listSellers: Hub read with any failure discards all statuses",
+   "analysis": "listSellers partial reconcile: mutant discards ALL Hub statuses when any one of the four per-status list() calls fails. The documented rule ('A status whose call fails is simply not reconciled') is untested; failure mode is only staler display state (persisted status shown), never wrong data written. Non-load-bearing, but a real coverage gap.",
+   "killing_test_to_add": "seller-invite.test.ts GET /: fake list() rejects for status 'expired' and resolves 'accepted' for a stored invitation; expect that seller's invitationStatus updated to 'accepted'."
+  }
+ ],
+ "score": {
+  "killed": 52,
+  "total": 59,
+  "percent": 88.1,
+  "required_killed": 22,
+  "required_total": 22
+ },
+ "notes": "Manual battery in .worktrees/hub25/mut. Each mutant: narrow files first, survivors re-run against full api/web vitest suites and node --test scripts/__tests__/*.test.mjs. No test:integration run. No timeouts observed; every kill is an assertion failure. All 22 requested mutants (every load-bearing rule in the plan's Verification posture) KILLED. Recommended follow-up: X22 latent double-navigation in MissingEntitlementPanel. git status clean after battery.",
+ "done": true,
+ "ts": "2026-10-01T20:06:57.800311+00:00"
+}

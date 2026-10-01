@@ -1,0 +1,64 @@
+{
+  "agent": "execute",
+  "slice": "14-send-invite-to-uninvited-seller",
+  "status": "done",
+  "branch": "feat/14-send-invite-to-uninvited-seller",
+  "worktree": "/Users/cauetpinciara/Documents/fxl/projects/06--PRODUCT--fxl-sales/.worktrees/hub25/14",
+  "commits": [
+    "aa05320 feat(sellers): send a new invitation to a seller without one",
+    "452742a test(sellers): cover POST /:id/invite in the real admin gate"
+  ],
+  "files": [
+    "apps/api/src/domains/sellers/admin-service.ts",
+    "apps/api/src/domains/sellers/admin-routes.ts",
+    "apps/api/src/domains/sellers/__tests__/seller-invite.test.ts",
+    "apps/web/src/admin/sellers/AdminSellersPage.tsx",
+    "apps/web/src/admin/sellers/hooks/useSellers.ts",
+    "apps/web/src/lib/api-client.ts",
+    "apps/web/src/i18n/pt-BR.json",
+    "apps/web/src/i18n/en.json",
+    "apps/web/src/admin/sellers/__tests__/AdminSellersPage.test.tsx",
+    "apps/api/src/domains/sellers/__tests__/seller-routes-admin-gate.test.ts"
+  ],
+  "http_contract": {
+    "route": "POST /api/v1/admin/sellers/:id/invite",
+    "auth": "inherited appAuthMiddleware + requireAdmin (admin group); bearer read from Authorization header",
+    "body": "{ locale?: 'pt-BR' | 'en' } (default pt-BR; no body accepted; any other body field ignored)",
+    "hub_call": "inviteSellerRow -> client.create({ accessToken, email: seller.contactEmail, appRoles: ['seller'], locale }), the SAME helper POST / uses; no organizationId",
+    "responses": {
+      "200": "{ seller, invitation, acceptUrl, emailDelivery, warnings } after persisting invitationId, invitationStatus 'pending', invitedOrgId = c.get('orgId')",
+      "400": "validation_error (unsupported locale), before the Hub",
+      "404": "{ error: 'not_found' } for a non-uuid id (no db read, no Hub), an unknown seller, or a seller whose stored invitedOrgId is non-null and differs from c.get('orgId') (byte-identical)",
+      "409": "{ error: 'conflict', code: 'seller_already_invited' } when the stored invitation is pending, expired or accepted (only null or revoked may get a new one)",
+      "503": "{ error: 'unavailable', code: 'hub_auth_not_configured' } with no invitations client, nothing written",
+      "mapped": "any HubInvitationError via mapInvitationError (status + body, retryAfterSeconds in body and Retry-After header); non-Hub error -> 500 internal_error/unknown; a failure writes nothing (never rolls back)"
+    },
+    "unchanged": "POST /:id/resend still answers 409 seller_not_invited with no stored invitation"
+  },
+  "checks": {
+    "oracle_api_seller-invite.test.ts": "RED 14 failing before impl, then 50/50 pass",
+    "oracle_web_AdminSellersPage.test.tsx": "RED 11 failing before impl, then 63/63 pass (with i18n keys-resolve: 71/71)",
+    "keys_resolve": "pass",
+    "api_unit": "76 files, 828 tests pass",
+    "web_unit": "100 files, 1192 tests pass",
+    "lint": "pnpm run lint exit 0",
+    "type_check": "pnpm run type-check exit 0",
+    "manual_mutants": "all killed: X29 (>=0 -> >0), X37 (any failed status discards all), X14 (uuid check removed on invite), canSendInvitation drops revoked, no-Hub retry copy disabled, invite allows any status, invitedOrgId not persisted",
+    "test_integration": "not run (per instruction)",
+    "admin_gate_test": "seller-routes-admin-gate.test.ts 7/7 pass; RED shown by temporarily mounting POST /sellers/:id/invite ahead of requireAdmin in domains/admin/index.ts (non-admin got the handler's 404 instead of 403), probe reverted (index.ts unchanged); eslint + tsc -p tsconfig.test.json clean"
+  },
+  "notes": [
+    "Refactor: inviteSellerRow(client, seller, actor, locale) is the only place building client.create; createSellerAndInvite inserts the row then delegates. withOwnSeller is the shared client/seller/cross-org preamble; withStoredInvitation (resend/revoke) layers the seller_not_invited check on it.",
+    "Decision: Enviar convite IS offered on revoked rows (a revoked invitation cannot be resent by the Hub) and never on pending/expired (Reenviar) or accepted. It never shares a row with Reenviar/Revogar. API enforces the same rule with 409 seller_already_invited.",
+    "Copy: errors.hub_auth_not_configured now says to use 'Enviar convite' / 'Send invitation' on the seller's row (no 'reenvie'/'resend'). A 503 on resend or revoke (the seller HAS an invitation) renders the new invitation.hubNotConfiguredRetry ('...e depois tente novamente.') instead. seller_not_invited copy points to Enviar convite; new seller_already_invited copy in both locales. New keys: actions.send, outcome.invitedTitle, outcome.inviteFailedTitle.",
+    "UI: Enviar convite is variant outline size sm, same classes as Reenviar (test asserts className equality), disabled while any row action is in flight, aria-busy + Loader2 spinner while sending, inside the unchanged h-9 actions cell. Outcome dialog reuses the create/resend body (warnings by code, acceptUrl for email_not_configured, resend offer for email_failed).",
+    "X14/X37/X29 killed: fake db now counts reads; malformed id on resend/revoke/invite asserts zero reads and zero Hub calls; GET / with list('expired') rejecting still writes 'accepted'; page test with body retryAfterSeconds 0 and Retry-After 17 shows 0.",
+    "Browser check under make dev-fake not performed by this agent (to avoid port clashes with the main checkout); the UI parity is asserted structurally in the oracle.",
+    "Admin gate: ROUTES now includes POST /sellers/:id/invite (non-admin token -> requireAdmin 403 body, zero invitations-client calls, zero db calls) plus an admin positive control (admin token reaches the invite handler: 404 not_found from the empty fake db, db reached, create not called)."
+  ],
+  "done": true,
+  "ts": "2026-10-01T00:30:00Z",
+  "extra_files_outside_files_modified": [
+    "apps/api/src/domains/sellers/__tests__/seller-routes-admin-gate.test.ts (added at the coordinator's request)"
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "agent": "verify",
+  "slice": "04-trocar-conta-entitlement-panel",
+  "status": "FAIL",
+  "checks": {
+    "oracle_missing_entitlement_panel": "PASS (30 tests)",
+    "entitlement_dead_end": "PASS (5 tests)",
+    "salesopsapp_402_order_unchanged": "PASS (SalesOpsApp.tsx untouched; entitlement, forbidden, auth order intact; <MissingEntitlementPanel /> with no props)",
+    "no_prompt_url_built": "PASS (panel calls the provider switchAccount wrapper only; no prompt= in non-test web src outside the auth seam comment)",
+    "copy_only_in_MISSING_ENTITLEMENT_COPY": "PASS (accountPrefix, accountSuffix, switchAccountHeading, switchAccountBody, switchAccount)",
+    "lint": "PASS",
+    "type_check": "PASS",
+    "web_unit_suite": "PASS (98 files, 1099 tests)",
+    "no_em_dash_added": "PASS",
+    "no_co_authored_by_trailer": "PASS",
+    "git_status_clean": "PASS"
+  },
+  "mutations": {
+    "drop_organization_option": "RED",
+    "second_click_calls_again (guard and disabled removed)": "RED",
+    "second_click_guard_only_removed (disabled attribute kept)": "GREEN (equivalent: disabled button still blocks; defense in depth, acceptable)",
+    "raw_workspace_id_in_account_block": "RED",
+    "raw_id_in_account_identity_line": "RED",
+    "account_block_before_org_switch": "RED",
+    "reload_on_switch_account": "RED",
+    "onRetry_called_from_switch_account": "GREEN (SURVIVED)",
+    "SalesOpsApp_passes_onRetry_to_panel": "GREEN (SURVIVED, pre-existing gap, file untouched by this slice)"
+  },
+  "findings": [
+    "BLOCKING: onRetry mutant survives. Adding `onRetry?.()` to handleSwitchAccount stays green because no Trocar conta test renders the panel with an onRetry spy. The plan's step 1 says 'Keep asserting no onRetry/no reload'; only the reload half is asserted. Fix: in 'calls the provider switchAccount once ... never reloads', render with `renderPanel({ onRetry })` and assert `expect(onRetry).not.toHaveBeenCalled()`.",
+    "Non-blocking (pre-existing, outside this slice's diff): passing `onRetry` to <MissingEntitlementPanel /> in SalesOpsApp.tsx stays green; entitlement-dead-end.test.tsx does not pin the CLAUDE.md rule 'passes no onRetry'. Recommend a follow-up oracle (render check or source assertion that the 402 arm mounts the panel with no props).",
+    "Non-blocking (cross-surface consistency): slices 03 (account menu) and 05 (no-role page) render the account avatar when the token carries avatarUrl; this panel shows name/email only though useAuthProfile already exposes avatarUrl. Recommend adding the same avatar (with the same fallback component as 03/05) beside the account line so the 'which account am I in' cue looks identical on all three surfaces, ideally via one shared AccountIdentity component rather than three copies.",
+    "Non-blocking: the second-click guard `if (leavingAccount) return;` is redundant with `disabled={leavingAccount || ...}` in tests (removing only the guard stays green). Acceptable as defense in depth."
+  ],
+  "done": true,
+  "ts": "2026-10-01T19:21:12Z"
+}

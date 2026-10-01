@@ -1,0 +1,70 @@
+{
+  "agent": "execute",
+  "slice": "06-sellers-invitation-schema",
+  "status": "DONE",
+  "commit": "f4b3915",
+  "branch": "feat/06-sellers-invitation-schema",
+  "files": [
+    "apps/api/src/db/schema.ts",
+    "apps/api/drizzle/0026_seller_invitation_state.sql",
+    "apps/api/drizzle/meta/_journal.json",
+    "apps/api/drizzle/meta/0026_snapshot.json",
+    "apps/web/src/admin/types.ts",
+    "apps/api/src/domains/sellers/__tests__/seller-invitation-schema.test.ts"
+  ],
+  "generated_sql": "ALTER TABLE \"sellers\" ADD COLUMN \"invitation_id\" text;--> statement-breakpoint\nALTER TABLE \"sellers\" ADD COLUMN \"invitation_status\" text;--> statement-breakpoint\nALTER TABLE \"sellers\" ADD COLUMN \"invited_org_id\" text;",
+  "checks": [
+    {
+      "command": "pnpm --filter @fxl-sales/api exec vitest run src/domains/sellers/__tests__/seller-invitation-schema.test.ts (RED, before impl)",
+      "exit": 1,
+      "counts": "4 failed, 1 passed (cross-org guard passes pre-change by design)"
+    },
+    {
+      "command": "pnpm exec drizzle-kit generate --name seller_invitation_state (offline, DATABASE_URL local 5006, no apply)",
+      "exit": 0,
+      "counts": "3 ALTER TABLE sellers ADD COLUMN statements only; 0026_snapshot.prevId == 0025_snapshot.id"
+    },
+    {
+      "command": "vitest run seller-invitation-schema.test.ts + settlements-schema-contract.test.ts",
+      "exit": 0,
+      "counts": "2 files, 8 tests passed"
+    },
+    {
+      "command": "pnpm --filter @fxl-sales/api exec vitest run",
+      "exit": 0,
+      "counts": "72 files, 725 tests passed"
+    },
+    {
+      "command": "pnpm run lint",
+      "exit": 0,
+      "counts": "clean"
+    },
+    {
+      "command": "pnpm run type-check",
+      "exit": 0,
+      "counts": "clean"
+    },
+    {
+      "command": "Gate 2 fix: vitest run seller-invitation-schema.test.ts + settlements-schema-contract.test.ts",
+      "exit": 0,
+      "counts": "2 files, 8 tests passed"
+    },
+    {
+      "command": "pnpm run lint (after fix)",
+      "exit": 0,
+      "counts": "clean"
+    },
+    {
+      "command": "pnpm run type-check (after fix)",
+      "exit": 0,
+      "counts": "clean"
+    }
+  ],
+  "notes": "Migration not applied and test:integration not run (per instructions; wave verify applies it). Header comment prepended to generated SQL in the 0023/0025 style; the oracle strips comment lines and asserts the statements verbatim. Oracle also asserts sellers has no org_id and no RLS/policies and that 0026 is journaled at idx 26 immediately after 0025_integration_transport with an increasing when. No web code constructs SellerRow literals, so the type addition needed no fixture changes. Gate 2 fix (f4b3915): removed expect(at).toBe(entries.length - 1) so a later migration does not turn the oracle red; no test name or comment carried the last-entry claim.",
+  "done": true,
+  "ts": "2026-10-01T19:12:24.604764+00:00",
+  "commits": [
+    "292a1e1",
+    "f4b3915"
+  ]
+}

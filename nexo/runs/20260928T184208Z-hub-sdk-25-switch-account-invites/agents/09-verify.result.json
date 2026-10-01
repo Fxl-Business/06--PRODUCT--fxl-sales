@@ -1,0 +1,40 @@
+{
+  "agent": "verify",
+  "slice": "09-admin-sellers-invite-ui",
+  "status": "PASS",
+  "checks": {
+    "named_oracle_AdminSellersPage_and_keys_resolve": "PASS (48/48)",
+    "lint": "PASS (exit 0)",
+    "type_check": "PASS (exit 0)",
+    "web_unit_suite": "PASS (99 files, 1158 tests)",
+    "server_contract_match": "PASS: create reads 201 body inviteError vs top-level delivery; resend/revoke POST /:id/resend and /:id/revoke; ApiError code keyed (falls back to error for bare 404 not_found); warnings shape {code} matches SDK HubInvitationWarning",
+    "copy_by_code": "PASS: all 15 HubInvitationErrorCode values + hub_auth_not_configured, seller_not_invited, not_found, unknown have pt-BR and en copy; unrecognised codes fall back to errors.unknown; all 3 warnings rendered by code",
+    "retryAfterSeconds": "PASS: apiFetch reads body.retryAfterSeconds first, then numeric Retry-After header; create path reads inviteError.retryAfterSeconds",
+    "banned_patterns": "PASS: no native select/option/datalist/number input, no window.confirm (AlertDialog), no em dash in diff incl. JSON, no Co-Authored-By trailer",
+    "worktree_clean": "PASS"
+  },
+  "mutations": [
+    {"probe": "create outcome read from HTTP status instead of body.inviteError", "result": "RED (4 failed)"},
+    {"probe": "render server message instead of per-code copy (problem path)", "result": "RED"},
+    {"probe": "render server message on create inviteError", "result": "RED"},
+    {"probe": "drop acceptUrl copy button for email_not_configured", "result": "RED"},
+    {"probe": "drop acceptUrl display", "result": "RED"},
+    {"probe": "console.log acceptUrl", "result": "RED"},
+    {"probe": "revoke without confirmation", "result": "RED"},
+    {"probe": "revoke sent as DELETE", "result": "RED"},
+    {"probe": "remove one new key from en.json", "result": "RED"},
+    {"probe": "render raw seller/invitation id", "result": "RED"},
+    {"probe": "Revogar shown on accepted row", "result": "RED"},
+    {"probe": "hub_auth_not_configured hides new seller row/outcome", "result": "RED"},
+    {"probe": "drop create inviteError retryAfterSeconds", "result": "RED"},
+    {"probe": "drop email_failed resend affordance", "result": "RED"},
+    {"probe": "drop body.retryAfterSeconds branch in apiFetch (resend/revoke 429)", "result": "SURVIVED (only Retry-After header path is tested for resend/revoke)"}
+  ],
+  "findings": [
+    "NON-BLOCKING: apiFetch's body.retryAfterSeconds branch is untested for resend/revoke 429 (mutant survived); the resend 429 test uses only the Retry-After header. Once slice 10 adds retryAfterSeconds to resend/revoke bodies, add a body-only 429 case (cross-origin deployments hide Retry-After unless exposed).",
+    "NON-BLOCKING: create and resend send no locale, so the server default pt-BR is always used for the invite email even when the admin UI is in en.",
+    "NON-BLOCKING: warning callout uses hard-coded amber-* classes with no dark-mode variant, unlike token-based components."
+  ],
+  "done": true,
+  "ts": "2026-10-01T00:00:00Z"
+}

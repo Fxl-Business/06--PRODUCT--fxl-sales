@@ -1,0 +1,26 @@
+{
+  "agent": "execute",
+  "slice": "04-trocar-conta-entitlement-panel",
+  "status": "DONE",
+  "round": 2,
+  "branch": "feat/04-trocar-conta-entitlement-panel",
+  "commit": "35f8236",
+  "commits": ["9e627ca", "15229bb", "f539d43", "35f8236"],
+  "files": [
+    "apps/web/src/sales-ops/MissingEntitlementPanel.tsx",
+    "apps/web/src/sales-ops/missing-entitlement-copy.ts",
+    "apps/web/src/sales-ops/__tests__/missing-entitlement-panel.test.tsx"
+  ],
+  "checks": {
+    "onRetry_probe": "onRetry?.() injected into handleSwitchAccount -> 'calls the provider switchAccount once ... never reloads' RED (1 failed / 29 passed); probe reverted, GREEN",
+    "avatar_tests_red_first": "4 new avatar tests failed before implementation",
+    "missing-entitlement-panel.test.tsx": "PASS 34/34",
+    "entitlement-dead-end.test.tsx": "PASS 5/5",
+    "lint": "PASS",
+    "type-check": "PASS",
+    "web_unit_suite": "PASS 98 files / 1118 tests"
+  },
+  "notes": "Round 2. 15229bb merges master (slices 03/05) into the branch. f539d43: the Trocar conta test renders with an onRetry spy and asserts it is never called. 35f8236: local AccountAvatar twin of SalesOpsApp's (size-10, rounded-[11px], amber tile, sales-ops-num, initials via calculations.initials, alt='', referrerPolicy no-referrer, onError falls back to initials keyed on the URL), marked [data-account-avatar], shown beside the account line; initials from name, else email. Not re-declared from SalesOpsApp import because SalesOpsApp imports this panel (cycle). Not validated in a real browser.",
+  "done": true,
+  "ts": "2026-10-01T00:00:00Z"
+}

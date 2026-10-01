@@ -1,11 +1,11 @@
 {
-  "active_accumulated_seconds": 1278,
+  "active_accumulated_seconds": 6270,
   "active_since": 1790881201,
   "counters": {
-    "agent_dispatches": 6,
+    "agent_dispatches": 47,
     "initial_slices": 9,
     "replans": 2,
-    "total_slices": 9,
+    "total_slices": 15,
     "wave_recoveries": 0
   },
   "exhausted": null,
@@ -19,9 +19,25 @@
     "max_verify_attempts_per_slice": 3,
     "max_wave_recoveries": 1
   },
-  "paused": false,
+  "paused": true,
   "scoped_counters": {
-    "verify_attempts": {}
+    "verify_attempts": {
+      "01-sdk-bump-2.5.0": 1,
+      "02-web-switchaccount-seam": 1,
+      "03-trocar-conta-account-menu": 1,
+      "04-trocar-conta-entitlement-panel": 2,
+      "05-trocar-conta-no-role": 1,
+      "06-sellers-invitation-schema": 2,
+      "07-invitations-client-seam": 1,
+      "08-seller-invite-server": 1,
+      "09-admin-sellers-invite-ui": 1,
+      "10-verify-findings-polish": 1,
+      "11-invite-locale-and-429-body": 2,
+      "12-integration-test-hygiene": 1,
+      "13-integration-env-docs": 1,
+      "14-send-invite-to-uninvited-seller": 1,
+      "15-mutation-survivors": 1
+    }
   },
   "version": 1
 }

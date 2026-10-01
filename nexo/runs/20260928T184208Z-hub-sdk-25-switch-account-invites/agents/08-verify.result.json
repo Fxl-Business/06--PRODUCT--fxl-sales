@@ -1,0 +1,66 @@
+{
+  "agent": "verify",
+  "slice": "08-seller-invite-server",
+  "branch": "feat/08-seller-invite-server",
+  "commit": "ba944ef",
+  "status": "PASS",
+  "checks": {
+    "oracle": "PASS - apps/api/src/domains/sellers/__tests__/seller-invite.test.ts 26/26",
+    "api_unit_suite": "PASS - 75 files, 799 tests (vitest run)",
+    "lint": "PASS - pnpm run lint exit 0",
+    "type_check": "PASS - pnpm run type-check exit 0 (api src, scripts, test configs)",
+    "auth_inheritance": "PASS - sellersAdminRouter mounted under adminRouter.use(appAuthMiddleware) + use(requireAdmin) in admin/index.ts; the sub-router applies no auth",
+    "bearer_source": "PASS - bearerOf(c) reads c.req.header('Authorization') only; body accessToken and hubAuth ignored (oracle smuggles both)",
+    "org_source": "PASS - invitedOrgId = c.get('orgId'); oracle sets a different hubAuth workspace to prove it",
+    "no_organizationId_in_invite": "PASS - create/list calls carry no organizationId; body organizationId is stripped by zod",
+    "appRoles": "PASS - exactly ['seller']",
+    "id_validation": "PASS - :id validated as uuid, malformed and unknown both 404 before any Hub call",
+    "revoke_verb": "PASS - POST /:id/revoke, no DELETE route",
+    "locale": "PASS - z.enum(['pt-BR','en']).default('pt-BR') on create and resend; 'fr' is 400 before insert",
+    "no_hub_mode": "PASS - client forced absent through slice 07 seam: POST / 201 with inviteError hub_auth_not_configured, resend/revoke 503 byte-identical body, GET / returns persisted state without list",
+    "acceptUrl_never_logged": "PASS - only error NAME / code logged; oracle spies all console methods",
+    "header_comment_C6": "PASS - admin-service.ts header keeps account_id/provisioning point, adds Sales-owned delivery and references the Capture ADR",
+    "files_scope": "PASS - only the 3 files in files_modified",
+    "em_dash": "PASS - none added",
+    "co_authored_by": "PASS - no trailer",
+    "git_status": "clean after every probe"
+  },
+  "mutations": [
+    {"name": "accessToken read from body", "result": "RED"},
+    {"name": "accessToken from hubAuth", "result": "RED"},
+    {"name": "appRoles ['seller','admin']", "result": "RED"},
+    {"name": "organizationId added to create", "result": "RED"},
+    {"name": "rollback: delete seller on invite failure", "result": "RED", "note": "RED partly because the fake DB has no delete(); a rethrow and a null-seller variant also go RED, and store.rows length assertions would catch a working delete"},
+    {"name": "rollback: rethrow invite error", "result": "RED"},
+    {"name": "map error by message instead of code", "result": "RED"},
+    {"name": "omit Retry-After", "result": "RED"},
+    {"name": "DELETE instead of POST for revoke", "result": "RED"},
+    {"name": "null client throws on create", "result": "RED"},
+    {"name": "null client throws on resend/revoke", "result": "RED"},
+    {"name": "GET / calls list() with null client", "result": "RED"},
+    {"name": "console.info(acceptUrl)", "result": "RED"},
+    {"name": "invitedOrgId from hubAuth workspace", "result": "RED"},
+    {"name": "reconcile does not persist", "result": "RED"},
+    {"name": "list() without status (pending only)", "result": "RED"},
+    {"name": "revoke does not write 'revoked'", "result": "RED"}
+  ],
+  "design_decisions": {
+    "a": {
+      "verdict": "SOUND",
+      "evidence": "hub-sdk 2.5.0 dist/server.d.ts ListHubInvitationsInput.status: 'Absent means the Hub's own default (pending).' dist/server.js list(): appends ?status= only when given, single value. So one call answers one status; accepted/expired are only visible when asked for.",
+      "reasoning": "Four parallel calls (Promise.allSettled) only when at least one seller carries an invitationId is the minimum that satisfies C2; the SDK offers no multi-status filter. Partial failure is coherent: the map is built only from fulfilled statuses, and a row is updated only when its id appears in a fulfilled list with a different status, so a failed status call can never downgrade or blank a row - that row simply keeps its persisted status. All calls failing returns null and falls back wholly to persisted state. Cost is 4 Hub GETs per admin list view; acceptable, worth revisiting only if the list endpoint gains pagination or a multi-status filter."
+    },
+    "b": {
+      "verdict": "SOUND - conforming interpretation, not a contract violation",
+      "reasoning": "Step 3 says 'Return 201 with the invite outcome. Map inviteError to the HTTP status from mapInvitationError.' Read with the acceptance ('an invite failure keeps the seller and returns the code'), the non-negotiable (save the seller, return the invite outcome so the admin can resend) and the RECONCILED rule (no client => POST / still answers 201 with the outcome carrying hub_auth_not_configured), the mapped status belongs to the outcome, not the response line: the resource was created, so 201 is the honest status, and answering 403/429/503 for a request that did create a row would make the web treat a saved seller as a failed save. The implementation carries the mapped status as inviteError.status plus the mapper's error/code/message and retryAfterSeconds, and also sets Retry-After. Resend and revoke, which create nothing, answer the mapped HTTP status directly. Documented in the route comment. Slice 09 must branch on body.inviteError, not res.status, for create."
+    }
+  },
+  "findings": [
+    "NON-BLOCKING: resend/revoke look the seller up by id only, not by invitedOrgId === c.get('orgId'). sellers is the pre-existing cross-tenant admin table with no org column, and the Hub scopes the call by the actor token (another org's invitation would fail actor_not_member/invitation_not_found and nothing local is written before Hub success), so no cross-org effect today; an explicit invitedOrgId check would make the boundary local rather than Hub-dependent.",
+    "NON-BLOCKING: POST / sets a Retry-After header on a 201 response when the invite was rate-limited. Harmless and pinned by the oracle, but semantically unusual; the body's retryAfterSeconds is what the web should read.",
+    "NON-BLOCKING: GET / issues 4 Hub list calls per view (one per status) and N sequential UPDATEs for changed rows; fine at current scale.",
+    "NON-BLOCKING: the rollback-by-delete probe goes RED partly because the oracle's fake DB has no delete(); the store.rows assertions would still catch a functioning delete, so the oracle is not vacuous on this rule."
+  ],
+  "done": true,
+  "ts": "2026-10-01T16:30:00Z"
+}

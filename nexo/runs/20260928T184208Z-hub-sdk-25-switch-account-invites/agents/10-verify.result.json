@@ -1,0 +1,114 @@
+{
+  "agent": "verify",
+  "slice": "10-verify-findings-polish",
+  "branch": "feat/10-verify-findings-polish",
+  "base": "a56585c",
+  "status": "PASS",
+  "items": [
+    {
+      "id": 1,
+      "title": "One shared AccountAvatar",
+      "test": "apps/web/src/sales-ops/__tests__/account-avatar.test.tsx (8) + missing-entitlement-panel.test.tsx (34): GREEN",
+      "probes": [
+        {"probe": "re-declare a local AccountAvatar in MissingEntitlementPanel.tsx", "result": "RED (implemented-exactly-once, imports-shared-module, panel initials fallback)"},
+        {"probe": "AccountAvatar onError no-op (break initials fallback)", "result": "RED"},
+        {"probe": "NoRolePage back to a local <img>", "result": "RED (source check only)"}
+      ],
+      "notes": "grep: exactly one `function AccountAvatar` (apps/web/src/sales-ops/AccountAvatar.tsx), imported by SalesOpsApp, MissingEntitlementPanel, NoRolePage; it imports only react and ./calculations, so no cycle. NoRolePage changed from a round image shown only when avatarUrl exists to the same 40px rounded-[11px] amber tile with image or initials used by the shell and MissingEntitlementPanel: this matches the other two surfaces and is what the contract rule (delete NoRolePage's copy, one implementation) requires. Not checked in a real browser.",
+      "verdict": "GREEN"
+    },
+    {
+      "id": 2,
+      "title": "Shell header never renders workspaceId",
+      "test": "shell-organization-switcher.test.tsx 'never renders the raw workspaceId, even with no name or email to show': GREEN",
+      "probes": [{"probe": "userName = profile.name ?? profile.workspaceId ?? 'FXL'", "result": "RED"}],
+      "verdict": "GREEN"
+    },
+    {
+      "id": 3,
+      "title": "SalesOpsApp passes no onRetry",
+      "test": "entitlement-dead-end.test.tsx 'renders the entitlement panel with no onRetry': GREEN",
+      "probes": [{"probe": "<MissingEntitlementPanel onRetry={() => void bootstrapQuery.refetch()} />", "result": "RED"}],
+      "verdict": "GREEN"
+    },
+    {
+      "id": 4,
+      "title": "No act() warning in the no-role English test",
+      "test": "no-role-redirect.test.tsx 'resolves the copy from i18n in English too, with no act() warning': GREEN",
+      "probes": [
+        {"probe": "remove act() around the finally changeLanguage('pt-BR') (runs while mounted)", "result": "RED"},
+        {"probe": "remove act() around the first changeLanguage('en') (runs before mount)", "result": "GREEN - expected, nothing is mounted yet, so that act() is harmless but not load-bearing"}
+      ],
+      "verdict": "GREEN"
+    },
+    {
+      "id": 5,
+      "title": "Resend/revoke refuse another org's seller with 404",
+      "test": "seller-invite.test.ts resend + revoke 'answers 404 like an unknown seller when the invitation belongs to another Organization' (body byte-equal to unknown, Hub not called, no updates): GREEN",
+      "probes": [{"probe": "drop the invitedOrgId !== actor.orgId check in withStoredInvitation", "result": "RED (both)"}],
+      "notes": "invitedOrgId NULL is safe: the only writer (createSeller's post-invite updateSeller) sets invitationId, invitationStatus and invitedOrgId in ONE update, and migration 0026 added all three nullable together, so a NULL invitedOrgId with a non-null invitationId is unreachable through product code; such a row falls to 409 seller_not_invited before the Hub. Even a hand-made row would only let the Hub decide, scoped by the actor's own bearer token. sellers is a cross-org table (no org_id/RLS, listed by GET / to every admin), so 409 vs 404 for a never-invited seller leaks nothing new.",
+      "verdict": "GREEN"
+    },
+    {
+      "id": 6,
+      "title": "Integration suite refuses unsafe databases",
+      "test": "pnpm --filter @fxl-sales/api test:integration",
+      "probes": [
+        {"probe": "(a) no TEST_*/ADMIN_*/DATABASE_URL", "result": "RED loudly: IntegrationDatabaseRefusal naming TEST_DATABASE_URL and ADMIN_DATABASE_URL + documented local values"},
+        {"probe": "(b) TEST_DATABASE_URL=postgresql://u:p@db.example.com:5432/x (also DATABASE_URL remote)", "result": "RED in 0.6s, before any connection; prints host only. Remote ADMIN_DATABASE_URL also refused (as admin and as migrate target)"},
+        {"probe": "(c) TEST_DATABASE_URL=postgres superuser on localhost:5006", "result": "RED: 'connects as \"postgres\", which is SUPERUSER and BYPASSRLS'"},
+        {"probe": "(d) real local URLs from apps/api/.env (localhost:5006, fxl_sales_test)", "result": "GREEN 305/305 (41 files). Earlier runs had 2 failures in producer-emission.integration.test.ts, reproduced on master (see findings)"}
+      ],
+      "notes": "local-database-guard.ts unchanged by the slice, still imports nothing and reads no process.env; assert-test-role.ts imports isLocalDatabaseHost/describeDatabaseTarget from it (reused, not re-implemented). setup-env keeps the hard DATABASE_URL override.",
+      "verdict": "GREEN"
+    },
+    {
+      "id": 7,
+      "title": "Real adminRouter gate on sellers routes",
+      "test": "seller-routes-admin-gate.test.ts (5): GREEN; mounts domains/admin/index.ts with the real SDK verifier",
+      "probes": [
+        {"probe": "remove adminRouter.use('*', requireAdmin)", "result": "RED (all four routes)"},
+        {"probe": "neutral control edit to admin/index.ts", "result": "GREEN (expected)"}
+      ],
+      "verdict": "GREEN"
+    },
+    {
+      "id": 8,
+      "title": "NoRolePage Trocar conta ignores a second click",
+      "test": "no-role-redirect.test.tsx 'ignores a second click while the account switch is already navigating': GREEN",
+      "probes": [
+        {"probe": "remove the leavingRef guard", "result": "RED"},
+        {"probe": "remove disabled={leavingAccount}", "result": "RED"}
+      ],
+      "verdict": "GREEN"
+    },
+    {
+      "id": 9,
+      "title": "retryAfterSeconds in resend/revoke bodies",
+      "test": "seller-invite.test.ts resend + revoke 'carries retryAfterSeconds in the body...' and 'omits retryAfterSeconds and the header when the Hub sent none': GREEN",
+      "probes": [{"probe": "failureResponse returns failure.body (drop retryAfterSeconds)", "result": "RED (both)"}],
+      "verdict": "GREEN"
+    }
+  ],
+  "checks": {
+    "lint": "PASS (pnpm run lint)",
+    "type_check": "PASS (pnpm run type-check, includes tsconfig.test.json)",
+    "unit_tests": "PASS (CI=true pnpm test: api 810, web 1129, shared-utils 155, auth-fake 41, scripts node tests ok)",
+    "integration": "PASS 305/305 as fxl_sales_test on rerun; refusals (a)(b)(c) all loud and pre-test",
+    "claude_md_testing_edit": "accurate and minimal (one line)",
+    "propostas_reference_edit": "matches the code and the CLAUDE.md line",
+    "em_dash_added": "none",
+    "co_authored_by_trailers": "none",
+    "git_status_after_probes": "clean",
+    "leftover_processes": "none (all run-once)"
+  },
+  "findings": [
+    "Pre-existing flake, not caused by this slice: apps/api/src/domains/sales-ops/__tests__/producer-emission.integration.test.ts orders outboxOf by `position`, which is NULL until the publisher assigns it after commit, so `.slice(before)` reads rows in heap order. Failed 1/10 isolated runs and 1/2 full runs on master (060608d) as well as on this branch. Should be fixed (order by a deterministic insert column) in its own slice.",
+    "Dead but misleading fallbacks: 34 `process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL ?? 'postgresql://postgres:postgres@localhost:5006/fxl_sales'` style chains remain in apps/api/test/rls (conversion-webhook-contract, integration-transport-schema, proposal-write, leads-schema-migration, leads-seller-scope, update-sale-in-place, settlements-schema, list-finder-links-cross-tenant, sale-professional-funcoes, conversion-ingest, funcoes-schema-migration, leads-rls, product-commission-contract, cadastro-purge, scratch-database.ts migrationAdminUrl, sao-paulo-day, cadastro-archive-audit, leads-no-financial-impact, referral-links-public-lookup, hub-bff-login-supersede, among others) plus src/domains/integration/__tests__/outbox-adapter.integration.test.ts and src/db/__tests__/settlement-test-cleanup.ts. Unreachable in the integration project because setup-env.ts sets all four vars non-empty before any test module loads, but they contradict the new 'no postgres default' rule; replace with reads of the resolved env.",
+    "Stale comment: apps/api/vitest.config.ts still says 'The integration tests connect through the standard project DATABASE_URL'.",
+    "Item 1 NoRolePage swap is locked only by a source-text check (imports + '<AccountAvatar'), not by a NoRolePage render assertion of the tile/initials; the visual change (round image to amber tile with initials) was not checked in a browser.",
+    "global-setup.ts was modified but is not in the contract's files_modified list (justified: the old migrate chain lived there)."
+  ],
+  "done": true,
+  "ts": "2026-10-01T19:46:58Z"
+}

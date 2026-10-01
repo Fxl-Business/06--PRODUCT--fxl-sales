@@ -1,0 +1,29 @@
+{
+  "agent": "verify",
+  "slice": "15-mutation-survivors",
+  "status": "PASS",
+  "checks": {
+    "oracles": "PASS - no-role-redirect 36 / react 68 (web 139 total) and invitations-client 10, all green",
+    "web_unit": "PASS - 100 files, 1185 tests",
+    "api_unit": "PASS - 76 files, 811 tests",
+    "lint": "PASS - eslint api and web clean",
+    "type_check": "PASS - api (src, scripts, test) and web",
+    "em_dash": "PASS - none in branch diff",
+    "co_authored_by": "PASS - no trailer in commit 106cf5e",
+    "x19_probe_location": "PASS - seam-switch-account-empty exists only in apps/web/src/auth/__tests__/react.test.tsx",
+    "x18_no_message_logged": "PASS - test asserts console.error args are exactly the prefix plus error name and JSON of calls does not contain the secret-bearing message",
+    "x22_disabled_and_onRetry": "PASS - new test asserts button disabled after the double click; existing Trocar conta test asserts onRetry not called; handleSwitchAccount never calls onRetry",
+    "integration_tests": "not run (per instruction)",
+    "git_status": "clean after all probes"
+  },
+  "mutations": [
+    {"id": "X22", "mutant": "master MissingEntitlementPanel with `if (leavingAccount) return;` removed", "result": "KILLED", "killing_test": "MissingEntitlementPanel - Trocar conta > ignores a second click that lands before React re-renders the button disabled"},
+    {"id": "X22-ref", "mutant": "new code with `if (leavingAccountRef.current) return;` removed, disabled state kept", "result": "KILLED", "killing_test": "MissingEntitlementPanel - Trocar conta > ignores a second click that lands before React re-renders the button disabled"},
+    {"id": "X25", "mutant": "NoRolePage `const secondary = email;`", "result": "KILLED", "killing_test": "/no-role ... > renders an email-only account email exactly once, never repeated on a secondary line"},
+    {"id": "X19", "mutant": "react.tsx switchAccount `if (organization !== undefined)` (forwards empty hint)", "result": "KILLED", "killing_test": "active organization and the useOrganizations seam > treats an empty organization hint as absent and calls client.switchAccount with no options"},
+    {"id": "X18", "mutant": "invitations-client.ts catch block `throw error;` instead of `return null;`", "result": "KILLED", "killing_test": "getInvitationsClient when the SDK refuses to build the client > returns null, never throws, and logs only the error name"}
+  ],
+  "findings": [],
+  "done": true,
+  "ts": "2026-10-01T20:13:05Z"
+}

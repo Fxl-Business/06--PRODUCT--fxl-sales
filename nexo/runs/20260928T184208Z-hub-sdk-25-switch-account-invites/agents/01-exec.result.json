@@ -1,0 +1,39 @@
+{
+  "agent": "execute",
+  "slice": "01-sdk-bump-2.5.0",
+  "status": "DONE",
+  "commit": "cb5e2a3",
+  "branch": "feat/01-sdk-bump-2.5.0",
+  "files": [
+    "CLAUDE.md",
+    "apps/api/package.json",
+    "apps/web/package.json",
+    "apps/web/src/__tests__/session-journey.test.tsx",
+    "apps/web/src/auth/__tests__/react.test.tsx",
+    "apps/web/src/dev/__tests__/dev-identity-roles.test.tsx",
+    "apps/web/src/dev/install-dev-identity.ts",
+    "apps/web/src/sales-ops/__tests__/session-loss-keeps-route.test.tsx",
+    "nexo/knowledge/reference/auth-model.md",
+    "package.json",
+    "pnpm-lock.yaml",
+    "scripts/__tests__/hub-sdk-pin.test.mjs"
+  ],
+  "checks": {
+    "oracle_red_before_bump": {"exit": 1, "pass": 4, "fail": 2, "note": "the two exact-2.5.0 pin tests failed against 2.3.0"},
+    "oracle_green_after_bump": {"exit": 0, "pass": 6, "fail": 0},
+    "lint": {"exit": 0},
+    "typecheck": {"exit": 0},
+    "test": {"exit": 0, "counts": {"auth-fake": 41, "shared-utils": 155, "api": 720, "web": 1084, "node_guards": 68}, "failed": 0},
+    "build": {"exit": 0, "note": "assert-web-bundle-clean clean"}
+  },
+  "notes": [
+    "Lockfile: only hub-sdk 2.3.0 -> 2.5.0 moved; exactly one hono@4.12.28 resolves; pnpm-workspace.yaml override untouched.",
+    "DEVIATION (outside files_modified, required to keep type-check green): 2.5.0 is NOT source-additive for implementers. HubClient gained a REQUIRED switchAccount member, so every object that satisfies HubClient broke. Added a minimal switchAccount() { window.location.reload(); } shim in apps/web/src/dev/install-dev-identity.ts (mirrors dev login(), per overview spec section 8) and a switchAccount mock in 4 test client mocks (session-journey, auth/react, session-loss-keeps-route, dev-identity-roles). Slice 02 owns the shim's oracle; the member already exists, so slice 02 should add its test and not re-add the member.",
+    "switchAccount returns void and performs a full-document navigation to ${bffBase}/auth/login?prompt=select_account[&organization=...], so slice 02 needs no setActive-style critical section.",
+    "auth-model.md: lines 16 and 125 now state 2.5.0; line 41 keeps 'as of 2.3.0' and adds that the env contract holds unchanged through 2.5.0; added one sentence that 2.5.0's hono peer is unchanged and the override did not move. Historical 2.3.0 narrative left untouched (auth-model 57/109/115/121-122/129/131/136/143, code comments in auth-provider.ts, app-auth.ts, tests, packages/auth-fake F1, milestones, state.json).",
+    "Surface recorded at nexo/runs/20260928T184208Z-hub-sdk-25-switch-account-invites/sdk-2.5.0-surface.md (main checkout, not committed).",
+    "pnpm install warned 'Ignored build scripts: esbuild' (pre-existing pnpm v10 behaviour, not caused by this slice; build is green). @fxl-business/hub-sdk-testing not installed."
+  ],
+  "done": true,
+  "ts": "2026-10-01T19:04:34Z"
+}

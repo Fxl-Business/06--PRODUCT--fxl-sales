@@ -1,0 +1,56 @@
+{
+  "agent": "verify",
+  "slice": "11-invite-locale-and-429-body",
+  "status": "FAIL",
+  "checks": {
+    "oracle_AdminSellersPage_and_keys_resolve": "PASS (60/60)",
+    "server_contract": "PASS - create and resend both parse c.req.json().catch(() => ({})) against z.object({ locale: z.enum(['pt-BR','en']).default('pt-BR') }); a resend with no body still defaults to pt-BR; apiFetch always sends Content-Type application/json",
+    "lint": "PASS",
+    "type_check": "PASS",
+    "web_unit_suite": "PASS (99 files, 1170 tests)",
+    "no_em_dash": "PASS",
+    "no_co_authored_by": "PASS",
+    "git_status_clean": "PASS"
+  },
+  "mutations": [
+    {
+      "probe": "inviteLocaleOf maps only exact 'en' (en-US -> pt-BR)",
+      "result": "KILLED (2 tests)"
+    },
+    {
+      "probe": "hook sends raw (i18n.resolvedLanguage ?? i18n.language) unmapped",
+      "result": "SURVIVED"
+    },
+    {
+      "probe": "hook sends raw i18n.language unmapped",
+      "result": "SURVIVED"
+    },
+    {
+      "probe": "resend omits body/locale",
+      "result": "KILLED (3 tests)"
+    },
+    {
+      "probe": "capture locale in render scope (re-captured on re-render)",
+      "result": "SURVIVED - equivalent: useTranslation re-renders on languageChanged, so behaviour is identical"
+    },
+    {
+      "probe": "capture locale once at mount (useRef)",
+      "result": "KILLED (switch-after-mount test)"
+    },
+    {
+      "probe": "capture locale at module load",
+      "result": "KILLED (2 tests)"
+    },
+    {
+      "probe": "apiFetch ignores body retryAfterSeconds",
+      "result": "KILLED (body-only 429 test)"
+    }
+  ],
+  "findings": [
+    "BLOCKING: the hook's use of inviteLocaleOf is not pinned. Probe 'hook sends raw i18n.language' (the brief's 'en-US' case) survives because every wiring test only sets i18n to 'pt-BR' or 'en', which are already valid locales; inviteLocaleOf is tested only as a pure function. Fix: add a wiring case that calls i18n.changeLanguage('en-US') and asserts create and resend send locale 'en' (raw i18n.language would be 'en-US'). The '(resolvedLanguage ?? language) unmapped' variant is likely equivalent with the current resources (resolvedLanguage resolves to 'en' or 'pt-BR'), so the raw i18n.language probe is the one that must die.",
+    "Non-blocking: the app has no language switcher or detector today (lng fixed at 'pt-BR', no changeLanguage call outside tests), so in production every invite currently carries 'pt-BR'; the en path is reachable only once a switcher lands.",
+    "Non-blocking: plan files_modified lists AdminSellersPage.tsx, which was not touched; correct since the locale is read in the hooks."
+  ],
+  "done": true,
+  "ts": "2026-10-01T00:00:00Z"
+}

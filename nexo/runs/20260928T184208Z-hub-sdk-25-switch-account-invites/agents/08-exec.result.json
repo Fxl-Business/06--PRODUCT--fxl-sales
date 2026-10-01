@@ -1,0 +1,102 @@
+{
+  "agent": "execute",
+  "slice": "08-seller-invite-server",
+  "status": "DONE",
+  "branch": "feat/08-seller-invite-server",
+  "worktree": "/Users/cauetpinciara/Documents/fxl/projects/06--PRODUCT--fxl-sales/.worktrees/hub25/08",
+  "commit": "ba944ef",
+  "files": [
+    "apps/api/src/domains/sellers/admin-service.ts",
+    "apps/api/src/domains/sellers/admin-routes.ts",
+    "apps/api/src/domains/sellers/__tests__/seller-invite.test.ts"
+  ],
+  "http_contract": {
+    "base": "/api/v1/admin/sellers (inherits appAuthMiddleware + requireAdmin from admin/index.ts; every route requires Authorization: Bearer <hub access token>, which is also the Hub actor token)",
+    "SellerRow": "{ id: uuid, accountId: string|null, displayName: string, contactEmail: string, status: 'active'|'inactive', createdAt: ISO, updatedAt: ISO|null, invitationId: string|null, invitationStatus: 'pending'|'accepted'|'expired'|'revoked'|null, invitedOrgId: string|null }",
+    "InvitationDelivery": "{ invitation: HubInvitation { id, organizationId, applicationId, email, status, appRoles: string[], invitedByAccountId: string|null, expiresAt: ISO, createdAt: ISO, acceptedAt: ISO|null }, acceptUrl: string (single-use, display only, never log), emailDelivery: { status: 'sent'|'not_configured'|'failed' }, warnings: Array<{ code: 'application_url_missing'|'email_not_configured'|'email_failed' }> }",
+    "InvitationErrorBody": "{ error: string, code: HubInvitationErrorCode | 'unknown' | 'hub_auth_not_configured' | 'seller_not_invited', message?: string (pt-BR INVITATION_COPY; absent on hub_auth_not_configured and seller_not_invited) }",
+    "routes": [
+      {
+        "method": "GET",
+        "path": "/",
+        "request_body": null,
+        "behaviour": "Lists sellers newest first. When the invitations client is present and at least one seller has an invitationId, calls client.list({ accessToken, status }) once per status (pending, accepted, expired, revoked; the Hub list answers one status per call and defaults to pending, so a single list() could never surface accepted/expired), and persists any changed invitationStatus before returning. List failure or no client: persisted state, no error.",
+        "responses": [
+          { "status": 200, "body": "{ sellers: SellerRow[] }" }
+        ]
+      },
+      {
+        "method": "POST",
+        "path": "/",
+        "request_body": "{ displayName: string (2..100), contactEmail: email, locale?: 'pt-BR'|'en' (default 'pt-BR') }; any other key (organizationId, accessToken, ...) is ignored",
+        "behaviour": "Inserts the seller, then client.create({ accessToken: <bearer>, email: contactEmail, appRoles: ['seller'], locale }). On success persists invitationId, invitationStatus='pending', invitedOrgId=c.get('orgId'). The seller is never rolled back.",
+        "responses": [
+          { "status": 201, "case": "invite sent", "body": "{ seller: SellerRow, invitation, acceptUrl, emailDelivery, warnings } (InvitationDelivery spread at top level)" },
+          { "status": 201, "case": "Hub refused / failed", "body": "{ seller: SellerRow, inviteError: { status: number (the HTTP status mapInvitationError assigns: 400|401|403|404|409|429|500|502|503), error, code, message, retryAfterSeconds?: number } }", "headers": "Retry-After: <seconds> when the Hub rate-limited with a Retry-After" },
+          { "status": 201, "case": "no invitations client (no Hub config or dev identity mode)", "body": "{ seller: SellerRow, inviteError: { status: 503, error: 'unavailable', code: 'hub_auth_not_configured' } }" },
+          { "status": 201, "case": "non-Hub error from the client (defect)", "body": "{ seller, inviteError: { status: 500, error: 'internal_error', code: 'unknown', message: INVITATION_COPY.configurationDefect } }" },
+          { "status": 400, "case": "validation (incl. unsupported locale); nothing inserted", "body": "{ error: 'validation_error', issues }" }
+        ]
+      },
+      {
+        "method": "POST",
+        "path": "/:id/resend",
+        "request_body": "optional { locale?: 'pt-BR'|'en' } (default 'pt-BR'); an absent body is fine",
+        "behaviour": "client.resend({ accessToken: <bearer>, invitationId: <stored>, locale }); persists the returned invitation.id and invitation.status.",
+        "responses": [
+          { "status": 200, "body": "{ seller: SellerRow, invitation, acceptUrl, emailDelivery, warnings }" },
+          { "status": 404, "case": "unknown or non-uuid seller id", "body": "{ error: 'not_found' }" },
+          { "status": 409, "case": "seller has no stored invitationId", "body": "{ error: 'conflict', code: 'seller_not_invited' }" },
+          { "status": 503, "case": "no invitations client (checked first)", "body": "{ error: 'unavailable', code: 'hub_auth_not_configured' }" },
+          { "status": "mapped (400|401|403|404|409|429|500|502|503)", "case": "HubInvitationError", "body": "{ error, code, message } from mapInvitationError", "headers": "Retry-After when rate_limited carries retryAfterSeconds" },
+          { "status": 400, "case": "invalid locale", "body": "{ error: 'validation_error', issues }" }
+        ]
+      },
+      {
+        "method": "POST",
+        "path": "/:id/revoke",
+        "request_body": null,
+        "behaviour": "client.revoke({ accessToken: <bearer>, invitationId: <stored> }); then invitationStatus='revoked'. No DELETE verb exists.",
+        "responses": [
+          { "status": 200, "body": "{ seller: SellerRow }" },
+          { "status": 404, "case": "unknown or non-uuid seller id", "body": "{ error: 'not_found' }" },
+          { "status": 409, "case": "seller has no stored invitationId", "body": "{ error: 'conflict', code: 'seller_not_invited' }" },
+          { "status": 503, "case": "no invitations client", "body": "{ error: 'unavailable', code: 'hub_auth_not_configured' }" },
+          { "status": "mapped", "case": "HubInvitationError (persisted status unchanged)", "body": "{ error, code, message }", "headers": "Retry-After when present" }
+        ]
+      },
+      {
+        "method": "PATCH",
+        "path": "/:id/status",
+        "request_body": "{ status: 'active'|'inactive' }",
+        "behaviour": "unchanged",
+        "responses": [
+          { "status": 200, "body": "{ seller: SellerRow }" },
+          { "status": 400, "body": "{ error: 'validation_error', issues }" },
+          { "status": 404, "body": "{ error: 'not_found' }" }
+        ]
+      }
+    ]
+  },
+  "checks": [
+    { "command": "pnpm exec vitest run src/domains/sellers/__tests__/seller-invite.test.ts (RED, before impl)", "exit": 1, "counts": "20 failed | 6 passed (26)" },
+    { "command": "pnpm exec vitest run src/domains/sellers", "exit": 0, "counts": "4 files, 79 tests passed (seller-invite 26)" },
+    { "command": "manual mutations (each reverted): appRoles+admin, organizationId in create body, invitedOrgId constant, rethrow on create failure (rollback-equivalent), single list() call, non-header bearer, drop Retry-After", "exit": 1, "counts": "7/7 mutations RED (1,1,1,4,1,1,2 failing tests)" },
+    { "command": "pnpm --filter @fxl-sales/api exec vitest run", "exit": 0, "counts": "75 files, 799 tests passed" },
+    { "command": "pnpm run lint", "exit": 0 },
+    { "command": "pnpm run type-check", "exit": 0 }
+  ],
+  "notes": [
+    "POST / always answers 201 because the seller row exists; a failed invite rides as `inviteError` with `status` = the HTTP status mapInvitationError (or INVITATIONS_UNAVAILABLE) assigns, plus Retry-After header and retryAfterSeconds when rate-limited. This keeps the existing web createSeller contract ({ seller }) working and lets slice 09 offer resend.",
+    "GET / reconciliation deviates from the literal 'client.list({ accessToken })': the SDK documents that an absent status means the Hub's default (pending), so one call per status is made (Promise.allSettled; any fulfilled status reconciles, all failing = persisted fallback). Only rows whose status changed are UPDATEd. Matching is by stored invitation id; invitations from another Organization simply do not appear and keep their persisted status.",
+    "Bearer is read in the route handler: (Authorization ?? '').replace(/^Bearer\\s+/i, '').trim(); never body, never hubAuth. The test sets hubAuth with a different workspace to prove neither org nor token comes from it.",
+    "Resend/revoke check the client first (503 before any DB read), then seller existence (non-uuid ids answer 404 instead of a Postgres 22P02), then the stored invitationId (409 seller_not_invited).",
+    "Logging: only error NAME (non-Hub errors) or HubInvitationError.code (list failures) is logged; the route-level test spies console.log/info/warn/error/debug/trace across create, resend and a failing create whose error message contains the acceptUrl, and asserts neither the accept token nor the bearer reaches any call.",
+    "The unit test mocks getAdminDb with an in-memory fake and replaces drizzle-orm `eq` (partial mock keeping the rest) so the fake can resolve `where(eq(sellers.id, x))`.",
+    "admin-service.ts header now states account provisioning stays operator-owned while invitation delivery is Sales-owned via createHubInvitations, referencing the Capture ADR in nexo/knowledge/decisions/ (not yet written; Capture owns it).",
+    "listSellers signature changed to listSellers({ accessToken }); setSellerStatus now goes through the shared updateSeller helper (same SQL: status + updatedAt).",
+    "Did not run test:integration (owned by another verifier). No nexo/ notes committed. No merge, no push."
+  ],
+  "done": true,
+  "ts": "2026-10-01T16:25:00Z"
+}

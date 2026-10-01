@@ -1,0 +1,53 @@
+{
+  "agent": "wave-verify",
+  "wave": "closing",
+  "commit": "cc5c21d",
+  "status": "PASS",
+  "checks": {
+    "lint": { "exit": 0, "warnings": 0 },
+    "type_check": { "exit": 0 },
+    "test": {
+      "exit": 0,
+      "command": "CI=true pnpm test",
+      "vitest": {
+        "packages/auth-fake": "2 files / 41 tests passed",
+        "packages/shared-utils": "5 files / 155 tests passed",
+        "apps/api": "76 files / 831 tests passed",
+        "apps/web": "100 files / 1195 tests passed"
+      },
+      "node_test": "84/84 passed across 10 files",
+      "node_test_list": "all 10 listed files exist and equal the full contents of scripts/__tests__/",
+      "dev_identity_docs_reconciliation": "runs in the root list, 5/5 pass standalone",
+      "integration_env_docs": "runs in the root list, 11/11 pass standalone (incl. 'the root test script runs this guard and names only files that exist')",
+      "tail_scripts": "no-legacy-auth, no-legacy-env-names, build-contract: ok"
+    },
+    "cold_build": {
+      "exit": 0,
+      "cleaned": "packages/*/dist, packages/*/tsconfig.tsbuildinfo, apps/*/dist (bash, nullglob)",
+      "bundle_clean": "FXL_SALES_DEV_FAKE_ROSTER_SENTINEL absent from apps/web/dist"
+    },
+    "integration": {
+      "exit": 0,
+      "db": "localhost:5006 (TEST_DATABASE_URL role fxl_sales_test; exported in the verify shell only)",
+      "result": "41 files / 305 tests passed"
+    }
+  },
+  "security": {
+    "invite_route": {
+      "bearer_from_header_only": "PASS - bearerOf(c) reads Authorization; body accessToken/email/organizationId smuggling test asserts the exact create args",
+      "app_roles_seller_only": "PASS - inviteSellerRow passes exactly ['seller'], shared with create",
+      "no_organization_id": "PASS - create args asserted with toEqual, no organizationId",
+      "require_admin_inherited_and_tested": "PASS - mounted in the admin group; POST /sellers/:id/invite added to seller-routes-admin-gate ROUTES plus an admin positive control",
+      "cross_org_404": "PASS - withOwnSeller answers not_found on invitedOrgId mismatch; tested",
+      "uuid_check": "PASS - SellerIdSchema z.string().uuid() answers 404 before DB/Hub; tested",
+      "no_rollback": "PASS - a Hub failure writes nothing and keeps the seller row; tested",
+      "accept_url_never_logged": "PASS - no console call carries acceptUrl or bearer; tested across console methods"
+    },
+    "pnpm_audit_prod": { "high": 0, "critical": 0, "moderate": 11, "low": 1, "baseline_high_critical": "0/0" }
+  },
+  "findings": [
+    "NOTE: sellers is cross-tenant by design (getAdminDb, no org_id); a never-invited seller (invitedOrgId null) can be invited by an admin of any Organization, matching the pre-existing documented rule for null invitedOrgId. Not a regression; flag only if the product wants sellers org-owned."
+  ],
+  "done": true,
+  "ts": "2026-10-01T20:22:03Z"
+}

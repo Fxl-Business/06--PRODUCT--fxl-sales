@@ -1,0 +1,26 @@
+{
+  "agent": "execute",
+  "slice": "11-invite-locale-and-429-body",
+  "status": "done",
+  "commit": "6b5d7d7",
+  "commits": ["9c7afab", "6b5d7d7"],
+  "files": [
+    "apps/web/src/admin/sellers/hooks/useSellers.ts",
+    "apps/web/src/lib/api-client.ts",
+    "apps/web/src/admin/sellers/__tests__/AdminSellersPage.test.tsx"
+  ],
+  "checks": {
+    "red_first": "locale tests failed before implementation (body had no locale, inviteLocaleOf missing)",
+    "body_only_429_red_proof": "removing the body retryAfterSeconds check in apiFetch's retryAfterOf made 'a 429 whose retryAfterSeconds is only in the body renders that exact wait' FAIL; restored",
+    "gate2_fix_en_us_red_proof": "probe useInviteLocale -> `i18n.language as InviteLocale` (raw language) made 'en-US: create and resend send the mapped locale en, never the raw language' FAIL; probe reverted (file restored byte-identical)",
+    "oracle": "AdminSellersPage.test.tsx 53/53 pass (+ keys-resolve: 61/61 across both files)",
+    "keys_resolve": "pass",
+    "lint": "pass",
+    "type_check": "pass",
+    "web_unit_suite": "99 files, 1171 tests pass",
+    "integration": "not run (per instruction)"
+  },
+  "notes": "Gate 2 fix (commit 6b5d7d7, test only): new hook-level test switches the UI to 'en-US' inside act() (restored to pt-BR in afterEach, asserts no act warning) and asserts both create and resend send locale 'en'. Caveat for the verifier: a probe sending raw i18n.resolvedLanguage (not i18n.language) would stay green, because i18next resolves 'en-US' to the loaded 'en' resource; the raw i18n.language probe is the one that goes RED. inviteLocaleOf(language) in useSellers.ts is the one mapping (startsWith('en') -> 'en', else 'pt-BR'); useInviteLocale reads i18n.resolvedLanguage ?? i18n.language at mutation time. AdminSellersPage.tsx and types.ts unchanged.",
+  "done": true,
+  "ts": "2026-10-01T19:45:00Z"
+}

@@ -1,0 +1,38 @@
+{
+  "agent": "verify",
+  "slice": "01-sdk-bump-2.5.0",
+  "branch": "feat/01-sdk-bump-2.5.0",
+  "head": "cb5e2a3af956cefe24dce7cf7963848b8ecdb323",
+  "status": "PASS",
+  "checks": [
+    {"command": "node --test scripts/__tests__/hub-sdk-pin.test.mjs", "exit": 0, "note": "6/6 pass; includes a non-vacuity test that packages/* manifests are enumerated from the filesystem"},
+    {"command": "pnpm --filter @fxl-sales/api exec vitest run src/config/__tests__/env-example-contract.test.ts", "exit": 0, "note": "29/29 pass"},
+    {"command": "pnpm run type-check", "exit": 0, "note": "all packages including api test/scripts tsconfigs"},
+    {"command": "pnpm run lint", "exit": 0, "note": "api and web eslint clean"},
+    {"command": "CI=true pnpm --filter @fxl-sales/web exec vitest run <4 touched test files>", "exit": 0, "note": "93/93 pass in session-journey, react, dev-identity-roles, session-loss-keeps-route"},
+    {"command": "inspect package.json x2 + pnpm-lock.yaml", "exit": 0, "note": "both apps pin exactly \"2.5.0\"; lockfile has a single hono@4.12.28 package/snapshot entry; 0 occurrences of hub-sdk-testing; root test script appends hub-sdk-pin.test.mjs to the node --test list"},
+    {"command": "compare node_modules hub-sdk 2.3.0 vs 2.5.0 dist", "exit": 0, "note": "peer hono >=4.12.28 unchanged; identical FXL_HUB_* name set, so the auth-model.md claim '2.4.0 and 2.5.0 add no environment variable' holds; client.d.ts exposes switchAccount(options?: {organization?})"},
+    {"command": "git grep 2.3.0 (excluding lock, runs, doubts, decisions, plans)", "exit": 0, "note": "every remaining hit is narrative history (comments, milestones, state.json, auth-model history lines); no live pin still asserts 2.3.0"},
+    {"command": "git diff master...HEAD | grep U+2014", "exit": 1, "note": "0 em dashes introduced"},
+    {"command": "git log -1 --format=%B | grep -i co-authored", "exit": 1, "note": "no Co-Authored-By trailer"}
+  ],
+  "mutations": [
+    {"probe": "apps/web pin -> ^2.5.0", "observed": "RED (exit 1)"},
+    {"probe": "apps/api pin -> 2.3.0", "observed": "RED (exit 1)"},
+    {"probe": "both apps pin -> 2.3.0 (agreement test alone would pass)", "observed": "RED (exit 1)"},
+    {"probe": "packages/auth-fake devDependencies += @fxl-business/hub-sdk-testing", "observed": "RED (exit 1)"},
+    {"probe": "apps/web devDependencies += @fxl-business/hub-sdk-testing", "observed": "RED (exit 1)"},
+    {"probe": "append hub-sdk-testing entry to pnpm-lock.yaml", "observed": "RED (exit 1)"},
+    {"probe": "revert install-dev-identity.ts to master (drop switchAccount)", "observed": "RED tsc TS2741 'switchAccount is missing ... required in type HubClient'"},
+    {"probe": "revert auth/__tests__/react.test.tsx to master (drop mock stub)", "observed": "RED tsc TS1360 switchAccount missing"},
+    {"probe": "all probes reverted", "observed": "GREEN (exit 0), git status clean"}
+  ],
+  "findings": [
+    "Declared deviation ACCEPTED: 2.5.0 makes HubClient.switchAccount required; removing the dev-identity shim or a test stub breaks tsc, so the five out-of-files_modified edits are the minimum to keep the trunk compiling. The dev shim only reloads, mirroring its login(), and nothing calls switchAccount yet, so it is not a feature.",
+    "Doc edits are limited to live-pin statements (CLAUDE.md line 26, auth-model.md lines 16, 41, 125) plus two additive sentences (pin guard pointer; 2.5.0 peer/override unchanged). Historical 2.3.0 narrative is untouched. Line 41 keeps 'as of 2.3.0' and appends 'holds unchanged through 2.5.0', which was verified against the shipped dist.",
+    "Non-blocking: the full CI=true pnpm test and pnpm run build were not run by this verifier (slice oracle scope); the wave-verify must run them.",
+    "Non-blocking: the slice's step 4 surface evidence file (nexo/runs/.../sdk-2.5.0-surface.md) is untracked in the main checkout, not on the slice branch; Capture should commit it if later slices rely on it."
+  ],
+  "done": true,
+  "ts": "2026-10-01T16:07:30-03:00"
+}

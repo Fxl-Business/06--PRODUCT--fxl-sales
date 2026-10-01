@@ -1,0 +1,42 @@
+{
+  "agent": "verify",
+  "slice": "13-integration-env-docs",
+  "status": "PASS",
+  "checks": {
+    "integration_env_docs_test": "PASS 11/11",
+    "root_node_test_list": "PASS 84/84 (10 files, all exist, every scripts/__tests__/*.test.mjs listed)",
+    "env_example_contract_test": "PASS 29/29 (vitest run)",
+    "local_database_guard_test": "PASS (inside root list)",
+    "lint": "PASS",
+    "type_check": "PASS",
+    "em_dash": "none in prose; one literal U+2014 inside the guard's own assertion (intended)",
+    "co_authored_by_trailer": "absent in 40974ac and 44e430e",
+    "values_local": "ADMIN/TEST/TEST_MIGRATE all postgresql://...@localhost:5006/fxl_sales, TEST uses fxl_sales_test role",
+    "admin_runtime_description": "true: getAdminDb() uses resolveAdminDatabaseUrl = ADMIN_DATABASE_URL ?? DATABASE_URL with app.fxl_admin; env.ts maps blank to undefined so blank falls back",
+    "sales_env_file_note": "intact (diff only adds lines above it); apps/api/.env.staging.example has exactly one ADMIN_DATABASE_URL= line (value not printed); loadEnvFiles loads the named file last with override, so the claim holds",
+    "restored_guard_vs_spec": "matches slice 07 step 7: pure reconciliationViolations({modeExists, planText, claudeText}), exact sentinel, ordering check, heading check, D1-D4 titles verbatim, plus one extra CLAUDE.md-heading control",
+    "roadmap_line_removed": "yes, the dev-identity-docs-reconciliation test entry only",
+    "git_status_after": "clean"
+  },
+  "mutations": [
+    {"probe": "ADMIN_DATABASE_URL blank in example", "result": "RED (1 fail)"},
+    {"probe": "TEST_DATABASE_URL removed from example", "result": "RED (3 fail)"},
+    {"probe": "TEST_DATABASE_URL non-local host", "result": "RED (1 fail)"},
+    {"probe": "nonexistent file added to root test list", "result": "RED"},
+    {"probe": "unlisted scripts/__tests__/x.test.mjs", "result": "RED"},
+    {"probe": "resolver yields zero env names", "result": "RED, loud Error 'found zero env names'"},
+    {"probe": "DOCUMENTED_LOCAL_VALUES emptied", "result": "RED, loud Error 'found zero documented local values'"},
+    {"probe": "resolveIntegrationDatabaseUrls renamed", "result": "RED, loud Error 'could not find'"},
+    {"probe": "ADMIN comment says Optional", "result": "RED"},
+    {"probe": "SUPERSEDED sentinel removed from parked plan", "result": "RED (D1)"},
+    {"probe": "sentinel moved below prohibition", "result": "RED (D1)"},
+    {"probe": "CLAUDE.md '## Development identity mode' heading renamed", "result": "RED (D1)"}
+  ],
+  "findings": [
+    "NOTE: reconciliationViolations treats an absent prohibition string as satisfied (prohibitionAt === -1 passes) and emits both the missing-sentinel and the ordering line when the sentinel is missing; the literal spec would flag a missing prohibition. Defensible, non-blocking.",
+    "NOTE: JSDoc headers in both new .mjs guards are hard-wrapped (several sentences per physical line), consistent with existing scripts/__tests__ style; the .env example comments added by this slice are one sentence per line.",
+    "NOTE: commit 40974ac's message says the dev-identity-docs-reconciliation name is removed from the root list; 44e430e restores it with the file, so the final tree is consistent but that message describes an intermediate state."
+  ],
+  "done": true,
+  "ts": "2026-10-01T00:00:00Z"
+}

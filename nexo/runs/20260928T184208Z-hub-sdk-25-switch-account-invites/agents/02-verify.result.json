@@ -1,0 +1,41 @@
+{
+  "agent": "verify",
+  "slice": "02-web-switchaccount-seam",
+  "status": "PASS",
+  "checks": {
+    "named_oracles": "PASS - react.test.tsx (67), dev-identity-switch-account.test.ts (2), no-hand-built-prompt.test.ts (2): 71/71",
+    "lint": "PASS (pnpm run lint exit 0)",
+    "type_check": "PASS (pnpm run type-check exit 0; dev client satisfies 2.5.0 HubClient)",
+    "web_unit_suite": "PASS - 98 files, 1090 tests",
+    "em_dash_added": "none",
+    "co_authored_by_trailer": "none",
+    "setActive_critical_section": "unchanged (no diff hunks inside it)",
+    "useHubOrganizations_thin": "switchAccount handed through by reference; no queryClient.clear added",
+    "sdk_semantics": "client.d.ts: switchAccount(options?: { organization?: string }): void, navigates; seam shaped like login (no flush/seed/generation guard), matching contract default",
+    "git_status_after": "clean"
+  },
+  "mutations": [
+    {"probe": "seam drops organization option", "result": "RED"},
+    {"probe": "seam calls queryClient.clear()", "result": "RED"},
+    {"probe": "seam calls tokenCache.seed()", "result": "RED"},
+    {"probe": "seam calls client.login() as well", "result": "RED"},
+    {"probe": "dev shim adopts organization hint (activeWorkspaceId swap)", "result": "RED"},
+    {"probe": "dev shim swaps stored identity", "result": "RED"},
+    {"probe": "dev shim navigates instead of reload", "result": "RED"},
+    {"probe": "web product file gains '/auth/login?prompt=select_account' string", "result": "RED"},
+    {"probe": "web product file gains template literal `${b}/auth/login?prompt=select_account`", "result": "RED"},
+    {"probe": "web product file gains URLSearchParams.set('prompt', ...)", "result": "RED"},
+    {"probe": "api product file gains '?prompt=consent'", "result": "RED"},
+    {"probe": "guard scanned roots mistyped", "result": "RED (files.length > 100 non-vacuity assertion)"},
+    {"probe": "guard REPO_ROOT one level off", "result": "RED"},
+    {"probe": "web product file gains new URLSearchParams({ prompt: 'login' })", "result": "GREEN (survived) - see findings"}
+  ],
+  "findings": [
+    "NON-BLOCKING: guard gap - an object-literal identifier key `{ prompt: value }` (e.g. new URLSearchParams({ prompt: 'login' }), or shorthand `{ prompt }`) is not caught, because only string/template/JSX text nodes are inspected. Any form carrying the literal `select_account` is still caught, and the obvious URL-string, template-literal and .set('prompt', ...) forms are caught. Suggest also flagging PropertyAssignment/ShorthandPropertyAssignment named `prompt`.",
+    "NON-BLOCKING: guard scope is apps/web/src and apps/api/src only (packages/ and scripts/ unscanned); acceptable for the contract wording.",
+    "NON-BLOCKING: possible future false positives - any product string literal that is exactly 'prompt' (e.g. an enum/tag value, or reading c.req.query('prompt') in the API) or contains 'select_account' / 'prompt=' anywhere (including user-facing copy) will fail the guard. No such hits today.",
+    "INFO: the dev client switchAccount shim already existed on master (slice 01); this slice only adds a comment there plus the new oracle, which does pin its behaviour."
+  ],
+  "done": true,
+  "ts": "2026-10-01T00:00:00Z"
+}

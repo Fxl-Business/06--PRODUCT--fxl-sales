@@ -1,0 +1,31 @@
+{
+  "agent": "verify",
+  "slice": "11-invite-locale-and-429-body",
+  "attempt": 2,
+  "status": "PASS",
+  "head": "6b5d7d7",
+  "checks": {
+    "oracle_AdminSellersPage": "PASS 53/53",
+    "keys_resolve": "PASS (61/61 with oracle)",
+    "lint": "PASS exit 0",
+    "type_check": "PASS exit 0",
+    "web_unit_suite": "PASS 99 files, 1171 tests",
+    "no_em_dash_in_diff": "PASS",
+    "no_co_authored_by_trailer": "PASS (9c7afab, 6b5d7d7)",
+    "git_status_clean": "PASS",
+    "no_leftover_processes": "PASS"
+  },
+  "mutations": [
+    {"id": "P1", "probe": "useInviteLocale returns raw i18n.language", "result": "KILLED (1 failed: en-US mapped locale test)"},
+    {"id": "P1b", "probe": "useInviteLocale returns raw resolvedLanguage ?? language", "result": "SURVIVED - equivalent mutant: resources are only pt-BR and en, so resolvedLanguage is always one of the two allowed values"},
+    {"id": "P2", "probe": "inviteLocaleOf: only exact 'en' maps to en (en-US -> pt-BR)", "result": "KILLED (2 failed)"},
+    {"id": "P3", "probe": "resendInvitation omits locale body", "result": "KILLED (4 failed)"},
+    {"id": "P4", "probe": "apiFetch ignores body retryAfterSeconds", "result": "KILLED (1 failed: body-only 429 test)"}
+  ],
+  "findings": [
+    "Attempt-1 gap closed: sending raw i18n.language now goes RED via the en-US test.",
+    "Info only: raw resolvedLanguage cast survives but is behaviourally equivalent under the current two-resource i18n config; if a new resource language is added, inviteLocaleOf remains the guard."
+  ],
+  "done": true,
+  "ts": "2026-10-01T19:46:50Z"
+}

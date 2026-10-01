@@ -1,0 +1,32 @@
+{
+  "agent": "verify",
+  "slice": "12-integration-test-hygiene",
+  "status": "PASS",
+  "checks": [
+    {"name": "diagnosis", "result": "PASS", "detail": "integration_outbox.position is nullable with no default (0025), assigned only by the publisher after commit; the test file runs no publisher, so ORDER BY position ties every row. Fix orders by created_at, id and assigns no position at INSERT."},
+    {"name": "producer-emission 20x isolated", "result": "PASS", "detail": "20/20 green, each log shows 5/5 tests passed (non-vacuous)."},
+    {"name": "created_at ordering soundness", "result": "PASS", "detail": "created_at DEFAULT now() = transaction start. The assertions only slice across SEQUENTIAL awaited business transactions (tx N+1 BEGINs after tx N COMMIT returns), so now() is strictly later at microsecond resolution; a tie needs a wall-clock step back or two transactions starting in the same microsecond, neither realistic with several round-trips between them. Rows inside one transaction share now() and tie, broken by random uuid id, but every assertion within a slice is order-insensitive (every/Set/find/filter count)."},
+    {"name": "full integration suite as fxl_sales_test", "result": "PASS", "detail": "41 files / 305 tests passed, exit 0; URLs from apps/api/.env all localhost:5006, exported in shell only."},
+    {"name": "helper throws when unresolved", "result": "PASS", "detail": "Outside vitest with vars unset: throws naming all three variables and setup-env.ts; with only TEST_MIGRATE_DATABASE_URL missing it names only that one; inside vitest after deleting TEST_DATABASE_URL post-setup it throws the expected message (temp probe test, removed)."},
+    {"name": "behaviour-neutral mapping", "result": "PASS", "detail": "Every replaced chain maps to the same value setup-env.ts already forced (appUrl/adminUrl/migrateUrl; scratch-database's old TEST_MIGRATE ?? TEST_DATABASE chain becomes migrateUrl, which assert-test-role already resolves as TEST_MIGRATE ?? ADMIN)."},
+    {"name": "postgres:postgres grep", "result": "PASS", "detail": "Only apps/api/test/rls/assert-test-role.ts:38-39 documented example lines. No residual ?? DATABASE_URL / ?? 'postgres...' chains."},
+    {"name": "helper not imported by production code", "result": "PASS", "detail": "No importer in apps/api/src outside __tests__; no importer in built JS outside __tests__."},
+    {"name": "build output excludes helper", "result": "NOTE", "detail": "tsc emits dist/db/__tests__/test-database-urls.js, as it emits all 87 __tests__ files including the pre-existing settlement-test-cleanup.js (tsconfig include src/**/*). Unreachable and import-free; see findings."},
+    {"name": "lint", "result": "PASS"},
+    {"name": "type-check", "result": "PASS", "detail": "includes tsconfig.test.json"},
+    {"name": "api unit suite", "result": "PASS", "detail": "76 files / 810 tests"},
+    {"name": "no em dash, no Co-Authored-By", "result": "PASS"},
+    {"name": "clean tree, no leftover processes", "result": "PASS", "detail": "git status clean; all runs were run-once."}
+  ],
+  "mutations": [
+    {"probe": "restore ORDER BY position in outboxOf", "expected": "fail at least once in 20", "result": "KILLED", "detail": "18 of 20 runs failed (both ordering-dependent tests, AssertionError on every(...) voided/voidReason); reverted."},
+    {"probe": "call testDatabaseUrls with vars unset / after deleting TEST_DATABASE_URL post-setup", "result": "KILLED", "detail": "throws with the variable names; probe removed."}
+  ],
+  "findings": [
+    "NON-BLOCKING: Declared deviation (helper under src/db/__tests__ instead of test/rls) is sound: tsconfig rootDir ./src makes test/rls unreachable from src integration files (TS6059), and it matches the existing settlement-test-cleanup.ts precedent.",
+    "NON-BLOCKING: The production build emits every src/**/__tests__ file into dist (87 JS files, pre-existing on master), so the helper ships in the API image as dead, unreferenced code. Suggest excluding **/__tests__/** from apps/api/tsconfig.json build (keeping tsconfig.test.json for type-check) in a follow-up; not introduced by this slice.",
+    "NON-BLOCKING: Plan frontmatter files_modified still lists apps/api/test/rls/test-database-urls.ts; the declared deviation explains the real path."
+  ],
+  "done": true,
+  "ts": "2026-10-01T00:00:00Z"
+}

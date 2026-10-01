@@ -1,0 +1,36 @@
+{
+  "agent": "verify",
+  "slice": "03-trocar-conta-account-menu",
+  "status": "PASS",
+  "checks": {
+    "oracle_shell_organization_switcher": "PASS (19/19)",
+    "lint": "PASS (pnpm run lint exit 0)",
+    "type_check": "PASS (pnpm run type-check exit 0)",
+    "web_unit_suite": "PASS (98 files, 1097 tests, includes auth logout-intent tests)",
+    "scope": "diff touches only SalesOpsApp.tsx and the named oracle, as planned",
+    "org_section_guard": "PASS (AccountOrganizationSection keeps `if (others.length === 0) return null`; Trocar conta lives in a separate account-level group)",
+    "sair_logout_flow": "PASS (Sair still calls logout() via onLogout; logout intent lives in the provider, untouched)",
+    "no_raw_ids": "PASS (no new id rendering; header uses userName/email/roleLabel; img alt is empty)",
+    "pt_br_copy": "PASS (hardcoded 'Trocar conta')",
+    "no_prompt_param": "PASS (no 'prompt=' in diff; calls provider switchAccount, not client.switchAccount)",
+    "reuse": "PASS (DropdownMenuGroup/DropdownMenuItem, existing initials helper, lucide icon)",
+    "no_em_dash": "PASS (0 added)",
+    "no_co_authored_by": "PASS",
+    "git_status_clean": "PASS"
+  },
+  "mutations": [
+    {"id": "M1", "probe": "drop organization option from switchAccount call", "result": "KILLED (1 failed)"},
+    {"id": "M2", "probe": "render Trocar conta only when others.length > 0", "result": "KILLED (1 failed)"},
+    {"id": "M3", "probe": "move Trocar conta into AccountOrganizationSection", "result": "KILLED (3 failed)"},
+    {"id": "M4b", "probe": "render active organization raw id in the account group", "result": "KILLED (1 failed)"},
+    {"id": "M4a", "probe": "header name fallback to profile.workspaceId before 'FXL'", "result": "SURVIVED (mock profile carries no workspaceId; pre-existing line not changed by this slice)"},
+    {"id": "M5", "probe": "Sair calls switchAccount instead of logout", "result": "KILLED (1 failed)"}
+  ],
+  "findings": [
+    "NON-BLOCKING: M4a survives - the oracle's useAuthProfile mock has no workspaceId, so a userName fallback to a raw id would go unnoticed. The fallback line is pre-existing and unchanged here; worth a follow-up oracle that sets workspaceId and asserts it is never rendered.",
+    "NON-BLOCKING: trigger avatar scope extension judged in-scope polish - AccountAvatar keeps the identical size-10 flex-none rounded-[11px] box (only overflow-hidden added), so trigger size/layout is unchanged in both expanded and collapsed sidebar; the image path on the trigger itself is not asserted by a test (only the menu header img is).",
+    "NON-BLOCKING: AccountAvatar's onError fallback to initials has no test."
+  ],
+  "done": true,
+  "ts": "2026-10-01T19:20:47Z"
+}

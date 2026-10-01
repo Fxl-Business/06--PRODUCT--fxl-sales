@@ -33,7 +33,7 @@ Access gate:
   - `401 {"error":"unauthorized"}` (any code, `contract_version_mismatch` and a token with no `access` key included) goes to the login screen.
   - `402 {"error":"payment_required","code":"no_org_access"}` MUST render the buy screen (`MissingEntitlementPanel`).
   - `403 {"error":"forbidden"}` (`missing_module`, `missing_role`, `origin_not_trusted`) MUST render the ask-an-administrator panel (`ForbiddenPanel`), which names no module, role or raw id.
-  - `503 {"error":"unavailable","code":"hub_auth_not_configured"}` means no Hub configuration at all.
+  - `503 {"error":"unavailable","code":"hub_auth_not_configured"}` means no Hub configuration at all. The seller invitation routes also answer it while the development identity adapter is installed.
 - `isAuthFailure` (401), `isEntitlementFailure` (402) and `isForbiddenFailure` (403) in `apps/web/src/lib/require-token.ts` key on the STATUS alone, never on the body `code`. `require-token.ts` imports nothing.
 - `SalesOpsApp` classifies in the order entitlement, forbidden, auth, generic. The generic `Verifique o servidor local` copy is reachable ONLY for an unclassified error. Oracle: `apps/web/src/sales-ops/__tests__/entitlement-dead-end.test.tsx`.
 - That classification is for the bootstrap READ only. A 403 on a mutation is `MutationErrorBanner` (`salesOpsMutationErrorMessage` in `apps/web/src/sales-ops/mutation-error-copy.ts`), keyed on the status like `isForbiddenFailure`.
@@ -136,6 +136,25 @@ Full reference: `nexo/knowledge/reference/organization-context.md`.
 - Match the active Organization by the `workspaceId` claim, never by name (name is only a fallback when the claim is missing).
 - The sales-ops account dropdown shows an Organization section guarded by `others.length === 0`, never `organizations.length > 1`.
 - `?organization=` deep linking is not used; a switch is always an in-app `setActive`.
+
+## Trocar conta e convites de vendedor
+
+Full reference: `nexo/knowledge/decisions/2026-10-01-sales-owns-seller-invitation-delivery.md`.
+
+Trocar conta:
+- `switchAccount(options?)` reaches the UI only through the provider seam in `apps/web/src/auth/react.tsx`, handed through `useOrganizations()` by reference. It passes `{ organization }` only for a non-empty id, navigates the page, and never flushes the query cache or seeds the token cache.
+- Never hand-build a `prompt=` URL; `apps/web/src/auth/__tests__/no-hand-built-prompt.test.ts` scans both apps. The BFF relays `prompt=select_account` itself.
+- "Trocar conta" lives in the account menu, `MissingEntitlementPanel` and `NoRolePage`; each ignores a second click with a ref guard plus `disabled`. The panel still passes no `onRetry`.
+- The three surfaces render the account through the one `AccountAvatar` (`apps/web/src/sales-ops/AccountAvatar.tsx`), never a raw id.
+
+Convites de vendedor:
+- Sales sends the Hub invitation; Hub ACCOUNT provisioning stays with the Hub (`sellers.account_id` nullable).
+- The actor token is the raw `Authorization` bearer read in the route handler, never a body and never `hubAuth`. `appRoles` is exactly `['seller']`; no `organizationId` is ever sent. `invited_org_id` is `c.get('orgId')`.
+- Exactly one place builds the Hub create call: `inviteSellerRow` in `apps/api/src/domains/sellers/admin-service.ts`, used by `POST /` and `POST /:id/invite`.
+- An invite failure never rolls back the seller: `POST /` answers `201` and the outcome rides in the body (`inviteError` or the delivery fields). The web reads `body.inviteError`, never the HTTP status.
+- `HubInvitationError` is mapped by `code` only through `mapInvitationError`; `acceptUrl` and the bearer are never logged; `retryAfterSeconds` rides in the body (CORS hides `Retry-After`).
+- `getInvitationsClient()` is null with no Hub config OR while `isAppAuthAdapterInstalled()`; never read `SALES_AUTH_FAKE` there.
+- Resend, revoke and invite validate the uuid and answer the unknown-seller `404` when a stored `invited_org_id` differs from the admin's org, before the Hub is called. Routes inherit `requireAdmin` from `admin/index.ts`; `seller-routes-admin-gate.test.ts` proves it on the real router.
 
 ## Arquivamento e histórico
 

@@ -1,0 +1,32 @@
+{
+  "agent": "verify",
+  "slice": "06-sellers-invitation-schema",
+  "status": "FAIL",
+  "checks": {
+    "named_oracle": "PASS - seller-invitation-schema.test.ts (5) + settlements-schema-contract.test.ts (3) green",
+    "non_vacuity": "PASS - all four requested probes RED",
+    "brittleness": "FAIL - seller-invitation-schema.test.ts asserts 0026 is the LAST journal entry; a legitimate 0027 turns it red (proven by probe)",
+    "snapshot_chain": "PASS - 0026_snapshot.prevId == 0025_snapshot.id (97c4144c-...); only public.sellers differs, +3 nullable text columns, isRLSEnabled false",
+    "sql_shape": "PASS - exactly three ALTER TABLE \"sellers\" ADD COLUMN ... text; nullable, no default, no org_id/RLS",
+    "web_type": "PASS - SellerRow gains invitationId/invitationStatus/invitedOrgId (string|null, SellerInvitationStatus|null); SellerInvitationStatus = pending|accepted|expired|revoked",
+    "drizzle_kit_offline": "PASS - drizzle-kit generate in a scratch copy (dummy unreachable local URL, no connection) reports 'No schema changes, nothing to migrate'",
+    "lint": "PASS",
+    "type_check": "PASS",
+    "em_dash": "PASS - none added",
+    "co_authored_by": "PASS - no trailer",
+    "worktree_clean": "PASS"
+  },
+  "mutations": [
+    {"probe": "rename invited_org_id column in schema.ts", "result": "RED"},
+    {"probe": "invitation_status NOT NULL in 0026 SQL", "result": "RED"},
+    {"probe": "swap journal entries idx 25/26 order", "result": "RED"},
+    {"probe": "append fourth statement to 0026 SQL", "result": "RED"},
+    {"probe": "append legitimate future 0027 journal entry (brittleness check)", "result": "RED (expected 26 to be 27) - defect"}
+  ],
+  "findings": [
+    "BLOCKING: apps/api/src/domains/sellers/__tests__/seller-invitation-schema.test.ts line `expect(at).toBe(entries.length - 1);` pins 0026 as the last journal entry, so the next unrelated migration (0027) turns this oracle red. Fix: delete that line; the findIndex + previous-neighbour + idx:26 + when-ordering checks already mirror the settlements-schema-contract precedent and are sufficient. Optionally, if forward ordering is wanted, assert `entries[at + 1] === undefined || entries[at + 1].idx === 27` instead.",
+    "Note: migration apply against the local test DB was not run here per instructions; it is deferred to the wave-verify test:integration."
+  ],
+  "done": true,
+  "ts": "2026-10-01T19:11:39Z"
+}

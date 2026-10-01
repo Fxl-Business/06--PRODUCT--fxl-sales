@@ -1,0 +1,44 @@
+{
+  "agent": "verify",
+  "slice": "14-send-invite-to-uninvited-seller",
+  "status": "PASS",
+  "checks": {
+    "oracles": "PASS: seller-invite.test.ts 50/50, seller-routes-admin-gate.test.ts 7/7, AdminSellersPage.test.tsx 63/63, keys-resolve.test.ts 8/8",
+    "single_hub_create_site": "PASS: only apps/api/src/domains/sellers/admin-service.ts:210 (inviteSellerRow), shared by POST / and POST /:id/invite",
+    "resend_semantics": "PASS: resend/revoke still 409 seller_not_invited without invitation (pre-existing tests; probe swapping NOT_INVITED went RED)",
+    "lint": "PASS (pnpm run lint exit 0)",
+    "type_check": "PASS (pnpm run type-check exit 0)",
+    "api_unit": "PASS 76 files / 830 tests",
+    "web_unit": "PASS 100 files / 1192 tests",
+    "no_em_dash": "PASS (0 in added lines, code and JSON)",
+    "no_coauthor_trailer": "PASS",
+    "no_native_select_or_confirm": "PASS",
+    "git_status_clean": "PASS (every probe reverted)"
+  },
+  "mutations": [
+    {"id": "P1", "change": "invite route takes token from body", "result": "KILLED"},
+    {"id": "P2", "change": "appRoles ['seller','admin']", "result": "KILLED"},
+    {"id": "P3", "change": "add organizationId to create", "result": "KILLED"},
+    {"id": "P4", "change": "skip cross-org check (invite-only and helper variants)", "result": "KILLED"},
+    {"id": "P5", "change": "skip uuid check on /:id/invite", "result": "KILLED"},
+    {"id": "P6", "change": "allow invite on pending/expired row (and drop the guard entirely)", "result": "KILLED"},
+    {"id": "P7", "change": "throw instead of INVITATIONS_UNAVAILABLE when client null", "result": "KILLED"},
+    {"id": "P8", "change": "invitedOrgId from hubAuth / body / null", "result": "KILLED"},
+    {"id": "P9", "change": "roll back invitation fields on Hub failure", "result": "KILLED"},
+    {"id": "P10", "change": "bypass requireAdmin for /invite", "result": "KILLED"},
+    {"id": "U1", "change": "show Enviar convite on pending row", "result": "KILLED"},
+    {"id": "U2", "change": "hide Enviar convite on revoked row", "result": "KILLED"},
+    {"id": "U3", "change": "hub_auth_not_configured copy back to reenvie/resend (pt, en) and retry branch removed", "result": "KILLED"},
+    {"id": "U4", "change": "outcome code read from HTTP status (problemOf and send onError)", "result": "KILLED"},
+    {"id": "U5", "change": "drop disabled / spinner / send from rowBusy", "result": "KILLED"},
+    {"id": "X14", "change": "uuid validation removed on resend and on revoke", "result": "KILLED"},
+    {"id": "X29", "change": "retryAfterOf >= 0 -> > 0", "result": "KILLED"},
+    {"id": "X37", "change": "any failing status call discards all statuses", "result": "KILLED"},
+    {"id": "R1", "change": "resend without invitation answers seller_already_invited", "result": "KILLED"}
+  ],
+  "findings": [
+    "NON-BLOCKING: apps/web/src/i18n/en.json and pt-BR.json have misindented added lines (actions.resend, outcome.inviteFailedTitle, outcome.resentTitle at 12 spaces; hubNotConfiguredRetry at 10) where siblings use 10/8. Valid JSON, no formatter gate catches it; cosmetic diff noise worth fixing in a follow-up."
+  ],
+  "done": true,
+  "ts": "2026-10-01T00:00:00Z"
+}

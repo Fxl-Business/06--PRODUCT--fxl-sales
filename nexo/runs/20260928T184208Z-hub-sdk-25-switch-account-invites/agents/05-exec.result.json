@@ -1,0 +1,24 @@
+{
+  "agent": "execute",
+  "slice": "05-trocar-conta-no-role",
+  "status": "DONE",
+  "branch": "feat/05-trocar-conta-no-role",
+  "commit": "135646a",
+  "files": [
+    "apps/web/src/pages/errors/NoRolePage.tsx",
+    "apps/web/src/i18n/pt-BR.json",
+    "apps/web/src/i18n/en.json",
+    "apps/web/src/__tests__/no-role-redirect.test.tsx"
+  ],
+  "checks": {
+    "red_first": "8 new tests failed before implementation",
+    "oracle_no_role_redirect": "PASS (34/34)",
+    "keys_resolve": "PASS (8/8)",
+    "lint": "PASS",
+    "type_check": "PASS",
+    "web_unit_suite": "PASS (98 files, 1098 tests)"
+  },
+  "notes": "Trocar conta (default Button) sits beside Sair (outline) in one flex row; calls useOrganizations().switchAccount({ organization: active?.id }) exactly once, never the SDK client nor any prompt= URL. Active account block shows 'Conectado como' + name/email and an optional decorative avatar img; omitted entirely when neither name nor email exists (no raw id fallback). Added i18n keys errors.noRole.signedInAs and errors.noRole.switchAccount in both locales, inserted before signOut. NoRoleGuard and router wiring untouched; existing redirect tests still green. Not visually checked in a browser: the dev-fake roster has no identity with zero roles, so /no-role is not reachable via make dev-fake.",
+  "done": true,
+  "ts": "2026-10-01T19:18:28Z"
+}

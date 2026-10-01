@@ -1,0 +1,65 @@
+{
+  "agent": "execute",
+  "slice": "10-verify-findings-polish",
+  "branch": "feat/10-verify-findings-polish",
+  "status": "DONE",
+  "commits": [
+    "a2c976b fix(api): answer 404 when resending or revoking another org's seller invitation",
+    "a652220 refactor(web): share one AccountAvatar across the three account surfaces",
+    "62fa1b0 test(web): pin that the shell header never renders the raw workspaceId",
+    "e315190 test(web): lock that SalesOpsApp renders MissingEntitlementPanel with no onRetry",
+    "43f9148 fix(web): make NoRolePage Trocar conta ignore a second click",
+    "14e9e2e test(api): prove the sellers routes refuse a non-admin through the real adminRouter",
+    "1c2b01b fix(api): refuse an integration run as a superuser or against a non-local database",
+    "6d9624b fix(api): carry retryAfterSeconds in resend and revoke error bodies"
+  ],
+  "files": [
+    "apps/web/src/sales-ops/AccountAvatar.tsx",
+    "apps/web/src/sales-ops/SalesOpsApp.tsx",
+    "apps/web/src/sales-ops/MissingEntitlementPanel.tsx",
+    "apps/web/src/pages/errors/NoRolePage.tsx",
+    "apps/web/src/sales-ops/__tests__/account-avatar.test.tsx",
+    "apps/web/src/sales-ops/__tests__/shell-organization-switcher.test.tsx",
+    "apps/web/src/sales-ops/__tests__/entitlement-dead-end.test.tsx",
+    "apps/web/src/__tests__/no-role-redirect.test.tsx",
+    "apps/api/src/domains/sellers/admin-service.ts",
+    "apps/api/src/domains/sellers/admin-routes.ts",
+    "apps/api/src/domains/sellers/__tests__/seller-invite.test.ts",
+    "apps/api/src/domains/sellers/__tests__/seller-routes-admin-gate.test.ts",
+    "apps/api/test/rls/setup-env.ts",
+    "apps/api/test/rls/assert-test-role.ts",
+    "apps/api/test/rls/global-setup.ts",
+    "CLAUDE.md",
+    "nexo/knowledge/reference/propostas.md"
+  ],
+  "checks": {
+    "red_first": {
+      "1_account_avatar": "RED: account-avatar.test.tsx failed to import ../AccountAvatar (module missing); GREEN after extraction",
+      "2_shell_workspaceId": "Already GREEN (fallback is profile.name ?? 'FXL'); mutation profile.name ?? profile.workspaceId ?? 'FXL' turned it RED, reverted",
+      "3_no_onRetry": "Already GREEN; mutation <MissingEntitlementPanel onRetry={...} /> turned it RED, reverted",
+      "4_act_warning": "RED with unwrapped i18n.changeLanguage (warning captured, assertion failed); GREEN with both calls in act()",
+      "5_cross_org_resend_revoke": "RED 2 failed (200 instead of 404); GREEN after invitedOrgId check",
+      "6_integration_refusal": "RED: old setup with no TEST_* and DATABASE_URL=...@staging-db.invalid dialed that host (ENOTFOUND). GREEN: missing vars -> IntegrationDatabaseRefusal naming both; remote TEST_DATABASE_URL/TEST_MIGRATE host -> refusal by host only; superuser local postgres as TEST_DATABASE_URL -> exit 1 'connects as postgres, which is SUPERUSER and BYPASSRLS', no test ran",
+      "7_admin_gate": "Already GREEN; mutation removing adminRouter.use('*', requireAdmin) turned 4 of 5 RED, reverted",
+      "8_noRole_double_click": "RED (switchAccount called 3 times); GREEN after ref guard + disabled",
+      "9_retryAfterSeconds_body": "RED 2 failed; GREEN after shared failureBody"
+    },
+    "oracles": "account-avatar, shell-organization-switcher, missing-entitlement-panel, entitlement-dead-end, no-role-redirect, seller-invite, seller-routes-admin-gate: all pass",
+    "test_integration": "PASS as fxl_sales_test (TEST_* exported in shell only from apps/api/.env, all localhost:5006): 41 files, 305 tests, exit 0; run after wave3-verify.result.json existed",
+    "pnpm_test": "PASS (api 810, web 1129, shared-utils 155, auth-fake 41, node script guards ok)",
+    "lint": "PASS",
+    "type_check": "PASS"
+  },
+  "notes": [
+    "Extra files beyond files_modified: apps/api/src/domains/sellers/admin-routes.ts (item 5 needs orgId passed to resend/revoke; item 9 per coordinator), apps/api/test/rls/global-setup.ts (it had the same DATABASE_URL/postgres fallback chain and is the once-per-run place for the role check, running before migrations), CLAUDE.md Testing (developer contract changed: TEST_DATABASE_URL and ADMIN_DATABASE_URL now required and local), nexo/knowledge/reference/propostas.md (matching reference line, per CLAUDE.md rule).",
+    "TEST_MIGRATE_DATABASE_URL is optional and falls back ONLY to ADMIN_DATABASE_URL (both local-checked). The role check applies to the app URL only; admin/migrate URLs are the local postgres superuser by design (decision 2026-07-29).",
+    "assert-test-role.ts reuses isLocalDatabaseHost/describeDatabaseTarget from src/db/local-database-guard.ts (unchanged, still pure). SALES_ENV_FILE is not honoured here. An unparseable test URL is refused (cannot be proven local), unlike the server guard.",
+    "Individual test/rls files still carry their own '?? postgres default' fallbacks; they are now dead because setup-env always sets the variables first. Not touched (out of files_modified).",
+    "NoRolePage visual change: the account block now shows the shared amber 40px tile (initials fallback, onError retry) instead of a bare round image only when avatarUrl was set. Not checked in a real browser.",
+    "Cross-org resend/revoke: a null invitedOrgId (legacy rows) is not refused; the unavailable-client 503 still precedes the seller lookup, as for an unknown seller.",
+    "nexo/knowledge/decisions/2026-07-29-integration-tests-are-hermetic-local.md still describes the old global-setup fallback chain; left as a dated decision record.",
+    "No processes left running; no merge, no push."
+  ],
+  "done": true,
+  "ts": "2026-10-01T19:37:21Z"
+}

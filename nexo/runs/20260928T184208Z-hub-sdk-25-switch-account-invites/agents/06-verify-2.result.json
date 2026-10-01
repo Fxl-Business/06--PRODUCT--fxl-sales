@@ -1,0 +1,29 @@
+{
+  "agent": "verify",
+  "slice": "06-sellers-invitation-schema",
+  "attempt": 2,
+  "head": "f4b3915",
+  "status": "PASS",
+  "checks": {
+    "oracle_baseline": "PASS 5/5",
+    "oracle_plus_settlements_schema_contract": "PASS 2 files, 8/8 tests",
+    "lint": "PASS exit 0",
+    "type_check": "PASS exit 0 (api incl. scripts and test tsconfigs, web, packages)",
+    "em_dash_added_in_diff": 0,
+    "co_authored_by_trailers": 0,
+    "git_status_clean_after": true
+  },
+  "mutations": [
+    {"probe": "append 0027_probe journal entry after 0026", "expect": "GREEN", "result": "GREEN 5/5", "reverted": true},
+    {"probe": "schema.ts invited_org_id -> invited_org", "expect": "RED", "result": "RED 2 failed", "reverted": true},
+    {"probe": "SQL invitation_status text NOT NULL", "expect": "RED", "result": "RED 1 failed", "reverted": true},
+    {"probe": "journal: 0026 placed before 0025", "expect": "RED", "result": "RED 1 failed", "reverted": true},
+    {"probe": "fourth ALTER statement in 0026 SQL", "expect": "RED", "result": "RED 1 failed", "reverted": true}
+  ],
+  "findings": [
+    "Attempt-1 blocker resolved: f4b3915 removes only the last-entry assertion; a later 0027 migration no longer breaks the oracle.",
+    "Oracle remains non-vacuous on column naming, nullability, journal order and statement count."
+  ],
+  "done": true,
+  "ts": "2026-10-01T19:13:32Z"
+}

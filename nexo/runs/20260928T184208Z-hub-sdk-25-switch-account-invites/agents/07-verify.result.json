@@ -1,0 +1,36 @@
+{
+  "agent": "verify",
+  "slice": "07-invitations-client-seam",
+  "status": "PASS",
+  "checks": {
+    "oracles": "PASS - invitation-error.test.ts + invitations-client.test.ts: 2 files, 48/48",
+    "code_coverage": "PASS - all 15 codes of HubInvitationErrorCode in hub-sdk 2.5.0 server.d.ts are in MAPPING, typed Record<HubInvitationErrorCode, Mapping> (exhaustive at type level); oracle EXPECTED table is also a full Record and asserts length 15",
+    "keys_on_code_only": "PASS - mapInvitationError reads err.code and retryAfterSeconds only; message never read nor echoed (body.message is fixed pt-BR copy); unknown or prototype-key codes fall to 500 code 'unknown'",
+    "acceptUrl_never_logged": "PASS - only occurrences in the diff are a doc comment and a source-discipline assertion; the single console.error logs only error.name",
+    "unavailable_body": "PASS - INVITATIONS_UNAVAILABLE = 503 {\"error\":\"unavailable\",\"code\":\"hub_auth_not_configured\"}, byte-checked by the oracle",
+    "dev_adapter_oracle_non_vacuous": "PASS - stubs a valid Hub config (pk_fxl-sales_development_*), vi.resetModules + dynamic import of app-auth and the client in one graph, installs the adapter on that app-auth instance, fetch stubbed to throw for the whole file (afterEach asserts it was never called), positive control with same config and no adapter returns non-null and builds exactly one instance from getHubSdkConfig()",
+    "isAppAuthAdapterInstalled": "PASS - returns installedAppAuthAdapter !== null; no env read",
+    "no_SALES_AUTH_FAKE_read": "PASS - invitations-client.ts has no SALES_AUTH_FAKE or process.env (tests only blank the var)",
+    "auth_fake_isolation": "PASS - node --test scripts/__tests__/auth-fake-isolation.test.mjs 21/21; no @fxl-sales/auth-fake import added",
+    "lint": "PASS - pnpm run lint exit 0, 0 warnings",
+    "type_check": "PASS - pnpm run type-check exit 0",
+    "api_unit_suite": "PASS - 73 files, 768/768",
+    "no_em_dash": "PASS - 0 added U+2014",
+    "no_coauthor_trailer": "PASS",
+    "scope": "PASS - 5 files, exactly the plan's files_modified; no route wiring"
+  },
+  "mutations": [
+    {"id": "M1", "probe": "remove isAppAuthAdapterInstalled() guard in resolveRealClient", "result": "RED (2 failed)"},
+    {"id": "M2", "probe": "getInvitationsClient builds per call (no memo)", "result": "RED (2 failed)"},
+    {"id": "M3", "probe": "reset seam does not clear the memo", "result": "RED (1 failed)"},
+    {"id": "M4", "probe": "INVITATIONS_UNAVAILABLE body changed by one byte", "result": "RED (1 failed)"},
+    {"id": "M5", "probe": "derive code from message instead of err.code", "result": "RED (14 failed)"},
+    {"id": "M6", "probe": "swap 404/409 between invitation_not_found and invitation_not_pending", "result": "RED (2 failed)"}
+  ],
+  "findings": [
+    "NOTE: every mutation was reverted; git status of the worktree is clean.",
+    "NOTE (non-blocking): the source-discipline regex /console\\.[a-z]+\\([^)]*acceptUrl/ is a narrow guard (single-line, no logger other than console); the real protection is that nothing in the seam handles results. Slice 08 should keep the acceptUrl-not-logged assertion at the route level."
+  ],
+  "done": true,
+  "ts": "2026-10-01T16:20:00Z"
+}

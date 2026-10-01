@@ -1,0 +1,21 @@
+{
+  "agent": "execute",
+  "slice": "03-trocar-conta-account-menu",
+  "status": "DONE",
+  "commit": "f39b8ca",
+  "branch": "feat/03-trocar-conta-account-menu",
+  "files": [
+    "apps/web/src/sales-ops/SalesOpsApp.tsx",
+    "apps/web/src/sales-ops/__tests__/shell-organization-switcher.test.tsx"
+  ],
+  "checks": {
+    "oracle_red": "6 new tests failed before implementation",
+    "oracle_green": "shell-organization-switcher.test.tsx 19/19 passed",
+    "lint": "pass",
+    "type_check": "pass",
+    "web_unit_suite": "98 files, 1097 tests passed"
+  },
+  "notes": "New AccountSessionActions component (inside DropdownMenuContent, so useOrganizations runs only while the menu is open) renders a DropdownMenuGroup with 'Trocar conta' (UsersRound icon, neutral row styling matching org rows) then 'Sair' (unchanged). Trocar conta onSelect calls the seam switchAccount({ organization: active.id }) or switchAccount(undefined) when no active org; Radix closes the menu on select. AccountOrganizationSection and its others.length === 0 guard untouched. New AccountAvatar renders profile.avatarUrl (alt='', object-cover, falls back to initials on load error, keyed by URL) in both the trigger and menu header, so they stay consistent. No browser E2E pass was done; UI verified via happy-dom oracle only.",
+  "done": true,
+  "ts": "2026-10-01T19:18:11Z"
+}

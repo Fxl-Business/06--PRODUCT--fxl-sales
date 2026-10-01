@@ -1,0 +1,30 @@
+{
+  "agent": "wave-verify",
+  "wave": 1,
+  "commit": "6d79f63",
+  "status": "PASS",
+  "checks": [
+    {"command": "pnpm run lint", "exit": 0, "counts": {"errors": 0, "warnings": 0}, "note": "eslint apps/api (src, scripts) and apps/web (src) clean"},
+    {"command": "pnpm run type-check", "exit": 0, "counts": {"errors": 0}, "note": "includes api tsconfig.scripts.json and tsconfig.test.json; switchAccount stubs type-check against HubClient 2.5.0"},
+    {"command": "CI=true pnpm test", "exit": 0, "counts": {"auth-fake": "41/41", "shared-utils": "155/155", "api_unit": "720/720 (71 files)", "web": "1084/1084 (96 files)", "node_scripts": "68/68"}, "note": "hub-sdk-pin.test.mjs ran (subtests 35-40 green); no timeouts, no reruns needed; installed hub-sdk in both apps is 2.5.0"},
+    {"command": "rm -rf packages/*/dist packages/*/tsconfig.tsbuildinfo apps/*/dist && pnpm run build", "exit": 0, "counts": {}, "note": "cold build green; assert-web-bundle-clean: dev-fake sentinel absent from apps/web/dist. First attempt exited 1 only because zsh errored on an unmatched apps/*/dist glob before building; rerun with nullglob"},
+    {"command": "pnpm --filter @fxl-sales/api test:integration", "exit": 0, "counts": {"files": "41/41", "tests": "305/305"}, "note": "docker container 06--product--fxl-sales-db-1 healthy on 5006; worktree has no apps/api/.env, so setup-env.ts would fall back to the postgres SUPERUSER (vacuous RLS). Exported the main checkout's local TEST_DATABASE_URL (fxl_sales_test, rolsuper=f, rolbypassrls=f), TEST_MIGRATE_DATABASE_URL and ADMIN_DATABASE_URL (all localhost:5006) into the shell only; tree untouched"},
+    {"command": "pnpm audit --prod", "exit": 1, "counts": {"critical": 0, "high": 0, "moderate": 11, "low": 1}, "note": "all pre-existing (hono 4.12.28 via workspace override, @hono/node-server, react-router/react-router-dom); identical counts at 3eb642c; none in hub-sdk or jose"}
+  ],
+  "security": {
+    "findings": [
+      "No secret values in the diff (only package specifiers, lockfile integrity hashes, test stubs and docs).",
+      "No change under apps/api/src: requireHubAuth / appAuthMiddleware wiring and the single access gate are untouched; auth-model.md change is documentation of the version only.",
+      "No org-scoping or tenancy change.",
+      "install-dev-identity.ts switchAccount() only calls window.location.reload(), mirrors login(), lives behind the import.meta.env.DEV seam; bundle-clean assertion passed.",
+      "New guard hub-sdk-pin.test.mjs enforces exact 2.5.0 in both importers and bans @fxl-business/hub-sdk-testing from manifests and lockfile; it is wired into root pnpm test.",
+      "pnpm audit --prod: 0 critical, 0 high; 11 moderate + 1 low, all pre-existing and not introduced by this wave."
+    ]
+  },
+  "findings": [
+    "NON-BLOCKING: worktrees lack apps/api/.env, so a bare test:integration in a worktree silently runs as the postgres superuser (RLS tests vacuous). setup-env.ts could fail closed when TEST_DATABASE_URL is unset.",
+    "NON-BLOCKING: verifier procedural note - an accidental 'git checkout 3eb642c --' briefly moved this worktree's detached HEAD; restored to 6d79f63 immediately, tree clean, all checks except the JSON audit re-read ran at 6d79f63 and the audit was re-run at 6d79f63."
+  ],
+  "done": true,
+  "ts": "2026-10-01T19:11:03Z"
+}

@@ -1,0 +1,45 @@
+{
+  "agent": "wave-verify",
+  "wave": 3,
+  "commit": "a56585c",
+  "status": "PASS",
+  "checks": {
+    "lint": {"exit": 0, "notes": "eslint apps/api (src, scripts) and apps/web src clean"},
+    "type_check": {"exit": 0, "notes": "all 5 workspace projects incl. api scripts and test tsconfigs"},
+    "unit_tests": {"exit": 0, "command": "CI=true pnpm test", "counts": {"auth-fake": "41/41 (2 files)", "shared-utils": "155/155 (5 files)", "api": "799/799 (75 files)", "web": "1118/1118 (98 files)", "node_test_scripts": "68/68, 0 fail, 0 skipped"}, "timeouts_rerun": "none needed"},
+    "cold_build": {"exit": 0, "notes": "removed packages/*/dist, packages/*/tsconfig.tsbuildinfo, apps/*/dist (none remained before build); pnpm run build green; assert-web-bundle-clean: sentinel absent from apps/web/dist"},
+    "integration": {"exit": 0, "command": "pnpm --filter @fxl-sales/api test:integration", "counts": "305/305 tests, 41/41 files", "env": "TEST_DATABASE_URL, TEST_MIGRATE_DATABASE_URL, ADMIN_DATABASE_URL all localhost:5006 (exported in shell only); app role fxl_sales_test rolsuper=f rolbypassrls=f"}
+  },
+  "from_scratch_migrate": {
+    "result": "PASS",
+    "scratch_db": "fxl_sales_wv3_scratch on localhost:5006 (created via local admin URL)",
+    "command": "env -u SALES_ENV_FILE NODE_ENV=development DATABASE_URL=<scratch> pnpm exec tsx src/db/migrate.ts (worktree apps/api has no .env/.env.local, so loadEnvFiles injected 0 vars; guard printed host=localhost port=5006)",
+    "exit": 0,
+    "migrations_applied": 27,
+    "migration_files": "0000..0026 (27 .sql files), drizzle.__drizzle_migrations count = 27",
+    "sellers_invitation_columns": ["invitation_id text NULL", "invitation_status text NULL", "invited_org_id text NULL"],
+    "integration_transport_tables": ["integration_cursor", "integration_inbox", "integration_outbox", "integration_outbox_position"],
+    "notices": "only benign NOTICEs (drop policy if exists skip; identifier truncation)",
+    "cleanup": "DROP DATABASE fxl_sales_wv3_scratch; pg_database count afterwards = 0"
+  },
+  "security": {
+    "invite_token_is_raw_bearer": "PASS - bearerOf(c) strips 'Bearer ' from the Authorization header; never from body or hubAuth; test 'invites with the raw bearer...' pins it",
+    "no_organizationId_sent": "PASS - client.create/resend/revoke/list carry no organizationId; a smuggled body organizationId is ignored and asserted absent (tests L250, L536)",
+    "app_roles_exactly_seller": "PASS - appRoles: ['seller'] literal in createSellerAndInvite",
+    "requireAdmin_inherited": "PASS - sellersAdminRouter mounted at adminRouter.route('/sellers') after adminRouter.use('*', appAuthMiddleware) and use('*', requireAdmin); /:id/resend and /:id/revoke inherit it",
+    "acceptUrl_and_bearer_never_logged": "PASS - only error.name / HubInvitationError.code are logged; test spies every console method for the accept URL; acceptUrl is returned only in the admin's response body by design",
+    "no_raw_ids_in_ui": "PASS - SalesOps account menu, MissingEntitlementPanel and NoRolePage render only name/email/avatar; the account block disappears when neither exists; active.id is only passed as the switchAccount hint",
+    "pnpm_audit_prod": {"high": 0, "critical": 0, "moderate": 11, "low": 1, "baseline_high_critical": "0/0 held"}
+  },
+  "findings": [
+    "NON-BLOCKING: no test drives the admin gate on /api/v1/admin/sellers (including the new /:id/resend and /:id/revoke) with a non-admin token; protection is structural only (adminRouter.use('*', requireAdmin)). Pre-existing gap, worth an oracle.",
+    "NON-BLOCKING: AccountAvatar is duplicated verbatim in SalesOpsApp.tsx and MissingEntitlementPanel.tsx (documented as a cycle-avoidance twin); a shared module would remove drift risk.",
+    "NON-BLOCKING: NoRolePage 'Trocar conta' has no double-click guard, unlike MissingEntitlementPanel's leavingAccount flag.",
+    "NON-BLOCKING: listSellers reconciles with N sequential UPDATEs and 4 Hub list calls on every GET when any seller has an invitation; fine at current scale.",
+    "NON-BLOCKING: pnpm audit --prod reports 11 moderate + 1 low (no high/critical)."
+  ],
+  "tree_left_as_found": true,
+  "processes_left_running": "none",
+  "done": true,
+  "ts": "2026-10-01T19:29:41Z"
+}

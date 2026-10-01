@@ -61,3 +61,9 @@ Moved verbatim from `CLAUDE.md` on 2026-09-22 so the standing context stays shor
   The isolation guard proves itself against the source tree, not yet against the built Docker artifact, and that remaining gap is exactly what the paragraph above files on `nexo/ROADMAP.md`.
   The parked file carries a dated supersession note, corrected on the same day to state the Docker gap rather than the four-layer claim it first repeated, and `nexo/knowledge/decisions/2026-09-21-development-identity-is-a-boot-time-adapter.md` carries the reasoning.
   `scripts/__tests__/dev-identity-docs-reconciliation.test.mjs` fails if that note is removed while `packages/auth-fake` is still in the tree, so the repository can never again ship a prohibition against something it does.
+
+## Seller invitations under the adapter (v4.1.0)
+
+- With the adapter installed, `getInvitationsClient()` in `apps/api/src/domains/sellers/invitations-client.ts` returns null even when `apps/api/.env` carries a valid Hub configuration, so a fake bearer never reaches the real Hub.
+- The check is `isAppAuthAdapterInstalled()` in `apps/api/src/middleware/app-auth.ts`, which reads the adapter slot filled once at boot; it is decided lazily on the first call and memoized, and it never reads `SALES_AUTH_FAKE`.
+- Creating a seller under `make dev-fake` saves the row and shows the `hub_auth_not_configured` operator copy; the row then offers `Enviar convite`.

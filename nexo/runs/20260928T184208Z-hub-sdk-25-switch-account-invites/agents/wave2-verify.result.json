@@ -1,0 +1,27 @@
+{
+  "agent": "wave-verify",
+  "wave": 2,
+  "commit": "eb6470a",
+  "status": "PASS",
+  "checks": {
+    "lint": {"command": "pnpm run lint", "exit": 0, "errors": 0, "warnings": 0},
+    "typeCheck": {"command": "pnpm run type-check", "exit": 0},
+    "unit": {"command": "CI=true pnpm test", "exit": 0, "files": 179, "tests": 2059, "breakdown": {"auth-fake": "2 files / 41 tests", "shared-utils": "5 / 155", "api": "74 / 773", "web": "98 / 1090", "node --test scripts": "68 pass / 0 fail / 0 skipped"}, "timeoutsRerun": 0},
+    "build": {"command": "cold: rm -rf packages/*/dist packages/*/tsconfig.tsbuildinfo apps/*/dist apps/*/tsconfig.tsbuildinfo; pnpm run build", "exit": 0, "assertWebBundleClean": "clean"},
+    "integration": {"command": "pnpm --filter @fxl-sales/api test:integration", "exit": 0, "files": 41, "tests": 305, "appRole": "fxl_sales_test (rolsuper=f, rolbypassrls=f)", "urls": "TEST_DATABASE_URL, TEST_MIGRATE_DATABASE_URL, ADMIN_DATABASE_URL all localhost:5006, exported in verifier shell only", "migration0026": "applied by global-setup on the local test DB (sellers had no invitation columns before the run); afterwards invitation_id, invitation_status, invited_org_id exist as text, nullable, no default; 27 journal rows applied. Applied incrementally onto the existing local DB, not on a dropped/recreated database."}
+  },
+  "security": {
+    "secrets": "none; only a test fixture literal 'sk_fxl-sales_development_unit-test-only-not-a-real-secret-...' in a unit test",
+    "authGate": "unchanged; isAppAuthAdapterInstalled() only reads installedAppAuthAdapter !== null; requireHubAuth and appAuthMiddleware untouched",
+    "orgScoping": "unchanged; sellers stays cross-org (invited_org_id informational, no RLS/org_id change)",
+    "acceptUrl": "never logged; only mentioned in a doc comment; client construction failure logs error.name only",
+    "errorMapping": "mapInvitationError keys on code only, never echoes SDK message",
+    "pnpmAuditProd": {"critical": 0, "high": 0, "moderate": 11, "low": 1, "baselineHigh": 0, "baselineCritical": 0}
+  },
+  "findings": [
+    "NOTE: migration 0026 was proven by applying on top of the existing local test DB (pre-run the columns were absent, post-run present), not by a drop-and-recreate from an empty database.",
+    "NOTE: web SellerRow adds non-optional invitation fields; API listSellers uses db.select() of the whole table, so the fields are actually returned."
+  ],
+  "done": true,
+  "ts": "2026-10-01T19:18:14Z"
+}

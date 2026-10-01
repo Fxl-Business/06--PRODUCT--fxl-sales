@@ -1,0 +1,94 @@
+{
+  "agent": "execute",
+  "slice": "12-integration-test-hygiene",
+  "status": "PASS",
+  "branch": "feat/12-integration-test-hygiene",
+  "commits": [
+    {
+      "sha": "92d33c2",
+      "message": "test(api): order producer-emission outbox reads by write order, not NULL position"
+    },
+    {
+      "sha": "615bd05",
+      "message": "test(api): read integration database URLs through one helper, drop dead fallbacks"
+    }
+  ],
+  "files": [
+    "apps/api/src/db/__tests__/settlement-test-cleanup.ts",
+    "apps/api/src/db/__tests__/test-database-urls.ts",
+    "apps/api/src/domains/integration/__tests__/outbox-adapter.integration.test.ts",
+    "apps/api/src/domains/sales-ops/__tests__/producer-emission.integration.test.ts",
+    "apps/api/test/rls/areas-rls.test.ts",
+    "apps/api/test/rls/audit-history-org-scope.test.ts",
+    "apps/api/test/rls/cadastro-archive-audit.test.ts",
+    "apps/api/test/rls/cadastro-purge.test.ts",
+    "apps/api/test/rls/client-legal-fields.test.ts",
+    "apps/api/test/rls/conversion-ingest.test.ts",
+    "apps/api/test/rls/conversion-webhook-contract.test.ts",
+    "apps/api/test/rls/conversions-commissions-rls.test.ts",
+    "apps/api/test/rls/cross-tenant.test.ts",
+    "apps/api/test/rls/funcoes-concurrency.test.ts",
+    "apps/api/test/rls/funcoes-rls.test.ts",
+    "apps/api/test/rls/funcoes-schema-migration.test.ts",
+    "apps/api/test/rls/hub-bff-login-supersede.test.ts",
+    "apps/api/test/rls/hub-bff-session-store.test.ts",
+    "apps/api/test/rls/integration-transport-schema.test.ts",
+    "apps/api/test/rls/lead-stages-rls.test.ts",
+    "apps/api/test/rls/leads-no-financial-impact.test.ts",
+    "apps/api/test/rls/leads-rls.test.ts",
+    "apps/api/test/rls/leads-schema-migration.test.ts",
+    "apps/api/test/rls/leads-seller-scope.test.ts",
+    "apps/api/test/rls/list-finder-links-cross-tenant.test.ts",
+    "apps/api/test/rls/product-commission-contract.test.ts",
+    "apps/api/test/rls/product-funcao-costs-rls.test.ts",
+    "apps/api/test/rls/produtos-servicos-schema-migration.test.ts",
+    "apps/api/test/rls/professional-payable-migration.integration.test.ts",
+    "apps/api/test/rls/proposal-schema-migration.test.ts",
+    "apps/api/test/rls/proposal-write.test.ts",
+    "apps/api/test/rls/referral-links-public-lookup.test.ts",
+    "apps/api/test/rls/sale-professional-funcoes.test.ts",
+    "apps/api/test/rls/sao-paulo-day.test.ts",
+    "apps/api/test/rls/scratch-database.ts",
+    "apps/api/test/rls/settlements-schema.test.ts",
+    "apps/api/test/rls/update-sale-in-place.test.ts",
+    "apps/api/vitest.config.ts"
+  ],
+  "diagnosis": {
+    "cause": "outboxOf() read integration_outbox ORDER BY position. position is NULL at INSERT (fxl-contracts OUTBOX_INSERT writes NULL) and only the elected publisher assigns it after commit; no publisher runs in this test, so every row tied on NULL and Postgres returned them in arbitrary order. The two .slice(before) assertions (test.ts:141 revert voids, test.ts:157 cancel-contract voids) then sometimes picked earlier 'active' rows from the win transaction.",
+    "evidence": "18/20 isolated runs failed before the fix; failing assertions were test.ts:141 (17x, together with :157) and test.ts:157 (1x), both 'expected false to be true' on every(state==='voided') over a slice.",
+    "fix": "ORDER BY created_at, id. created_at defaults to now() (the business transaction start), strictly increasing across the test's sequential transactions; id only breaks ties inside one transaction, which no assertion depends on. position is still never assigned at INSERT; no sleeps or retries.",
+    "failures_before": "18/20",
+    "failures_after": "0/20 (each run 5/5 tests)"
+  },
+  "counts_before_after": {
+    "integration_before": {
+      "files": 41,
+      "tests": 305
+    },
+    "integration_after": {
+      "files": 41,
+      "tests": 305
+    },
+    "api_unit_after": {
+      "files": 76,
+      "tests": 810
+    }
+  },
+  "checks": {
+    "producer_emission_20x_isolated": "PASS 20/20",
+    "api_test_integration_full": "PASS 41 files / 305 tests (as fxl_sales_test, all URLs localhost:5006)",
+    "api_unit": "PASS 76 files / 810 tests",
+    "pnpm_run_lint": "PASS",
+    "pnpm_run_type_check": "PASS",
+    "oracle_grep_postgres_postgres": "only apps/api/test/rls/assert-test-role.ts:38-39 (documented fixture lines)"
+  },
+  "notes": [
+    "Deviation from plan path: the helper lives at apps/api/src/db/__tests__/test-database-urls.ts, not apps/api/test/rls/test-database-urls.ts. src/ integration files (outbox-adapter.integration.test.ts, settlement-test-cleanup.ts) must import it and apps/api/tsconfig.json has rootDir ./src, so importing from test/rls fails type-check with TS6059 (reproduced). One implementation, imported by all 34 test/rls and src importers; it imports nothing.",
+    "testDatabaseUrls() returns {appUrl, adminUrl, migrateUrl} from the values setup-env.ts wrote to process.env and throws naming the missing variables otherwise. Replacement is behaviour-neutral: under setup-env every old chain already resolved to the same variable.",
+    "Five files (funcoes-schema-migration, hub-bff-login-supersede, leads-schema-migration, produtos-servicos-schema-migration, proposal-schema-migration) only used APP_DB_URL as the admin fallback, so they now bind only ADMIN_DB_URL.",
+    "vitest.config.ts comment now describes TEST_DATABASE_URL / ADMIN_DATABASE_URL / TEST_MIGRATE_DATABASE_URL, global-setup and setup-env.",
+    "Test env vars were exported only in the subshells that ran tests; no leftover processes; no nexo/ notes; no merge or push."
+  ],
+  "done": true,
+  "ts": "2026-10-01T19:54:25.476742+00:00"
+}

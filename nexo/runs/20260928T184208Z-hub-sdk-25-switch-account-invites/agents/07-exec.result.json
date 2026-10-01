@@ -1,0 +1,66 @@
+{
+  "agent": "execute",
+  "slice": "07-invitations-client-seam",
+  "status": "DONE",
+  "branch": "feat/07-invitations-client-seam",
+  "worktree": "/Users/cauetpinciara/Documents/fxl/projects/06--PRODUCT--fxl-sales/.worktrees/hub25/07",
+  "commit": "64fe085",
+  "files": [
+    "apps/api/src/domains/sellers/invitations-client.ts",
+    "apps/api/src/domains/sellers/invitation-error.ts",
+    "apps/api/src/domains/sellers/__tests__/invitation-error.test.ts",
+    "apps/api/src/domains/sellers/__tests__/invitations-client.test.ts",
+    "apps/api/src/middleware/app-auth.ts"
+  ],
+  "exported_api": {
+    "apps/api/src/middleware/app-auth.ts": [
+      "export function isAppAuthAdapterInstalled(): boolean"
+    ],
+    "apps/api/src/domains/sellers/invitations-client.ts": [
+      "export interface SalesInvitationsClient { create(input: CreateHubInvitationInput): Promise<HubInvitationResult>; list(input: ListHubInvitationsInput): Promise<HubInvitationList>; revoke(input: RevokeHubInvitationInput): Promise<void>; resend(input: ResendHubInvitationInput): Promise<HubInvitationResult>; }  (input/output types are the SDK's, from @fxl-business/hub-sdk/server)",
+      "export function getInvitationsClient(): SalesInvitationsClient | null",
+      "export function setInvitationsClientForTests(client: SalesInvitationsClient): void",
+      "export function forceInvitationsClientAbsentForTests(): void",
+      "export function resetInvitationsClientForTests(): void  (drops override AND memoized decision)"
+    ],
+    "apps/api/src/domains/sellers/invitation-error.ts": [
+      "export const INVITATION_COPY: { notAllowed, invalidRole, invitationGone, signInAgain, rateLimited, temporary, configurationDefect, operatorItem } (pt-BR strings)",
+      "export type InvitationErrorBody = { error: string; code: HubInvitationErrorCode | 'unknown'; message: string }",
+      "export type InvitationErrorResponse = { httpStatus: number; body: InvitationErrorBody; retryAfterSeconds?: number }",
+      "export function mapInvitationError(err: Pick<HubInvitationError, 'code' | 'retryAfterSeconds'>): InvitationErrorResponse",
+      "export function isHubInvitationError(value: unknown): value is HubInvitationError",
+      "export const INVITATIONS_UNAVAILABLE = { httpStatus: 503, body: { error: 'unavailable', code: 'hub_auth_not_configured' } } as const"
+    ]
+  },
+  "mapping": {
+    "actor_not_member|application_not_granted": "403 forbidden",
+    "invalid_app_roles": "400 invalid_request",
+    "invitation_not_found": "404 not_found",
+    "invitation_not_pending": "409 conflict",
+    "invalid_actor_token": "401 unauthorized",
+    "rate_limited": "429 rate_limited (+retryAfterSeconds only when non-null)",
+    "network_error": "503 unavailable",
+    "unexpected_response": "502 bad_gateway",
+    "invalid_client|application_mismatch|not_an_application|invalid_request": "500 internal_error",
+    "discovery_missing_api_url|discovery_insecure_api_url": "503 unavailable (operator item)",
+    "unknown code": "500 internal_error, body.code 'unknown'"
+  },
+  "checks": [
+    {"command": "pnpm --filter @fxl-sales/api exec vitest run src/domains/sellers (RED before impl)", "exit": 1, "counts": "2 files failed: modules missing"},
+    {"command": "pnpm --filter @fxl-sales/api exec vitest run src/domains/sellers", "exit": 0, "counts": "2 files, 48 tests passed"},
+    {"command": "manual mutation: drop isAppAuthAdapterInstalled() guard", "exit": 1, "counts": "2 of 9 invitations-client tests RED (dev-adapter null + memo/reset); restored"},
+    {"command": "pnpm --filter @fxl-sales/api exec vitest run", "exit": 0, "counts": "73 files, 768 tests passed (after building packages/shared-utils dist in the fresh worktree)"},
+    {"command": "node --test scripts/__tests__/auth-fake-isolation.test.mjs", "exit": 0, "counts": "21/21 pass"},
+    {"command": "pnpm run lint", "exit": 0},
+    {"command": "pnpm run type-check", "exit": 0}
+  ],
+  "notes": [
+    "The fresh worktree had no packages/shared-utils dist, so 25 api files failed at collection ('Failed to resolve entry for package @fxl-sales/shared-utils'). Built with pnpm --filter ./packages/** run build (gitignored output); not a code issue. Verify agent will need the same build in a fresh worktree.",
+    "Real client is the SDK HubInvitations instance returned as-is (it satisfies SalesInvitationsClient); built lazily on first getInvitationsClient() call, memoized, null memoized too; construction errors are caught (logs only error.name) so the getter never throws.",
+    "Slice 08: when getInvitationsClient() is null answer c.json(INVITATIONS_UNAVAILABLE.body, INVITATIONS_UNAVAILABLE.httpStatus); on isHubInvitationError(e) answer mapInvitationError(e) and set Retry-After from retryAfterSeconds when present. Use resetInvitationsClientForTests in afterEach.",
+    "invitations-client.ts contains no process.env / SALES_AUTH_FAKE token and never logs acceptUrl (asserted by a source-discipline test).",
+    "No route wiring, no nexo/ notes committed."
+  ],
+  "done": true,
+  "ts": "2026-10-01T16:20:00Z"
+}

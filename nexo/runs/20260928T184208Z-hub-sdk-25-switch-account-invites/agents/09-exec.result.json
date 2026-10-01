@@ -1,0 +1,38 @@
+{
+  "agent": "execute",
+  "slice": "09-admin-sellers-invite-ui",
+  "status": "DONE",
+  "branch": "feat/09-admin-sellers-invite-ui",
+  "worktree": "/Users/cauetpinciara/Documents/fxl/projects/06--PRODUCT--fxl-sales/.worktrees/hub25/09",
+  "commit": "67b172d",
+  "files": [
+    "apps/web/src/admin/sellers/AdminSellersPage.tsx",
+    "apps/web/src/admin/sellers/hooks/useSellers.ts",
+    "apps/web/src/lib/api-client.ts",
+    "apps/web/src/i18n/pt-BR.json",
+    "apps/web/src/i18n/en.json",
+    "apps/web/src/admin/sellers/__tests__/AdminSellersPage.test.tsx"
+  ],
+  "checks": [
+    { "command": "pnpm exec vitest run src/admin/sellers (RED, before impl)", "exit": 1, "counts": "39 failed | 1 passed (40)" },
+    { "command": "pnpm exec vitest run src/admin/sellers src/i18n", "exit": 0, "counts": "48 passed (oracle 40 + keys-resolve 8)" },
+    { "command": "manual mutations (each reverted, file cmp-verified): revoke on expired, acceptUrl always shown, unknown code not mapped to unknown, inviteError ignored", "exit": 1, "counts": "4/4 RED (1,2,1,4 failing tests)" },
+    { "command": "pnpm --filter @fxl-sales/web exec vitest run", "exit": 0, "counts": "99 files, 1158 tests passed" },
+    { "command": "pnpm run lint", "exit": 0 },
+    { "command": "pnpm run type-check", "exit": 0 }
+  ],
+  "notes": [
+    "Oracle runs the REAL api-client and hooks against a stubbed global fetch, asserting method, path and Bearer of POST /, /:id/resend and /:id/revoke; only @/auth/react and the Radix Dialog/AlertDialog shells are mocked (context-aware stand-ins).",
+    "Create reads the outcome from the 201 BODY: `inviteError` -> createFailed outcome (seller saved line + copy by code), else delivery fields. Resend/revoke failures read ApiError.code (falling back to `error`, e.g. bare 404 `not_found`).",
+    "Every warning/error renders through admin.sellers.invitation.{warnings,errors}.<code>; INVITE_ERROR_CODES whitelists codes with copy, anything else renders errors.unknown. Server `message` is never rendered (oracle asserts a sentinel message is absent). pt copy mirrors the API INVITATION_COPY strings.",
+    "Outcome dialog (one Dialog for create/resend/revoke-error): email_not_configured shows the single-use acceptUrl in a code block + Copiar link (KeyRevealModal pattern); acceptUrl lives only in outcome state, cleared on close; oracle spies every console level and asserts the token never appears. email_failed offers Reenviar in the dialog. application_url_missing is an amber operator note. hub_auth_not_configured is its own operator copy and the new row (Sem convite) stays visible.",
+    "Rows: new Convite column (Badge: accepted default, pending secondary, expired outline, revoked destructive, null outline muted 'Sem convite'), rendered verbatim from SellerRow.invitationStatus. Resend on pending/expired, Revoke on pending only (accepted/revoked/uninvited get none, since resend of an uninvited seller is a guaranteed 409). Actions cell has a fixed h-9 so rows with and without buttons line up. Both row buttons disable while either mutation runs for that row; Loader2 spinner on the active one (repo pattern).",
+    "Revoke asks for confirmation via AlertDialog (Voltar / Revogar convite), never window.confirm.",
+    "api-client: ApiError gained optional retryAfterSeconds (body field first, then a numeric Retry-After header; headers read is optional-chained because minimal fetch fakes have none). Added CreateSellerResult / SellerInviteDelivery / SellerInviteError types and adminSellersApi.resendInvitation / revokeInvitation (POST, no body, server defaults locale pt-BR).",
+    "FOLLOW-UP (server, not in this slice): resend/revoke 429 bodies carry no retryAfterSeconds (only the create inviteError does) and the API CORS config does not expose Retry-After, so cross-origin (staging/prod) the resend rate-limit copy falls back to the generic 'Aguarde um pouco' text. Fix: put retryAfterSeconds in failureResponse's body, or add exposeHeaders: ['Retry-After'] in apps/api/src/middleware/cors.ts.",
+    "Not browser-verified: no dev server was started (shared loaded machine, port contention with parallel worktrees). Verify should eyeball /admin/sellers under make dev-fake (expect the hub_auth_not_configured path).",
+    "Did not run test:integration. No nexo/ notes committed. No merge, no push. No processes left running."
+  ],
+  "done": true,
+  "ts": "2026-10-01T18:10:00Z"
+}
