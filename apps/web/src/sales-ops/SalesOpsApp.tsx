@@ -133,6 +133,7 @@ import { SPLIT_BP_TOTAL } from '@fxl-sales/shared-utils/professional-split';
 import { todayInSaoPaulo } from '@fxl-sales/shared-utils/sao-paulo-day';
 import { CadastroHistorySection } from './CadastroHistoryPanel';
 import { ForbiddenPanel } from './ForbiddenPanel';
+import { AccountAvatar } from './AccountAvatar';
 import { MissingEntitlementPanel } from './MissingEntitlementPanel';
 import { MutationErrorBanner } from './MutationErrorBanner';
 import { lockedRowLines } from './settlements/settlement-errors';
@@ -1215,33 +1216,6 @@ function AccountOrganizationSection({ onSwitched }: { onSwitched: () => void }) 
       ) : null}
       <DropdownMenuSeparator className="my-1.5 bg-[#e5e5ea]" />
     </div>
-  );
-}
-
-/**
- * The account's face in the shell: the Hub avatar when the token carries one, the
- * initials otherwise. Display-only. A URL that fails to load falls back to the
- * initials instead of leaving a broken image, and the fallback is keyed on the URL so
- * a later token with a new avatar gets a fresh attempt.
- */
-function AccountAvatar({ avatarUrl, name }: { avatarUrl?: string; name: string }) {
-  const [failedUrl, setFailedUrl] = useState<string | null>(null);
-  const showImage = Boolean(avatarUrl) && failedUrl !== avatarUrl;
-
-  return (
-    <span className="sales-ops-num flex size-10 flex-none items-center justify-center overflow-hidden rounded-[11px] bg-[#eaa81a] text-[14px] font-bold text-[#18181b]">
-      {showImage ? (
-        <img
-          alt=""
-          className="size-full object-cover"
-          onError={() => setFailedUrl(avatarUrl ?? null)}
-          referrerPolicy="no-referrer"
-          src={avatarUrl}
-        />
-      ) : (
-        initials(name)
-      )}
-    </span>
   );
 }
 

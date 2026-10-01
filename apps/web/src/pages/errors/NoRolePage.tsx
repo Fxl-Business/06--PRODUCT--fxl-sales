@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { useAuthProfile, useLogout, useOrganizations } from '@/auth/react';
 import { Button } from '@/components/ui/button';
+import { AccountAvatar } from '@/sales-ops/AccountAvatar';
 
 /**
  * Shown to a signed-in operator this app has nothing to offer (Phase 03 T13).
@@ -13,9 +14,10 @@ import { Button } from '@/components/ui/button';
  * The usual cause is being signed in with the WRONG account, so the page names the
  * active account and offers `Trocar conta` beside `Sair`. The switch goes through the
  * provider's `switchAccount` (handed out by `useOrganizations`), which owns the call into
- * the SDK; this page never builds the Hub URL itself. The account block is display only
- * and simply disappears when the token carries neither a name nor an email: there is no
- * raw id to fall back to on this screen.
+ * the SDK; this page never builds the Hub URL itself. The account block is display only,
+ * fronted by the shared `AccountAvatar` (the Hub avatar, or the initials), and simply
+ * disappears when the token carries neither a name nor an email: there is no raw id to
+ * fall back to on this screen.
  */
 export function NoRolePage() {
   const { t } = useTranslation();
@@ -34,14 +36,7 @@ export function NoRolePage() {
           className="flex w-full max-w-sm items-center gap-3 rounded-lg border bg-muted/40 px-4 py-3 text-left"
           data-testid="no-role-active-account"
         >
-          {avatarUrl ? (
-            <img
-              alt=""
-              className="size-10 flex-none rounded-full object-cover"
-              referrerPolicy="no-referrer"
-              src={avatarUrl}
-            />
-          ) : null}
+          <AccountAvatar avatarUrl={avatarUrl} name={primary} />
           <div className="min-w-0 flex-1 leading-tight">
             <p className="text-xs text-muted-foreground">{t('errors.noRole.signedInAs')}</p>
             <p className="mt-0.5 truncate text-sm font-medium">{primary}</p>
