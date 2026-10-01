@@ -27,6 +27,8 @@ type ClientModule = typeof import('../invitations-client.js');
 type AppAuthModule = typeof import('../../../middleware/app-auth.js');
 
 let createCalls: Array<{ config: HubConfig }> = [];
+/** When set, the spied `createHubInvitations` throws it instead of building. */
+let createThrows: Error | undefined;
 
 function stubCommonEnv(): void {
   vi.stubEnv('NODE_ENV', 'test');
@@ -59,6 +61,7 @@ async function loadGraph(): Promise<{ client: ClientModule; appAuth: AppAuthModu
       ...actual,
       createHubInvitations: (...args: Parameters<typeof actual.createHubInvitations>) => {
         createCalls.push({ config: args[0] });
+        if (createThrows) throw createThrows;
         return actual.createHubInvitations(...args);
       },
     };
@@ -83,6 +86,7 @@ function fakeClient(): SalesInvitationsClient {
 
 beforeEach(() => {
   createCalls = [];
+  createThrows = undefined;
   fetchSpy.mockClear();
 });
 
@@ -166,6 +170,33 @@ describe('getInvitationsClient with a VALID Hub config', () => {
     // Re-resolved against the CURRENT state, which now has the adapter.
     expect(client.getInvitationsClient()).toBeNull();
     expect(createCalls).toHaveLength(1);
+  });
+});
+
+describe('getInvitationsClient when the SDK refuses to build the client', () => {
+  it('returns null, never throws, and logs only the error name', async () => {
+    stubValidHubConfig();
+    const { client } = await loadGraph();
+    class HubConfigRefusedError extends Error {
+      override name = 'HubConfigRefusedError';
+    }
+    createThrows = new HubConfigRefusedError('secret-bearing detail sk_must_not_be_logged');
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    try {
+      expect(() => client.getInvitationsClient()).not.toThrow();
+      // Memoized null: a second call neither throws nor rebuilds.
+      expect(client.getInvitationsClient()).toBeNull();
+      expect(createCalls).toHaveLength(1);
+      expect(consoleError).toHaveBeenCalledTimes(1);
+      expect(consoleError.mock.calls[0]).toEqual([
+        '[invitations] Could not build the Hub invitations client:',
+        'HubConfigRefusedError',
+      ]);
+      expect(JSON.stringify(consoleError.mock.calls)).not.toContain('sk_must_not_be_logged');
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 });
 

@@ -232,6 +232,15 @@ function OrganizationProbe() {
       >
         trocar conta
       </button>
+      <button
+        data-testid="seam-switch-account-empty"
+        onClick={() => {
+          switchAccount({ organization: '' });
+        }}
+        type="button"
+      >
+        trocar conta sem dica
+      </button>
     </div>
   );
 }
@@ -2145,6 +2154,18 @@ describe('active organization and the useOrganizations seam', () => {
     await flushReact();
 
     await clickTestId(container, 'seam-switch-account');
+    await flushReact();
+
+    expect(mocks.client.switchAccount).toHaveBeenCalledTimes(1);
+    expect(mocks.client.switchAccount.mock.calls[0]).toEqual([]);
+  });
+
+  it('treats an empty organization hint as absent and calls client.switchAccount with no options', async () => {
+    mocks.cache.getToken.mockResolvedValue(ok(profileToken('Alpha', undefined, 'workspace-alpha')));
+    ({ container, root } = renderOrganizations());
+    await flushReact();
+
+    await clickTestId(container, 'seam-switch-account-empty');
     await flushReact();
 
     expect(mocks.client.switchAccount).toHaveBeenCalledTimes(1);

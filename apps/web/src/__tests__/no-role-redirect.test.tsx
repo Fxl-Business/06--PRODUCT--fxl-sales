@@ -335,6 +335,15 @@ describe('/no-role offers "Trocar conta" for a person signed in with the wrong a
     expect(account?.querySelectorAll('img')).toHaveLength(0);
   });
 
+  it('renders an email-only account email exactly once, never repeated on a secondary line', async () => {
+    profileName = undefined;
+    await renderAt('/no-role');
+
+    const account = container.querySelector('[data-testid="no-role-active-account"]');
+    const text = account?.textContent ?? '';
+    expect(text.split('test.user@fxl.example')).toHaveLength(2);
+  });
+
   it('omits the account block, but keeps both actions, when neither name nor email is known', async () => {
     profileName = undefined;
     profileEmail = undefined;
