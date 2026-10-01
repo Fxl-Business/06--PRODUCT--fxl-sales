@@ -128,7 +128,10 @@ function buildDevIdentitySession(fake: FakeAuthModule, identity: FakeIdentity): 
     switchAccount() {
       // There is no Hub Account Chooser to navigate to. Behave exactly like
       // `login()`: a reload re-enters the cold-boot path with the SAME adopted
-      // identity, never a live identity swap.
+      // identity, never a live identity swap. The `organization` hint is
+      // ignored on purpose: changing identity is the switcher's job
+      // (`switchDevIdentity`), and changing Organization is `setActive`'s.
+      // Oracle: `__tests__/dev-identity-switch-account.test.ts`.
       window.location.reload();
     },
     async loginWithPopup() {
