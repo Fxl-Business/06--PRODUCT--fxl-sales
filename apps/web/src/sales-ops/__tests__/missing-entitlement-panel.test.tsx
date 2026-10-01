@@ -28,7 +28,7 @@ type Seam = {
 };
 
 /* Display only: the panel names the signed-in account and tolerates every absence. */
-type Profile = { name?: string; email?: string };
+type Profile = { name?: string; email?: string; avatarUrl?: string };
 
 let seam: Seam;
 let profile: Profile;
@@ -428,6 +428,44 @@ describe('MissingEntitlementPanel - Trocar conta', () => {
     expect(account?.textContent).toContain('ana@acme.example');
   });
 
+  it('shows the account avatar as a decorative image when the token carries one', async () => {
+    profile = { ...profile, avatarUrl: 'https://cdn.example/ana.png' };
+    await renderPanel();
+    const avatar = section().querySelector('[data-account-avatar]');
+    const image = avatar?.querySelector('img');
+    expect(image).toBeInstanceOf(HTMLImageElement);
+    expect(image?.getAttribute('src')).toBe('https://cdn.example/ana.png');
+    expect(image?.getAttribute('alt')).toBe('');
+    expect(avatar?.textContent?.trim()).toBe('');
+  });
+
+  it('falls back to the account initials when the token carries no avatar', async () => {
+    await renderPanel();
+    const avatar = section().querySelector('[data-account-avatar]');
+    expect(avatar?.querySelector('img')).toBeNull();
+    expect(avatar?.textContent?.trim()).toBe('AS');
+  });
+
+  it('falls back to the account initials when the avatar image fails to load', async () => {
+    profile = { ...profile, avatarUrl: 'https://cdn.example/broken.png' };
+    await renderPanel();
+    const image = section().querySelector('[data-account-avatar] img');
+    expect(image).toBeInstanceOf(HTMLImageElement);
+    await act(async () => {
+      image?.dispatchEvent(new Event('error'));
+    });
+    await flushReact();
+    const avatar = section().querySelector('[data-account-avatar]');
+    expect(avatar?.querySelector('img')).toBeNull();
+    expect(avatar?.textContent?.trim()).toBe('AS');
+  });
+
+  it('derives the initials from the email when the token carries no name', async () => {
+    profile = { email: 'ana@acme.example' };
+    await renderPanel();
+    expect(section().querySelector('[data-account-avatar]')?.textContent?.trim()).toBe('AN');
+  });
+
   it('names the account by email alone when the token carries no name', async () => {
     profile = { email: 'ana@acme.example' };
     await renderPanel();
@@ -440,6 +478,7 @@ describe('MissingEntitlementPanel - Trocar conta', () => {
     profile = {};
     await renderPanel();
     expect(section().querySelector('[data-active-account]')).toBeNull();
+    expect(section().querySelector('[data-account-avatar]')).toBeNull();
     expect(sectionText()).not.toContain(MISSING_ENTITLEMENT_COPY.accountPrefix);
     /* The way out still exists without the identity line. */
     expect(accountSwitchButton().textContent?.trim()).toBe(MISSING_ENTITLEMENT_COPY.switchAccount);

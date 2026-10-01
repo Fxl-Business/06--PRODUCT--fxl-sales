@@ -5,6 +5,7 @@ import type { Organization } from '@/auth/react';
 import { Combobox } from '@/components/ui/combobox';
 import { Skeleton } from '@/components/ui/skeleton';
 import { isOrgLabelFallback, orgLabel } from '@/lib/displayNames';
+import { initials } from './calculations';
 import { MISSING_ENTITLEMENT_COPY } from './missing-entitlement-copy';
 
 /*
@@ -71,7 +72,8 @@ export function MissingEntitlementPanel({ onRetry }: { onRetry?: () => void }) {
     so naming the account is what lets them recognise it. Every field may be absent and
     the line simply disappears; the profile carries no raw account id to fall back to.
   */
-  const { name: accountName, email: accountEmail } = useAuthProfile();
+  const { name: accountName, email: accountEmail, avatarUrl } = useAuthProfile();
+  const accountPrimary = accountName ?? accountEmail;
 
   const [attempt, setAttempt] = useState(0);
   /*
@@ -216,17 +218,20 @@ export function MissingEntitlementPanel({ onRetry }: { onRetry?: () => void }) {
         </p>
       )}
 
-      {accountName || accountEmail ? (
-        <p className="text-[13px] leading-5 text-[#57575f]">
-          {MISSING_ENTITLEMENT_COPY.accountPrefix}
-          <span data-active-account>
-            <span className="font-semibold text-[#201f24]">{accountName ?? accountEmail}</span>
-            {accountName && accountEmail ? (
-              <span className="text-[#8b8b92]">{` (${accountEmail})`}</span>
-            ) : null}
-          </span>
-          {MISSING_ENTITLEMENT_COPY.accountSuffix}
-        </p>
+      {accountPrimary ? (
+        <div className="flex items-center gap-[11px]">
+          <AccountAvatar avatarUrl={avatarUrl} name={accountPrimary} />
+          <p className="min-w-0 text-[13px] leading-5 text-[#57575f]">
+            {MISSING_ENTITLEMENT_COPY.accountPrefix}
+            <span className="break-words" data-active-account>
+              <span className="font-semibold text-[#201f24]">{accountPrimary}</span>
+              {accountName && accountEmail ? (
+                <span className="text-[#8b8b92]">{` (${accountEmail})`}</span>
+              ) : null}
+            </span>
+            {MISSING_ENTITLEMENT_COPY.accountSuffix}
+          </p>
+        </div>
       ) : null}
 
       <p className={`${mutedStateClass} leading-5`}>
@@ -347,6 +352,37 @@ export function MissingEntitlementPanel({ onRetry }: { onRetry?: () => void }) {
         </button>
       </div>
     </section>
+  );
+}
+
+/*
+  A local twin of the sales ops shell's `AccountAvatar` (same 40px tile, 11px rounding,
+  amber initials tile), re-declared here for the same cycle reason as the style
+  constants above. Decorative: the name beside it is the accessible text, so `alt` is
+  empty. A URL that fails to load falls back to the initials, keyed on the URL so a NEW
+  avatar gets its own attempt rather than inheriting the old failure.
+*/
+function AccountAvatar({ avatarUrl, name }: { avatarUrl?: string; name: string }) {
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const showImage = Boolean(avatarUrl) && failedUrl !== avatarUrl;
+
+  return (
+    <span
+      className="sales-ops-num flex size-10 flex-none items-center justify-center overflow-hidden rounded-[11px] bg-[#eaa81a] text-[14px] font-bold text-[#18181b]"
+      data-account-avatar
+    >
+      {showImage ? (
+        <img
+          alt=""
+          className="size-full object-cover"
+          onError={() => setFailedUrl(avatarUrl ?? null)}
+          referrerPolicy="no-referrer"
+          src={avatarUrl}
+        />
+      ) : (
+        initials(name)
+      )}
+    </span>
   );
 }
 
