@@ -1,3 +1,4 @@
+import { useCallback, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAuthProfile, useLogout, useOrganizations } from '@/auth/react';
 import { Button } from '@/components/ui/button';
@@ -26,6 +27,20 @@ export function NoRolePage() {
   const { active, switchAccount } = useOrganizations();
   const primary = name ?? email;
   const secondary = name ? email : undefined;
+  /*
+    `switchAccount` is a full-document navigation to the Hub Account Chooser, so this
+    document is about to be torn down; nothing ever resets the flag. The ref stops a
+    second click that lands before React re-renders the button disabled, and the state
+    renders it disabled, matching `MissingEntitlementPanel`. `Sair` stays enabled.
+  */
+  const leavingRef = useRef(false);
+  const [leavingAccount, setLeavingAccount] = useState(false);
+  const handleSwitchAccount = useCallback(() => {
+    if (leavingRef.current) return;
+    leavingRef.current = true;
+    setLeavingAccount(true);
+    switchAccount({ organization: active?.id });
+  }, [active?.id, switchAccount]);
 
   return (
     <div className="flex h-screen flex-col items-center justify-center gap-4 px-6 text-center">
@@ -47,7 +62,7 @@ export function NoRolePage() {
         </div>
       ) : null}
       <div className="flex flex-wrap items-center justify-center gap-2">
-        <Button onClick={() => switchAccount({ organization: active?.id })} type="button">
+        <Button disabled={leavingAccount} onClick={handleSwitchAccount} type="button">
           {t('errors.noRole.switchAccount')}
         </Button>
         <Button onClick={() => void logout()} type="button" variant="outline">
