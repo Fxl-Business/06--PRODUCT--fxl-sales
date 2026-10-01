@@ -695,6 +695,25 @@ describe('invite locale follows the active UI language', () => {
     expectNoActWarning();
   });
 
+  it('en-US: create and resend send the mapped locale en, never the raw language', async () => {
+    await useLanguage('en-US');
+    await mount();
+    await click(button(en.admin.sellers.invite));
+    await typeInto('seller-name', CREATED.displayName);
+    await typeInto('seller-email', CREATED.contactEmail);
+    await click(button(en.admin.sellers.invite, dialog()));
+    await click(button(en.admin.sellers.invitation.actions.close, dialog()));
+    await click(button(en.admin.sellers.invitation.actions.resend, rowOf('Paula')));
+
+    expect(posts('/api/v1/admin/sellers')[0]?.body).toEqual({
+      displayName: CREATED.displayName,
+      contactEmail: CREATED.contactEmail,
+      locale: 'en',
+    });
+    expect(posts('/resend')[0]?.body).toEqual({ locale: 'en' });
+    expectNoActWarning();
+  });
+
   it('a switch after mount is honoured by the next request', async () => {
     await mount();
     await useLanguage('en');
