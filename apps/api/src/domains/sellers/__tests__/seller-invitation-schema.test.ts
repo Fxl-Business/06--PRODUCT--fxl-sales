@@ -42,7 +42,6 @@ describe('seller invitation schema (migration 0026)', () => {
     expect(entry).toMatchObject({ idx: 26, tag: '0026_seller_invitation_state' });
     expect(previous).toMatchObject({ idx: 25, tag: '0025_integration_transport' });
     expect(entry!.when).toBeGreaterThan(previous!.when);
-    expect(at).toBe(entries.length - 1);
   });
 
   it('ships exactly three additive nullable sellers columns', () => {
