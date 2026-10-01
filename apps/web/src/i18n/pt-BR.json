@@ -247,7 +247,8 @@
           "revoked": "Revogado"
         },
         "actions": {
-          "resend": "Reenviar",
+          "send": "Enviar convite",
+            "resend": "Reenviar",
           "revoke": "Revogar",
           "copy": "Copiar link",
           "copied": "Copiado",
@@ -261,7 +262,9 @@
         },
         "outcome": {
           "createdTitle": "Vendedor cadastrado",
-          "resentTitle": "Convite reenviado",
+          "invitedTitle": "Convite enviado",
+            "inviteFailedTitle": "Convite não enviado",
+            "resentTitle": "Convite reenviado",
           "resendFailedTitle": "Convite não reenviado",
           "revokeFailedTitle": "Convite não revogado",
           "sent": "Convite enviado para {{email}}.",
@@ -275,6 +278,7 @@
           "email_failed": "O convite foi criado, mas o e-mail não foi entregue. Tente reenviar."
         },
         "rateLimitedWait": "Muitas tentativas. Aguarde {{seconds}} s e tente novamente.",
+          "hubNotConfiguredRetry": "Os convites do Hub não estão configurados neste ambiente. Peça ao operador para configurar o Hub e depois tente novamente.",
         "errors": {
           "actor_not_member": "Você não pode convidar para esta Organization.",
           "application_not_granted": "Você não pode convidar para esta Organization.",
@@ -291,8 +295,9 @@
           "invalid_request": "Não foi possível processar o convite. Contate o suporte.",
           "discovery_missing_api_url": "O serviço de convites não está disponível. Contate o suporte.",
           "discovery_insecure_api_url": "O serviço de convites não está disponível. Contate o suporte.",
-          "hub_auth_not_configured": "Os convites do Hub não estão configurados neste ambiente. Peça ao operador para configurar o Hub e depois reenvie o convite.",
-          "seller_not_invited": "Este vendedor ainda não tem um convite para reenviar ou revogar.",
+          "hub_auth_not_configured": "Os convites do Hub não estão configurados neste ambiente. Peça ao operador para configurar o Hub e depois use Enviar convite na linha do vendedor.",
+          "seller_not_invited": "Este vendedor ainda não tem convite. Use Enviar convite na linha do vendedor.",
+          "seller_already_invited": "Este vendedor já tem um convite pendente, expirado ou aceito. Atualize a página.",
           "not_found": "Vendedor não encontrado. Atualize a página.",
           "unknown": "Não foi possível processar o convite. Contate o suporte."
         }

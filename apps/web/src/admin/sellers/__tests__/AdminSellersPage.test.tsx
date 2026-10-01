@@ -176,6 +176,7 @@ let calls: Call[];
 let createReply: Reply;
 let resendReply: Reply;
 let revokeReply: Reply;
+let inviteReply: Reply;
 
 function json(reply: Reply): Response {
   return new Response(JSON.stringify(reply.body), {
@@ -202,6 +203,7 @@ function installFetch() {
       }
       if (method === 'POST' && url.pathname.endsWith('/resend')) return json(resendReply);
       if (method === 'POST' && url.pathname.endsWith('/revoke')) return json(revokeReply);
+      if (method === 'POST' && url.pathname.endsWith('/invite')) return json(inviteReply);
       return json({ status: 404, body: { error: 'not_found' } });
     }),
   );
@@ -221,6 +223,10 @@ beforeEach(() => {
   createReply = { status: 201, body: { seller: CREATED, ...delivery([]) } };
   resendReply = { status: 200, body: { seller: PENDING, ...delivery([]) } };
   revokeReply = { status: 200, body: { seller: { ...PENDING, invitationStatus: 'revoked' } } };
+  inviteReply = {
+    status: 200,
+    body: { seller: { ...UNINVITED, invitationId: 'inv-new', invitationStatus: 'pending' }, ...delivery([]) },
+  };
   installFetch();
   consoleSpies = (['log', 'info', 'warn', 'error', 'debug', 'trace'] as const).map((level) =>
     vi.spyOn(console, level).mockImplementation(() => undefined),
@@ -357,6 +363,35 @@ describe('invitation state per row', () => {
     }
   });
 
+  it('offers Enviar convite only on rows with no invitation or a revoked one', async () => {
+    await mount();
+
+    expect(buttons('Enviar convite', rowOf('Nina'))).toHaveLength(1);
+    expect(buttons('Enviar convite', rowOf('Rita'))).toHaveLength(1);
+    for (const name of ['Paula', 'Aline', 'Edu']) {
+      expect(buttons('Enviar convite', rowOf(name)), name).toHaveLength(0);
+    }
+    // Enviar convite never shares a row with Reenviar or Revogar.
+    for (const name of ['Nina', 'Rita']) {
+      expect(buttons('Reenviar', rowOf(name)), name).toHaveLength(0);
+      expect(buttons('Revogar', rowOf(name)), name).toHaveLength(0);
+    }
+  });
+
+  it('styles Enviar convite exactly like Reenviar inside the fixed-height actions cell', async () => {
+    await mount();
+
+    const send = button('Enviar convite', rowOf('Nina'));
+    const resend = button('Reenviar', rowOf('Paula'));
+    expect(send.className).toBe(resend.className);
+    expect(send.type).toBe(resend.type);
+    expect(send.parentElement?.className).toBe(resend.parentElement?.className);
+    expect(send.parentElement?.className).toContain('h-9');
+    // A row with no action at all keeps the same fixed-height cell.
+    const empty = rowOf('Aline').querySelector('td:last-child > div');
+    expect(empty?.className).toBe(resend.parentElement?.className);
+  });
+
   it('never renders a raw invitation or organization id', async () => {
     await mount();
 
@@ -483,6 +518,15 @@ describe('create outcome', () => {
     expect(text()).toContain(ptBR.admin.sellers.invitation.errors.hub_auth_not_configured);
     expect(text()).not.toContain(ptBR.admin.sellers.invitation.errors.unknown);
     expect(rowOf('Carla').textContent).toContain('Sem convite');
+    // The copy points to the row action that exists, never to resending a
+    // non-existent invitation.
+    expect(ptBR.admin.sellers.invitation.errors.hub_auth_not_configured).toContain('Enviar convite');
+    expect(ptBR.admin.sellers.invitation.errors.hub_auth_not_configured).not.toMatch(/reenvi/i);
+    expect(en.admin.sellers.invitation.errors.hub_auth_not_configured).toContain(
+      en.admin.sellers.invitation.actions.send,
+    );
+    expect(en.admin.sellers.invitation.errors.hub_auth_not_configured).not.toMatch(/resend/i);
+    expect(buttons('Enviar convite', rowOf('Carla'))).toHaveLength(1);
   });
 
   it('rate_limited shows the retry wait', async () => {
@@ -571,7 +615,7 @@ describe('row resend and revoke', () => {
 
     resendReply = { status: 503, body: { error: 'unavailable', code: 'hub_auth_not_configured' } };
     await click(button('Reenviar', rowOf('Paula')));
-    expect(text()).toContain(ptBR.admin.sellers.invitation.errors.hub_auth_not_configured);
+    expect(text()).toContain(ptBR.admin.sellers.invitation.hubNotConfiguredRetry);
     await click(button('Fechar', dialog()));
 
     resendReply = { status: 409, body: { error: 'conflict', code: 'seller_not_invited' } };
@@ -603,6 +647,23 @@ describe('row resend and revoke', () => {
       ptBR.admin.sellers.invitation.rateLimitedWait.replace('{{seconds}}', '23'),
     );
     expect(text()).not.toContain(ptBR.admin.sellers.invitation.errors.rate_limited);
+  });
+
+  it('a body retryAfterSeconds of 0 is kept, never replaced by the header', async () => {
+    await mount();
+    resendReply = {
+      status: 429,
+      body: { error: 'rate_limited', code: 'rate_limited', retryAfterSeconds: 0 },
+      headers: { 'Retry-After': '17' },
+    };
+    await click(button('Reenviar', rowOf('Paula')));
+
+    expect(text()).toContain(
+      ptBR.admin.sellers.invitation.rateLimitedWait.replace('{{seconds}}', '0'),
+    );
+    expect(text()).not.toContain(
+      ptBR.admin.sellers.invitation.rateLimitedWait.replace('{{seconds}}', '17'),
+    );
   });
 
   it('revoke asks for confirmation; cancel sends nothing', async () => {
@@ -642,6 +703,118 @@ describe('row resend and revoke', () => {
 
     expect(text()).toContain(ptBR.admin.sellers.invitation.errors.invitation_not_pending);
     expect(text()).not.toContain(RAW_SERVER_PROSE);
+  });
+});
+
+// ── send a new invitation ───────────────────────────────────────────────────
+
+describe('row Enviar convite', () => {
+  it('posts to the invite endpoint with the bearer and the locale, and shows the outcome like create', async () => {
+    inviteReply = {
+      status: 200,
+      body: {
+        seller: { ...UNINVITED, invitationId: 'inv-new', invitationStatus: 'pending' },
+        ...delivery(['email_not_configured'], 'not_configured'),
+      },
+    };
+    await mount();
+    listed = [PENDING, ACCEPTED, EXPIRED, REVOKED, { ...UNINVITED, invitationStatus: 'pending' }];
+    await click(button('Enviar convite', rowOf('Nina')));
+
+    expect(posts('/invite')).toEqual([
+      expect.objectContaining({
+        path: `/api/v1/admin/sellers/${UNINVITED.id}/invite`,
+        auth: `Bearer ${TOKEN}`,
+        body: { locale: 'pt-BR' },
+      }),
+    ]);
+    expect(posts('/resend')).toEqual([]);
+    expect(dialog().textContent).toContain(ptBR.admin.sellers.invitation.outcome.invitedTitle);
+    expect(text()).toContain(ptBR.admin.sellers.invitation.warnings.email_not_configured);
+    expect(dialog().textContent).toContain(ACCEPT_URL);
+    expectNothingLogged('single-use-secret-token');
+    // The list refreshed: the row now reads Pendente with Reenviar, no Enviar convite.
+    expect(rowOf('Nina').textContent).toContain('Pendente');
+    expect(buttons('Enviar convite', rowOf('Nina'))).toHaveLength(0);
+  });
+
+  it('sends a new invitation from a revoked row', async () => {
+    await mount();
+    await click(button('Enviar convite', rowOf('Rita')));
+
+    expect(posts('/invite')[0]?.path).toBe(`/api/v1/admin/sellers/${REVOKED.id}/invite`);
+    expect(text()).toContain(`Convite enviado para ${UNINVITED.contactEmail}.`);
+  });
+
+  it('sends locale en when the UI is in English', async () => {
+    await act(async () => {
+      await i18n.changeLanguage('en');
+    });
+    await mount();
+    await click(button(en.admin.sellers.invitation.actions.send, rowOf('Nina')));
+
+    expect(posts('/invite')[0]?.body).toEqual({ locale: 'en' });
+  });
+
+  it('disables the row action and shows a spinner while the request is in flight', async () => {
+    let release: (() => void) | undefined;
+    const fetchStub = vi.mocked(globalThis.fetch);
+    const original = fetchStub.getMockImplementation();
+    fetchStub.mockImplementation(async (input, init) => {
+      if (String(input).endsWith('/invite')) {
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      }
+      return original!(input, init);
+    });
+    await mount();
+    await click(button('Enviar convite', rowOf('Nina')));
+
+    const sending = button('Enviar convite', rowOf('Nina'));
+    expect(sending.disabled).toBe(true);
+    expect(sending.getAttribute('aria-busy')).toBe('true');
+    expect(sending.querySelector('.animate-spin')).not.toBeNull();
+    expect(button('Enviar convite', rowOf('Rita')).disabled).toBe(false);
+    expect(button('Reenviar', rowOf('Paula')).disabled).toBe(false);
+    release?.();
+    await flush();
+  });
+
+  it('errors render by code, never the server message', async () => {
+    await mount();
+
+    inviteReply = {
+      status: 503,
+      body: { error: 'unavailable', code: 'hub_auth_not_configured', message: RAW_SERVER_PROSE },
+    };
+    await click(button('Enviar convite', rowOf('Nina')));
+    expect(dialog().textContent).toContain(ptBR.admin.sellers.invitation.outcome.inviteFailedTitle);
+    expect(text()).toContain(ptBR.admin.sellers.invitation.errors.hub_auth_not_configured);
+    expect(text()).not.toContain(RAW_SERVER_PROSE);
+    await click(button('Fechar', dialog()));
+
+    inviteReply = { status: 409, body: { error: 'conflict', code: 'seller_already_invited' } };
+    await click(button('Enviar convite', rowOf('Nina')));
+    expect(text()).toContain(ptBR.admin.sellers.invitation.errors.seller_already_invited);
+    expect(text()).not.toContain(ptBR.admin.sellers.invitation.errors.unknown);
+    await click(button('Fechar', dialog()));
+
+    inviteReply = {
+      status: 429,
+      body: { error: 'rate_limited', code: 'rate_limited', retryAfterSeconds: 9 },
+    };
+    await click(button('Enviar convite', rowOf('Nina')));
+    expect(text()).toContain(ptBR.admin.sellers.invitation.rateLimitedWait.replace('{{seconds}}', '9'));
+  });
+
+  it('a 503 on a seller that HAS an invitation does not point to Enviar convite', async () => {
+    await mount();
+    resendReply = { status: 503, body: { error: 'unavailable', code: 'hub_auth_not_configured' } };
+    await click(button('Reenviar', rowOf('Paula')));
+
+    expect(text()).toContain(ptBR.admin.sellers.invitation.hubNotConfiguredRetry);
+    expect(text()).not.toContain(ptBR.admin.sellers.invitation.errors.hub_auth_not_configured);
   });
 });
 
@@ -764,6 +937,7 @@ describe('copy by code', () => {
     'discovery_insecure_api_url',
     'hub_auth_not_configured',
     'seller_not_invited',
+    'seller_already_invited',
     'not_found',
     'unknown',
   ];

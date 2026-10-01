@@ -247,7 +247,8 @@
           "revoked": "Revoked"
         },
         "actions": {
-          "resend": "Resend",
+          "send": "Send invitation",
+            "resend": "Resend",
           "revoke": "Revoke",
           "copy": "Copy link",
           "copied": "Copied",
@@ -261,7 +262,9 @@
         },
         "outcome": {
           "createdTitle": "Seller added",
-          "resentTitle": "Invitation resent",
+          "invitedTitle": "Invitation sent",
+            "inviteFailedTitle": "Invitation not sent",
+            "resentTitle": "Invitation resent",
           "resendFailedTitle": "Invitation not resent",
           "revokeFailedTitle": "Invitation not revoked",
           "sent": "Invitation sent to {{email}}.",
@@ -275,6 +278,7 @@
           "email_failed": "The invitation was created, but the email was not delivered. Try resending."
         },
         "rateLimitedWait": "Too many attempts. Wait {{seconds}} s and try again.",
+          "hubNotConfiguredRetry": "Hub invitations are not configured in this environment. Ask the operator to configure the Hub, then try again.",
         "errors": {
           "actor_not_member": "You cannot invite people to this Organization.",
           "application_not_granted": "You cannot invite people to this Organization.",
@@ -291,8 +295,9 @@
           "invalid_request": "The invitation could not be processed. Contact support.",
           "discovery_missing_api_url": "The invitation service is unavailable. Contact support.",
           "discovery_insecure_api_url": "The invitation service is unavailable. Contact support.",
-          "hub_auth_not_configured": "Hub invitations are not configured in this environment. Ask the operator to configure the Hub, then resend the invitation.",
-          "seller_not_invited": "This seller has no invitation to resend or revoke yet.",
+          "hub_auth_not_configured": "Hub invitations are not configured in this environment. Ask the operator to configure the Hub, then use Send invitation on the seller's row.",
+          "seller_not_invited": "This seller has no invitation yet. Use Send invitation on the seller's row.",
+          "seller_already_invited": "This seller already has a pending, expired or accepted invitation. Refresh the page.",
           "not_found": "Seller not found. Refresh the page.",
           "unknown": "The invitation could not be processed. Contact support."
         }

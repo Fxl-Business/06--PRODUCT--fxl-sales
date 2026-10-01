@@ -273,6 +273,16 @@ export const adminSellersApi = {
       token,
       body: JSON.stringify({ status }),
     }),
+  /**
+   * A NEW invitation for a seller with none or a revoked one (`POST /:id/invite`),
+   * the same Hub call as create. Unlike create, a failure REJECTS with an
+   * `ApiError` keyed by `code` (`seller_already_invited` included).
+   */
+  sendInvitation: (id: string, locale: InviteLocale, token: string) =>
+    apiFetch<{ seller: SellerRow } & SellerInviteDelivery>(
+      `/api/v1/admin/sellers/${id}/invite`,
+      { method: 'POST', token, body: JSON.stringify({ locale }) },
+    ),
   /** A failure rejects with an `ApiError` whose `code` names it (or `error` on a bare 404). */
   resendInvitation: (id: string, locale: InviteLocale, token: string) =>
     apiFetch<{ seller: SellerRow } & SellerInviteDelivery>(
