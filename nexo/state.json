@@ -108,5 +108,13 @@
     "decided_at": "2026-10-01",
     "note": "Gate 1 approved by the owner after reconciling the paused plan with master (migration 0026, pin guard, dev-fake invite gate; plan-check round 3 PASS). Owner kept apps/api/Dockerfile running migrate.js at container start.",
     "outcome": "15 slices (9 planned, 6 added at Execute) merged to local master, each passing Gate 2 by a separate Verify agent; four wave verifies, a feature-boundary verify, a manual mutation battery (52/59, actionable survivors then killed) and a closing verify at cc5c21d all PASS: lint, type-check, 2222 unit + 84 script tests, cold build, 305 integration tests as fxl_sales_test, audit 0 high/critical. Browser check under make dev-fake found and closed the uninvited-seller dead end. Not pushed, not promoted."
+  },
+  "gate3_v4_1_0": {
+    "release": "v4.1.0",
+    "commit": "42ea895bdc39a0507ae8e32c9af0a9ac1c250774",
+    "flow": "ship",
+    "decision": "approved-tag-only",
+    "decided_at": "2026-10-01",
+    "note": "Gate 3a: owner approved pushing master and the v4.1.0 tag only; staging NOT promoted, production NOT promoted. Release-verify attempt 1 FAILED (API image did not build, fixed by slice 16); attempt 2 PASS at 04af2f0; 42ea895 differs only in release notes and records. Milestone stays open until production."
   }
 }
