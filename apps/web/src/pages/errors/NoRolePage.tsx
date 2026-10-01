@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { useLogout } from '@/auth/react';
+import { useAuthProfile, useLogout, useOrganizations } from '@/auth/react';
 import { Button } from '@/components/ui/button';
 
 /**
@@ -9,17 +9,56 @@ import { Button } from '@/components/ui/button';
  * or `/seller/*` URL asks for an `AppRole` the profile does not hold, and `SalesOpsApp`,
  * when `getVisibleWorkspaces(roles)` is empty. `NoRoleGuard` is the way back out and
  * redirects to `/` the moment either of those facts stops being true.
+ *
+ * The usual cause is being signed in with the WRONG account, so the page names the
+ * active account and offers `Trocar conta` beside `Sair`. The switch goes through the
+ * provider's `switchAccount` (handed out by `useOrganizations`), which owns the call into
+ * the SDK; this page never builds the Hub URL itself. The account block is display only
+ * and simply disappears when the token carries neither a name nor an email: there is no
+ * raw id to fall back to on this screen.
  */
 export function NoRolePage() {
   const { t } = useTranslation();
   const logout = useLogout();
+  const { name, email, avatarUrl } = useAuthProfile();
+  const { active, switchAccount } = useOrganizations();
+  const primary = name ?? email;
+  const secondary = name ? email : undefined;
+
   return (
     <div className="flex h-screen flex-col items-center justify-center gap-4 px-6 text-center">
       <h1 className="text-2xl font-semibold">{t('errors.noRole.title')}</h1>
       <p className="max-w-md text-muted-foreground">{t('errors.noRole.body')}</p>
-      <Button variant="outline" onClick={() => void logout()}>
-        {t('errors.noRole.signOut')}
-      </Button>
+      {primary ? (
+        <div
+          className="flex w-full max-w-sm items-center gap-3 rounded-lg border bg-muted/40 px-4 py-3 text-left"
+          data-testid="no-role-active-account"
+        >
+          {avatarUrl ? (
+            <img
+              alt=""
+              className="size-10 flex-none rounded-full object-cover"
+              referrerPolicy="no-referrer"
+              src={avatarUrl}
+            />
+          ) : null}
+          <div className="min-w-0 flex-1 leading-tight">
+            <p className="text-xs text-muted-foreground">{t('errors.noRole.signedInAs')}</p>
+            <p className="mt-0.5 truncate text-sm font-medium">{primary}</p>
+            {secondary ? (
+              <p className="mt-0.5 truncate text-sm text-muted-foreground">{secondary}</p>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+      <div className="flex flex-wrap items-center justify-center gap-2">
+        <Button onClick={() => switchAccount({ organization: active?.id })} type="button">
+          {t('errors.noRole.switchAccount')}
+        </Button>
+        <Button onClick={() => void logout()} type="button" variant="outline">
+          {t('errors.noRole.signOut')}
+        </Button>
+      </div>
     </div>
   );
 }

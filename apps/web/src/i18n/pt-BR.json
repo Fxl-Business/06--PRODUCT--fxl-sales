@@ -18,6 +18,8 @@
     "noRole": {
       "title": "Acesso não autorizado",
       "body": "Sua conta ainda não tem um perfil associado na plataforma FXL Sales. Entre em contato com o administrador.",
+      "signedInAs": "Conectado como",
+      "switchAccount": "Trocar conta",
       "signOut": "Sair"
     }
   },

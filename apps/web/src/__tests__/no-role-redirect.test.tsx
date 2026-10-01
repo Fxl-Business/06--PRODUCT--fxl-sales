@@ -31,18 +31,37 @@ const UNAUTHORIZED = 'Acesso não autorizado';
 
 let profileRoles: AppRole[] = [];
 let profileLoaded = true;
+let profileName: string | undefined = 'Test User';
+let profileEmail: string | undefined = 'test.user@fxl.example';
+let profileAvatarUrl: string | undefined;
+let activeOrganization: { id: string; name?: string } | null = null;
 
-const authMocks = vi.hoisted(() => ({ logout: vi.fn(async () => undefined) }));
+const ACTIVE_ORGANIZATION_ID = 'org_raw_no_role_7f3a';
+
+const authMocks = vi.hoisted(() => ({
+  logout: vi.fn(async () => undefined),
+  switchAccount: vi.fn(),
+}));
 
 vi.mock('@/auth/react', () => ({
   useAuthProfile: () => ({
     isLoaded: profileLoaded,
     isSignedIn: profileLoaded,
     roles: profileRoles,
-    name: 'Test User',
-    email: 'test.user@fxl.example',
+    name: profileName,
+    email: profileEmail,
+    avatarUrl: profileAvatarUrl,
   }),
   useLogout: () => authMocks.logout,
+  useOrganizations: () => ({
+    active: activeOrganization,
+    activeName: activeOrganization?.name,
+    organizations: activeOrganization ? [activeOrganization] : [],
+    others: [],
+    setActive: vi.fn(async () => undefined),
+    switchAccount: authMocks.switchAccount,
+    client: {},
+  }),
 }));
 
 const mutation = {
@@ -166,6 +185,10 @@ beforeEach(() => {
   visited = [];
   profileRoles = [];
   profileLoaded = true;
+  profileName = 'Test User';
+  profileEmail = 'test.user@fxl.example';
+  profileAvatarUrl = undefined;
+  activeOrganization = null;
 });
 
 afterEach(async () => {
@@ -222,6 +245,102 @@ describe('/no-role is not a dead end for an entitled operator', () => {
     expect(visited).toEqual(['/no-role']);
     expect(container.textContent).not.toContain(UNAUTHORIZED);
     expect(container.querySelector('.animate-pulse')).not.toBeNull();
+  });
+});
+
+describe('/no-role offers "Trocar conta" for a person signed in with the wrong account', () => {
+  const buttonNamed = (label: string) =>
+    Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === label,
+    );
+
+  it('renders "Trocar conta" beside "Sair" in the same action row', async () => {
+    await renderAt('/no-role');
+
+    const switchButton = buttonNamed('Trocar conta');
+    const signOutButton = buttonNamed('Sair');
+    expect(switchButton).toBeDefined();
+    expect(signOutButton).toBeDefined();
+    expect(switchButton?.parentElement).toBe(signOutButton?.parentElement);
+    expect(switchButton?.getAttribute('type')).toBe('button');
+  });
+
+  it('calls the provider switchAccount exactly once with the active Organization as the hint', async () => {
+    activeOrganization = { id: ACTIVE_ORGANIZATION_ID, name: 'Acme' };
+    await renderAt('/no-role');
+
+    await act(async () => buttonNamed('Trocar conta')?.click());
+
+    expect(authMocks.switchAccount).toHaveBeenCalledTimes(1);
+    expect(authMocks.switchAccount).toHaveBeenCalledWith({ organization: ACTIVE_ORGANIZATION_ID });
+    expect(authMocks.logout).not.toHaveBeenCalled();
+    expect(visited).toEqual(['/no-role']);
+  });
+
+  it('calls switchAccount with no organization hint when no Organization is active', async () => {
+    activeOrganization = null;
+    await renderAt('/no-role');
+
+    await act(async () => buttonNamed('Trocar conta')?.click());
+
+    expect(authMocks.switchAccount).toHaveBeenCalledTimes(1);
+    expect(authMocks.switchAccount).toHaveBeenCalledWith({ organization: undefined });
+  });
+
+  it('names the active account so the person can see which one has no role', async () => {
+    activeOrganization = { id: ACTIVE_ORGANIZATION_ID, name: 'Acme' };
+    await renderAt('/no-role');
+
+    const account = container.querySelector('[data-testid="no-role-active-account"]');
+    expect(account).not.toBeNull();
+    expect(account?.textContent).toContain('Conectado como');
+    expect(account?.textContent).toContain('Test User');
+    expect(account?.textContent).toContain('test.user@fxl.example');
+    expect(container.textContent).not.toContain(ACTIVE_ORGANIZATION_ID);
+  });
+
+  it('shows the avatar when the claim carries one, decorative only', async () => {
+    profileAvatarUrl = 'https://cdn.fxl.example/avatar.png';
+    await renderAt('/no-role');
+
+    const avatar = container.querySelector('[data-testid="no-role-active-account"] img');
+    expect(avatar?.getAttribute('src')).toBe(profileAvatarUrl);
+    expect(avatar?.getAttribute('alt')).toBe('');
+  });
+
+  it('falls back to the email alone when the name claim is absent', async () => {
+    profileName = undefined;
+    await renderAt('/no-role');
+
+    const account = container.querySelector('[data-testid="no-role-active-account"]');
+    expect(account?.textContent).toContain('test.user@fxl.example');
+    expect(account?.querySelectorAll('img')).toHaveLength(0);
+  });
+
+  it('omits the account block, but keeps both actions, when neither name nor email is known', async () => {
+    profileName = undefined;
+    profileEmail = undefined;
+    activeOrganization = { id: ACTIVE_ORGANIZATION_ID };
+    await renderAt('/no-role');
+
+    expect(container.querySelector('[data-testid="no-role-active-account"]')).toBeNull();
+    expect(container.textContent).not.toContain(ACTIVE_ORGANIZATION_ID);
+    expect(buttonNamed('Trocar conta')).toBeDefined();
+    expect(buttonNamed('Sair')).toBeDefined();
+  });
+
+  it('resolves the copy from i18n in English too', async () => {
+    const { i18n } = await import('@/i18n');
+    await i18n.changeLanguage('en');
+    try {
+      await renderAt('/no-role');
+
+      expect(buttonNamed('Switch account')).toBeDefined();
+      expect(buttonNamed('Sign out')).toBeDefined();
+      expect(container.textContent).toContain('Signed in as');
+    } finally {
+      await i18n.changeLanguage('pt-BR');
+    }
   });
 });
 
