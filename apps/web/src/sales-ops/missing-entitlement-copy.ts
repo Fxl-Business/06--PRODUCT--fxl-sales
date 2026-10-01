@@ -38,4 +38,10 @@ export const MISSING_ENTITLEMENT_COPY = {
   checkoutLoading: 'Preparando o link do FXL Hub',
   checkoutFailed: 'Não foi possível preparar o link do FXL Hub agora.',
   checkoutRetry: 'Tentar novamente',
+  accountPrefix: 'Você entrou com a conta ',
+  accountSuffix: '.',
+  switchAccountHeading: 'Usar outra conta',
+  switchAccountBody:
+    'Se o FXL Sales está liberado em outra conta sua, troque de conta e entre com ela no FXL Hub.',
+  switchAccount: 'Trocar conta',
 } as const;
