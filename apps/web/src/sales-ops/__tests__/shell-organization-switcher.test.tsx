@@ -28,12 +28,16 @@ const authMocks = vi.hoisted(() => ({
   logout: vi.fn(async () => undefined),
   setActive: vi.fn(async (_organizationId: string) => undefined),
   checkoutUrl: vi.fn(async () => 'https://hub.example/checkout'),
+  switchAccount: vi.fn((_options?: { organization?: string }) => undefined),
 }));
 
 let profileRoles: AppRole[] = ['admin'];
 let active: Organization | null = null;
 let organizations: Organization[] = [];
 let others: Organization[] = [];
+let profileName: string | undefined = 'Test User';
+let profileEmail: string | undefined = 'test.user@fxl.example';
+let profileAvatarUrl: string | undefined;
 
 /**
  * Allocated ONCE at module scope. A fresh object literal per render allocates a new
@@ -46,8 +50,9 @@ vi.mock('@/auth/react', () => ({
     isLoaded: true,
     isSignedIn: true,
     roles: profileRoles,
-    name: 'Test User',
-    email: 'test.user@fxl.example',
+    name: profileName,
+    email: profileEmail,
+    avatarUrl: profileAvatarUrl,
   }),
   useLogout: () => authMocks.logout,
   useOrganizations: () => ({
@@ -56,6 +61,7 @@ vi.mock('@/auth/react', () => ({
     organizations,
     others,
     setActive: authMocks.setActive,
+    switchAccount: authMocks.switchAccount,
     client: hubClient,
   }),
 }));
@@ -148,6 +154,9 @@ beforeEach(() => {
   active = alfa;
   organizations = [alfa, beta, nameless];
   others = [beta, nameless];
+  profileName = 'Test User';
+  profileEmail = 'test.user@fxl.example';
+  profileAvatarUrl = undefined;
   authMocks.setActive.mockImplementation(async () => undefined);
 });
 
@@ -388,5 +397,93 @@ describe('sales-ops account dropdown Organization switcher', () => {
     expect(byName('Trocar para Iota Industria')).not.toBeNull();
     const scroller = container.querySelector('.max-h-\\[240px\\]');
     expect(scroller?.className).toContain('overflow-y-auto');
+  });
+});
+
+describe('sales-ops account dropdown Trocar conta', () => {
+  function accountMenu(): HTMLElement | null {
+    return container.querySelector<HTMLElement>('[role="menu"]');
+  }
+
+  it('offers Trocar conta in the account-level group beside Sair, outside the Organization rows', async () => {
+    await renderRoute('/tatico/dashboard');
+    await openAccountMenu();
+
+    const switchAccount = byName('Trocar conta');
+    expect(switchAccount).not.toBeNull();
+    expect(switchAccount?.textContent?.trim()).toBe('Trocar conta');
+    expect(switchAccount?.closest('[data-testid="account-organization-section"]')).toBeNull();
+
+    const group = switchAccount?.closest('[role="group"]');
+    expect(group).not.toBeNull();
+    expect(group?.contains(buttonByTextOrNull('Sair'))).toBe(true);
+  });
+
+  it('calls the provider switchAccount once with the active Organization as the hint', async () => {
+    await renderRoute('/tatico/dashboard');
+    await openAccountMenu();
+
+    await click(byName('Trocar conta')!);
+
+    expect(authMocks.switchAccount).toHaveBeenCalledTimes(1);
+    expect(authMocks.switchAccount).toHaveBeenCalledWith({ organization: 'org-a' });
+    expect(authMocks.setActive).not.toHaveBeenCalled();
+    expect(authMocks.logout).not.toHaveBeenCalled();
+  });
+
+  it('calls switchAccount with no hint when no Organization is active', async () => {
+    active = null;
+    organizations = [beta];
+    others = [beta];
+    await renderRoute('/tatico/dashboard');
+    await openAccountMenu();
+
+    await click(byName('Trocar conta')!);
+
+    expect(authMocks.switchAccount).toHaveBeenCalledTimes(1);
+    expect(authMocks.switchAccount.mock.calls[0]?.[0]?.organization).toBeUndefined();
+  });
+
+  it('still offers Trocar conta when the account has a single Organization', async () => {
+    organizations = [alfa];
+    others = [];
+    await renderRoute('/tatico/dashboard');
+    await openAccountMenu();
+
+    expect(byName('Trocar conta')).not.toBeNull();
+  });
+
+  it('shows the active account name and email in the menu header', async () => {
+    await renderRoute('/tatico/dashboard');
+    await openAccountMenu();
+
+    const menu = accountMenu();
+    expect(menu?.textContent).toContain('Test User');
+    expect(menu?.textContent).toContain('test.user@fxl.example');
+  });
+
+  it('renders the avatar image when the account has one', async () => {
+    profileAvatarUrl = 'https://cdn.example/avatar.png';
+    await renderRoute('/tatico/dashboard');
+    await openAccountMenu();
+
+    const image = accountMenu()?.querySelector('img');
+    expect(image?.getAttribute('src')).toBe('https://cdn.example/avatar.png');
+    expect(image?.getAttribute('alt')).toBe('');
+  });
+
+  it('falls back to initials and tolerates an absent name, email and avatar', async () => {
+    profileName = undefined;
+    profileEmail = undefined;
+    profileAvatarUrl = undefined;
+    await renderRoute('/tatico/dashboard');
+    await openAccountMenu();
+
+    const menu = accountMenu();
+    expect(menu?.querySelector('img')).toBeNull();
+    expect(menu?.textContent).toContain('FXL');
+    expect(menu?.textContent).not.toContain('@');
+    expect(byName('Trocar conta')).not.toBeNull();
+    expect(menu?.textContent).not.toContain('org-a');
   });
 });
