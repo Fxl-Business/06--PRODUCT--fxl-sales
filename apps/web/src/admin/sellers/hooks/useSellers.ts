@@ -1,6 +1,7 @@
 import { useAccessToken } from '@/auth/react';
 import { useQuery } from '@tanstack/react-query';
-import { adminSellersApi } from '@/lib/api-client';
+import { useTranslation } from 'react-i18next';
+import { adminSellersApi, type InviteLocale } from '@/lib/api-client';
 import { useAppMutation } from '@/lib/app-mutation';
 import { queryKeys } from '@/lib/query-keys';
 import { requireToken } from '@/lib/require-token';
@@ -9,6 +10,21 @@ import type { CreateSellerBody, SellerRow } from '@/admin/types';
 /**
  * Admin sellers TanStack Query hooks (Phase 03 T10). apiFetch + getToken() (D-J).
  */
+
+/**
+ * The ONE mapping from the active UI language to the invitation email locale:
+ * any `en` variant is `en`, everything else (unknown or absent included) is
+ * `pt-BR`, the product default. Used by both create and resend.
+ */
+export function inviteLocaleOf(language: string | undefined): InviteLocale {
+  return language?.startsWith('en') ? 'en' : 'pt-BR';
+}
+
+/** Reads the UI language at call time, so a switch is honoured by the next request. */
+function useInviteLocale(): () => InviteLocale {
+  const { i18n } = useTranslation();
+  return () => inviteLocaleOf(i18n.resolvedLanguage ?? i18n.language);
+}
 
 export function useSellers() {
   const { getToken } = useAccessToken();
@@ -26,9 +42,10 @@ export function useSellers() {
  */
 export function useInviteSeller() {
   const { getToken } = useAccessToken();
+  const localeNow = useInviteLocale();
   return useAppMutation({
     mutationFn: async (data: CreateSellerBody) =>
-      adminSellersApi.create(data, await requireToken(getToken)),
+      adminSellersApi.create(data, localeNow(), await requireToken(getToken)),
     invalidates: [queryKeys.adminSellers.all],
   });
 }
@@ -40,9 +57,10 @@ export function useInviteSeller() {
  */
 export function useResendSellerInvitation() {
   const { getToken } = useAccessToken();
+  const localeNow = useInviteLocale();
   return useAppMutation({
     mutationFn: async (sellerId: string) =>
-      adminSellersApi.resendInvitation(sellerId, await requireToken(getToken)),
+      adminSellersApi.resendInvitation(sellerId, localeNow(), await requireToken(getToken)),
     invalidates: [queryKeys.adminSellers.all],
   });
 }

@@ -261,11 +261,11 @@ export const adminSellersApi = {
    * either the delivery fields at top level or `inviteError`. Read the body,
    * never the HTTP status, to learn whether the invitation went out.
    */
-  create: (data: CreateSellerBody, token: string) =>
+  create: (data: CreateSellerBody, locale: InviteLocale, token: string) =>
     apiFetch<CreateSellerResult>('/api/v1/admin/sellers', {
       method: 'POST',
       token,
-      body: JSON.stringify(data),
+      body: JSON.stringify({ ...data, locale }),
     }),
   setStatus: (id: string, status: SellerStatus, token: string) =>
     apiFetch<{ seller: SellerRow }>(`/api/v1/admin/sellers/${id}/status`, {
@@ -274,10 +274,10 @@ export const adminSellersApi = {
       body: JSON.stringify({ status }),
     }),
   /** A failure rejects with an `ApiError` whose `code` names it (or `error` on a bare 404). */
-  resendInvitation: (id: string, token: string) =>
+  resendInvitation: (id: string, locale: InviteLocale, token: string) =>
     apiFetch<{ seller: SellerRow } & SellerInviteDelivery>(
       `/api/v1/admin/sellers/${id}/resend`,
-      { method: 'POST', token },
+      { method: 'POST', token, body: JSON.stringify({ locale }) },
     ),
   revokeInvitation: (id: string, token: string) =>
     apiFetch<{ seller: SellerRow }>(`/api/v1/admin/sellers/${id}/revoke`, {
@@ -285,6 +285,13 @@ export const adminSellersApi = {
       token,
     }),
 };
+
+/**
+ * The language of the invitation email, the closed set the API accepts
+ * (`z.enum(['pt-BR', 'en'])`). Derived from the UI language by `inviteLocaleOf`,
+ * never free text.
+ */
+export type InviteLocale = 'pt-BR' | 'en';
 
 /** The closed set of warnings the Hub may attach to a sent invitation. */
 export type SellerInviteWarningCode = 'application_url_missing' | 'email_not_configured' | 'email_failed';

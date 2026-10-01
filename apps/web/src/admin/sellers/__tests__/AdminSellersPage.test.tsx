@@ -5,7 +5,7 @@ import * as React from 'react';
 import type { HTMLAttributes, ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import '@/i18n';
+import { i18n } from '@/i18n';
 import ptBR from '@/i18n/pt-BR.json';
 import en from '@/i18n/en.json';
 
@@ -106,6 +106,7 @@ vi.mock('@/components/ui/alert-dialog', () => {
 });
 
 import { AdminSellersPage } from '../AdminSellersPage';
+import { inviteLocaleOf } from '../hooks/useSellers';
 
 const act = (React as typeof React & { act: typeof import('react-dom/test-utils').act }).act;
 
@@ -231,6 +232,9 @@ beforeEach(() => {
 
 afterEach(async () => {
   await act(async () => root.unmount());
+  await act(async () => {
+    await i18n.changeLanguage('pt-BR');
+  });
   container.remove();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -389,6 +393,7 @@ describe('create outcome', () => {
     expect(create?.body).toEqual({
       displayName: CREATED.displayName,
       contactEmail: CREATED.contactEmail,
+      locale: 'pt-BR',
     });
     expect(text()).toContain(`Convite enviado para ${CREATED.contactEmail}.`);
     expect(text()).not.toContain(ACCEPT_URL);
@@ -586,6 +591,20 @@ describe('row resend and revoke', () => {
     expect(text()).not.toContain(RAW_SERVER_PROSE);
   });
 
+  it('a 429 whose retryAfterSeconds is only in the body renders that exact wait', async () => {
+    await mount();
+    resendReply = {
+      status: 429,
+      body: { error: 'rate_limited', code: 'rate_limited', retryAfterSeconds: 23 },
+    };
+    await click(button('Reenviar', rowOf('Paula')));
+
+    expect(text()).toContain(
+      ptBR.admin.sellers.invitation.rateLimitedWait.replace('{{seconds}}', '23'),
+    );
+    expect(text()).not.toContain(ptBR.admin.sellers.invitation.errors.rate_limited);
+  });
+
   it('revoke asks for confirmation; cancel sends nothing', async () => {
     await mount();
     await click(button('Revogar', rowOf('Paula')));
@@ -623,6 +642,104 @@ describe('row resend and revoke', () => {
 
     expect(text()).toContain(ptBR.admin.sellers.invitation.errors.invitation_not_pending);
     expect(text()).not.toContain(RAW_SERVER_PROSE);
+  });
+});
+
+// ── invite locale ───────────────────────────────────────────────────────────
+
+describe('invite locale follows the active UI language', () => {
+  async function useLanguage(language: string) {
+    await act(async () => {
+      await i18n.changeLanguage(language);
+    });
+  }
+
+  function expectNoActWarning() {
+    const errorSpy = consoleSpies[3];
+    for (const args of errorSpy?.mock.calls ?? []) {
+      expect(String(args[0])).not.toContain('not wrapped in act');
+    }
+  }
+
+  it('pt-BR: create and resend send locale pt-BR', async () => {
+    await mount();
+    await createSeller();
+    await click(button('Fechar', dialog()));
+    await click(button('Reenviar', rowOf('Paula')));
+
+    expect(posts('/api/v1/admin/sellers')[0]?.body).toEqual({
+      displayName: CREATED.displayName,
+      contactEmail: CREATED.contactEmail,
+      locale: 'pt-BR',
+    });
+    expect(posts('/resend')[0]?.body).toEqual({ locale: 'pt-BR' });
+    expectNoActWarning();
+  });
+
+  it('en: create and resend send locale en', async () => {
+    await useLanguage('en');
+    await mount();
+    await click(button(en.admin.sellers.invite));
+    await typeInto('seller-name', CREATED.displayName);
+    await typeInto('seller-email', CREATED.contactEmail);
+    await click(button(en.admin.sellers.invite, dialog()));
+    await click(button(en.admin.sellers.invitation.actions.close, dialog()));
+    await click(button(en.admin.sellers.invitation.actions.resend, rowOf('Paula')));
+
+    expect(posts('/api/v1/admin/sellers')[0]?.body).toEqual({
+      displayName: CREATED.displayName,
+      contactEmail: CREATED.contactEmail,
+      locale: 'en',
+    });
+    expect(posts('/resend')[0]?.body).toEqual({ locale: 'en' });
+    expectNoActWarning();
+  });
+
+  it('en-US: create and resend send the mapped locale en, never the raw language', async () => {
+    await useLanguage('en-US');
+    await mount();
+    await click(button(en.admin.sellers.invite));
+    await typeInto('seller-name', CREATED.displayName);
+    await typeInto('seller-email', CREATED.contactEmail);
+    await click(button(en.admin.sellers.invite, dialog()));
+    await click(button(en.admin.sellers.invitation.actions.close, dialog()));
+    await click(button(en.admin.sellers.invitation.actions.resend, rowOf('Paula')));
+
+    expect(posts('/api/v1/admin/sellers')[0]?.body).toEqual({
+      displayName: CREATED.displayName,
+      contactEmail: CREATED.contactEmail,
+      locale: 'en',
+    });
+    expect(posts('/resend')[0]?.body).toEqual({ locale: 'en' });
+    expectNoActWarning();
+  });
+
+  it('a switch after mount is honoured by the next request', async () => {
+    await mount();
+    await useLanguage('en');
+    await click(button(en.admin.sellers.invitation.actions.resend, rowOf('Paula')));
+    await click(button(en.admin.sellers.invitation.actions.close, dialog()));
+    await useLanguage('pt-BR');
+    await click(button('Reenviar', rowOf('Paula')));
+
+    expect(posts('/resend').map((call) => call.body)).toEqual([
+      { locale: 'en' },
+      { locale: 'pt-BR' },
+    ]);
+    expectNoActWarning();
+  });
+
+  it.each([
+    ['en', 'en'],
+    ['en-US', 'en'],
+    ['en-GB', 'en'],
+    ['pt-BR', 'pt-BR'],
+    ['pt', 'pt-BR'],
+    ['es', 'pt-BR'],
+    ['', 'pt-BR'],
+    [undefined, 'pt-BR'],
+  ] as const)('maps the UI language %s to %s', (language, expected) => {
+    expect(inviteLocaleOf(language)).toBe(expected);
   });
 });
 
