@@ -233,7 +233,70 @@
         "name": "Name",
         "email": "Email"
       },
-      "empty": "No sellers yet"
+      "empty": "No sellers yet",
+      "columns": {
+        "invitation": "Invitation",
+        "actions": "Actions"
+      },
+      "invitation": {
+        "status": {
+          "none": "Not invited",
+          "pending": "Pending",
+          "accepted": "Accepted",
+          "expired": "Expired",
+          "revoked": "Revoked"
+        },
+        "actions": {
+          "resend": "Resend",
+          "revoke": "Revoke",
+          "copy": "Copy link",
+          "copied": "Copied",
+          "close": "Close"
+        },
+        "revokeConfirm": {
+          "title": "Revoke the invitation for {{name}}?",
+          "description": "The link sent to {{email}} stops working and the invitation can no longer be accepted.",
+          "cancel": "Back",
+          "confirm": "Revoke invitation"
+        },
+        "outcome": {
+          "createdTitle": "Seller added",
+          "resentTitle": "Invitation resent",
+          "resendFailedTitle": "Invitation not resent",
+          "revokeFailedTitle": "Invitation not revoked",
+          "sent": "Invitation sent to {{email}}.",
+          "created": "Invitation created for {{email}}.",
+          "sellerSaved": "{{name}} was added, but the invitation was not sent.",
+          "acceptUrlLabel": "Invitation link (single use)"
+        },
+        "warnings": {
+          "application_url_missing": "Sales has no address registered in the Hub, so the invitation may not bring the seller back to Sales. Ask the Hub operator to set the application address.",
+          "email_not_configured": "Email delivery is not configured in the Hub. Copy the link below and send it to the seller through another channel.",
+          "email_failed": "The invitation was created, but the email was not delivered. Try resending."
+        },
+        "rateLimitedWait": "Too many attempts. Wait {{seconds}} s and try again.",
+        "errors": {
+          "actor_not_member": "You cannot invite people to this Organization.",
+          "application_not_granted": "You cannot invite people to this Organization.",
+          "invalid_app_roles": "Invalid role.",
+          "invitation_not_found": "This invitation no longer exists, or it was already accepted or revoked.",
+          "invitation_not_pending": "This invitation no longer exists, or it was already accepted or revoked.",
+          "invalid_actor_token": "Your session expired. Sign in again to continue.",
+          "rate_limited": "Too many attempts. Wait a moment and try again.",
+          "network_error": "The invitation could not be sent right now. Try again in a moment.",
+          "unexpected_response": "The invitation could not be sent right now. Try again in a moment.",
+          "invalid_client": "The invitation could not be processed. Contact support.",
+          "application_mismatch": "The invitation could not be processed. Contact support.",
+          "not_an_application": "The invitation could not be processed. Contact support.",
+          "invalid_request": "The invitation could not be processed. Contact support.",
+          "discovery_missing_api_url": "The invitation service is unavailable. Contact support.",
+          "discovery_insecure_api_url": "The invitation service is unavailable. Contact support.",
+          "hub_auth_not_configured": "Hub invitations are not configured in this environment. Ask the operator to configure the Hub, then resend the invitation.",
+          "seller_not_invited": "This seller has no invitation to resend or revoke yet.",
+          "not_found": "Seller not found. Refresh the page.",
+          "unknown": "The invitation could not be processed. Contact support."
+        }
+      }
     },
     "status": {
       "active": "Active",

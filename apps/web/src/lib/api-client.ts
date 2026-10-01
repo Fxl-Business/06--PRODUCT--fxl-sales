@@ -33,6 +33,12 @@ export type ApiError = {
    * classify auth failures, which key on `status` alone.
    */
   rows?: ApiErrorRow[];
+  /**
+   * The wait a `429` asked for, in seconds: the body's `retryAfterSeconds` when
+   * the API sends one, else a numeric `Retry-After` header the browser could
+   * read. Absent when neither is available. Display data only.
+   */
+  retryAfterSeconds?: number;
 };
 
 /** One ledger row named by a 409 body. `id` is for logic only, never for display. */
@@ -63,10 +69,23 @@ export async function apiFetch<T>(
       status: res.status,
       rows: Array.isArray(body.rows) ? (body.rows as ApiErrorRow[]) : undefined,
     };
+    const retryAfterSeconds = retryAfterOf(body, res);
+    if (retryAfterSeconds !== undefined) err.retryAfterSeconds = retryAfterSeconds;
     throw err;
   }
 
   return res.json() as Promise<T>;
+}
+
+function retryAfterOf(body: { retryAfterSeconds?: unknown }, res: Response): number | undefined {
+  if (typeof body.retryAfterSeconds === 'number' && body.retryAfterSeconds >= 0) {
+    return body.retryAfterSeconds;
+  }
+  // `headers` is optional on purpose: a cross-origin response hides
+  // `Retry-After` unless exposed, and minimal fetch fakes carry no headers.
+  const header = res.headers?.get('Retry-After') ?? null;
+  if (header !== null && /^\d+$/.test(header.trim())) return Number(header.trim());
+  return undefined;
 }
 
 /**
@@ -237,8 +256,13 @@ export const adminFindersApi = {
 export const adminSellersApi = {
   list: (token: string) =>
     apiFetch<{ sellers: SellerRow[] }>('/api/v1/admin/sellers', { method: 'GET', token }),
+  /**
+   * Always `201` once the seller row exists: the invite outcome is in the BODY,
+   * either the delivery fields at top level or `inviteError`. Read the body,
+   * never the HTTP status, to learn whether the invitation went out.
+   */
   create: (data: CreateSellerBody, token: string) =>
-    apiFetch<{ seller: SellerRow }>('/api/v1/admin/sellers', {
+    apiFetch<CreateSellerResult>('/api/v1/admin/sellers', {
       method: 'POST',
       token,
       body: JSON.stringify(data),
@@ -249,7 +273,45 @@ export const adminSellersApi = {
       token,
       body: JSON.stringify({ status }),
     }),
+  /** A failure rejects with an `ApiError` whose `code` names it (or `error` on a bare 404). */
+  resendInvitation: (id: string, token: string) =>
+    apiFetch<{ seller: SellerRow } & SellerInviteDelivery>(
+      `/api/v1/admin/sellers/${id}/resend`,
+      { method: 'POST', token },
+    ),
+  revokeInvitation: (id: string, token: string) =>
+    apiFetch<{ seller: SellerRow }>(`/api/v1/admin/sellers/${id}/revoke`, {
+      method: 'POST',
+      token,
+    }),
 };
+
+/** The closed set of warnings the Hub may attach to a sent invitation. */
+export type SellerInviteWarningCode = 'application_url_missing' | 'email_not_configured' | 'email_failed';
+
+/**
+ * What a create or resend answers about a sent invitation. `acceptUrl` carries a
+ * single-use token: it may be shown to the admin, never logged or stored.
+ */
+export type SellerInviteDelivery = {
+  invitation: { id: string; email: string; status: string; expiresAt: string };
+  acceptUrl: string;
+  emailDelivery: { status: 'sent' | 'not_configured' | 'failed' };
+  warnings: Array<{ code: SellerInviteWarningCode }>;
+};
+
+/** An invite the API could not send. `message` is server prose: never rendered. */
+export type SellerInviteError = {
+  status: number;
+  error: string;
+  code: string;
+  message?: string;
+  retryAfterSeconds?: number;
+};
+
+export type CreateSellerResult =
+  | ({ seller: SellerRow; inviteError?: undefined } & SellerInviteDelivery)
+  | { seller: SellerRow; inviteError: SellerInviteError };
 
 // ─── Phase 04: finder links + catalog + clicks (D-J - apiFetch + Bearer token) ──
 // FIRST-CLASS finder-authed endpoints — NOT admin-route reuse (admin routes are

@@ -233,7 +233,70 @@
         "name": "Nome",
         "email": "E-mail"
       },
-      "empty": "Nenhum vendedor cadastrado"
+      "empty": "Nenhum vendedor cadastrado",
+      "columns": {
+        "invitation": "Convite",
+        "actions": "Ações"
+      },
+      "invitation": {
+        "status": {
+          "none": "Sem convite",
+          "pending": "Pendente",
+          "accepted": "Aceito",
+          "expired": "Expirado",
+          "revoked": "Revogado"
+        },
+        "actions": {
+          "resend": "Reenviar",
+          "revoke": "Revogar",
+          "copy": "Copiar link",
+          "copied": "Copiado",
+          "close": "Fechar"
+        },
+        "revokeConfirm": {
+          "title": "Revogar o convite de {{name}}?",
+          "description": "O link enviado para {{email}} deixa de funcionar e o convite não pode mais ser aceito.",
+          "cancel": "Voltar",
+          "confirm": "Revogar convite"
+        },
+        "outcome": {
+          "createdTitle": "Vendedor cadastrado",
+          "resentTitle": "Convite reenviado",
+          "resendFailedTitle": "Convite não reenviado",
+          "revokeFailedTitle": "Convite não revogado",
+          "sent": "Convite enviado para {{email}}.",
+          "created": "Convite criado para {{email}}.",
+          "sellerSaved": "{{name}} foi cadastrado, mas o convite não foi enviado.",
+          "acceptUrlLabel": "Link do convite (uso único)"
+        },
+        "warnings": {
+          "application_url_missing": "O Sales não tem endereço cadastrado no Hub, então o convite pode não levar o vendedor de volta ao Sales. Peça ao operador do Hub para configurar o endereço do aplicativo.",
+          "email_not_configured": "O envio de e-mail não está configurado no Hub. Copie o link abaixo e envie ao vendedor por outro canal.",
+          "email_failed": "O convite foi criado, mas o e-mail não foi entregue. Tente reenviar."
+        },
+        "rateLimitedWait": "Muitas tentativas. Aguarde {{seconds}} s e tente novamente.",
+        "errors": {
+          "actor_not_member": "Você não pode convidar para esta Organization.",
+          "application_not_granted": "Você não pode convidar para esta Organization.",
+          "invalid_app_roles": "Papel inválido.",
+          "invitation_not_found": "Este convite não existe mais ou já foi aceito ou revogado.",
+          "invitation_not_pending": "Este convite não existe mais ou já foi aceito ou revogado.",
+          "invalid_actor_token": "Sua sessão expirou. Entre novamente para continuar.",
+          "rate_limited": "Muitas tentativas. Aguarde um pouco e tente novamente.",
+          "network_error": "Falha temporária ao enviar o convite. Tente novamente em instantes.",
+          "unexpected_response": "Falha temporária ao enviar o convite. Tente novamente em instantes.",
+          "invalid_client": "Não foi possível processar o convite. Contate o suporte.",
+          "application_mismatch": "Não foi possível processar o convite. Contate o suporte.",
+          "not_an_application": "Não foi possível processar o convite. Contate o suporte.",
+          "invalid_request": "Não foi possível processar o convite. Contate o suporte.",
+          "discovery_missing_api_url": "O serviço de convites não está disponível. Contate o suporte.",
+          "discovery_insecure_api_url": "O serviço de convites não está disponível. Contate o suporte.",
+          "hub_auth_not_configured": "Os convites do Hub não estão configurados neste ambiente. Peça ao operador para configurar o Hub e depois reenvie o convite.",
+          "seller_not_invited": "Este vendedor ainda não tem um convite para reenviar ou revogar.",
+          "not_found": "Vendedor não encontrado. Atualize a página.",
+          "unknown": "Não foi possível processar o convite. Contate o suporte."
+        }
+      }
     },
     "status": {
       "active": "Ativo",
