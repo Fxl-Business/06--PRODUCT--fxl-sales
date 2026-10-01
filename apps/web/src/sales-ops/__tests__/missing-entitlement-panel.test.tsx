@@ -511,6 +511,20 @@ describe('MissingEntitlementPanel - Trocar conta', () => {
     expect(accountSwitchButton().disabled).toBe(true);
   });
 
+  it('ignores a second click that lands before React re-renders the button disabled', async () => {
+    await renderPanel();
+    // Two clicks in ONE act, as the NoRolePage oracle does: the second lands while the
+    // button is still enabled, so only a synchronous guard can stop it.
+    await act(async () => {
+      accountSwitchButton().click();
+      accountSwitchButton().click();
+    });
+    await flushReact();
+    expect(seam.switchAccount).toHaveBeenCalledTimes(1);
+    expect(seam.switchAccount).toHaveBeenCalledWith({ organization: 'org-active' });
+    expect(accountSwitchButton().disabled).toBe(true);
+  });
+
   it('calls switchAccount with no Organization hint when none is active', async () => {
     seam = makeSeam({ active: null, activeName: undefined });
     await renderPanel();

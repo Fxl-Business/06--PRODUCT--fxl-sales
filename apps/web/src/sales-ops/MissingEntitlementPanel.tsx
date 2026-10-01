@@ -100,9 +100,12 @@ export function MissingEntitlementPanel({ onRetry }: { onRetry?: () => void }) {
   const [switchFailed, setSwitchFailed] = useState(false);
   /*
     `switchAccount` is a full-document navigation to the Hub Account Chooser, so this
-    document is about to be torn down. The flag only stops a second click from firing a
-    second navigation while the first one is leaving; nothing ever resets it.
+    document is about to be torn down; nothing ever resets the flag. The ref stops a
+    second click that lands before React re-renders the button disabled (state read in
+    the handler would still be the stale `false`), and the state renders it disabled,
+    matching `NoRolePage`.
   */
+  const leavingAccountRef = useRef(false);
   const [leavingAccount, setLeavingAccount] = useState(false);
 
   const mountedRef = useRef(true);
@@ -176,14 +179,15 @@ export function MissingEntitlementPanel({ onRetry }: { onRetry?: () => void }) {
     no argument at all rather than forwarding an empty hint.
   */
   const handleSwitchAccount = useCallback(() => {
-    if (leavingAccount) return;
+    if (leavingAccountRef.current) return;
+    leavingAccountRef.current = true;
     setLeavingAccount(true);
     if (activeId === undefined) {
       switchAccount();
     } else {
       switchAccount({ organization: activeId });
     }
-  }, [activeId, leavingAccount, switchAccount]);
+  }, [activeId, switchAccount]);
 
   const [firstOther] = others;
   const activeIsFallback = active ? isOrgLabelFallback(active) : false;
