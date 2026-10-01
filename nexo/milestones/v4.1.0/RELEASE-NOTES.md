@@ -1,7 +1,7 @@
 # FXL Sales v4.1.0 - release notes
 
 **Previous release:** v4.0.0 (`a1be9d6`), the commit staging and production both run today.
-**Range:** `v4.0.0..v4.1.0`, 234 commits that were never pushed before this cut.
+**Range:** `v4.0.0..v4.1.0`, 241 commits (177 excluding merges, counted at the release commit), none of them pushed before this cut.
 
 ## What ships
 
@@ -26,7 +26,7 @@ Five migrations are pending in staging and in production: `0022`, `0023`, `0024`
 | `0022_sales_ops_leads` | Creates the three lead tables with FORCE RLS. | Seeds the default four-stage pipeline for every existing org. |
 | `0023_lead_seller_identity` | Adds the account column that links a Hub token to a pessoa. | None. |
 | `0024_sales_ops_settlements` | Creates `sales_ops_settlements` (immutable baixa/estorno facts, with a trigger that refuses UPDATE and DELETE), adds `revision`/`updated_at` to receivables and payables, and `removed_at` to sale items and professionals. | Writes one synthetic baixa for every row already marked paid (`actor_name = 'Migração'`). |
-| `0025_integration_transport` | Creates the four integration transport tables (outbox, publisher high-water, inbox, cursor) with RLS. | None. |
+| `0025_integration_transport` | Creates the four integration transport tables (outbox, publisher high-water, inbox, cursor) with RLS. | Inserts the single publisher high-water bookkeeping row. |
 | `0026_seller_invitation_state` | Adds three nullable text columns to `sellers`. | None. |
 
 **How the migrations run.**
@@ -73,8 +73,7 @@ Until then Sales emits nothing and behaves exactly as before for that Organizati
 
 The code is revertable, but the migrations are forward-only, and v4.0.0 does NOT safely run on a database that `0024` has migrated:
 - v4.0.0 does not filter `removed_at`, so sale items and professionals removed by a v4.1.0 edit reappear.
-- v4.0.0 edits a proposta by deleting and recreating its rows, which the settlements foreign keys and trigger refuse for any proposta that ever had a baixa.
-- v4.0.0 marks rows paid without writing a baixa, so its paid status and the settlements ledger diverge.
+- v4.0.0 edits a proposta by deleting and recreating its rows, which the settlements foreign keys (`ON DELETE RESTRICT`) refuse for any proposta that ever had a baixa.
 
 So a problem after `0024` has run is fixed FORWARD with `/nexo-hotfix`, never by redeploying v4.0.0.
 Do not drop the new tables or columns by hand.

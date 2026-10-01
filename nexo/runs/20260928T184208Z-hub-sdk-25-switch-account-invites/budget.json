@@ -2,7 +2,7 @@
   "active_accumulated_seconds": 6270,
   "active_since": 1790886766,
   "counters": {
-    "agent_dispatches": 49,
+    "agent_dispatches": 50,
     "initial_slices": 9,
     "replans": 2,
     "total_slices": 16,

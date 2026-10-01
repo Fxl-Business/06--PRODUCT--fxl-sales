@@ -1,0 +1,89 @@
+{
+  "agent": "release-verify",
+  "release": "v4.1.0",
+  "attempt": 2,
+  "commit": "04af2f0",
+  "status": "PASS",
+  "checks": {
+    "lint": { "command": "pnpm run lint", "exit": 0, "notes": "packages, apps/api (src+scripts), apps/web eslint clean, 0 warnings" },
+    "type_check": { "command": "pnpm run type-check", "exit": 0 },
+    "unit_tests": {
+      "command": "CI=true pnpm test",
+      "exit": 0,
+      "counts": {
+        "packages/auth-fake": "2 files, 41 passed",
+        "packages/shared-utils": "5 files, 155 passed",
+        "apps/api": "76 files, 831 passed",
+        "apps/web": "100 files, 1195 passed",
+        "node --test scripts": "11 files, 91 tests, 91 pass, 0 fail, 0 skipped"
+      },
+      "total_passed": 2313,
+      "failed": 0,
+      "node_test_list": "all 11 listed scripts/__tests__ files exist and every scripts/__tests__/*.test.mjs (incl. new api-dockerfile-workspace-deps.test.mjs) is listed; build-contract: ok"
+    },
+    "cold_build": { "command": "rm -rf packages/*/dist packages/*/tsconfig.tsbuildinfo apps/*/dist && pnpm run build", "exit": 0, "notes": "apps/api/dist/db/migrate.js and apps/web/dist/index.html produced; assert-web-bundle-clean passed" },
+    "vercel_style_web_build": { "command": "rm -rf packages/*/dist packages/*/tsconfig.tsbuildinfo && pnpm --filter @fxl-sales/web build", "exit": 0, "notes": "dev-fake sentinel absent from apps/web/dist (0 files)" },
+    "integration_tests": {
+      "command": "pnpm --filter @fxl-sales/api test:integration",
+      "exit": 0,
+      "db_targets": "DATABASE_URL, TEST_DATABASE_URL (fxl_sales_test), TEST_MIGRATE_DATABASE_URL, ADMIN_DATABASE_URL all localhost:5006/fxl_sales, exported in a subshell only",
+      "counts": "41 files, 305 passed, 0 failed, 0 skipped"
+    }
+  },
+  "docker": {
+    "build": { "command": "git archive 04af2f0 | tar -x (scratch dir); docker build --no-cache -f apps/api/Dockerfile .", "exit": 0, "notes": "attempt-1 blocker resolved: deps stage now copies packages/auth-fake/package.json and build stage copies its node_modules; api tsc succeeds" },
+    "smoke_fake_under_production": { "command": "docker run --network none -e SALES_AUTH_FAKE=1 <img> node dist/server.js", "exit": 1, "result": "refuses: 'SALES_AUTH_FAKE is set while NODE_ENV=production ... Refusing to boot.' (installFakeAuthIfRequested, select.js)" },
+    "smoke_default_cmd": { "exit": 1, "result": "default CMD runs migrate.js first and exits on ECONNREFUSED 127.0.0.1:1 before server.js, as designed" },
+    "smoke_migrate": { "command": "docker run --network none -e DATABASE_URL=postgresql://x:x@127.0.0.1:1/x <img> node dist/db/migrate.js", "exit": 1, "result": "starts, prints 'Running migrations from ./drizzle', fails only with ECONNREFUSED 127.0.0.1:1 (guard passes under NODE_ENV=production)" },
+    "image_env": "NODE_ENV=production baked in runtime stage",
+    "known_gap": "runtime image still contains packages/auth-fake (now with node_modules); held closed by NODE_ENV=production + boot refusal, as documented on ROADMAP",
+    "cleanup": "image fxl-sales-api-relverify2:04af2f0 removed, no containers left (all --rm), scratch archive dir removed; build cache not pruned"
+  },
+  "migration_upgrade": {
+    "method": "Scratch DB fxl_sales_relverify2_scratch on local Postgres localhost:5006. v4.0.0's own src/db/migrate.ts + migration-runner.ts + drizzle folder (git archive v4.0.0) run with tsx -> 22 journal rows (0000..0021). Seeded org_rv2: one seller pessoa, one won sale, receivables 1/3 paid (due 2026-08-01), 2/3 paid with FUTURE due 2027-01-01, 3/3 open; payables one paid (2026-08-01), one open; one legacy sellers row. Then this release's built apps/api/dist/db/migrate.js run twice (NODE_ENV=development, no SALES_ENV_FILE, no .env in worktree).",
+    "first_run": "exit 0, 'Done.'; journal 22 -> 27 (0022..0026 applied); 3 settlements",
+    "second_run": "exit 0, 'Done.'; journal still 27, settlements still 3 (no-op)",
+    "synthetic_baixas": [
+      "receivable ...3331 baixa paid_on 2026-08-01 amount 100000 actor_user_id 'system' actor_name 'Migração' origin manual",
+      "receivable ...3332 baixa paid_on 2026-10-01 (future due clamped to today in Sao Paulo) amount 100000 actor_name 'Migração'",
+      "payable ...4441 baixa paid_on 2026-08-01 amount 10000 actor_name 'Migração'"
+    ],
+    "other_effects_observed": "0022 seeded Novo/Em negociação/Proposta/Perdido for org_rv2; receivables revision=1; sellers invitation_* all NULL; integration_outbox_position 'default' row last_position 0",
+    "trigger_check": "DELETE FROM sales_ops_settlements refused: 'sales_ops_settlements is immutable: DELETE of settlement ... refused, record an estorno instead'",
+    "cleanup": "scratch DB dropped (no *relverify* DB remains); staged v4.0.0 files removed; worktree status clean",
+    "result": "PASS"
+  },
+  "release_notes_claims": [
+    { "claim": "Previous release v4.0.0 (a1be9d6) is what staging and production run", "true": true, "evidence": "v4.0.0^{commit} = a1be9d6 = origin/staging = origin/production (local remote-tracking refs)" },
+    { "claim": "Range v4.0.0..v4.1.0 is 234 commits", "true": false, "evidence": "rev-list --count v4.0.0..04af2f0 = 240 (176 non-merge, 105 first-parent); 235 at 622fbf0, 237 at 7671688. No counting yields 234. Cosmetic." },
+    { "claim": "Five migrations 0022..0026 pending; per-migration table (structure + data touched)", "true": true, "evidence": "diff adds exactly 0022..0026; rehearsal applied exactly 5; 0024 synthetic baixas 'Migração' observed. Minor: 0025 'Data touched: None' strictly inserts one bookkeeping row in integration_outbox_position; 0022 also adds unique (org_id,id) indexes (unmentioned, harmless)" },
+    { "claim": "Dockerfile runs migrate.js && exec server.js; API serves only after migrations succeed", "true": true, "evidence": "CMD verified; image now builds; smoke shows migrate failure stops before server.js" },
+    { "claim": "Re-running migrations is tolerated", "true": true, "evidence": "second run no-op (27 journal rows, 3 settlements)" },
+    { "claim": "Runner bounds lock waits and retries on lock contention", "true": true, "evidence": "migration-runner.ts unchanged since attempt 1 verification" },
+    { "claim": "CORRECTED: No new variable is REQUIRED in staging/production; four dev-only names SALES_AUTH_FAKE, VITE_AUTH_FAKE, SALES_ENV_FILE, SALES_LISTEN_HOST must stay unset there", "true": true, "evidence": "Attempt-1 finding fixed. SALES_LISTEN_HOST: resolveListenHost returns undefined (all interfaces) under production when unset; only docker-compose.yml (local, NODE_ENV=development) sets it. SALES_AUTH_FAKE refused under production (proven in image). SALES_ENV_FILE only in make back-stg. VITE_AUTH_FAKE behind import.meta.env.DEV." },
+    { "claim": "Operator items: TRUSTED_ORIGINS (403 origin_not_trusted), REDIRECT_URI (boot refuses Hub origin), renamed SALES_* values, HEALTH_TOKEN", "true": true, "evidence": "consistent with CLAUDE.md Hub configuration rules and code" },
+    { "claim": "VITE_FXL_HUB_* validated at render; missing one builds green then white-screens", "true": true, "evidence": "apps/web/src/auth/provider.ts throws at runtime when VITE_FXL_HUB_API_URL/AUDIENCE missing" },
+    { "claim": "Hub API_PUBLIC_URL missing -> discovery_missing_api_url, seller still saved, admin sees operator message", "true": true, "evidence": "invitation-error.ts maps discovery_missing_api_url; AdminSellersPage + i18n copy present. Hub-side variable itself not verifiable here" },
+    { "claim": "Contract emits only after Hub setup / one Activation per Organization", "true": true, "evidence": "producer-gate default false; only registration in start-integration.ts from producerActivations" },
+    { "claim": "CORRECTED rollback bullet 1: v4.0.0 does not filter removed_at, so removed items/professionals reappear", "true": true, "evidence": "v4.0.0 schema has no removed_at; its readers cannot filter it" },
+    { "claim": "CORRECTED rollback bullet 2: v4.0.0 edits by delete-and-recreate, refused for any proposta that ever had a baixa", "true": true, "evidence": "v4.0.0 service.ts updateSale (draft/open only) deletes payables/receivables (lines 2444-2447); settlements FKs are ON DELETE RESTRICT, so a proposta reverted to open after an estorno fails. Nit: it is the FKs that refuse, not the trigger" },
+    { "claim": "CORRECTED rollback bullet 3: v4.0.0 marks rows paid without writing a baixa", "true": false, "evidence": "v4.0.0 has NO path that marks a sales_ops receivable/payable paid: its only ledger UPDATEs are status 'void' in transitionSale (won->open, open payables) and cancelContract (open future receivables/payables); routes.ts has no receivable/payable route; web only displays paid. The bullet (inherited from attempt-1's own evidence) is wrong about the mechanism. The section's conclusion (fix forward, never redeploy v4.0.0) still stands on bullets 1-2." },
+    { "claim": "Fix forward with /nexo-hotfix; do not drop new tables/columns by hand", "true": true, "evidence": "advice consistent with forward-only migrations" }
+  ],
+  "security": {
+    "pnpm_audit_prod": { "exit": 1, "high": 0, "critical": 0, "moderate": 11, "low": 1, "modules": "hono, @hono/node-server, react-router, react-router-dom", "notes": "exit 1 reflects moderates only; 0 high/critical, unchanged from attempt 1" },
+    "secrets_scan": { "result": "clean", "evidence": "added lines of git diff v4.0.0 04af2f0 scanned for non-local postgres URLs, sk_live/sk_test, AKIA, PEM keys, ghp_, xox, JWTs, AIza: only u:p@[::1]/notlocalhost/localhost test fixtures and doc prose; slice 16 diff adds no credential" },
+    "access_gate": { "result": "unchanged", "evidence": "requireHubAuth(hubSdkConfig) is the single gate (app-auth.ts:245), allowWithoutAccess left at default false; no classifyHubAccess/hasHubOrgAccess/hasHubModule/requireHubModule in src" },
+    "web_bundle_dev_fake": { "result": "absent", "evidence": "assert-web-bundle-clean passed in cold build; sentinel grep of apps/web/dist after Vercel-style build: 0 files" },
+    "auth_fake_in_production_image": { "result": "known gap unchanged", "evidence": "image contains packages/auth-fake; boot refusal under NODE_ENV=production proven with --network none" }
+  },
+  "findings": [
+    "Attempt-1 BLOCKING finding resolved: the production API image builds from a clean git archive of 04af2f0 with --no-cache, and the smoke tests pass (fake identity refused under production, migrate.js fails only on the unreachable local DATABASE_URL).",
+    "Release notes (non-blocking): rollback bullet 3 'v4.0.0 marks rows paid without writing a baixa' is false - v4.0.0 has no route or service path that sets a sales-ops receivable/payable to paid (only 'void' updates). Drop or replace it; the fix-forward conclusion still holds via bullets 1-2.",
+    "Release notes (non-blocking): '234 commits' matches no count; v4.0.0..04af2f0 is 240 (176 non-merge, 105 first-parent). Recompute at the tag.",
+    "Release notes (minor, carried from attempt 1): 0025 'Data touched: None' omits the one integration_outbox_position bookkeeping row; rollback bullet 2 attributes the refusal to 'foreign keys and trigger' where only the RESTRICT FKs act.",
+    "Non-blocking: pnpm audit --prod 11 moderate + 1 low (hono, @hono/node-server, react-router, react-router-dom); 0 high/critical."
+  ],
+  "done": true,
+  "ts": "2026-10-01T20:50:00Z"
+}
