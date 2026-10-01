@@ -31,8 +31,8 @@ importers:
         specifier: 0.1.0
         version: 0.1.0
       '@fxl-business/hub-sdk':
-        specifier: 2.3.0
-        version: 2.3.0(hono@4.12.28)
+        specifier: 2.5.0
+        version: 2.5.0(hono@4.12.28)
       '@fxl-sales/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
@@ -125,8 +125,8 @@ importers:
         specifier: ^5.2.8
         version: 5.2.9
       '@fxl-business/hub-sdk':
-        specifier: 2.3.0
-        version: 2.3.0(hono@4.12.28)
+        specifier: 2.5.0
+        version: 2.5.0(hono@4.12.28)
       '@fxl-sales/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
@@ -801,8 +801,8 @@ packages:
   '@fxl-business/fxl-contracts@0.1.0':
     resolution: {integrity: sha512-YRL8TbrRwHZTZ7WeFsZK1PbRJjeTBWokvlrQlt04Y96HKwZ+0HlGqfsxthTOFwRY7TbilyaNWoJKdvCmA6hevg==}
 
-  '@fxl-business/hub-sdk@2.3.0':
-    resolution: {integrity: sha512-DHUI/qvYMKMebY8LLxuo8tz6wRbYE4fPxxX9x6Q1AdtoKMBmldAx5+NdWOXnQoh0KdmBDB82RqMTZSAPh41rcA==}
+  '@fxl-business/hub-sdk@2.5.0':
+    resolution: {integrity: sha512-IRBVY1NqGjqLju8+84fkN1q1589iF7qaUVJdZ/sB0MTcC4OVRSeWzx96ygdELPjE3pc1fQVDDVtMGMu/ijNfIA==}
     peerDependencies:
       hono: 4.12.28
 
@@ -3322,7 +3322,7 @@ snapshots:
 
   '@fxl-business/fxl-contracts@0.1.0': {}
 
-  '@fxl-business/hub-sdk@2.3.0(hono@4.12.28)':
+  '@fxl-business/hub-sdk@2.5.0(hono@4.12.28)':
     dependencies:
       hono: 4.12.28
       jose: 5.10.0

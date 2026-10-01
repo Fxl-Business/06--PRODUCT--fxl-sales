@@ -14,6 +14,7 @@ const act = (
 const mocks = vi.hoisted(() => {
   const client = {
     login: vi.fn<HubClient['login']>(),
+    switchAccount: vi.fn<HubClient['switchAccount']>(),
     loginWithPopup: vi.fn<HubClient['loginWithPopup']>(),
     getToken: vi.fn<HubClient['getToken']>(),
     getTokenResult: vi.fn<HubClient['getTokenResult']>(),

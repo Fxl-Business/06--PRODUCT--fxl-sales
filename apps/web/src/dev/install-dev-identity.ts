@@ -125,6 +125,12 @@ function buildDevIdentitySession(fake: FakeAuthModule, identity: FakeIdentity): 
       // anti-lockout backstop CLAUDE.md already names.
       window.location.reload();
     },
+    switchAccount() {
+      // There is no Hub Account Chooser to navigate to. Behave exactly like
+      // `login()`: a reload re-enters the cold-boot path with the SAME adopted
+      // identity, never a live identity swap.
+      window.location.reload();
+    },
     async loginWithPopup() {
       // Nothing in this app calls it. `unavailable` is the outcome that means
       // "no answer about the session", never a fabricated success.

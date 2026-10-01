@@ -106,6 +106,7 @@ function teardown(host: HTMLElement, root: Root): void {
 function buildStubClient(token: string): HubClient {
   return {
     login: vi.fn(),
+    switchAccount: vi.fn(),
     loginWithPopup: vi.fn(async () => ({ status: 'unavailable' as const })),
     getToken: vi.fn(async () => token),
     getTokenResult: vi.fn(async () => ({
