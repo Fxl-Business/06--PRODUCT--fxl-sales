@@ -5,6 +5,7 @@ import {
   listSellers,
   resendInvitation,
   revokeInvitation,
+  sendNewInvitation,
   setSellerStatus,
   type InviteFailure,
 } from './admin-service.js';
@@ -31,7 +32,8 @@ const CreateSellerSchema = z.object({
   locale: LocaleSchema,
 });
 
-const ResendSchema = z.object({ locale: LocaleSchema });
+/** The body of `POST /:id/invite` and `POST /:id/resend`: only the email locale. */
+const LocaleBodySchema = z.object({ locale: LocaleSchema });
 
 const StatusSchema = z.object({ status: z.enum(['active', 'inactive']) });
 
@@ -98,10 +100,34 @@ sellersAdminRouter.post('/', async (c) => {
   );
 });
 
+/**
+ * A NEW invitation for a seller with none, or whose last one was revoked (the
+ * create-time invite failed, or the admin revoked it). Same Hub call as `POST /`.
+ * A pending, expired or accepted invitation answers `409 seller_already_invited`;
+ * those are resent through `POST /:id/resend`.
+ */
+sellersAdminRouter.post('/:id/invite', async (c) => {
+  const id = SellerIdSchema.safeParse(c.req.param('id'));
+  if (!id.success) return c.json({ error: 'not_found' }, 404);
+  const parsed = LocaleBodySchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) {
+    return c.json({ error: 'validation_error', issues: parsed.error.flatten() }, 400);
+  }
+
+  const outcome = await sendNewInvitation(
+    id.data,
+    { accessToken: bearerOf(c), orgId: c.get('orgId') },
+    parsed.data.locale,
+  );
+  if (outcome.kind === 'not_found') return c.json({ error: 'not_found' }, 404);
+  if (outcome.kind === 'failed') return failureResponse(c, outcome.failure);
+  return c.json({ seller: outcome.seller, ...outcome.value });
+});
+
 sellersAdminRouter.post('/:id/resend', async (c) => {
   const id = SellerIdSchema.safeParse(c.req.param('id'));
   if (!id.success) return c.json({ error: 'not_found' }, 404);
-  const parsed = ResendSchema.safeParse(await c.req.json().catch(() => ({})));
+  const parsed = LocaleBodySchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) {
     return c.json({ error: 'validation_error', issues: parsed.error.flatten() }, 400);
   }

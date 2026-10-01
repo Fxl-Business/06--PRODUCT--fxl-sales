@@ -14,7 +14,7 @@ import type { CreateSellerBody, SellerRow } from '@/admin/types';
 /**
  * The ONE mapping from the active UI language to the invitation email locale:
  * any `en` variant is `en`, everything else (unknown or absent included) is
- * `pt-BR`, the product default. Used by both create and resend.
+ * `pt-BR`, the product default. Used by create, send and resend.
  */
 export function inviteLocaleOf(language: string | undefined): InviteLocale {
   return language?.startsWith('en') ? 'en' : 'pt-BR';
@@ -46,6 +46,21 @@ export function useInviteSeller() {
   return useAppMutation({
     mutationFn: async (data: CreateSellerBody) =>
       adminSellersApi.create(data, localeNow(), await requireToken(getToken)),
+    invalidates: [queryKeys.adminSellers.all],
+  });
+}
+
+/**
+ * Send a NEW Hub invitation to a seller with none or a revoked one
+ * (`POST /:id/invite`). Resolves with a delivery like resend; a failure rejects
+ * with an `ApiError` keyed by `code`.
+ */
+export function useSendSellerInvitation() {
+  const { getToken } = useAccessToken();
+  const localeNow = useInviteLocale();
+  return useAppMutation({
+    mutationFn: async (sellerId: string) =>
+      adminSellersApi.sendInvitation(sellerId, localeNow(), await requireToken(getToken)),
     invalidates: [queryKeys.adminSellers.all],
   });
 }

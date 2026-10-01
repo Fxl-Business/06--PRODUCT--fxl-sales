@@ -46,6 +46,8 @@ const store = vi.hoisted(() => ({
   rows: [] as Row[],
   inserts: [] as Record<string, unknown>[],
   updates: [] as { id: unknown; patch: Record<string, unknown> }[],
+  /** Every read that reached the fake database, list or by id. */
+  reads: 0,
 }));
 
 vi.mock('drizzle-orm', async (importOriginal) => {
@@ -99,18 +101,21 @@ const fakeDb = {
       }),
     }),
   }),
-  select: () => ({
-    from: () => ({
-      orderBy: async () => [...store.rows].reverse().map((row) => ({ ...row })),
-      where: (cond: Cond) => ({
-        limit: async (n: number) =>
-          store.rows
-            .filter((row) => matches(row, cond))
-            .slice(0, n)
-            .map((row) => ({ ...row })),
+  select: () => {
+    store.reads += 1;
+    return {
+      from: () => ({
+        orderBy: async () => [...store.rows].reverse().map((row) => ({ ...row })),
+        where: (cond: Cond) => ({
+          limit: async (n: number) =>
+            store.rows
+              .filter((row) => matches(row, cond))
+              .slice(0, n)
+              .map((row) => ({ ...row })),
+        }),
       }),
-    }),
-  }),
+    };
+  },
 };
 
 vi.mock('../../../db/client.js', () => ({
@@ -221,6 +226,7 @@ beforeEach(() => {
   store.rows.length = 0;
   store.inserts.length = 0;
   store.updates.length = 0;
+  store.reads = 0;
   fake = fakeClient();
   setInvitationsClientForTests(fake as unknown as SalesInvitationsClient);
 });
@@ -457,6 +463,15 @@ describe('POST /:id/resend', () => {
     expect(fake.resend).not.toHaveBeenCalled();
   });
 
+  it('refuses a malformed seller id with 404 before reaching the database or the Hub', async () => {
+    const res = await post('/not-a-uuid/resend', {});
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: 'not_found' });
+    expect(store.reads).toBe(0);
+    expect(store.updates).toHaveLength(0);
+    expect(fake.resend).not.toHaveBeenCalled();
+  });
+
   it('answers 404 like an unknown seller when the invitation belongs to another Organization', async () => {
     const seller = seedSeller({
       invitationId: 'inv_other',
@@ -569,6 +584,15 @@ describe('POST /:id/revoke', () => {
     expect(await res.json()).not.toHaveProperty('retryAfterSeconds');
   });
 
+  it('refuses a malformed seller id with 404 before reaching the database or the Hub', async () => {
+    const res = await post('/not-a-uuid/revoke');
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: 'not_found' });
+    expect(store.reads).toBe(0);
+    expect(store.updates).toHaveLength(0);
+    expect(fake.revoke).not.toHaveBeenCalled();
+  });
+
   it('answers 409 seller_not_invited without a stored invitation', async () => {
     const seller = seedSeller();
     const res = await post(`/${seller.id}/revoke`);
@@ -584,6 +608,178 @@ describe('POST /:id/revoke', () => {
     expect(res.status).toBe(503);
     expect(await res.json()).toEqual({ error: 'unavailable', code: 'hub_auth_not_configured' });
     expect(store.rows[0]).toMatchObject({ invitationStatus: 'pending' });
+  });
+});
+
+describe('POST /:id/invite sends a NEW invitation to a seller without one', () => {
+  it('invites an uninvited seller with the same call as create and persists it', async () => {
+    const seller = seedSeller();
+
+    const res = await post(`/${seller.id}/invite`, {
+      organizationId: 'smuggled-org',
+      accessToken: 'smuggled-token',
+      email: 'smuggled@example.com',
+    });
+    expect(res.status).toBe(200);
+
+    expect(fake.create).toHaveBeenCalledTimes(1);
+    expect(fake.create.mock.calls[0]?.[0]).toEqual({
+      accessToken: BEARER,
+      email: 'bruno@example.com',
+      appRoles: ['seller'],
+      locale: 'pt-BR',
+    });
+    expect(fake.resend).not.toHaveBeenCalled();
+
+    expect(store.rows[0]).toMatchObject({
+      id: seller.id,
+      invitationId: 'inv_1',
+      invitationStatus: 'pending',
+      invitedOrgId: ORG,
+    });
+    expect(JSON.stringify(store.updates)).not.toContain('smuggled');
+
+    const body = await res.json();
+    expect(body.seller).toMatchObject({ id: seller.id, invitationId: 'inv_1', invitationStatus: 'pending' });
+    expect(body.invitation).toMatchObject({ id: 'inv_1', status: 'pending', appRoles: ['seller'] });
+    expect(body.acceptUrl).toBe(ACCEPT_URL);
+    expect(body.emailDelivery).toEqual({ status: 'not_configured' });
+    expect(body.warnings).toEqual([{ code: 'email_not_configured' }]);
+  });
+
+  it('passes an explicit locale through and refuses an unsupported one before the Hub', async () => {
+    const seller = seedSeller();
+    expect((await post(`/${seller.id}/invite`, { locale: 'fr' })).status).toBe(400);
+    expect(fake.create).not.toHaveBeenCalled();
+
+    expect((await post(`/${seller.id}/invite`, { locale: 'en' })).status).toBe(200);
+    expect(fake.create.mock.calls[0]?.[0]).toMatchObject({ locale: 'en' });
+  });
+
+  it('accepts no body at all', async () => {
+    const seller = seedSeller();
+    expect((await post(`/${seller.id}/invite`)).status).toBe(200);
+    expect(fake.create.mock.calls[0]?.[0]).toMatchObject({ locale: 'pt-BR' });
+  });
+
+  it('sends a fresh invitation to a seller whose invitation was revoked', async () => {
+    const seller = seedSeller({ invitationId: 'inv_old', invitationStatus: 'revoked', invitedOrgId: ORG });
+    fake.create.mockResolvedValueOnce(result({ id: 'inv_new' }));
+
+    const res = await post(`/${seller.id}/invite`, {});
+    expect(res.status).toBe(200);
+    expect(fake.create).toHaveBeenCalledTimes(1);
+    expect(store.rows[0]).toMatchObject({ invitationId: 'inv_new', invitationStatus: 'pending', invitedOrgId: ORG });
+  });
+
+  it.each(['pending', 'expired', 'accepted'] as const)(
+    'answers 409 seller_already_invited for a %s invitation and never reaches the Hub',
+    async (status) => {
+      const seller = seedSeller({ invitationId: 'inv_9', invitationStatus: status, invitedOrgId: ORG });
+
+      const res = await post(`/${seller.id}/invite`, {});
+      expect(res.status).toBe(409);
+      expect(await res.json()).toEqual({ error: 'conflict', code: 'seller_already_invited' });
+      expect(fake.create).not.toHaveBeenCalled();
+      expect(store.updates).toHaveLength(0);
+    },
+  );
+
+  it('maps a HubInvitationError by code and keeps the seller untouched', async () => {
+    const seller = seedSeller();
+    fake.create.mockRejectedValueOnce(
+      new HubInvitationError('actor_not_member', 403, 'hub-sdk: invitation create failed: actor_not_member'),
+    );
+
+    const res = await post(`/${seller.id}/invite`, {});
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body).toEqual({ error: 'forbidden', code: 'actor_not_member', message: INVITATION_COPY.notAllowed });
+    expect(JSON.stringify(body)).not.toContain('hub-sdk:');
+    expect(store.rows).toHaveLength(1);
+    expect(store.rows[0]).toMatchObject({ id: seller.id, invitationId: null, invitationStatus: null });
+    expect(store.updates).toHaveLength(0);
+  });
+
+  it('carries retryAfterSeconds in the body as well as the Retry-After header on a rate limit', async () => {
+    const seller = seedSeller();
+    fake.create.mockRejectedValueOnce(new HubInvitationError('rate_limited', 429, 'x', 12));
+
+    const res = await post(`/${seller.id}/invite`, {});
+    expect(res.status).toBe(429);
+    expect(res.headers.get('Retry-After')).toBe('12');
+    expect((await res.json()).retryAfterSeconds).toBe(12);
+  });
+
+  it('answers 500 unknown for a failure that is not a HubInvitationError', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const seller = seedSeller();
+    fake.create.mockRejectedValueOnce(new TypeError(`failed for ${ACCEPT_URL}`));
+
+    const res = await post(`/${seller.id}/invite`, {});
+    expect(res.status).toBe(500);
+    expect(await res.json()).toMatchObject({ error: 'internal_error', code: 'unknown' });
+    expect(store.updates).toHaveLength(0);
+  });
+
+  it('answers the unavailable body when there is no invitations client', async () => {
+    forceInvitationsClientAbsentForTests();
+    const seller = seedSeller();
+
+    const res = await post(`/${seller.id}/invite`, {});
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: 'unavailable', code: 'hub_auth_not_configured' });
+    expect(store.rows[0]).toMatchObject({ invitationId: null, invitationStatus: null, invitedOrgId: null });
+    expect(fake.create).not.toHaveBeenCalled();
+  });
+
+  it('answers 404 for an unknown seller', async () => {
+    const res = await post(`/${randomUUID()}/invite`, {});
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: 'not_found' });
+    expect(fake.create).not.toHaveBeenCalled();
+  });
+
+  it('refuses a malformed seller id with 404 before reaching the database or the Hub', async () => {
+    const res = await post('/not-a-uuid/invite', {});
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: 'not_found' });
+    expect(store.reads).toBe(0);
+    expect(fake.create).not.toHaveBeenCalled();
+  });
+
+  it('answers 404 like an unknown seller when the seller was invited from another Organization', async () => {
+    const seller = seedSeller({
+      invitationId: 'inv_other',
+      invitationStatus: 'revoked',
+      invitedOrgId: 'another-org',
+    });
+    const unknown = await post(`/${randomUUID()}/invite`, {});
+
+    const res = await post(`/${seller.id}/invite`, {});
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual(await unknown.json());
+    expect(fake.create).not.toHaveBeenCalled();
+    expect(store.updates).toHaveLength(0);
+  });
+
+  it('never hands the accept URL or the bearer to any console call', async () => {
+    const spies = (['log', 'info', 'warn', 'error', 'debug', 'trace'] as const).map((method) =>
+      vi.spyOn(console, method).mockImplementation(() => {}),
+    );
+    const seller = seedSeller();
+    await post(`/${seller.id}/invite`, {});
+    const other = seedSeller({ contactEmail: 'bia@example.com' });
+    fake.create.mockRejectedValueOnce(new TypeError(`failed for ${ACCEPT_URL}`));
+    await post(`/${other.id}/invite`, {});
+
+    for (const spy of spies) {
+      const logged = JSON.stringify(spy.mock.calls, (_k, v) =>
+        v instanceof Error ? `${v.name}:${v.message}:${v.stack}` : v,
+      );
+      expect(logged).not.toContain('single-use-secret-token');
+      expect(logged).not.toContain(BEARER);
+    }
   });
 });
 
@@ -637,6 +833,24 @@ describe('GET / reconciles invitation state from the Hub', () => {
     expect(res.status).toBe(200);
     expect((await res.json()).sellers).toEqual([expect.objectContaining({ id: seller.id, invitationStatus: 'pending' })]);
     expect(store.updates).toHaveLength(0);
+  });
+
+  it('still reconciles the statuses that were read when one status call fails', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const accepted = seedSeller({ invitationId: 'inv_a', invitationStatus: 'pending' });
+    fake.list.mockImplementation(async (input: { status?: string }) => {
+      if (input.status === 'expired') throw new HubInvitationError('network_error', null, 'x');
+      if (input.status === 'accepted') return { invitations: [invitation({ id: 'inv_a', status: 'accepted' })] };
+      return { invitations: [] };
+    });
+
+    const res = await get('/');
+    expect(res.status).toBe(200);
+    expect((await res.json()).sellers).toEqual([
+      expect.objectContaining({ id: accepted.id, invitationStatus: 'accepted' }),
+    ]);
+    expect(store.rows[0]).toMatchObject({ invitationStatus: 'accepted' });
+    expect(store.updates.map((u) => u.id)).toEqual([accepted.id]);
   });
 
   it('returns the persisted state without calling list when there is no client', async () => {

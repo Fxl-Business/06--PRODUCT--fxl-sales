@@ -41,6 +41,7 @@ import {
   useResendSellerInvitation,
   useRevokeSellerInvitation,
   useSellers,
+  useSendSellerInvitation,
 } from './hooks/useSellers';
 
 /**
@@ -73,6 +74,7 @@ const INVITE_ERROR_CODES: ReadonlySet<string> = new Set([
   'discovery_insecure_api_url',
   'hub_auth_not_configured',
   'seller_not_invited',
+  'seller_already_invited',
   'not_found',
   'unknown',
 ]);
@@ -80,12 +82,18 @@ const INVITE_ERROR_CODES: ReadonlySet<string> = new Set([
 type InviteProblem = { code: string; retryAfterSeconds?: number };
 
 type InviteOutcome =
-  | { kind: 'created' | 'resent'; seller: SellerRow; delivery: SellerInviteDelivery }
-  | { kind: 'createFailed' | 'resendFailed' | 'revokeFailed'; seller: SellerRow; problem: InviteProblem };
+  | { kind: 'created' | 'invited' | 'resent'; seller: SellerRow; delivery: SellerInviteDelivery }
+  | {
+      kind: 'createFailed' | 'inviteFailed' | 'resendFailed' | 'revokeFailed';
+      seller: SellerRow;
+      problem: InviteProblem;
+    };
 
 const OUTCOME_TITLE: Record<InviteOutcome['kind'], string> = {
   created: 'admin.sellers.invitation.outcome.createdTitle',
   createFailed: 'admin.sellers.invitation.outcome.createdTitle',
+  invited: 'admin.sellers.invitation.outcome.invitedTitle',
+  inviteFailed: 'admin.sellers.invitation.outcome.inviteFailedTitle',
   resent: 'admin.sellers.invitation.outcome.resentTitle',
   resendFailed: 'admin.sellers.invitation.outcome.resendFailedTitle',
   revokeFailed: 'admin.sellers.invitation.outcome.revokeFailedTitle',
@@ -112,6 +120,21 @@ function problemOf(error: unknown): InviteProblem {
   return { code: 'unknown' };
 }
 
+/**
+ * A NEW invitation is offered only when there is none (the create-time invite
+ * failed) or the last one was revoked; pending and expired ones are resent, and
+ * an accepted one needs nothing. Mirrors the API's `409 seller_already_invited`.
+ */
+function canSendInvitation(status: SellerInvitationStatus | null): boolean {
+  return status === null || status === 'revoked';
+}
+
+/**
+ * The seller of a failed resend or revoke HAS an invitation, so the no-Hub copy
+ * must not point to Enviar convite: it asks to try again instead.
+ */
+const HAS_INVITATION_KINDS: ReadonlySet<InviteOutcome['kind']> = new Set(['resendFailed', 'revokeFailed']);
+
 function canResend(status: SellerInvitationStatus | null): boolean {
   return status === 'pending' || status === 'expired';
 }
@@ -126,6 +149,7 @@ export function AdminSellersPage() {
   const invite = useInviteSeller();
   const resend = useResendSellerInvitation();
   const revoke = useRevokeSellerInvitation();
+  const send = useSendSellerInvitation();
   const [open, setOpen] = useState(false);
   const [displayName, setDisplayName] = useState('');
   const [contactEmail, setContactEmail] = useState('');
@@ -166,6 +190,13 @@ export function AdminSellersPage() {
     });
   }
 
+  function sendFor(seller: SellerRow) {
+    send.mutate(seller.id, {
+      onSuccess: (result) => setOutcome({ kind: 'invited', seller: result.seller, delivery: result }),
+      onError: (error) => setOutcome({ kind: 'inviteFailed', seller, problem: problemOf(error) }),
+    });
+  }
+
   function confirmRevoke() {
     const seller = revokeTarget;
     setRevokeTarget(null);
@@ -177,6 +208,7 @@ export function AdminSellersPage() {
 
   function rowBusy(sellerId: string): boolean {
     return (
+      (send.isPending && send.variables === sellerId) ||
       (resend.isPending && resend.variables === sellerId) ||
       (revoke.isPending && revoke.variables === sellerId)
     );
@@ -255,6 +287,7 @@ export function AdminSellersPage() {
                 {sellers.map((s) => {
                   const busy = rowBusy(s.id);
                   const resending = resend.isPending && resend.variables === s.id;
+                  const sending = send.isPending && send.variables === s.id;
                   return (
                     <TableRow key={s.id}>
                       <TableCell className="font-medium">{s.displayName}</TableCell>
@@ -270,6 +303,18 @@ export function AdminSellersPage() {
                       <TableCell className="text-right">
                         {/* Fixed height so rows with and without actions line up. */}
                         <div className="flex h-9 items-center justify-end gap-2">
+                          {canSendInvitation(s.invitationStatus) ? (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={busy}
+                              aria-busy={sending}
+                              onClick={() => sendFor(s)}
+                            >
+                              {sending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                              {t('admin.sellers.invitation.actions.send')}
+                            </Button>
+                          ) : null}
                           {canResend(s.invitationStatus) ? (
                             <Button
                               variant="outline"
@@ -404,6 +449,9 @@ function InviteOutcomeBody({
   function problemCopy(value: InviteProblem): string {
     if (value.code === 'rate_limited' && value.retryAfterSeconds !== undefined) {
       return t('admin.sellers.invitation.rateLimitedWait', { seconds: value.retryAfterSeconds });
+    }
+    if (value.code === 'hub_auth_not_configured' && HAS_INVITATION_KINDS.has(outcome.kind)) {
+      return t('admin.sellers.invitation.hubNotConfiguredRetry');
     }
     const code = INVITE_ERROR_CODES.has(value.code) ? value.code : 'unknown';
     return t(`admin.sellers.invitation.errors.${code}`);

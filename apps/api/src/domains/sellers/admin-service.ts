@@ -34,7 +34,7 @@ import { getInvitationsClient } from './invitations-client.js';
  *   Hub takes it from the actor token. `invited_org_id` records the verified
  *   context org the route passes in.
  * - An invite failure never rolls back the seller row; the outcome travels back
- *   so the admin can resend.
+ *   so the admin can send it again from the list (`POST /:id/invite`).
  * - `acceptUrl` is returned to the caller and never logged.
  */
 
@@ -76,6 +76,11 @@ const UNAVAILABLE: InviteFailure = {
 const NOT_INVITED: InviteFailure = {
   httpStatus: 409,
   body: { error: 'conflict', code: 'seller_not_invited' },
+};
+
+const ALREADY_INVITED: InviteFailure = {
+  httpStatus: 409,
+  body: { error: 'conflict', code: 'seller_already_invited' },
 };
 
 const INVITATION_STATUSES: readonly HubInvitationStatus[] = ['pending', 'accepted', 'expired', 'revoked'];
@@ -185,6 +190,44 @@ export async function listSellers(actor: Pick<InviteActor, 'accessToken'>): Prom
   return reconciled;
 }
 
+type InvitationsClient = NonNullable<ReturnType<typeof getInvitationsClient>>;
+
+/**
+ * The ONE place a Hub invitation is created, for `POST /` and `POST /:id/invite`
+ * alike: the raw bearer, the seller's stored email, exactly `['seller']` and no
+ * Organization (the Hub takes it from the actor token). On success the row
+ * records the new invitation as `pending` with the verified context org; on a
+ * failure nothing is written, so the seller row is never rolled back.
+ */
+async function inviteSellerRow(
+  client: InvitationsClient,
+  seller: SellerRow,
+  actor: InviteActor,
+  locale: HubInvitationLocale,
+): Promise<{ seller: SellerRow; invite: InviteOutcome }> {
+  let result: HubInvitationResult;
+  try {
+    result = await client.create({
+      accessToken: actor.accessToken,
+      email: seller.contactEmail,
+      appRoles: ['seller'],
+      locale,
+    });
+  } catch (error) {
+    // The seller stays: the admin sends the invitation again from the list.
+    return { seller, invite: { ok: false, failure: toInviteFailure(error, 'create') } };
+  }
+
+  const updated =
+    (await updateSeller(seller.id, {
+      invitationId: result.invitation.id,
+      invitationStatus: 'pending',
+      invitedOrgId: actor.orgId,
+    })) ?? seller;
+
+  return { seller: updated, invite: { ok: true, delivery: deliveryOf(result) } };
+}
+
 export async function createSellerAndInvite(
   input: { displayName: string; contactEmail: string; locale: HubInvitationLocale },
   actor: InviteActor,
@@ -206,27 +249,7 @@ export async function createSellerAndInvite(
   const client = getInvitationsClient();
   if (!client) return { seller: inserted, invite: { ok: false, failure: UNAVAILABLE } };
 
-  let result: HubInvitationResult;
-  try {
-    result = await client.create({
-      accessToken: actor.accessToken,
-      email: input.contactEmail,
-      appRoles: ['seller'],
-      locale: input.locale,
-    });
-  } catch (error) {
-    // The seller stays: the admin resends from the list.
-    return { seller: inserted, invite: { ok: false, failure: toInviteFailure(error, 'create') } };
-  }
-
-  const seller =
-    (await updateSeller(inserted.id, {
-      invitationId: result.invitation.id,
-      invitationStatus: 'pending',
-      invitedOrgId: actor.orgId,
-    })) ?? inserted;
-
-  return { seller, invite: { ok: true, delivery: deliveryOf(result) } };
+  return inviteSellerRow(client, inserted, actor, input.locale);
 }
 
 export type InvitationActionResult<T> =
@@ -235,22 +258,20 @@ export type InvitationActionResult<T> =
   | { kind: 'failed'; failure: InviteFailure };
 
 /**
- * Shared preamble of resend and revoke: client, seller, stored invitation id.
+ * Shared preamble of invite, resend and revoke: client, then the seller.
  *
  * A seller whose invitation was sent from ANOTHER Organization answers exactly
  * like an unknown seller (`not_found`) and never reaches the Hub: the admin's
  * verified org (`actor.orgId`, from `c.get('orgId')`) is the only one whose
  * invitations this route may touch, and a distinct answer would leak that the
- * seller exists elsewhere. A `null` `invitedOrgId` (rows invited before the
- * column existed) is not refused here; the Hub still scopes by the actor token.
+ * seller exists elsewhere. A `null` `invitedOrgId` (never invited, or invited
+ * before the column existed) is not refused here; the Hub still scopes by the
+ * actor token.
  */
-async function withStoredInvitation<T>(
+async function withOwnSeller<T>(
   sellerId: string,
   actor: Pick<InviteActor, 'orgId'>,
-  run: (
-    client: NonNullable<ReturnType<typeof getInvitationsClient>>,
-    seller: SellerRow & { invitationId: string },
-  ) => Promise<InvitationActionResult<T>>,
+  run: (client: InvitationsClient, seller: SellerRow) => Promise<InvitationActionResult<T>>,
 ): Promise<InvitationActionResult<T>> {
   const client = getInvitationsClient();
   if (!client) return { kind: 'failed', failure: UNAVAILABLE };
@@ -259,9 +280,47 @@ async function withStoredInvitation<T>(
   if (seller.invitedOrgId !== null && seller.invitedOrgId !== actor.orgId) {
     return { kind: 'not_found' };
   }
-  const invitationId = seller.invitationId;
-  if (!invitationId) return { kind: 'failed', failure: NOT_INVITED };
-  return run(client, { ...seller, invitationId });
+  return run(client, seller);
+}
+
+/** Resend and revoke: the seller must carry a stored invitation id. */
+async function withStoredInvitation<T>(
+  sellerId: string,
+  actor: Pick<InviteActor, 'orgId'>,
+  run: (client: InvitationsClient, seller: SellerRow & { invitationId: string }) => Promise<InvitationActionResult<T>>,
+): Promise<InvitationActionResult<T>> {
+  return withOwnSeller(sellerId, actor, async (client, seller) => {
+    const invitationId = seller.invitationId;
+    if (!invitationId) return { kind: 'failed', failure: NOT_INVITED };
+    return run(client, { ...seller, invitationId });
+  });
+}
+
+/**
+ * A seller may get a NEW invitation only when it has none (the create-time
+ * invite failed, or the seller predates invitations) or its last one was
+ * revoked. A pending or expired invitation is resent instead, and an accepted
+ * one needs nothing.
+ */
+function canSendNewInvitation(seller: SellerRow): boolean {
+  return seller.invitationId === null || seller.invitationStatus === 'revoked';
+}
+
+/**
+ * `POST /:id/invite`: a NEW Hub invitation for a seller without a usable one,
+ * through the same `inviteSellerRow` as create. A failure writes nothing.
+ */
+export async function sendNewInvitation(
+  sellerId: string,
+  actor: InviteActor,
+  locale: HubInvitationLocale,
+): Promise<InvitationActionResult<InvitationDelivery>> {
+  return withOwnSeller(sellerId, actor, async (client, seller) => {
+    if (!canSendNewInvitation(seller)) return { kind: 'failed', failure: ALREADY_INVITED };
+    const { seller: updated, invite } = await inviteSellerRow(client, seller, actor, locale);
+    if (!invite.ok) return { kind: 'failed', failure: invite.failure };
+    return { kind: 'ok', seller: updated, value: invite.delivery };
+  });
 }
 
 export async function resendInvitation(

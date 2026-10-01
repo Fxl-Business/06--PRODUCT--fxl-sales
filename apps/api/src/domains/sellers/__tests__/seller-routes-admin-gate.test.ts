@@ -161,6 +161,7 @@ const ROUTES = [
   },
   { name: 'POST /sellers/:id/resend', method: 'POST', path: `/sellers/${SELLER_ID}/resend`, body: {} },
   { name: 'POST /sellers/:id/revoke', method: 'POST', path: `/sellers/${SELLER_ID}/revoke`, body: undefined },
+  { name: 'POST /sellers/:id/invite', method: 'POST', path: `/sellers/${SELLER_ID}/invite`, body: {} },
 ] as const;
 
 describe('the sellers routes behind the real adminRouter', () => {
@@ -178,5 +179,15 @@ describe('the sellers routes behind the real adminRouter', () => {
 
     expect(res.status).toBe(200);
     expect(dbCalls.count).toBeGreaterThan(0);
+  });
+
+  it('lets an admin token through to the invite handler (positive control)', async () => {
+    const res = await call('POST', `/sellers/${SELLER_ID}/invite`, await signToken(claims('admin')), {});
+
+    // The fake database knows no seller, so the handler itself answers 404.
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: 'not_found' });
+    expect(dbCalls.count).toBeGreaterThan(0);
+    expect(fake.create).not.toHaveBeenCalled();
   });
 });
