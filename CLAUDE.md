@@ -23,7 +23,7 @@ Full reference: `nexo/knowledge/reference/auth-model.md`.
 Wiring:
 - The API mounts the Hub BFF at `/auth/*`; the browser enters through same-origin web `/auth/*`, proxied by Vite to the API. The local callback is `http://localhost:8006/auth/callback`.
 - Protected routes use Hub bearer tokens through `appAuthMiddleware`; `requireHubAuth` exposes `c.get('hubAuth')`. `userId` is the Hub account id, `orgId` the active Hub workspace id.
-- The SDK is pinned EXACTLY at `@fxl-business/hub-sdk@2.3.0` in both apps (no caret). `hono` is pinned to `4.12.28` by a `pnpm-workspace.yaml` override so only one Hono copy resolves.
+- The SDK is pinned EXACTLY at `@fxl-business/hub-sdk@2.5.0` in both apps (no caret). `hono` is pinned to `4.12.28` by a `pnpm-workspace.yaml` override so only one Hono copy resolves.
 
 Access gate:
 - Baseline access is the boolean `auth.claims.entitlements.access` and nothing else. Never read `entitlements.modules` for baseline access (the old `sales.core` module gate answered 402 to everyone). `modules` is for paid add-ons only, via `requireHubAuth`'s `requiredModule`.
