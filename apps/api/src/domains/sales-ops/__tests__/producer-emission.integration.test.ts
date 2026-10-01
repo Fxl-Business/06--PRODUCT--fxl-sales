@@ -74,9 +74,18 @@ async function seedOpenSale(orgId: string) {
 }
 
 type OutboxRow = { event_name: string; idempotency_key: string; payload: Record<string, unknown> };
+/*
+  Rows in write order, so `.slice(before)` is exactly what the later business
+  transaction emitted. Never order by `position`: it stays NULL until the single
+  elected publisher assigns it after commit, and no publisher runs here, so
+  `ORDER BY position` ties every row and Postgres returns them in arbitrary order.
+  `created_at` defaults to `now()`, the business transaction's start time, so each
+  sequential transaction sorts strictly after the previous one; `id` only breaks
+  ties among rows of the same transaction, which no assertion depends on.
+*/
 async function outboxOf(orgId: string): Promise<OutboxRow[]> {
   return (await getAdminDb().execute(
-    sql`SELECT event_name, idempotency_key, payload FROM integration_outbox WHERE organization_id = ${orgId} ORDER BY position`,
+    sql`SELECT event_name, idempotency_key, payload FROM integration_outbox WHERE organization_id = ${orgId} ORDER BY created_at, id`,
   )) as unknown as OutboxRow[];
 }
 const names = (rows: OutboxRow[]) => rows.map((r) => r.event_name);

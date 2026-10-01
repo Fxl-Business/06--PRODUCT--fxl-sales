@@ -1,4 +1,5 @@
 import postgres from 'postgres';
+import { testDatabaseUrls } from './test-database-urls.js';
 
 /**
  * Removes every settlement of the given orgs from the LOCAL test database.
@@ -12,11 +13,7 @@ import postgres from 'postgres';
  */
 export async function deleteSettlementsForOrgs(orgIds: readonly string[]): Promise<number> {
   if (orgIds.length === 0) return 0;
-  const url =
-    process.env.TEST_MIGRATE_DATABASE_URL ??
-    process.env.ADMIN_DATABASE_URL ??
-    'postgresql://postgres:postgres@localhost:5006/fxl_sales';
-  const client = postgres(url, { max: 1 });
+  const client = postgres(testDatabaseUrls().migrateUrl, { max: 1 });
   try {
     return await client.begin(async (tx) => {
       const [me] = await tx<{ rolsuper: boolean }[]>`

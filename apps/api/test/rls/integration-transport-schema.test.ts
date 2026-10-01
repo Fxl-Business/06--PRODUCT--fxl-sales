@@ -10,12 +10,9 @@
 import { randomUUID } from 'node:crypto';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { testDatabaseUrls } from '../../src/db/__tests__/test-database-urls.js';
 
-const APP_DB_URL =
-  process.env.TEST_DATABASE_URL ??
-  process.env.DATABASE_URL ??
-  'postgresql://postgres:postgres@localhost:5006/fxl_sales';
-const ADMIN_DB_URL = process.env.ADMIN_DATABASE_URL ?? APP_DB_URL;
+const { appUrl: APP_DB_URL, adminUrl: ADMIN_DB_URL } = testDatabaseUrls();
 const ADMIN_CONNECTION_OPTIONS = { connection: { 'app.fxl_admin': 'true' } } as const;
 
 type Sql = postgres.Sql;

@@ -8,6 +8,7 @@ import {
   type MigrationPhaseEvent,
   runDatabaseMigrations,
 } from '../../src/db/migration-runner.js';
+import { testDatabaseUrls } from '../../src/db/__tests__/test-database-urls.js';
 
 type SqlClient = ReturnType<typeof postgres>;
 
@@ -86,12 +87,7 @@ function databaseUrl(
 }
 
 function migrationAdminUrl(): string {
-  return (
-    process.env.TEST_MIGRATE_DATABASE_URL ??
-    process.env.TEST_DATABASE_URL ??
-    process.env.DATABASE_URL ??
-    'postgresql://postgres:postgres@localhost:5006/fxl_sales'
-  );
+  return testDatabaseUrls().migrateUrl;
 }
 
 async function attemptCleanup(

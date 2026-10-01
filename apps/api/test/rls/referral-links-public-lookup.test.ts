@@ -16,15 +16,9 @@
  */
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { testDatabaseUrls } from '../../src/db/__tests__/test-database-urls.js';
 
-const TEST_DB_URL =
-  process.env.TEST_DATABASE_URL ??
-  process.env.DATABASE_URL ??
-  'postgresql://postgres:postgres@localhost:5006/fxl_sales';
-
-const CLEANUP_DB_URL =
-  process.env.ADMIN_DATABASE_URL ??
-  TEST_DB_URL;
+const { appUrl: TEST_DB_URL, adminUrl: CLEANUP_DB_URL } = testDatabaseUrls();
 const ADMIN_CONNECTION_OPTIONS = { connection: { 'app.fxl_admin': 'true' } } as const;
 
 describe('RLS: referral_links public-lookup (D-E)', () => {

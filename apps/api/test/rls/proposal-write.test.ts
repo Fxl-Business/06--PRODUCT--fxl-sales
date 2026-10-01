@@ -27,12 +27,9 @@ import {
   getSalesOpsSnapshot,
   updateSale,
 } from '../../src/domains/sales-ops/service.js';
+import { testDatabaseUrls } from '../../src/db/__tests__/test-database-urls.js';
 
-const APP_DB_URL =
-  process.env.TEST_DATABASE_URL ??
-  process.env.DATABASE_URL ??
-  'postgresql://postgres:postgres@localhost:5006/fxl_sales';
-const ADMIN_DB_URL = process.env.ADMIN_DATABASE_URL ?? APP_DB_URL;
+const { appUrl: APP_DB_URL, adminUrl: ADMIN_DB_URL } = testDatabaseUrls();
 const ADMIN_CONNECTION_OPTIONS = { connection: { 'app.fxl_admin': 'true' } } as const;
 
 describe('proposal write backend (create v2 + update + payable materialization)', () => {
