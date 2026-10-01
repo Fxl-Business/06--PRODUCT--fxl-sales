@@ -132,6 +132,8 @@ export interface FinderListResponse {
 
 export type SellerStatus = 'active' | 'inactive';
 
+export type SellerInvitationStatus = 'pending' | 'accepted' | 'expired' | 'revoked';
+
 export interface SellerRow {
   id: string;
   accountId: string | null;
@@ -140,6 +142,10 @@ export interface SellerRow {
   status: SellerStatus;
   createdAt: string;
   updatedAt: string | null;
+  // Hub invitation state. All null until the seller is invited.
+  invitationId: string | null;
+  invitationStatus: SellerInvitationStatus | null;
+  invitedOrgId: string | null;
 }
 
 export interface CreateSellerBody {

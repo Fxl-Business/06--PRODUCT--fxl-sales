@@ -93,6 +93,12 @@ export const sellers = pgTable('sellers', {
   status: text('status').notNull(), // 'active' | 'inactive'
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }),
+  // Hub invitation state (migration 0026). All NULL until the seller is invited.
+  invitationId: text('invitation_id'),
+  invitationStatus: text('invitation_status'), // 'pending' | 'accepted' | 'expired' | 'revoked'
+  // The Hub Organization the invite targeted. Informational only: it does NOT
+  // make sellers tenant-scoped (no org_id, no RLS).
+  invitedOrgId: text('invited_org_id'),
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
