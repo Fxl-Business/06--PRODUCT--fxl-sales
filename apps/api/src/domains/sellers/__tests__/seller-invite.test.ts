@@ -436,6 +436,22 @@ describe('POST /:id/resend', () => {
     expect(fake.resend).not.toHaveBeenCalled();
   });
 
+  it('answers 404 like an unknown seller when the invitation belongs to another Organization', async () => {
+    const seller = seedSeller({
+      invitationId: 'inv_other',
+      invitationStatus: 'pending',
+      invitedOrgId: 'another-org',
+    });
+    const unknown = await post(`/${randomUUID()}/resend`, {});
+
+    const res = await post(`/${seller.id}/resend`, {});
+    expect(res.status).toBe(404);
+    // Byte-identical to the unknown-seller answer: no existence leak across Organizations.
+    expect(await res.json()).toEqual(await unknown.json());
+    expect(fake.resend).not.toHaveBeenCalled();
+    expect(store.updates).toHaveLength(0);
+  });
+
   it('answers 409 seller_not_invited for a seller without a stored invitation', async () => {
     const seller = seedSeller();
     const res = await post(`/${seller.id}/resend`, {});
@@ -493,6 +509,22 @@ describe('POST /:id/revoke', () => {
       message: INVITATION_COPY.invitationGone,
     });
     expect(store.rows[0]).toMatchObject({ invitationStatus: 'pending' });
+  });
+
+  it('answers 404 like an unknown seller when the invitation belongs to another Organization', async () => {
+    const seller = seedSeller({
+      invitationId: 'inv_other',
+      invitationStatus: 'pending',
+      invitedOrgId: 'another-org',
+    });
+    const unknown = await post(`/${randomUUID()}/revoke`);
+
+    const res = await post(`/${seller.id}/revoke`);
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual(await unknown.json());
+    expect(fake.revoke).not.toHaveBeenCalled();
+    expect(store.rows[0]).toMatchObject({ invitationStatus: 'pending' });
+    expect(store.updates).toHaveLength(0);
   });
 
   it('answers 409 seller_not_invited without a stored invitation', async () => {

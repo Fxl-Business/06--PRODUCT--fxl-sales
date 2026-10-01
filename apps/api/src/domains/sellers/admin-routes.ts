@@ -96,7 +96,11 @@ sellersAdminRouter.post('/:id/resend', async (c) => {
     return c.json({ error: 'validation_error', issues: parsed.error.flatten() }, 400);
   }
 
-  const outcome = await resendInvitation(id.data, { accessToken: bearerOf(c) }, parsed.data.locale);
+  const outcome = await resendInvitation(
+    id.data,
+    { accessToken: bearerOf(c), orgId: c.get('orgId') },
+    parsed.data.locale,
+  );
   if (outcome.kind === 'not_found') return c.json({ error: 'not_found' }, 404);
   if (outcome.kind === 'failed') return failureResponse(c, outcome.failure);
   return c.json({ seller: outcome.seller, ...outcome.value });
@@ -106,7 +110,10 @@ sellersAdminRouter.post('/:id/revoke', async (c) => {
   const id = SellerIdSchema.safeParse(c.req.param('id'));
   if (!id.success) return c.json({ error: 'not_found' }, 404);
 
-  const outcome = await revokeInvitation(id.data, { accessToken: bearerOf(c) });
+  const outcome = await revokeInvitation(id.data, {
+    accessToken: bearerOf(c),
+    orgId: c.get('orgId'),
+  });
   if (outcome.kind === 'not_found') return c.json({ error: 'not_found' }, 404);
   if (outcome.kind === 'failed') return failureResponse(c, outcome.failure);
   return c.json({ seller: outcome.seller });
