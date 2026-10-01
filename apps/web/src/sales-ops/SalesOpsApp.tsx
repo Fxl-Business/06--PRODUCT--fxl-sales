@@ -22,6 +22,7 @@ import {
   Settings,
   Trash2,
   UserRound,
+  UsersRound,
   X,
 } from 'lucide-react';
 import {
@@ -1217,6 +1218,84 @@ function AccountOrganizationSection({ onSwitched }: { onSwitched: () => void }) 
   );
 }
 
+/**
+ * The account's face in the shell: the Hub avatar when the token carries one, the
+ * initials otherwise. Display-only. A URL that fails to load falls back to the
+ * initials instead of leaving a broken image, and the fallback is keyed on the URL so
+ * a later token with a new avatar gets a fresh attempt.
+ */
+function AccountAvatar({ avatarUrl, name }: { avatarUrl?: string; name: string }) {
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const showImage = Boolean(avatarUrl) && failedUrl !== avatarUrl;
+
+  return (
+    <span className="sales-ops-num flex size-10 flex-none items-center justify-center overflow-hidden rounded-[11px] bg-[#eaa81a] text-[14px] font-bold text-[#18181b]">
+      {showImage ? (
+        <img
+          alt=""
+          className="size-full object-cover"
+          onError={() => setFailedUrl(avatarUrl ?? null)}
+          referrerPolicy="no-referrer"
+          src={avatarUrl}
+        />
+      ) : (
+        initials(name)
+      )}
+    </span>
+  );
+}
+
+/**
+ * The account-level actions of the shell's dropdown: `Trocar conta` and `Sair`.
+ *
+ * `Trocar conta` switches ACCOUNT, which is not switching Organization: the per-org
+ * rows above it (`AccountOrganizationSection`) move this session between the
+ * Organizations of the SAME account, while this hands the whole document to the Hub's
+ * Account Chooser through the provider's `switchAccount`. It therefore sits with `Sair`,
+ * the other action that ends this account's session in this document, and never among
+ * the Organization rows. The active Organization travels only as the chooser's hint;
+ * the seam drops an absent one. Nothing here builds a URL, flushes a cache or touches
+ * the SDK client.
+ *
+ * The hook is called here, inside the menu content, for the same reason
+ * `AccountOrganizationSection` calls it there: Radix mounts this only while the menu
+ * is open.
+ */
+function AccountSessionActions({ onLogout }: { onLogout: () => void }) {
+  const { active, switchAccount } = useOrganizations();
+
+  return (
+    <DropdownMenuGroup>
+      <DropdownMenuItem
+        asChild
+        onSelect={() => {
+          switchAccount(active ? { organization: active.id } : undefined);
+        }}
+      >
+        <button
+          aria-label="Trocar conta"
+          className="flex w-full cursor-pointer items-center gap-2.5 rounded-[10px] px-2.5 py-2.5 text-left text-[13.5px] font-semibold text-[#201f24] outline-none transition hover:bg-[#f5f5f7] focus:bg-[#f5f5f7]"
+          type="button"
+        >
+          <UsersRound className="size-4 text-[#84848c]" />
+          Trocar conta
+        </button>
+      </DropdownMenuItem>
+      <DropdownMenuItem asChild>
+        <button
+          aria-label="Sair"
+          className="flex w-full cursor-pointer items-center gap-2.5 rounded-[10px] px-2.5 py-2.5 text-left text-[13.5px] font-semibold text-[#c93d32] outline-none transition hover:bg-[#fff2f0] focus:bg-[#fff2f0]"
+          onClick={onLogout}
+          type="button"
+        >
+          <LogOut className="size-4" />
+          Sair
+        </button>
+      </DropdownMenuItem>
+    </DropdownMenuGroup>
+  );
+}
+
 export function SalesOpsApp() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -1917,9 +1996,7 @@ export function SalesOpsApp() {
                 title="Conta"
                 type="button"
               >
-                <span className="sales-ops-num flex size-10 flex-none items-center justify-center rounded-[11px] bg-[#eaa81a] text-[14px] font-bold text-[#18181b]">
-                  {initials(userName)}
-                </span>
+                <AccountAvatar avatarUrl={profile.avatarUrl} name={userName} />
                 {!sidebarCollapsed ? (
                   <>
                     <span className="min-w-0 flex-1 leading-[1.2]">
@@ -1944,9 +2021,7 @@ export function SalesOpsApp() {
               sideOffset={10}
             >
               <DropdownMenuLabel className="flex items-center gap-[11px] px-2.5 py-2 font-normal">
-                <span className="sales-ops-num flex size-10 flex-none items-center justify-center rounded-[11px] bg-[#eaa81a] text-[14px] font-bold text-[#18181b]">
-                  {initials(userName)}
-                </span>
+                <AccountAvatar avatarUrl={profile.avatarUrl} name={userName} />
                 <span className="min-w-0 flex-1 leading-[1.2]">
                   <span className="block truncate text-[13.5px] font-bold text-[#201f24]">
                     {userName}
@@ -1963,21 +2038,11 @@ export function SalesOpsApp() {
               </DropdownMenuLabel>
               <DropdownMenuSeparator className="my-1.5 bg-[#e5e5ea]" />
               <AccountOrganizationSection onSwitched={() => setAccountMenuOpen(false)} />
-              <DropdownMenuGroup>
-                <DropdownMenuItem asChild>
-                  <button
-                    aria-label="Sair"
-                    className="flex w-full cursor-pointer items-center gap-2.5 rounded-[10px] px-2.5 py-2.5 text-left text-[13.5px] font-semibold text-[#c93d32] outline-none transition hover:bg-[#fff2f0] focus:bg-[#fff2f0]"
-                    onClick={() => {
-                      void logout();
-                    }}
-                    type="button"
-                  >
-                    <LogOut className="size-4" />
-                    Sair
-                  </button>
-                </DropdownMenuItem>
-              </DropdownMenuGroup>
+              <AccountSessionActions
+                onLogout={() => {
+                  void logout();
+                }}
+              />
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
