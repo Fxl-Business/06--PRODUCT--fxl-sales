@@ -11,6 +11,7 @@ COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY apps/api/package.json apps/api/
 COPY packages/shared-types/package.json packages/shared-types/
 COPY packages/shared-utils/package.json packages/shared-utils/
+COPY packages/auth-fake/package.json packages/auth-fake/
 RUN pnpm install --frozen-lockfile
 
 # --- build stage ---
@@ -20,6 +21,7 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/apps/api/node_modules ./apps/api/node_modules
 COPY --from=deps /app/packages/shared-types/node_modules ./packages/shared-types/node_modules
 COPY --from=deps /app/packages/shared-utils/node_modules ./packages/shared-utils/node_modules
+COPY --from=deps /app/packages/auth-fake/node_modules ./packages/auth-fake/node_modules
 COPY . .
 RUN pnpm --filter "@fxl-sales/shared-types" build && \
     pnpm --filter "@fxl-sales/shared-utils" build && \
