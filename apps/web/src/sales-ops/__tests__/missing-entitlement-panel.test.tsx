@@ -446,7 +446,12 @@ describe('MissingEntitlementPanel - Trocar conta', () => {
   });
 
   it('calls the provider switchAccount once with the active Organization and never reloads', async () => {
-    await renderPanel();
+    /*
+      The switch is a full-document navigation, so a refetch fired beside it would only
+      race the old token into the same 402. `onRetry` belongs to the Organization switch.
+    */
+    const onRetry = vi.fn();
+    await renderPanel({ onRetry });
     const button = accountSwitchButton();
     expect(button.textContent?.trim()).toBe(MISSING_ENTITLEMENT_COPY.switchAccount);
     expect(button.type).toBe('button');
@@ -455,6 +460,7 @@ describe('MissingEntitlementPanel - Trocar conta', () => {
     expect(seam.switchAccount).toHaveBeenCalledWith({ organization: 'org-active' });
     expect(seam.setActive).not.toHaveBeenCalled();
     expect(seam.client.checkoutUrl).toHaveBeenCalledTimes(1);
+    expect(onRetry).not.toHaveBeenCalled();
     expect(reloadSpy).not.toHaveBeenCalled();
   });
 
