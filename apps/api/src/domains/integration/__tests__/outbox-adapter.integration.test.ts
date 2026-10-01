@@ -8,11 +8,9 @@ import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { hasDrizzleTx } from '../outbox-adapter.js';
 import { buildSettlementRecordedEvent } from '../events.js';
+import { testDatabaseUrls } from '../../../db/__tests__/test-database-urls.js';
 
-const APP_DB_URL =
-  process.env.TEST_DATABASE_URL ??
-  process.env.DATABASE_URL ??
-  'postgresql://postgres:postgres@localhost:5006/fxl_sales';
+const APP_DB_URL = testDatabaseUrls().appUrl;
 
 let sql: postgres.Sql;
 let db: ReturnType<typeof drizzle>;

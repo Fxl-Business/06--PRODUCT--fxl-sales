@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import postgres from 'postgres';
 import { expect } from 'vitest';
+import { testDatabaseUrls } from '../../src/db/__tests__/test-database-urls.js';
 
 /**
  * A throwaway Postgres database + owning NOSUPERUSER role, for migration
@@ -52,12 +53,7 @@ function databaseUrl(
 }
 
 export function migrationAdminUrl(): string {
-  return (
-    process.env.TEST_MIGRATE_DATABASE_URL ??
-    process.env.TEST_DATABASE_URL ??
-    process.env.DATABASE_URL ??
-    'postgresql://postgres:postgres@localhost:5006/fxl_sales'
-  );
+  return testDatabaseUrls().migrateUrl;
 }
 
 async function attemptCleanup(

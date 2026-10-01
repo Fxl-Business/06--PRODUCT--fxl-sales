@@ -20,12 +20,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { hmacVerifyMiddleware } from '../../src/domains/conversions/hmac-middleware.js';
 import { conversionsRouter } from '../../src/domains/conversions/routes.js';
 import { buildIdempotencyKey } from '../../src/domains/conversions/service.js';
+import { testDatabaseUrls } from '../../src/db/__tests__/test-database-urls.js';
 
 const SOURCE = 'fxl-financiero'; // D-A canonical slug (…ciero) - byte-identical to the seed
-const SEED_DB_URL =
-  process.env.TEST_DATABASE_URL ??
-  process.env.DATABASE_URL ??
-  'postgresql://postgres:postgres@localhost:5006/fxl_sales';
+const SEED_DB_URL = testDatabaseUrls().appUrl;
 const ADMIN_CONNECTION_OPTIONS = { connection: { 'app.fxl_admin': 'true' } } as const;
 
 /** Assemble the conversion webhook path exactly as server.ts does (HMAC before route). */

@@ -39,6 +39,7 @@ import {
 } from '../../src/auth/hub-session-store.js';
 import { createSessionSealer } from '../../src/auth/session-crypto.js';
 import * as schema from '../../src/db/schema.js';
+import { testDatabaseUrls } from '../../src/db/__tests__/test-database-urls.js';
 
 /**
  * The 1.3.1 `tx.get()` projection in one place.
@@ -56,11 +57,7 @@ async function readRecord(tx: HubSessionTransaction): Promise<HubSessionRecord |
 }
 
 
-const APP_DB_URL =
-  process.env.TEST_DATABASE_URL ??
-  process.env.DATABASE_URL ??
-  'postgresql://postgres:postgres@localhost:5006/fxl_sales';
-const ADMIN_DB_URL = process.env.ADMIN_DATABASE_URL ?? APP_DB_URL;
+const ADMIN_DB_URL = testDatabaseUrls().adminUrl;
 const ADMIN_CONNECTION_OPTIONS = { connection: { 'app.fxl_admin': 'true' } } as const;
 
 const IKM = 'hub-bff-login-supersede-test-ikm-0123456789';

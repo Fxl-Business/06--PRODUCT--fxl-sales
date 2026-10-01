@@ -12,7 +12,14 @@ import { defineConfig } from 'vitest/config';
  *                                plus *.integration.test.ts files and runs the
  *                                migrate-first globalSetup.
  *
- * The integration tests connect through the standard project DATABASE_URL.
+ * The integration tests never read the dev server's DATABASE_URL. They connect
+ * through TEST_DATABASE_URL (the non-superuser fxl_sales_test role),
+ * ADMIN_DATABASE_URL and TEST_MIGRATE_DATABASE_URL, named explicitly in
+ * apps/api/.env and refused unless local by test/rls/assert-test-role.ts:
+ * global-setup.ts checks the role and migrates once per run, and setup-env.ts
+ * resolves the URLs per file, then points DATABASE_URL at TEST_DATABASE_URL so
+ * the API code under test (getDb) hits the same test database. Test files read
+ * the resolved URLs through src/db/__tests__/test-database-urls.ts.
  */
 const isIntegration = process.env.VITEST_INTEGRATION === '1';
 

@@ -22,12 +22,9 @@ import {
 } from '../../src/domains/conversions/service.js';
 import { promoteHoldExpired } from '../../src/domains/commissions/service.js';
 import { verifyChain, type AuditChainRow } from '../../src/domains/audit/service.js';
+import { testDatabaseUrls } from '../../src/db/__tests__/test-database-urls.js';
 
-const ADMIN_DB_URL =
-  process.env.ADMIN_DATABASE_URL ??
-  process.env.TEST_DATABASE_URL ??
-  process.env.DATABASE_URL ??
-  'postgresql://postgres:postgres@localhost:5006/fxl_sales';
+const ADMIN_DB_URL = testDatabaseUrls().adminUrl;
 const SEED_DB_URL =
   ADMIN_DB_URL;
 const ADMIN_CONNECTION_OPTIONS = { connection: { 'app.fxl_admin': 'true' } } as const;
