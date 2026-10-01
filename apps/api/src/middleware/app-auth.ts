@@ -327,6 +327,17 @@ export function installAppAuthAdapter(adapter: MiddlewareHandler): void {
   installedAppAuthAdapter = adapter;
 }
 
+/**
+ * Whether the adapter slot is filled, read straight off it. A Hub-calling
+ * server path (the invitations client) asks this instead of any environment
+ * flag: with a valid local Hub config the development identity mode still
+ * yields a non-null `getHubSdkConfig()`, and only the slot says the bearer on
+ * the request is not a Hub token.
+ */
+export function isAppAuthAdapterInstalled(): boolean {
+  return installedAppAuthAdapter !== null;
+}
+
 export const appAuthMiddleware: MiddlewareHandler = (c, next) =>
   (installedAppAuthAdapter ?? hubAppAuthMiddleware)(c, next);
 
