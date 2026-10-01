@@ -47,10 +47,24 @@ function setRetryAfter(c: Context, failure: InviteFailure): void {
   }
 }
 
+/**
+ * The mapped body plus `retryAfterSeconds` when the Hub sent one. The header is
+ * kept too, but the browser cannot read `Retry-After` cross-origin (CORS does not
+ * expose it), so every failure answer carries the number in the body as well.
+ */
+function failureBody(failure: InviteFailure) {
+  return {
+    ...failure.body,
+    ...(failure.retryAfterSeconds !== undefined
+      ? { retryAfterSeconds: failure.retryAfterSeconds }
+      : {}),
+  };
+}
+
 function failureResponse(c: Context, failure: InviteFailure) {
   setRetryAfter(c, failure);
   // The status comes from mapInvitationError / INVITATIONS_UNAVAILABLE.
-  return c.json(failure.body, failure.httpStatus as 400);
+  return c.json(failureBody(failure), failure.httpStatus as 400);
 }
 
 sellersAdminRouter.get('/', async (c) => {
@@ -78,11 +92,7 @@ sellersAdminRouter.post('/', async (c) => {
   return c.json(
     {
       seller,
-      inviteError: {
-        status: failure.httpStatus,
-        ...failure.body,
-        ...(failure.retryAfterSeconds !== undefined ? { retryAfterSeconds: failure.retryAfterSeconds } : {}),
-      },
+      inviteError: { status: failure.httpStatus, ...failureBody(failure) },
     },
     201,
   );

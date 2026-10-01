@@ -430,6 +430,27 @@ describe('POST /:id/resend', () => {
     expect(res.headers.get('Retry-After')).toBe('7');
   });
 
+  it('carries retryAfterSeconds in the body as well as the Retry-After header on a rate limit', async () => {
+    const seller = seedSeller({ invitationId: 'inv_9', invitationStatus: 'pending' });
+    fake.resend.mockRejectedValueOnce(new HubInvitationError('rate_limited', 429, 'x', 30));
+
+    const res = await post(`/${seller.id}/resend`, {});
+    expect(res.status).toBe(429);
+    expect(res.headers.get('Retry-After')).toBe('30');
+    // The browser cannot read Retry-After cross-origin (CORS does not expose it).
+    expect((await res.json()).retryAfterSeconds).toBe(30);
+  });
+
+  it('omits retryAfterSeconds and the header when the Hub sent none', async () => {
+    const seller = seedSeller({ invitationId: 'inv_9', invitationStatus: 'pending' });
+    fake.resend.mockRejectedValueOnce(new HubInvitationError('rate_limited', 429, 'x'));
+
+    const res = await post(`/${seller.id}/resend`, {});
+    expect(res.status).toBe(429);
+    expect(res.headers.get('Retry-After')).toBeNull();
+    expect(await res.json()).not.toHaveProperty('retryAfterSeconds');
+  });
+
   it('answers 404 for an unknown or malformed seller id', async () => {
     expect((await post(`/${randomUUID()}/resend`, {})).status).toBe(404);
     expect((await post('/not-a-uuid/resend', {})).status).toBe(404);
@@ -525,6 +546,27 @@ describe('POST /:id/revoke', () => {
     expect(fake.revoke).not.toHaveBeenCalled();
     expect(store.rows[0]).toMatchObject({ invitationStatus: 'pending' });
     expect(store.updates).toHaveLength(0);
+  });
+
+  it('carries retryAfterSeconds in the body as well as the Retry-After header on a rate limit', async () => {
+    const seller = seedSeller({ invitationId: 'inv_9', invitationStatus: 'pending' });
+    fake.revoke.mockRejectedValueOnce(new HubInvitationError('rate_limited', 429, 'x', 30));
+
+    const res = await post(`/${seller.id}/revoke`);
+    expect(res.status).toBe(429);
+    expect(res.headers.get('Retry-After')).toBe('30');
+    // The browser cannot read Retry-After cross-origin (CORS does not expose it).
+    expect((await res.json()).retryAfterSeconds).toBe(30);
+  });
+
+  it('omits retryAfterSeconds and the header when the Hub sent none', async () => {
+    const seller = seedSeller({ invitationId: 'inv_9', invitationStatus: 'pending' });
+    fake.revoke.mockRejectedValueOnce(new HubInvitationError('rate_limited', 429, 'x'));
+
+    const res = await post(`/${seller.id}/revoke`);
+    expect(res.status).toBe(429);
+    expect(res.headers.get('Retry-After')).toBeNull();
+    expect(await res.json()).not.toHaveProperty('retryAfterSeconds');
   });
 
   it('answers 409 seller_not_invited without a stored invitation', async () => {
