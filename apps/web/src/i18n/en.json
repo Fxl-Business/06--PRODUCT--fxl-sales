@@ -18,6 +18,8 @@
     "noRole": {
       "title": "Access not authorized",
       "body": "Your account does not have a profile assigned on the FXL Sales platform yet. Please contact the administrator.",
+      "signedInAs": "Signed in as",
+      "switchAccount": "Switch account",
       "signOut": "Sign out"
     }
   },
