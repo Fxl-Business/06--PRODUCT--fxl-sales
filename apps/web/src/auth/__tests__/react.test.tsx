@@ -194,7 +194,8 @@ function Probe({ onWorkspace }: { onWorkspace?: (workspaceName?: string) => void
  * `switchWorkspace` still asserts on the visible pt-BR name.
  */
 function OrganizationProbe() {
-  const { active, activeName, organizations, others, setActive, client } = useOrganizations();
+  const { active, activeName, organizations, others, setActive, switchAccount, client } =
+    useOrganizations();
   const profile = useAuthProfile();
 
   return (
@@ -221,6 +222,15 @@ function OrganizationProbe() {
         type="button"
       >
         assinar
+      </button>
+      <button
+        data-testid="seam-switch-account"
+        onClick={() => {
+          switchAccount({ organization: active?.id });
+        }}
+        type="button"
+      >
+        trocar conta
       </button>
     </div>
   );
@@ -2102,6 +2112,43 @@ describe('active organization and the useOrganizations seam', () => {
     // The guard against the seam growing a flush of its own, which would be a flush on
     // the WRONG side of the await and which no pre-existing test would catch.
     expect(clearSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('reaches client.switchAccount once through the seam with the active organization', async () => {
+    mocks.cache.getToken.mockResolvedValue(ok(profileToken('Alpha', undefined, 'workspace-alpha')));
+    ({ container, root } = renderOrganizations());
+    await flushReact();
+    // After the mount flush, for the same reason as the setActive oracle above.
+    const clearSpy = vi.spyOn(queryClient, 'clear');
+
+    await clickTestId(container, 'seam-switch-account');
+    await flushReact();
+
+    expect(mocks.client.switchAccount).toHaveBeenCalledTimes(1);
+    expect(mocks.client.switchAccount.mock.calls[0]).toEqual([{ organization: 'workspace-alpha' }]);
+    /*
+      2.5.0's switchAccount is a full-document navigation, like login: the document is
+      torn down, so the seam owns no flush, no seed and no generation guard. A flush here
+      would be the setActive critical section leaking into a second copy.
+    */
+    expect(clearSpy).not.toHaveBeenCalled();
+    expect(mocks.cache.seed).not.toHaveBeenCalled();
+    expect(mocks.client.setActive).not.toHaveBeenCalled();
+    expect(mocks.client.login).not.toHaveBeenCalled();
+  });
+
+  it('calls client.switchAccount with no options when no organization is active', async () => {
+    // Neither an id nor a name match, so `active` is null and the caller passes
+    // `{ organization: undefined }`, which the seam must not forward as an empty hint.
+    mocks.cache.getToken.mockResolvedValue(ok(profileToken('Gamma')));
+    ({ container, root } = renderOrganizations());
+    await flushReact();
+
+    await clickTestId(container, 'seam-switch-account');
+    await flushReact();
+
+    expect(mocks.client.switchAccount).toHaveBeenCalledTimes(1);
+    expect(mocks.client.switchAccount.mock.calls[0]).toEqual([]);
   });
 
   it('hands back the Hub client so a later slice can build the checkout link', async () => {

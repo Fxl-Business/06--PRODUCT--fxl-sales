@@ -131,8 +131,16 @@ type HubAuthState = AuthProfile & {
   login: () => void;
   logout: () => Promise<void>;
   setActive: (workspaceId: string) => Promise<void>;
+  switchAccount: SwitchAccount;
   workspaces: HubWorkspacePreview[];
 };
+
+/**
+ * Switch ACCOUNT, not Organization: a sibling of `setActive`, never a variant of it.
+ * The optional `organization` is only a hint for the Hub's Account Chooser, passed the
+ * way `login` passes it.
+ */
+type SwitchAccount = (options?: { organization?: string }) => void;
 
 type AccessTokenHook = () => { getToken: () => Promise<string | null> };
 type LogoutHook = () => () => Promise<void>;
@@ -558,6 +566,30 @@ function HubAuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(() => client.login(), [client]);
 
+  /*
+    Shaped like `login`, NOT like `setActive`. 2.5.0's `switchAccount` returns `void` and
+    performs a full-document navigation to the BFF's `/auth/login?prompt=select_account`,
+    so this document is torn down and the next one boots cold: there is no token to seed,
+    no generation to check and no query cache worth flushing. Mirroring `setActive`'s
+    critical section here would be a second copy of an ordering that must have one.
+
+    The URL is the SDK's to build; nothing in this app spells `prompt=` (guarded by
+    `__tests__/no-hand-built-prompt.test.ts`). An absent or empty hint is normalized to
+    the no-argument call, so a caller with no active Organization never forwards an
+    empty `organization`.
+  */
+  const switchAccount = useCallback<SwitchAccount>(
+    (options) => {
+      const organization = options?.organization;
+      if (organization) {
+        client.switchAccount({ organization });
+      } else {
+        client.switchAccount();
+      }
+    },
+    [client],
+  );
+
   const logout = useCallback(async () => {
     /*
       SYNCHRONOUS, and BEFORE THE FIRST `await` in this function. Written as the first
@@ -699,9 +731,10 @@ function HubAuthProvider({ children }: { children: ReactNode }) {
       login,
       logout,
       setActive,
+      switchAccount,
       workspaces,
     }),
-    [client, getToken, login, logout, profile, sessionLost, setActive, workspaces],
+    [client, getToken, login, logout, profile, sessionLost, setActive, switchAccount, workspaces],
   );
 
   return <HubAuthContext.Provider value={value}>{children}</HubAuthContext.Provider>;
@@ -987,9 +1020,11 @@ function useHubOrganizations(): {
   organizations: Organization[];
   others: Organization[];
   setActive: (organizationId: string) => Promise<void>;
+  switchAccount: SwitchAccount;
   client: HubClient;
 } {
-  const { client, setActive, workspaceId, workspaceName, workspaces } = useHubAuthContext();
+  const { client, setActive, switchAccount, workspaceId, workspaceName, workspaces } =
+    useHubAuthContext();
 
   /**
    * Resolved by ID first, which is the whole point of reading the `workspaceId` claim.
@@ -1046,6 +1081,12 @@ function useHubOrganizations(): {
       others,
       setActive,
       /*
+        Handed through by reference, exactly like `setActive`. Callers pass
+        `{ organization: active?.id }`; the provider owns the call into the SDK, so no
+        surface reaches `client.switchAccount` directly.
+      */
+      switchAccount,
+      /*
         The RAW SDK client, deliberately not wrapped. A later slice builds the Hub
         checkout deep link with `client.checkoutUrl(sku?)`, which is async: wrapping it
         would force this hook to own loading and error state, and a stateless projection
@@ -1053,7 +1094,8 @@ function useHubOrganizations(): {
         the one or two methods in use would mean editing this file again for the next
         method, which is the coupling the seam exists to remove.
 
-        Do NOT call `client.logout()` or `client.login()` through this. `useLogout()` is
+        Do NOT call `client.logout()`, `client.login()` or `client.switchAccount()`
+        through this; use `useLogout()` and the `switchAccount` above. `useLogout()` is
         the only supported sign out: it writes the durable logout intent before its first
         `await`, clears the token cache, tears the session down and flushes the query
         cache in an order CLAUDE.md documents at length, and none of that happens if the
@@ -1061,7 +1103,7 @@ function useHubOrganizations(): {
       */
       client,
     }),
-    [active, client, others, setActive, workspaceName, workspaces],
+    [active, client, others, setActive, switchAccount, workspaceName, workspaces],
   );
 }
 
