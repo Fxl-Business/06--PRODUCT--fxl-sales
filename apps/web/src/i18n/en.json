@@ -248,7 +248,7 @@
         },
         "actions": {
           "send": "Send invitation",
-            "resend": "Resend",
+          "resend": "Resend",
           "revoke": "Revoke",
           "copy": "Copy link",
           "copied": "Copied",
@@ -263,8 +263,8 @@
         "outcome": {
           "createdTitle": "Seller added",
           "invitedTitle": "Invitation sent",
-            "inviteFailedTitle": "Invitation not sent",
-            "resentTitle": "Invitation resent",
+          "inviteFailedTitle": "Invitation not sent",
+          "resentTitle": "Invitation resent",
           "resendFailedTitle": "Invitation not resent",
           "revokeFailedTitle": "Invitation not revoked",
           "sent": "Invitation sent to {{email}}.",
@@ -278,7 +278,7 @@
           "email_failed": "The invitation was created, but the email was not delivered. Try resending."
         },
         "rateLimitedWait": "Too many attempts. Wait {{seconds}} s and try again.",
-          "hubNotConfiguredRetry": "Hub invitations are not configured in this environment. Ask the operator to configure the Hub, then try again.",
+        "hubNotConfiguredRetry": "Hub invitations are not configured in this environment. Ask the operator to configure the Hub, then try again.",
         "errors": {
           "actor_not_member": "You cannot invite people to this Organization.",
           "application_not_granted": "You cannot invite people to this Organization.",

@@ -248,7 +248,7 @@
         },
         "actions": {
           "send": "Enviar convite",
-            "resend": "Reenviar",
+          "resend": "Reenviar",
           "revoke": "Revogar",
           "copy": "Copiar link",
           "copied": "Copiado",
@@ -263,8 +263,8 @@
         "outcome": {
           "createdTitle": "Vendedor cadastrado",
           "invitedTitle": "Convite enviado",
-            "inviteFailedTitle": "Convite não enviado",
-            "resentTitle": "Convite reenviado",
+          "inviteFailedTitle": "Convite não enviado",
+          "resentTitle": "Convite reenviado",
           "resendFailedTitle": "Convite não reenviado",
           "revokeFailedTitle": "Convite não revogado",
           "sent": "Convite enviado para {{email}}.",
@@ -278,7 +278,7 @@
           "email_failed": "O convite foi criado, mas o e-mail não foi entregue. Tente reenviar."
         },
         "rateLimitedWait": "Muitas tentativas. Aguarde {{seconds}} s e tente novamente.",
-          "hubNotConfiguredRetry": "Os convites do Hub não estão configurados neste ambiente. Peça ao operador para configurar o Hub e depois tente novamente.",
+        "hubNotConfiguredRetry": "Os convites do Hub não estão configurados neste ambiente. Peça ao operador para configurar o Hub e depois tente novamente.",
         "errors": {
           "actor_not_member": "Você não pode convidar para esta Organization.",
           "application_not_granted": "Você não pode convidar para esta Organization.",
