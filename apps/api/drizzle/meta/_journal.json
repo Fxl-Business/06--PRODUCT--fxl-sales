@@ -183,6 +183,13 @@
       "when": 1790635014577,
       "tag": "0025_integration_transport",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1790881742363,
+      "tag": "0026_seller_invitation_state",
+      "breakpoints": true
     }
   ]
 }
