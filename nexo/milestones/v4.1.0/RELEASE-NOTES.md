@@ -46,7 +46,7 @@ API (staging and production):
 - [ ] `FXL_HUB_REDIRECT_URI` is set explicitly to the web origin's `/auth/callback`. Its default lands on the Hub's own origin, and the boot refuses that origin.
 - [ ] The variables renamed in v4.0.0 carry their VALUES, created alongside and not renamed in place: `SALES_SESSION_ENCRYPTION_IKM` (byte-for-byte the old `HUB_SESSION_ENCRYPTION_KEY` if that was non-blank, or every user is silently logged out), `SALES_POST_LOGIN_REDIRECT` and `SALES_POST_LOGIN_ERROR_REDIRECT`.
 - [ ] `FXL_HUB_HEALTH_TOKEN` is set (required outside development).
-- [ ] No new environment variable is introduced by v4.1.0.
+- [ ] No new variable is REQUIRED in staging or production. v4.1.0 does add four development-only names, which must stay UNSET there: `SALES_AUTH_FAKE` and `VITE_AUTH_FAKE` (the boot refuses `SALES_AUTH_FAKE` under `NODE_ENV=production`), `SALES_ENV_FILE` (set only by `make back-stg`) and `SALES_LISTEN_HOST` (dev servers bind to localhost).
 
 Web (Vercel, the `production` branch):
 - [ ] `VITE_FXL_HUB_API_URL`, `VITE_FXL_HUB_ENVIRONMENT` and `VITE_FXL_HUB_AUDIENCE` are set. They are validated at render, so a missing one builds green and then white-screens every user.
@@ -71,6 +71,10 @@ Until then Sales emits nothing and behaves exactly as before for that Organizati
 
 ## Rollback
 
-The code is revertable, but the migrations are forward-only.
-`0024` writes synthetic baixas, and the settlements trigger refuses DELETE, so rolling the API back to v4.0.0 after `0024` has run leaves extra tables and columns that v4.0.0 ignores.
-Do not drop them by hand.
+The code is revertable, but the migrations are forward-only, and v4.0.0 does NOT safely run on a database that `0024` has migrated:
+- v4.0.0 does not filter `removed_at`, so sale items and professionals removed by a v4.1.0 edit reappear.
+- v4.0.0 edits a proposta by deleting and recreating its rows, which the settlements foreign keys and trigger refuse for any proposta that ever had a baixa.
+- v4.0.0 marks rows paid without writing a baixa, so its paid status and the settlements ledger diverge.
+
+So a problem after `0024` has run is fixed FORWARD with `/nexo-hotfix`, never by redeploying v4.0.0.
+Do not drop the new tables or columns by hand.
