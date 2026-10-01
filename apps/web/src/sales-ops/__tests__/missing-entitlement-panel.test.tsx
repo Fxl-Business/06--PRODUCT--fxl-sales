@@ -23,13 +23,19 @@ type Seam = {
   organizations: Organization[];
   others: Organization[];
   setActive: ReturnType<typeof vi.fn>;
+  switchAccount: ReturnType<typeof vi.fn>;
   client: { checkoutUrl: ReturnType<typeof vi.fn> };
 };
 
+/* Display only: the panel names the signed-in account and tolerates every absence. */
+type Profile = { name?: string; email?: string };
+
 let seam: Seam;
+let profile: Profile;
 
 vi.mock('@/auth/react', () => ({
   useOrganizations: () => seam,
+  useAuthProfile: () => ({ isLoaded: true, isSignedIn: true, roles: [], ...profile }),
 }));
 
 const act = (
@@ -62,6 +68,7 @@ function makeSeam(overrides: Partial<Seam> = {}): Seam {
     others:
       overrides.others ?? organizations.filter((org) => org.id !== active?.id),
     setActive: overrides.setActive ?? vi.fn().mockResolvedValue(undefined),
+    switchAccount: overrides.switchAccount ?? vi.fn(),
     client: overrides.client ?? {
       checkoutUrl: vi.fn().mockResolvedValue(CHECKOUT_HREF),
     },
@@ -78,6 +85,7 @@ function mountContainer() {
 
 beforeEach(() => {
   seam = makeSeam();
+  profile = { name: 'Ana Souza', email: 'ana@acme.example' };
   mountContainer();
   reloadSpy = vi.fn();
   Object.defineProperty(window.location, 'reload', {
@@ -401,6 +409,108 @@ describe('MissingEntitlementPanel - the Hub checkout', () => {
     await click(buttonByText(MISSING_ENTITLEMENT_COPY.checkoutRetry));
     expect(checkoutUrl).toHaveBeenCalledTimes(2);
     expect(checkoutAnchor()?.getAttribute('href')).toBe(CHECKOUT_HREF);
+  });
+});
+
+function accountSwitchButton(): HTMLButtonElement {
+  const match = container.querySelector('[data-account-switch] button');
+  if (!(match instanceof HTMLButtonElement)) throw new Error('account switch button not found');
+  return match;
+}
+
+describe('MissingEntitlementPanel - Trocar conta', () => {
+  it('names the signed-in account so a wrong account is recognisable', async () => {
+    await renderPanel();
+    const account = section().querySelector('[data-active-account]');
+    expect(account).toBeTruthy();
+    expect(sectionText()).toContain(MISSING_ENTITLEMENT_COPY.accountPrefix);
+    expect(account?.textContent).toContain('Ana Souza');
+    expect(account?.textContent).toContain('ana@acme.example');
+  });
+
+  it('names the account by email alone when the token carries no name', async () => {
+    profile = { email: 'ana@acme.example' };
+    await renderPanel();
+    expect(section().querySelector('[data-active-account]')?.textContent?.trim()).toBe(
+      'ana@acme.example',
+    );
+  });
+
+  it('renders no account line at all when neither a name nor an email is known', async () => {
+    profile = {};
+    await renderPanel();
+    expect(section().querySelector('[data-active-account]')).toBeNull();
+    expect(sectionText()).not.toContain(MISSING_ENTITLEMENT_COPY.accountPrefix);
+    /* The way out still exists without the identity line. */
+    expect(accountSwitchButton().textContent?.trim()).toBe(MISSING_ENTITLEMENT_COPY.switchAccount);
+  });
+
+  it('calls the provider switchAccount once with the active Organization and never reloads', async () => {
+    await renderPanel();
+    const button = accountSwitchButton();
+    expect(button.textContent?.trim()).toBe(MISSING_ENTITLEMENT_COPY.switchAccount);
+    expect(button.type).toBe('button');
+    await click(button);
+    expect(seam.switchAccount).toHaveBeenCalledTimes(1);
+    expect(seam.switchAccount).toHaveBeenCalledWith({ organization: 'org-active' });
+    expect(seam.setActive).not.toHaveBeenCalled();
+    expect(seam.client.checkoutUrl).toHaveBeenCalledTimes(1);
+    expect(reloadSpy).not.toHaveBeenCalled();
+  });
+
+  it('ignores a second click while the account switch is already navigating', async () => {
+    await renderPanel();
+    await click(accountSwitchButton());
+    await click(accountSwitchButton());
+    expect(seam.switchAccount).toHaveBeenCalledTimes(1);
+    expect(accountSwitchButton().disabled).toBe(true);
+  });
+
+  it('calls switchAccount with no Organization hint when none is active', async () => {
+    seam = makeSeam({ active: null, activeName: undefined });
+    await renderPanel();
+    await click(accountSwitchButton());
+    expect(seam.switchAccount).toHaveBeenCalledTimes(1);
+    expect(seam.switchAccount).toHaveBeenCalledWith();
+  });
+
+  it('is a distinct control from the per-Organization switch and the Hub checkout', async () => {
+    seam = makeSeam({ organizations: [orgAtiva, orgAlfa] });
+    await renderPanel();
+    const accountBlock = section().querySelector('[data-account-switch]');
+    expect(accountBlock).toBeTruthy();
+    expect(accountBlock?.closest('[data-organization-switch]')).toBeNull();
+    expect(accountBlock?.closest('[data-hub-checkout]')).toBeNull();
+    expect(accountBlock?.querySelector('[data-organization-switch], [data-hub-checkout]')).toBeNull();
+
+    /* The per-Organization button still switches Organization, not account. */
+    await click(
+      container.querySelector('button[aria-label="Trocar para Alfa Consultoria"]') as HTMLElement,
+    );
+    expect(seam.setActive).toHaveBeenCalledWith('org-alfa');
+    expect(seam.switchAccount).not.toHaveBeenCalled();
+  });
+
+  it('comes after the free Organization switch and the Hub checkout in document order', async () => {
+    await renderPanel();
+    const blocks = [
+      ...section().querySelectorAll<HTMLElement>(
+        '[data-organization-switch], [data-hub-checkout], [data-account-switch]',
+      ),
+    ].map((block) =>
+      block.hasAttribute('data-organization-switch')
+        ? 'switch'
+        : block.hasAttribute('data-hub-checkout')
+          ? 'checkout'
+          : 'account',
+    );
+    expect(blocks).toEqual(['switch', 'checkout', 'account']);
+  });
+
+  it('renders no raw Organization id in the account block', async () => {
+    await renderPanel();
+    const accountBlock = section().querySelector('[data-account-switch]');
+    expect(accountBlock?.textContent).not.toContain('org-active');
   });
 });
 

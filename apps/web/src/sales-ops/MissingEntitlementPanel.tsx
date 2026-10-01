@@ -1,6 +1,6 @@
 import { Loader2 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useOrganizations } from '@/auth/react';
+import { useAuthProfile, useOrganizations } from '@/auth/react';
 import type { Organization } from '@/auth/react';
 import { Combobox } from '@/components/ui/combobox';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -65,7 +65,13 @@ type CheckoutState =
  * unresolved.
  */
 export function MissingEntitlementPanel({ onRetry }: { onRetry?: () => void }) {
-  const { active, activeName, others, setActive, client } = useOrganizations();
+  const { active, activeName, others, setActive, switchAccount, client } = useOrganizations();
+  /*
+    Display only. The person most likely to land here signed in with the WRONG account,
+    so naming the account is what lets them recognise it. Every field may be absent and
+    the line simply disappears; the profile carries no raw account id to fall back to.
+  */
+  const { name: accountName, email: accountEmail } = useAuthProfile();
 
   const [attempt, setAttempt] = useState(0);
   /*
@@ -90,6 +96,12 @@ export function MissingEntitlementPanel({ onRetry }: { onRetry?: () => void }) {
         : { status: 'loading' };
   const [switchingId, setSwitchingId] = useState<string | null>(null);
   const [switchFailed, setSwitchFailed] = useState(false);
+  /*
+    `switchAccount` is a full-document navigation to the Hub Account Chooser, so this
+    document is about to be torn down. The flag only stops a second click from firing a
+    second navigation while the first one is leaving; nothing ever resets it.
+  */
+  const [leavingAccount, setLeavingAccount] = useState(false);
 
   const mountedRef = useRef(true);
   useEffect(() => {
@@ -155,6 +167,22 @@ export function MissingEntitlementPanel({ onRetry }: { onRetry?: () => void }) {
     [onRetry, setActive, switchingId],
   );
 
+  /*
+    Through the provider's wrapper, never the SDK client, so the `prompt=` URL stays
+    the SDK's to build. The hint is the ACTIVE Organization when one is known, so the
+    chosen account lands where the operator was trying to go; with none the call takes
+    no argument at all rather than forwarding an empty hint.
+  */
+  const handleSwitchAccount = useCallback(() => {
+    if (leavingAccount) return;
+    setLeavingAccount(true);
+    if (activeId === undefined) {
+      switchAccount();
+    } else {
+      switchAccount({ organization: activeId });
+    }
+  }, [activeId, leavingAccount, switchAccount]);
+
   const [firstOther] = others;
   const activeIsFallback = active ? isOrgLabelFallback(active) : false;
   const activeLabel = active ? orgLabel(active) : (activeName ?? '');
@@ -187,6 +215,19 @@ export function MissingEntitlementPanel({ onRetry }: { onRetry?: () => void }) {
           {MISSING_ENTITLEMENT_COPY.activeUnknown}
         </p>
       )}
+
+      {accountName || accountEmail ? (
+        <p className="text-[13px] leading-5 text-[#57575f]">
+          {MISSING_ENTITLEMENT_COPY.accountPrefix}
+          <span data-active-account>
+            <span className="font-semibold text-[#201f24]">{accountName ?? accountEmail}</span>
+            {accountName && accountEmail ? (
+              <span className="text-[#8b8b92]">{` (${accountEmail})`}</span>
+            ) : null}
+          </span>
+          {MISSING_ENTITLEMENT_COPY.accountSuffix}
+        </p>
+      ) : null}
 
       <p className={`${mutedStateClass} leading-5`}>
         {others.length > 0
@@ -281,6 +322,29 @@ export function MissingEntitlementPanel({ onRetry }: { onRetry?: () => void }) {
             </button>
           </>
         ) : null}
+      </div>
+
+      {/*
+        LAST, after both Organization level offers: switching Organization stays in this
+        account and buying stays in this account, while this leaves it for the Hub
+        Account Chooser. Its own block, so it never reads as one more Organization row.
+      */}
+      <div className="flex flex-col gap-2 pt-1" data-account-switch>
+        <p className="text-[11px] font-bold uppercase tracking-[0.06em] text-[#9b9ba3]">
+          {MISSING_ENTITLEMENT_COPY.switchAccountHeading}
+        </p>
+        <p className={`${mutedStateClass} leading-5`}>
+          {MISSING_ENTITLEMENT_COPY.switchAccountBody}
+        </p>
+        <button
+          className={`${actionButtonClass} w-fit`}
+          disabled={leavingAccount || switchingId !== null}
+          onClick={handleSwitchAccount}
+          type="button"
+        >
+          {leavingAccount ? <Loader2 className="h-[14px] w-[14px] animate-spin" /> : null}
+          {MISSING_ENTITLEMENT_COPY.switchAccount}
+        </button>
       </div>
     </section>
   );
