@@ -1,0 +1,46 @@
+{
+  "agent": "verify",
+  "slice": "16-api-image-builds",
+  "branch": "feat/16-api-image-builds",
+  "commit": "8747d64",
+  "parent": "85eb5de6c83dbea190a02c694c6b213798cad50c",
+  "status": "PASS",
+  "checks": {
+    "docker_build_slice_archive": "PASS - git archive 8747d64 into fresh temp dir; docker build -f apps/api/Dockerfile . exit 0, both cached and --no-cache (tsc && tsc-alias ran)",
+    "docker_build_parent_archive": "PASS (fails as required) - git archive 85eb5de, --no-cache, exit 1: packages/auth-fake/src/index.ts(46,8): error TS2307: Cannot find module '@fxl-business/fxl-contracts/testing' (plus a consequent TS7006 at 601,34)",
+    "artifacts_present": "PASS - dist/server.js (9700 B) and dist/db/migrate.js (2398 B) present in /app/apps/api",
+    "boot_refuses_fake_in_production": "PASS - --network none, NODE_ENV=production SALES_AUTH_FAKE=1 DATABASE_URL=postgresql://x:x@127.0.0.1:1/x, node dist/server.js exits 1: 'Error: SALES_AUTH_FAKE is set while NODE_ENV=production. The development identity adapter must never run in production. Refusing to boot.' (from dist/auth/select.js installFakeAuthIfRequested)",
+    "boot_without_fake": "PASS - same env minus SALES_AUTH_FAKE: server prints '[fxl-sales-api] listening on port 3006 on every interface (production)' and shut down cleanly on SIGTERM from timeout 20 (no Hub config, DB is lazy, so no DB error at boot); dotenv prints 'injected env (0)' for .env and .env.local, neither file exists in the image",
+    "migrate_entrypoint": "PASS - node dist/db/migrate.js prints 'Running migrations from ./drizzle' then ECONNREFUSED 127.0.0.1:1, exit 1; the full image CMD behaves the same (migrate runs first)",
+    "runtime_cmd_unchanged": "PASS - Config.Cmd [\"sh\",\"-c\",\"node dist/db/migrate.js && exec node dist/server.js\"]; diff vs master touches only the two added COPY lines",
+    "node_env_unchanged": "PASS - ENV NODE_ENV=production unchanged",
+    "guard_oracle": "PASS - node --test scripts/__tests__/api-dockerfile-workspace-deps.test.mjs 7/7",
+    "root_node_test_list": "PASS - 11 files listed, all exist, every scripts/__tests__/*.test.mjs listed; node --test over the list 91/91",
+    "lint": "PASS - pnpm run lint exit 0",
+    "type_check": "PASS - pnpm run type-check exit 0",
+    "no_em_dash": "PASS - 0 in git diff master...HEAD",
+    "no_co_authored_by": "PASS - 0 trailers in master..HEAD",
+    "git_status_clean": "PASS - worktree clean after all probes"
+  },
+  "docker": {
+    "before": "19 image ids, 9 container ids (docker images -q / docker ps -aq)",
+    "built": ["nexo-verify16-good:tmp (removed)", "nexo-verify16-bad:tmp (build failed, never created)"],
+    "containers": "all runs used --rm --network none",
+    "after": "image id list and container id list identical to before (diff empty)",
+    "note": "BuildKit cache layers from these builds were not pruned, because docker builder prune is machine-wide and would sweep caches this agent did not create",
+    "temp_dirs": "both archive temp dirs deleted"
+  },
+  "mutations": [
+    {"id": "M1", "probe": "delete 'COPY packages/auth-fake/package.json packages/auth-fake/' from deps stage", "result": "RED - not ok 6 deps stage copies packages/auth-fake/package.json, exit 1", "reverted": true},
+    {"id": "M2", "probe": "delete 'COPY --from=deps /app/packages/auth-fake/node_modules ...' from build stage", "result": "RED - not ok 7 build stage copies packages/auth-fake/node_modules, exit 1", "reverted": true},
+    {"id": "M3", "probe": "add devDependency '@fxl-sales/web': 'workspace:*' to apps/api/package.json (apps/web exists, Dockerfile does not copy it)", "result": "RED - not ok 8 and 9 for apps/web package.json and node_modules, exit 1", "reverted": true},
+    {"id": "M4", "probe": "rewrite every workspace: spec in apps/api/package.json to '*' so the guard parses zero deps", "result": "RED loudly - not ok 1 'found zero workspace: dependencies in apps/api/package.json', exit 1", "reverted": true},
+    {"id": "M4b", "probe": "remove both globs from pnpm-workspace.yaml packages list", "result": "RED loudly - file-level failure 'pnpm-workspace.yaml lists no packages globs', exit 1", "reverted": true}
+  ],
+  "findings": [
+    "NOTE: the runtime image now also carries packages/auth-fake/node_modules (symlinks to @fxl-business/fxl-contracts, typescript, vitest). Each resolves into the same root .pnpm store entries the image already shipped via apps/api, so no new package content enters the image; the KNOWN GAP is not widened beyond the package's own install, and the boot refusal under NODE_ENV=production holds.",
+    "NOTE: the guard only supports single-level 'dir/*' workspace globs and asserts that; a future glob shape fails loudly rather than silently, which is acceptable."
+  ],
+  "done": true,
+  "ts": "2026-10-01T20:38:36Z"
+}

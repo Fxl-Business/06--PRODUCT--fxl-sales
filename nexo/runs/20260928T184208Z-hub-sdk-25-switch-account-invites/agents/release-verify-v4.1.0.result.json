@@ -1,0 +1,90 @@
+{
+  "agent": "release-verify",
+  "release": "v4.1.0",
+  "commit": "622fbf0",
+  "status": "FAIL",
+  "checks": {
+    "lint": { "command": "pnpm run lint", "exit": 0, "notes": "apps/web and apps/api eslint clean, 0 warnings reported" },
+    "type_check": { "command": "pnpm run type-check", "exit": 0 },
+    "unit_tests": {
+      "command": "CI=true pnpm test",
+      "exit": 0,
+      "counts": {
+        "packages/auth-fake": "2 files, 41 passed",
+        "packages/shared-utils": "5 files, 155 passed",
+        "apps/api": "76 files, 831 passed",
+        "apps/web": "100 files, 1195 passed",
+        "node --test scripts": "84 tests, 84 pass, 0 fail, 0 skipped"
+      },
+      "total_passed": 2306,
+      "failed": 0
+    },
+    "cold_build": {
+      "command": "rm -rf packages/*/dist packages/*/tsconfig.tsbuildinfo apps/*/dist && pnpm run build",
+      "exit": 0,
+      "notes": "build:packages, api tsc, web vite build, assert-web-bundle-clean all passed; apps/api/dist/db/migrate.js and apps/web/dist/index.html produced"
+    },
+    "vercel_style_web_build": {
+      "command": "rm -rf packages/*/dist packages/*/tsconfig.tsbuildinfo && pnpm --filter @fxl-sales/web build",
+      "exit": 0
+    },
+    "integration_tests": {
+      "command": "pnpm --filter @fxl-sales/api test:integration",
+      "exit": 0,
+      "db_targets": "DATABASE_URL, TEST_DATABASE_URL, TEST_MIGRATE_DATABASE_URL, ADMIN_DATABASE_URL all localhost:5006 (exported in subshell only)",
+      "counts": "41 files, 305 passed, 0 failed, 0 skipped"
+    },
+    "production_api_image_build": {
+      "command": "git archive 622fbf0 | docker build -f apps/api/Dockerfile .",
+      "exit": 1,
+      "error": "../../packages/auth-fake/src/index.ts(46,8): error TS2307: Cannot find module '@fxl-business/fxl-contracts/testing' or its corresponding type declarations. ../../packages/auth-fake/src/index.ts(601,34): error TS7006: Parameter 'eventName' implicitly has an 'any' type. -> @fxl-sales/api build (tsc) fails in the Dockerfile build stage",
+      "bisect": "430cc96^ builds (exit 0); 430cc96 'feat(auth-fake): add integration fixture org and fake integration authority' fails (exit 1). Also 4d23b24 and 4d23b24^ build.",
+      "cause": "apps/api tsc follows the dynamic import('@fxl-sales/auth-fake') in src/auth/select.ts into packages/auth-fake/src/index.ts, which since 430cc96 imports '@fxl-business/fxl-contracts/testing'. The Dockerfile deps stage copies only apps/api, shared-types and shared-utils package.json, so packages/auth-fake has no node_modules in the image and the module cannot resolve. Local builds pass only because the workspace has packages/auth-fake/node_modules."
+    }
+  },
+  "migration_upgrade": {
+    "method": "Scratch DB fxl_sales_relverify_scratch on local Postgres localhost:5006. Temp worktree at v4.0.0; its own src/db/migrate.ts (dotenv/config, no .env present) run with tsx against the scratch DB -> 22 journal rows (0000..0021). Seeded org_relverify: one pessoa, one won sale, receivables 1/2 paid (due 2026-08-01), 2/2 paid with FUTURE due 2027-01-01, 3/3 open; payables one paid (due 2026-08-01), one open; one legacy seller. Then this release's built apps/api/dist/db/migrate.js run twice with NODE_ENV=development, no SALES_ENV_FILE, no .env in the release worktree.",
+    "first_run": "exit 0, 'Done.'; journal 22 -> 27 rows, last created_at 1790881742363 (0026)",
+    "second_run": "exit 0, 'Done.'; journal still 27, settlements still 3 (no-op)",
+    "synthetic_baixas": [
+      "payable 4444...4441 baixa paid_on 2026-08-01 amount 10000 actor_user_id 'system' actor_name 'Migração' origin manual",
+      "receivable 3333...3331 baixa paid_on 2026-08-01 amount 100000 actor_name 'Migração'",
+      "receivable 3333...3332 baixa paid_on 2026-10-01 (future due date clamped to today in Sao Paulo) amount 100000 actor_name 'Migração'"
+    ],
+    "other_effects_observed": "0022 seeded Novo/Em negociação/Proposta(conversion)/Perdido(lost) for org_relverify; 0023 added sales_ops_people.hub_account_id; 0024 revision=1 on all receivables, FXS03 divergence check passed; 0025 integration_outbox_position 'default' row last_position 0; 0026 sellers gained invitation_id/invitation_status/invited_org_id, all NULL for the existing seller.",
+    "trigger_check": "DELETE FROM sales_ops_settlements refused: 'sales_ops_settlements is immutable: DELETE of settlement ... refused, record an estorno instead'",
+    "cleanup": "scratch database dropped, temp v4.0.0 worktree removed and pruned, no relverify docker images left",
+    "result": "PASS"
+  },
+  "release_notes_claims": [
+    { "claim": "Five migrations pending: 0022..0026", "true": true, "evidence": "git diff v4.0.0..622fbf0 adds exactly 0022..0026 SQL plus journal idx 22..26; upgrade rehearsal applied exactly 5 (22 -> 27 journal rows)" },
+    { "claim": "0022 creates the three lead tables with FORCE RLS and seeds the default four-stage pipeline for every existing org", "true": true, "evidence": "creates sales_ops_lead_stages/leads/lead_products, ENABLE+FORCE RLS with tenant_isolation+admin_context policies, seeds 4 stages for orgs from people/settings/sales; observed in rehearsal. Note: it also creates unique (org_id,id) indexes on sales_ops_clients/products/sales, unmentioned but harmless" },
+    { "claim": "0023 adds the account column linking a Hub token to a pessoa; no data touched", "true": true, "evidence": "ADD COLUMN sales_ops_people.hub_account_id + partial unique index, no backfill" },
+    { "claim": "0024 creates sales_ops_settlements with immutability trigger, adds revision/updated_at to receivables and payables and removed_at to sale items and professionals; writes one synthetic baixa per paid row with actor_name 'Migração'", "true": true, "evidence": "SQL matches; rehearsal produced 3 synthetic baixas for 3 paid rows with actor_name 'Migração'; DELETE refused with FXS01" },
+    { "claim": "0025 creates the four integration transport tables with RLS; no data touched", "true": true, "evidence": "creates integration_outbox, integration_outbox_position, integration_inbox, integration_cursor, all FORCE RLS. Strictly it inserts one bookkeeping row (integration_outbox_position 'default'), no business data" },
+    { "claim": "0026 adds three nullable text columns to sellers; no data touched", "true": true, "evidence": "invitation_id, invitation_status, invited_org_id, nullable, no default; rehearsal shows NULLs" },
+    { "claim": "apps/api/Dockerfile runs `node dist/db/migrate.js && exec node dist/server.js`, so the API only serves after migrations succeed", "true": true, "evidence": "CMD [\"sh\",\"-c\",\"node dist/db/migrate.js && exec node dist/server.js\"]; NODE_ENV=production in runtime stage so the local database guard returns no violations. BUT the image for 622fbf0 does not build (see findings), so this CMD is never reached" },
+    { "claim": "Re-running migrations is tolerated (journal skips applied ones)", "true": true, "evidence": "second run of release migrate.js was a no-op (27 rows, 3 settlements)" },
+    { "claim": "The runner bounds its lock waits and retries on lock contention", "true": true, "evidence": "migration-runner.ts: lock_timeout = deadlock_timeout/2, retryOnLockContention on 55P03/40P01, up to 50 attempts" },
+    { "claim": "No new environment variable is introduced by v4.1.0", "true": false, "evidence": "New names absent at v4.0.0: SALES_LISTEN_HOST (env.ts schema, server.ts bind host), SALES_AUTH_FAKE, SALES_ENV_FILE, VITE_AUTH_FAKE. None is REQUIRED for staging/production (SALES_LISTEN_HOST defaults to every interface under NODE_ENV=production, which the Dockerfile bakes; the others are dev-only), so the operator intent holds but the sentence is literally false. Should read 'No new environment variable is required in staging or production'." },
+    { "claim": "Operator items: FXL_HUB_TRUSTED_ORIGINS, FXL_HUB_REDIRECT_URI, renamed SALES_* vars, FXL_HUB_HEALTH_TOKEN, VITE_FXL_HUB_* on Vercel, API_PUBLIC_URL on the Hub", "true": true, "evidence": "Consistent with CLAUDE.md Hub configuration rules and apps/api/.env.staging.example (lists TRUSTED_ORIGINS, REDIRECT_URI, HEALTH_TOKEN, SALES_POST_LOGIN_*, SALES_SESSION_ENCRYPTION_IKM). API_PUBLIC_URL is a Hub-side variable, not verifiable from this repo" },
+    { "claim": "The Sales-Finance contract emits only after Hub setup / one Integration Activation per Organization; until then Sales behaves as before", "true": true, "evidence": "producer-gate.ts default gate () => false; the only registration is start-integration.ts: registerProducerFlowGate(orgId => liveOrgs.has(orgId)) where liveOrgs = authority.discovery.producerActivations(). startIntegration returns null without Hub config. Event types/contract/endpoint prerequisites are Hub-side and not verifiable here" },
+    { "claim": "Rollback: code revertable, migrations forward-only; rolling back after 0024 leaves extra tables and columns that v4.0.0 ignores", "true": false, "evidence": "Forward-only is true, but 'v4.0.0 ignores' is incomplete: v4.0.0 readers do not filter sales_ops_sale_items/sale_professionals.removed_at, so items/professionals soft-removed by a v4.1.0 edit reappear under v4.0.0; v4.0.0 updateSale deletes and recreates payables/receivables (service.ts ~2444) and will hit ON DELETE RESTRICT from sales_ops_settlements for any sale that has ever had a baixa (e.g. a sale reverted to open after an estorno); and v4.0.0 paid toggles write status without a baixa, desynchronizing the reduzirLiquidacao cache on re-upgrade. The notes should state these behaviours rather than 'ignores'." }
+  ],
+  "security": {
+    "pnpm_audit_prod": { "exit": 0, "high": 0, "critical": 0, "moderate": 11, "low": 1, "notes": "moderates include hono (patched >=4.12.34, repo pins 4.12.28 via override)" },
+    "secrets_scan": { "result": "clean", "evidence": "Added lines in git diff v4.0.0 622fbf0 scanned for postgres URLs with non-local hosts, sk_live/sk_test, AKIA, PEM private keys, ghp_, JWT-shaped tokens. Only local Docker postgres:postgres / fxl_sales_test fixtures at localhost:5006, test-only sk_fxl-sales_development_* strings, and a masked staging URL (***:***@fxl-db-server) in a nexo capture. No credential values." },
+    "access_gate": { "result": "unchanged", "evidence": "requireHubAuth(hubSdkConfig) remains the single gate in app-auth.ts with no allowWithoutAccess override; no classifyHubAccess/hasHubOrgAccess/hasHubModule/requireHubModule in src. app-auth.ts gained an adapter slot (installAppAuthAdapter) that throws under NODE_ENV=production; the integration feed is S2S by design." },
+    "web_bundle_dev_fake": { "result": "absent", "evidence": "assert-web-bundle-clean: FXL_SALES_DEV_FAKE_ROSTER_SENTINEL absent from apps/web/dist in both cold builds" },
+    "auth_fake_in_production_image": { "result": "known gap unchanged", "evidence": "Dockerfile still COPY --from=build /app/packages ./packages and keeps ENV NODE_ENV=production; installAppAuthAdapter and select.ts refuse to boot with SALES_AUTH_FAKE under NODE_ENV=production. The image currently fails to build at all (finding 1), and that failure is itself caused by auth-fake being reachable from apps/api's tsc program." }
+  },
+  "findings": [
+    "BLOCKING: The production API image does not build from 622fbf0. `docker build -f apps/api/Dockerfile .` on a clean `git archive 622fbf0` fails in the build stage: packages/auth-fake/src/index.ts(46,8) TS2307 Cannot find module '@fxl-business/fxl-contracts/testing' (plus TS7006 at 601,34), so `pnpm --filter @fxl-sales/api build` exits 2. apps/api's tsc follows the dynamic import('@fxl-sales/auth-fake') in src/auth/select.ts into packages/auth-fake, whose node_modules are never installed because the deps stage copies only apps/api, shared-types and shared-utils package.json. Introduced by 430cc96 (430cc96^ builds, 430cc96 fails). Every local check (lint, type-check, tests, cold build) is green because the workspace has packages/auth-fake/node_modules; staging/production Docker deploys of v4.1.0 would fail before any migration runs.",
+    "Release notes: 'No new environment variable is introduced by v4.1.0' is literally false (SALES_LISTEN_HOST, SALES_AUTH_FAKE, SALES_ENV_FILE, VITE_AUTH_FAKE are new). None is required in staging/production; reword to 'no new required deployment variable' and mention SALES_LISTEN_HOST (defaults to every interface under NODE_ENV=production).",
+    "Release notes: the rollback section says v4.0.0 'ignores' the new tables and columns. It does not: v4.0.0 does not filter removed_at (soft-removed items/professionals reappear), its delete-and-recreate updateSale hits ON DELETE RESTRICT from sales_ops_settlements on any sale that ever had a baixa, and its paid toggles bypass the settlement ledger. State these consequences.",
+    "Minor (notes accuracy): 0022 also creates unique (org_id,id) indexes on sales_ops_clients, sales_ops_products and sales_ops_sales, and 0025 inserts one bookkeeping row into integration_outbox_position; both unmentioned, both harmless.",
+    "Non-blocking: pnpm audit --prod reports 11 moderate and 1 low, including hono (patched >=4.12.34 vs the pinned 4.12.28 override); 0 high/critical."
+  ],
+  "done": true,
+  "ts": "2026-10-01T20:45:00Z"
+}

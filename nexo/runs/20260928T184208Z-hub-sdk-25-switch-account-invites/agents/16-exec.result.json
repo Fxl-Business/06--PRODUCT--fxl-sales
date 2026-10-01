@@ -1,0 +1,22 @@
+{
+  "agent": "execute",
+  "slice": "16-api-image-builds",
+  "status": "done",
+  "commit": "8747d640a6a99e5eca0767d1f5e3d3e828d1185f",
+  "branch": "feat/16-api-image-builds",
+  "files": ["apps/api/Dockerfile", "scripts/__tests__/api-dockerfile-workspace-deps.test.mjs", "package.json"],
+  "repro": {
+    "before": "docker build from clean git archive of 85eb5de: exit 1, packages/auth-fake/src/index.ts(46,8): error TS2307: Cannot find module '@fxl-business/fxl-contracts/testing' (plus TS7006 at 601,34 as a consequence)",
+    "after": "docker build from clean git archive of the fix commit: exit 0. Image smoke with NODE_ENV=production: dist/server.js and dist/db/migrate.js present ('ok'). node dist/server.js with SALES_AUTH_FAKE=1 NODE_ENV=production DATABASE_URL=postgresql://x:x@127.0.0.1:1/x --network none: exit 1 'SALES_AUTH_FAKE is set while NODE_ENV=production ... Refusing to boot.' from installFakeAuthIfRequested. node dist/db/migrate.js: loads, 'Running migrations from ./drizzle', fails only on ECONNREFUSED 127.0.0.1:1."
+  },
+  "checks": {
+    "guard_red_before_fix": "2 fail (auth-fake package.json in deps, auth-fake node_modules in build), 5 pass",
+    "guard_green_after_fix": "7/7 pass",
+    "root_node_test_list": "91/91 pass",
+    "lint": "pass",
+    "type_check": "pass"
+  },
+  "notes": "Guard follows workspace: deps transitively (deps + devDeps) via pnpm-workspace.yaml globs, fails loudly on zero deps or missing deps/build stages. Runtime CMD unchanged; NODE_ENV unchanged; no ROADMAP hardening attempted. Images (fxl-sales-api:slice16; the repro build produced no image) and temp archive dirs removed; no containers left (all runs --rm).",
+  "done": true,
+  "ts": "2026-10-01T20:35:21Z"
+}

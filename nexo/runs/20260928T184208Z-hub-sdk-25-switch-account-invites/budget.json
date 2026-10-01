@@ -1,11 +1,11 @@
 {
   "active_accumulated_seconds": 6270,
-  "active_since": 1790881201,
+  "active_since": 1790886766,
   "counters": {
-    "agent_dispatches": 47,
+    "agent_dispatches": 49,
     "initial_slices": 9,
     "replans": 2,
-    "total_slices": 15,
+    "total_slices": 16,
     "wave_recoveries": 0
   },
   "exhausted": null,
@@ -19,7 +19,7 @@
     "max_verify_attempts_per_slice": 3,
     "max_wave_recoveries": 1
   },
-  "paused": true,
+  "paused": false,
   "scoped_counters": {
     "verify_attempts": {
       "01-sdk-bump-2.5.0": 1,
@@ -36,7 +36,8 @@
       "12-integration-test-hygiene": 1,
       "13-integration-env-docs": 1,
       "14-send-invite-to-uninvited-seller": 1,
-      "15-mutation-survivors": 1
+      "15-mutation-survivors": 1,
+      "16-api-image-builds": 1
     }
   },
   "version": 1

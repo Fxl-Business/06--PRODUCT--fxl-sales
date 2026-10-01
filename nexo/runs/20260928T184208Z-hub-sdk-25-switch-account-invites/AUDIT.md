@@ -26,6 +26,8 @@ This file records decisions taken without the human, deviations from the plan, a
 - `14-send-invite-to-uninvited-seller`: found by the orchestrator's browser check under `make dev-fake`. A failed create left the seller with no invitation and no action, contradicting "invite failure never rolls back the seller ... so the admin can resend later". Added `POST /:id/invite` and the `Enviar convite` row action.
 - `15-mutation-survivors`: a real double-click bug in `MissingEntitlementPanel` plus three test gaps found by the mutation battery.
 
+- `16-api-image-builds`: added after the v4.1.0 release-verify FAILED. The production API image did not build from a clean archive (`TS2307 @fxl-business/fxl-contracts/testing`): `tsc` follows `select.ts`'s dynamic import into `packages/auth-fake`, whose dependencies the Dockerfile deps stage never installed. Introduced by `430cc96` in the contract run; invisible locally because the workspace already had `packages/auth-fake/node_modules`. Fixed with two COPY lines plus a guard that every `workspace:` dependency of `apps/api` is installed in the image; the Verify built the real image before (fail) and after (pass).
+
 ## Gate 2 record
 
 - Verify FAIL then PASS: slice 06 (brittle last-migration assertion), slice 04 (missing no-`onRetry` assertion), slice 11 (raw-language probe survived). No slice needed a third attempt.
