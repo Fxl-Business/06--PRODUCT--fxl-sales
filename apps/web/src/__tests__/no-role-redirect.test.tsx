@@ -277,6 +277,24 @@ describe('/no-role offers "Trocar conta" for a person signed in with the wrong a
     expect(visited).toEqual(['/no-role']);
   });
 
+  it('ignores a second click while the account switch is already navigating', async () => {
+    activeOrganization = { id: ACTIVE_ORGANIZATION_ID, name: 'Acme' };
+    await renderAt('/no-role');
+
+    // Two clicks in ONE act: the second lands before React re-renders the button
+    // disabled, so only the synchronous guard can stop it.
+    await act(async () => {
+      buttonNamed('Trocar conta')?.click();
+      buttonNamed('Trocar conta')?.click();
+    });
+    await act(async () => buttonNamed('Trocar conta')?.click());
+
+    expect(authMocks.switchAccount).toHaveBeenCalledTimes(1);
+    expect(buttonNamed('Trocar conta')?.disabled).toBe(true);
+    // Sair stays available: the person may still sign out instead.
+    expect(buttonNamed('Sair')?.disabled).toBe(false);
+  });
+
   it('calls switchAccount with no organization hint when no Organization is active', async () => {
     activeOrganization = null;
     await renderAt('/no-role');
@@ -329,9 +347,14 @@ describe('/no-role offers "Trocar conta" for a person signed in with the wrong a
     expect(buttonNamed('Sair')).toBeDefined();
   });
 
-  it('resolves the copy from i18n in English too', async () => {
+  it('resolves the copy from i18n in English too, with no act() warning', async () => {
     const { i18n } = await import('@/i18n');
-    await i18n.changeLanguage('en');
+    const consoleError = vi.spyOn(console, 'error');
+    // Both language changes re-render the mounted page through react-i18next, so both
+    // run inside act(); the switch back happens while the root is still mounted.
+    await act(async () => {
+      await i18n.changeLanguage('en');
+    });
     try {
       await renderAt('/no-role');
 
@@ -339,8 +362,15 @@ describe('/no-role offers "Trocar conta" for a person signed in with the wrong a
       expect(buttonNamed('Sign out')).toBeDefined();
       expect(container.textContent).toContain('Signed in as');
     } finally {
-      await i18n.changeLanguage('pt-BR');
+      await act(async () => {
+        await i18n.changeLanguage('pt-BR');
+      });
     }
+    const actWarnings = consoleError.mock.calls.filter((call) =>
+      call.some((part) => String(part).includes('not wrapped in act')),
+    );
+    consoleError.mockRestore();
+    expect(actWarnings).toEqual([]);
   });
 });
 

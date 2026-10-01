@@ -1,23 +1,17 @@
 import 'dotenv/config';
+import { resolveIntegrationDatabaseUrls } from './assert-test-role.js';
 
-const migrateUrl =
-  process.env.TEST_DATABASE_URL ??
-  process.env.DATABASE_URL ??
-  'postgresql://postgres:postgres@localhost:5006/fxl_sales';
+/*
+  Per test file: resolve the suite's URLs strictly (named, local, no fallback to
+  DATABASE_URL and no postgres default) or throw before the file runs. The role
+  check itself runs once per run, in global-setup.ts.
+*/
+const { appUrl, adminUrl, migrateUrl } = resolveIntegrationDatabaseUrls(process.env);
 
-const appUrl =
-  process.env.TEST_DATABASE_URL ??
-  process.env.DATABASE_URL ??
-  'postgresql://postgres:postgres@localhost:5006/fxl_sales';
-
-const adminUrl =
-  process.env.ADMIN_DATABASE_URL ??
-  appUrl;
-
-process.env.TEST_DATABASE_URL ??= appUrl;
+process.env.TEST_DATABASE_URL = appUrl;
 // Hard override, not ??=: with an .env pointing DATABASE_URL at a remote
 // environment, the API under test would silently run against that remote DB
 // while the test fixtures live in the test DB. Tests must be hermetic.
 process.env.DATABASE_URL = appUrl;
-process.env.ADMIN_DATABASE_URL ??= adminUrl;
-process.env.TEST_MIGRATE_DATABASE_URL ??= migrateUrl;
+process.env.ADMIN_DATABASE_URL = adminUrl;
+process.env.TEST_MIGRATE_DATABASE_URL = migrateUrl;

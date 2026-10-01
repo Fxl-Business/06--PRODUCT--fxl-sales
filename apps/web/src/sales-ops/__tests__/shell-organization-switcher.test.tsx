@@ -38,6 +38,7 @@ let others: Organization[] = [];
 let profileName: string | undefined = 'Test User';
 let profileEmail: string | undefined = 'test.user@fxl.example';
 let profileAvatarUrl: string | undefined;
+let profileWorkspaceId: string | undefined;
 
 /**
  * Allocated ONCE at module scope. A fresh object literal per render allocates a new
@@ -53,6 +54,7 @@ vi.mock('@/auth/react', () => ({
     name: profileName,
     email: profileEmail,
     avatarUrl: profileAvatarUrl,
+    workspaceId: profileWorkspaceId,
   }),
   useLogout: () => authMocks.logout,
   useOrganizations: () => ({
@@ -157,6 +159,7 @@ beforeEach(() => {
   profileName = 'Test User';
   profileEmail = 'test.user@fxl.example';
   profileAvatarUrl = undefined;
+  profileWorkspaceId = undefined;
   authMocks.setActive.mockImplementation(async () => undefined);
 });
 
@@ -485,5 +488,20 @@ describe('sales-ops account dropdown Trocar conta', () => {
     expect(menu?.textContent).not.toContain('@');
     expect(byName('Trocar conta')).not.toBeNull();
     expect(menu?.textContent).not.toContain('org-a');
+  });
+
+  it('never renders the raw workspaceId, even with no name or email to show', async () => {
+    const rawWorkspaceId = 'org_raw_shell_header_9c1d';
+    profileWorkspaceId = rawWorkspaceId;
+    profileName = undefined;
+    profileEmail = undefined;
+    await renderRoute('/tatico/dashboard');
+
+    // The collapsed trigger, before the menu opens.
+    expect(container.textContent).not.toContain(rawWorkspaceId);
+    await openAccountMenu();
+    expect(accountMenu()?.textContent).toContain('FXL');
+    expect(container.textContent).not.toContain(rawWorkspaceId);
+    expect(container.innerHTML).not.toContain(rawWorkspaceId);
   });
 });

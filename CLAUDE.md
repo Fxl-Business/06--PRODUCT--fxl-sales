@@ -274,6 +274,7 @@ Financial role gate (PC23):
 
 Testing:
 - Integration tests use the local Docker test DB via the `fxl_sales_test` non-superuser role; `apps/api/test/rls/setup-env.ts` hard-overrides `DATABASE_URL`.
+- `TEST_DATABASE_URL` and `ADMIN_DATABASE_URL` are REQUIRED and must be local hosts; nothing falls back to `DATABASE_URL` or a `postgres` default. `apps/api/test/rls/assert-test-role.ts` refuses a missing or non-local URL and a `SUPERUSER`/`BYPASSRLS` app role before any test runs.
 
 ## Kanban de leads
 

@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   logout: vi.fn(async () => undefined),
   setActive: vi.fn(async () => undefined),
   checkoutUrl: vi.fn(async () => 'https://hub.example/checkout'),
+  panelProps: [] as Array<Record<string, unknown>>,
 }));
 
 /*
@@ -74,6 +75,23 @@ vi.mock('@/components/ui/dialog', () => ({
   ),
 }));
 
+/*
+  The REAL panel renders (every assertion below reads its DOM); this wrapper only
+  records the props `SalesOpsApp` hands it. CLAUDE.md Organization context: the panel
+  gets NO `onRetry`, because a retry would re-read the bootstrap under the same
+  Organization and land on the same 402.
+*/
+vi.mock('../MissingEntitlementPanel', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../MissingEntitlementPanel')>();
+  return {
+    ...actual,
+    MissingEntitlementPanel: (props: Parameters<typeof actual.MissingEntitlementPanel>[0]) => {
+      mocks.panelProps.push({ ...props });
+      return actual.MissingEntitlementPanel(props);
+    },
+  };
+});
+
 // NOT mocked on purpose: '../api', '@/lib/api-client' and '../hooks'. The 402 body
 // travels the REAL apiFetch error path, so this oracle also proves the status
 // survives into the ApiError the shell classifies.
@@ -113,6 +131,7 @@ afterEach(async () => {
   container.remove();
   vi.unstubAllGlobals();
   vi.clearAllMocks();
+  mocks.panelProps.length = 0;
 });
 
 async function flushReact() {
@@ -173,6 +192,19 @@ describe('a 402 missing_entitlement is not a server fault', () => {
     // And a future collapse of the two error branches into one is caught here too.
     expect(text()).not.toContain(SESSION_EXPIRED);
     expect(forbiddenPanel()).toBeNull();
+  });
+
+  it('renders the entitlement panel with no onRetry', async () => {
+    mocks.getToken.mockResolvedValue('hub-access-token');
+    fetchMock.mockResolvedValue(missingEntitlement);
+
+    await renderApp('/tatico/dashboard');
+
+    expect(entitlementPanel()).not.toBeNull();
+    expect(mocks.panelProps.length).toBeGreaterThan(0);
+    for (const props of mocks.panelProps) {
+      expect(props).not.toHaveProperty('onRetry');
+    }
   });
 
   it('still renders the generic API fault for a 500', async () => {

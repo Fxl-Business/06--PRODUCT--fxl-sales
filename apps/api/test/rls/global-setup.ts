@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { runDatabaseMigrations } from '../../src/db/migration-runner.js';
+import { assertTestRole, resolveIntegrationDatabaseUrls } from './assert-test-role.js';
 
 /**
  * Vitest globalSetup for the integration project (D-G).
@@ -9,14 +10,14 @@ import { runDatabaseMigrations } from '../../src/db/migration-runner.js';
  * test connects. Without this, the RLS tests would run against an unmigrated DB
  * (no tables, no policies, no roles) and false-pass or crash.
  *
- * Uses the standard project database URL. Cluster roles are provisioned outside
- * application migrations.
+ * Before anything connects, `resolveIntegrationDatabaseUrls` refuses a missing or
+ * non-local URL (never falling back to DATABASE_URL or a postgres default), and
+ * `assertTestRole` refuses an app role that is SUPERUSER or BYPASSRLS. Both run
+ * once per integration run and fail it loudly. Cluster roles are provisioned
+ * outside application migrations.
  */
 export async function setup() {
-  const migrateUrl =
-    process.env.TEST_MIGRATE_DATABASE_URL ??
-    process.env.TEST_DATABASE_URL ??
-    process.env.DATABASE_URL ??
-    'postgresql://postgres:postgres@localhost:5006/fxl_sales';
+  const { appUrl, migrateUrl } = resolveIntegrationDatabaseUrls(process.env);
+  await assertTestRole(appUrl);
   await runDatabaseMigrations({ databaseUrl: migrateUrl, migrationsFolder: './drizzle' });
 }

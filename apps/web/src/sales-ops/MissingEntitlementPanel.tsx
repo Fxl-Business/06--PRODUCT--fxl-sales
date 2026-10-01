@@ -5,7 +5,7 @@ import type { Organization } from '@/auth/react';
 import { Combobox } from '@/components/ui/combobox';
 import { Skeleton } from '@/components/ui/skeleton';
 import { isOrgLabelFallback, orgLabel } from '@/lib/displayNames';
-import { initials } from './calculations';
+import { AccountAvatar } from './AccountAvatar';
 import { MISSING_ENTITLEMENT_COPY } from './missing-entitlement-copy';
 
 /*
@@ -352,37 +352,6 @@ export function MissingEntitlementPanel({ onRetry }: { onRetry?: () => void }) {
         </button>
       </div>
     </section>
-  );
-}
-
-/*
-  A local twin of the sales ops shell's `AccountAvatar` (same 40px tile, 11px rounding,
-  amber initials tile), re-declared here for the same cycle reason as the style
-  constants above. Decorative: the name beside it is the accessible text, so `alt` is
-  empty. A URL that fails to load falls back to the initials, keyed on the URL so a NEW
-  avatar gets its own attempt rather than inheriting the old failure.
-*/
-function AccountAvatar({ avatarUrl, name }: { avatarUrl?: string; name: string }) {
-  const [failedUrl, setFailedUrl] = useState<string | null>(null);
-  const showImage = Boolean(avatarUrl) && failedUrl !== avatarUrl;
-
-  return (
-    <span
-      className="sales-ops-num flex size-10 flex-none items-center justify-center overflow-hidden rounded-[11px] bg-[#eaa81a] text-[14px] font-bold text-[#18181b]"
-      data-account-avatar
-    >
-      {showImage ? (
-        <img
-          alt=""
-          className="size-full object-cover"
-          onError={() => setFailedUrl(avatarUrl ?? null)}
-          referrerPolicy="no-referrer"
-          src={avatarUrl}
-        />
-      ) : (
-        initials(name)
-      )}
-    </span>
   );
 }
 

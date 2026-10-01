@@ -234,9 +234,19 @@ export type InvitationActionResult<T> =
   | { kind: 'not_found' }
   | { kind: 'failed'; failure: InviteFailure };
 
-/** Shared preamble of resend and revoke: client, seller, stored invitation id. */
+/**
+ * Shared preamble of resend and revoke: client, seller, stored invitation id.
+ *
+ * A seller whose invitation was sent from ANOTHER Organization answers exactly
+ * like an unknown seller (`not_found`) and never reaches the Hub: the admin's
+ * verified org (`actor.orgId`, from `c.get('orgId')`) is the only one whose
+ * invitations this route may touch, and a distinct answer would leak that the
+ * seller exists elsewhere. A `null` `invitedOrgId` (rows invited before the
+ * column existed) is not refused here; the Hub still scopes by the actor token.
+ */
 async function withStoredInvitation<T>(
   sellerId: string,
+  actor: Pick<InviteActor, 'orgId'>,
   run: (
     client: NonNullable<ReturnType<typeof getInvitationsClient>>,
     seller: SellerRow & { invitationId: string },
@@ -246,6 +256,9 @@ async function withStoredInvitation<T>(
   if (!client) return { kind: 'failed', failure: UNAVAILABLE };
   const seller = await findSeller(sellerId);
   if (!seller) return { kind: 'not_found' };
+  if (seller.invitedOrgId !== null && seller.invitedOrgId !== actor.orgId) {
+    return { kind: 'not_found' };
+  }
   const invitationId = seller.invitationId;
   if (!invitationId) return { kind: 'failed', failure: NOT_INVITED };
   return run(client, { ...seller, invitationId });
@@ -253,10 +266,10 @@ async function withStoredInvitation<T>(
 
 export async function resendInvitation(
   sellerId: string,
-  actor: Pick<InviteActor, 'accessToken'>,
+  actor: InviteActor,
   locale: HubInvitationLocale,
 ): Promise<InvitationActionResult<InvitationDelivery>> {
-  return withStoredInvitation(sellerId, async (client, seller) => {
+  return withStoredInvitation(sellerId, actor, async (client, seller) => {
     let result: HubInvitationResult;
     try {
       result = await client.resend({ accessToken: actor.accessToken, invitationId: seller.invitationId, locale });
@@ -274,9 +287,9 @@ export async function resendInvitation(
 
 export async function revokeInvitation(
   sellerId: string,
-  actor: Pick<InviteActor, 'accessToken'>,
+  actor: InviteActor,
 ): Promise<InvitationActionResult<null>> {
-  return withStoredInvitation(sellerId, async (client, seller) => {
+  return withStoredInvitation(sellerId, actor, async (client, seller) => {
     try {
       await client.revoke({ accessToken: actor.accessToken, invitationId: seller.invitationId });
     } catch (error) {
