@@ -80,3 +80,26 @@ export const SALE_STATUS_LABEL: Record<SalesOpsStatus, string> = {
   lost: 'Perdida',
   cancelled: 'Cancelada',
 };
+
+export const BOARD_VIEW_LABEL = { board: 'Quadro', list: 'Lista' } as const;
+export const ALL_PHASES_LABEL = 'Todas as fases';
+export const VIEW_IN_LIST_LABEL = 'Ver em lista';
+export const EMPTY_COLUMN_HINT = 'Arraste um lead para cá';
+export const CARD_TOOLTIP = 'Clique para editar · arraste para mover';
+export const PERCENT_OF_TOTAL = (pct: number): string => `${pct}% do total`;
+export const LIST_HEADERS = {
+  lead: 'Lead',
+  phase: 'Fase',
+  products: 'Produtos',
+  seller: 'Vendedor',
+  inStage: 'Na fase',
+  value: 'Valor estimado',
+  actions: 'Ações',
+} as const;
+export const MOVE_LABEL = 'Mover';
+export const EDIT_LABEL = 'Editar';
+export const TOTAL_LABEL = 'TOTAL';
+export const NO_PRODUCTS_DASH = '-';
+export const scopeLeadsCount = (scope: string, n: number): string =>
+  `${scope} · ${n} ${n === 1 ? 'lead' : 'leads'}`;
+export const EMPTY_PHASE_LIST = 'Nenhum lead nesta fase.';

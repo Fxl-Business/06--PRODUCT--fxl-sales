@@ -13,6 +13,8 @@
   sites pass only non-geometry extras.
 */
 
+import type { LeadStageKind, SalesOpsLeadStage } from './types';
+
 export const formInputClass =
   'h-11 rounded-[10px] border-[#dcdce2] bg-[#fafafb] px-3 text-sm text-[#201f24] shadow-none outline-none ring-0 transition focus-visible:border-[#eaa81a] focus-visible:ring-0 focus-visible:ring-offset-0 disabled:bg-[#f4f4f6] disabled:text-[#9b9ba3] disabled:opacity-100';
 
@@ -71,8 +73,9 @@ export const dragOverlayCardClass = 'w-[276px] rotate-2 cursor-grabbing shadow-x
  */
 export const readOnlyCardClass = 'border-dashed bg-[#fbfbfc]';
 
+/** Pill geometry only. Compose with `dayBadgeTone(days)` for the colour. */
 export const daysBadgeClass =
-  'inline-flex items-center rounded-full bg-[#eeeef1] px-2 py-0.5 text-[11px] font-semibold text-[#6a6a72]';
+  'inline-flex items-center rounded-full px-2 py-0.5 text-[11.5px] font-semibold';
 
 export const chipClass =
   'inline-flex items-center rounded-full bg-[#f4f4f6] px-2 py-0.5 text-[11px] font-medium text-[#57575f]';
@@ -112,3 +115,98 @@ export const saleLinkClass =
 /** The code half of that link, kept monospace so a código reads as an identifier. */
 export const saleLinkCodeClass = 'font-mono text-[12px] tracking-tight text-[#1f1f27]';
 
+
+export interface StageColor {
+  /** Hex for the dot and the bar. */
+  dot: string;
+  /** Hex soft background. */
+  soft: string;
+  border: string;
+  ink: string;
+}
+
+const NORMAL_PALETTE: readonly StageColor[] = [
+  { dot: '#4f63d8', soft: '#f3f4fd', border: '#dfe3fa', ink: '#3443a8' },
+  { dot: '#8656d0', soft: '#f6f2fd', border: '#e7dcf8', ink: '#6a3db0' },
+  { dot: '#d07a1f', soft: '#fdf5ec', border: '#f5e1c8', ink: '#9a5610' },
+  { dot: '#22928f', soft: '#eef8f7', border: '#d0ebe9', ink: '#17706d' },
+];
+
+// Only the two special kinds are keys; the normal kind is NOT, so its lookup is
+// undefined and no inline kind comparison is ever needed.
+const KIND_COLORS: Partial<Record<LeadStageKind, StageColor>> = {
+  conversion: { dot: '#2f9155', soft: '#eef7f1', border: '#d3ebdc', ink: '#226c3f' },
+  lost: { dot: '#c2413b', soft: '#fcf1f0', border: '#f2d6d4', ink: '#9b2f2a' },
+};
+
+/** `stages` must already be in position order; it is not reordered here. */
+export function stageColors(
+  stages: readonly Pick<SalesOpsLeadStage, 'id' | 'kind'>[],
+): Map<string, StageColor> {
+  const map = new Map<string, StageColor>();
+  let normalIndex = 0;
+  for (const stage of stages) {
+    const special = KIND_COLORS[stage.kind];
+    if (special) {
+      map.set(stage.id, special);
+    } else {
+      map.set(stage.id, NORMAL_PALETTE[normalIndex % NORMAL_PALETTE.length]!);
+      normalIndex += 1;
+    }
+  }
+  return map;
+}
+
+export function stageIsNormal(stage: Pick<SalesOpsLeadStage, 'kind'>): boolean {
+  return !KIND_COLORS[stage.kind];
+}
+
+export function dayBadgeTone(days: number): string {
+  if (days <= 7) return 'bg-[#f1f1f4] text-[#6a6a72]';
+  if (days <= 14) return 'bg-[#fbf1d9] text-[#8a6210]';
+  return 'bg-[#fcf1f0] text-[#9b2f2a]';
+}
+
+export function avatarInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '?';
+  if (parts.length === 1) return parts[0]!.charAt(0).toUpperCase();
+  return (parts[0]!.charAt(0) + parts[parts.length - 1]!.charAt(0)).toUpperCase();
+}
+
+export const segmentedContainerClass =
+  'inline-flex items-center gap-1 rounded-[11px] bg-[#f2f2f4] p-1';
+
+export const segmentedButtonClass =
+  'inline-flex items-center gap-1.5 rounded-[8px] px-[13px] py-2 text-[13px] font-bold text-[#6a6a72] transition-colors';
+
+export const segmentedButtonActiveClass = 'bg-[#201f24] text-white';
+
+export const avatarClass =
+  'inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#f7e2a8] text-[10px] font-bold text-[#7a5a12]';
+
+export const columnHeaderCardClass =
+  'rounded-[13px] bg-white px-[14px] py-3 shadow-[0_1px_2px_rgba(32,31,36,0.05)]';
+
+export const proportionTrackClass = 'h-[5px] w-full overflow-hidden rounded-full bg-[#eeeef1]';
+
+export const iconButtonClass =
+  'inline-flex h-7 w-7 items-center justify-center rounded-lg text-[#9b9ba3] hover:bg-[#f2f2f4]';
+
+export const phaseChipClass =
+  'inline-flex items-center gap-2 whitespace-nowrap rounded-full border border-[#e2e2e7] bg-white px-3 py-1.5 text-[13px] font-semibold text-[#201f24]';
+
+export const phaseChipActiveClass = 'border-transparent bg-[#201f24] text-white';
+
+export const listTableCardClass = 'overflow-x-auto rounded-[18px] border border-[#e8e8ec]';
+
+export const listTheadClass =
+  'bg-[#fafafb] text-[11.5px] font-bold uppercase tracking-[0.06em] text-[#8b8b92]';
+
+export const listRowClass = 'border-t border-[#f0f0f3] hover:bg-[#fcfcfd]';
+
+export const listFooterClass =
+  'flex items-center justify-between border-t border-[#e8e8ec] bg-[#fafafb] px-4 py-3';
+
+/** Semantic alias; `cardButtonClass` stays until the card slice drops it. */
+export const listActionButtonClass = cardButtonClass;
