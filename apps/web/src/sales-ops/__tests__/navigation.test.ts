@@ -63,6 +63,7 @@ describe('sales operations navigation', () => {
       'pessoas',
       'funcoes',
       'etapas',
+      'importacao',
       'geral',
     ]);
     expect(getSalesOpsNavigation('cadastros', team).map((item) => item.label)).toEqual([
@@ -72,6 +73,7 @@ describe('sales operations navigation', () => {
       'Pessoas',
       'Funções',
       'Etapas do funil',
+      'Importação',
       'Geral',
     ]);
   });
@@ -520,5 +522,16 @@ describe('sales operations navigation', () => {
     expect(asNobody.path).toBe('/tatico/dashboard');
     expect(asNobody.redirect).toBe(true);
     expect('saleId' in asNobody.route).toBe(false);
+  });
+
+  it('resolves cadastros/importacao for an admin only', () => {
+    expect(resolveSalesOpsRoute({ workspace: 'cadastros', view: 'importacao' }, team)).toEqual({
+      route: { workspace: 'cadastros', view: 'importacao' },
+      path: '/cadastros/importacao',
+      redirect: false,
+    });
+    const asSeller = resolveSalesOpsRoute({ workspace: 'cadastros', view: 'importacao' }, seller);
+    expect(asSeller.redirect).toBe(true);
+    expect(asSeller.route.view).not.toBe('importacao');
   });
 });

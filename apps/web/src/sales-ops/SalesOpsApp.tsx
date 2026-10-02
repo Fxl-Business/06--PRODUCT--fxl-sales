@@ -153,6 +153,7 @@ import type { LeadConversionItem, LeadConversionPrefill } from './leads/conversi
 import type { LeadConversionRequest } from './leads/LeadsBoard';
 import { LeadsBoardContainer } from './leads/LeadsBoardContainer';
 import { LeadStagesContainer } from './leads/LeadStagesContainer';
+import { ImportContainer } from './import/ImportContainer';
 import {
   addMonthsToIsoDate,
   buildDashboardModel,
@@ -503,6 +504,10 @@ function titleForView(view: SalesOpsView, workspace: SalesOpsWorkspace) {
     etapas: {
       title: 'Etapas do funil',
       subtitle: 'Etapas configuráveis do quadro de prospecção, na ordem em que aparecem nele',
+    },
+    importacao: {
+      title: 'Importação',
+      subtitle: 'Planilhas para o onboarding e para trazer cadastros, leads e propostas em lote',
     },
   };
   return map[view];
@@ -1678,9 +1683,10 @@ export function SalesOpsApp() {
     draw their own primary button (`Novo lead`, `Nova etapa`). Without naming them
     the chain falls through to `'Nova proposta'`, which would render a proposta
     button over a Kanban board and open the wizard from it.
+    `importacao` has no create action at all.
   */
   const headerAction =
-    view === 'geral' || view === 'leads' || view === 'etapas'
+    view === 'geral' || view === 'leads' || view === 'etapas' || view === 'importacao'
       ? null
       : view === 'produtos'
         ? productKind === 'service'
@@ -2287,6 +2293,7 @@ export function SalesOpsApp() {
                   />
                 ) : null}
                 {view === 'etapas' ? <LeadStagesContainer /> : null}
+                {view === 'importacao' ? <ImportContainer /> : null}
                 {view === 'geral' ? (
                   /*
                     The history is a SIBLING of `SettingsView`, never nested inside it:
