@@ -1,13 +1,14 @@
-import { Hono, type Context } from 'hono';
+import { Hono } from 'hono';
 import { z } from 'zod';
 import { getDb } from '../../db/client.js';
-import { getHubActorDisplayName } from '../../middleware/app-auth.js';
 import {
   ADMIN_ROLE_REQUIRED_BODY,
   hasAdminRole,
   requireAdmin,
 } from '../../middleware/require-admin.js';
 import { HISTORY_MAX_LIMIT, listOrgAuditHistory } from '../audit/history-service.js';
+import { importRouter } from '../import/routes.js';
+import { cadastroActor } from './cadastro-actor.js';
 import { leadsRouter } from './leads/lead-routes.js';
 import { leadStagesRouter } from './leads/stage-routes.js';
 import {
@@ -66,18 +67,6 @@ import {
 const saleIdSchema = z.string().uuid();
 
 export const salesOpsRouter = new Hono();
-
-/**
- * Who is performing this cadastro write, taken from the VERIFIED context and
- * never from the request body. `c.get('userId')` is the Hub account id
- * appAuthMiddleware set from the verified token; the display name is snapshotted
- * into the ledger entry because there is no Hub account directory to resolve it
- * from later. `/api/v1/sales-ops/*` is behind appAuthMiddleware, so both are
- * always populated.
- */
-function cadastroActor(c: Context): { userId: string; displayName: string | null } {
-  return { userId: c.get('userId'), displayName: getHubActorDisplayName(c.get('hubAuth')) };
-}
 
 salesOpsRouter.get('/bootstrap', async (c) => {
   const snapshot = await getSalesOpsSnapshot(getDb(), c.get('orgId'));
@@ -305,6 +294,9 @@ salesOpsRouter.route('/', leadStagesRouter);
 // difference here is what keeps a reader from thinking one router grew a second
 // responsibility. There is no DELETE verb on either.
 salesOpsRouter.route('/leads', leadsRouter);
+
+// Planilha de importação (cadastros/importacao). Admin-only per route inside importRouter.
+salesOpsRouter.route('/import', importRouter);
 
 salesOpsRouter.get('/sales', async (c) => {
   const sales = await listSales(getDb(), c.get('orgId'));
