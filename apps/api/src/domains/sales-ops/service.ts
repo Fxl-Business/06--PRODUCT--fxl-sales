@@ -1558,6 +1558,21 @@ async function resolvePersonFuncoes(
 }
 
 /**
+ * Seeds the two predefined app roles (Vendedor, Finder) for an org that does not
+ * have them yet, through the SAME race-safe on-demand seed createPerson uses for
+ * the deprecated booleans. Idempotent. MUST run inside a tenant transaction.
+ * The import routes call it before readImportCatalog (Amendment D11b), because an
+ * org provisioned after migration 0012 has no system função at all.
+ */
+export async function ensureSystemFuncoes(tx: Db, orgId: string): Promise<void> {
+  const seeded = await resolvePersonFuncoes(tx, orgId, {
+    kind: 'slugs',
+    slugs: [...SYSTEM_FUNCAO_SLUGS],
+  });
+  if (seeded === 'unknown_funcao') throw new Error('system_funcao_seed_failed');
+}
+
+/**
  * Full set replacement, scoped to the caller org and the one person. Set replace
  * rather than merge is what keeps the derived boolean mirrors from drifting:
  * there is exactly one write path and the mirrors are recomputed alongside it.
