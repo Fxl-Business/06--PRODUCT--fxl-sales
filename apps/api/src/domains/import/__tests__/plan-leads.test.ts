@@ -320,6 +320,6 @@ describe('planLeads', () => {
     expect(src).not.toMatch(/lead-service\.js/);
     expect(src).not.toMatch(/db\//);
     expect(src).not.toMatch(/LEAD_PLACEHOLDER_ID/);
-    expect(src).not.toContain('—');
+    expect(src).not.toContain(String.fromCharCode(0x2014));
   });
 });
