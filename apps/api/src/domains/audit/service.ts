@@ -36,6 +36,11 @@ export const AuditActionSchema = z.enum([
   'cadastro.archived',
   'cadastro.restored',
   'cadastro.purged',
+  // One entry per committed spreadsheet import (domains/import/executor.ts).
+  // Deliberately NOT a cadastro lifecycle action: CADASTRO_LIFECYCLE_ACTIONS and
+  // CadastroEntityTypeSchema stay unchanged, so the cadastro history panel never
+  // lists it (importacao-planilha D10). entityType is 'importacao'.
+  'import.completed',
 ]);
 export type AuditAction = z.infer<typeof AuditActionSchema>;
 
