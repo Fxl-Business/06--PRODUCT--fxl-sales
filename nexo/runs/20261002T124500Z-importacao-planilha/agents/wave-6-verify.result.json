@@ -1,0 +1,1 @@
+{"agent":"wave-verify","slice":"wave-6","status":"PASS","done":true,"suite":"2667/2667 unit · 330/330 integration","lint":0,"typecheck":0,"build":"ok","security":"0 high","flaky":[],"findings":["pnpm audit --prod: 12 moderate, 1 low, 0 high/critical (e.g. hono <4.12.34 GHSA-79qm-7rj5-m7r9 in apps/api; informational, CLAUDE.md pins hono 4.12.28)"]}

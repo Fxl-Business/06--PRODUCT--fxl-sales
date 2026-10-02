@@ -38,7 +38,7 @@ Contagens de verify da suíte por wave (api / web):
 | 3 | 03, 04, 06 | 2608 / 318 |
 | 4 | 05 | 2646 / 318 |
 | 5 | 07, 09.1 | 2664 / 328 |
-| 6 | 10 | pending |
+| 6 | 10 | 2667/2667 unit · 330/330 integration · lint 0 · build ok · 0 high |
 
 ## Verify
 
