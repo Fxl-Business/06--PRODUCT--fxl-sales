@@ -227,7 +227,7 @@ export const WORKBOOK_SHEETS = [
     columns: [
       { key: 'ref', header: 'Ref', kind: { type: 'text', max: 40 }, required: true, example: 'P1', help: 'Ref da proposta na aba Propostas.' },
       { key: 'funcao', header: 'Função', kind: { type: 'text', max: 120 }, required: true, list: 'funcoes', example: 'Desenvolvedor', help: 'Função do profissional no projeto.' },
-      { key: 'pessoa', header: 'Pessoa', kind: { type: 'text', max: 120 }, required: true, list: 'pessoas', example: 'Ana Souza', help: 'Pessoa que exerce a função; ela recebe a função se ainda não a tiver.' },
+      { key: 'pessoa', header: 'Pessoa', kind: { type: 'text', max: 120 }, required: true, list: 'pessoas', example: 'Ana Souza', help: 'Pessoa que exerce a função no projeto; o cadastro da pessoa não é alterado.' },
       { key: 'custo', header: 'Custo (R$)', kind: { type: 'money' }, required: false, example: 'R$ 1.000,00', help: 'Custo alocado ao profissional; em branco usa o custo padrão do produto para a função.' },
       { key: 'divisaoCusto', header: 'Divisão do custo (%)', kind: { type: 'text', max: 1000 }, required: false, example: null, help: 'Percentuais do custo por parcela separados por ponto e vírgula e somando 100, por exemplo 50; 50; em branco divide proporcionalmente.' },
     ],
