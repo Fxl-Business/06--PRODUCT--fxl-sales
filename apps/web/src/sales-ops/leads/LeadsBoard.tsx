@@ -13,19 +13,52 @@ import {
 } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { List, Plus, SquareKanban } from 'lucide-react';
 import { Combobox, type ComboboxOption } from '@/components/ui/combobox';
+import { formatMoneyBrl } from '../calculations';
 import type { MoveLeadPayload } from './api';
-import type { LabelLookups } from './board-labels';
+import {
+  ALL_PHASES_LABEL,
+  BOARD_VIEW_LABEL,
+  EDIT_LABEL,
+  EMPTY_PHASE_LIST,
+  LIST_HEADERS,
+  MOVE_LABEL,
+  NO_PRODUCTS_DASH,
+  TOTAL_LABEL,
+  leadCompanyLabel,
+  leadProductLabels,
+  leadSellerLabel,
+  scopeLeadsCount,
+  type LabelLookups,
+} from './board-labels';
 import {
   buildMovePayload,
+  describeDaysInStage,
   dragHandsBackToDialog,
   moveTargetsFor,
   stageOpensConversion,
 } from './board-move';
 import { moveLeadInList } from './optimistic';
 import {
+  avatarClass,
+  avatarInitials,
   boardScrollerClass,
   cardButtonClass,
+  dayBadgeTone,
+  daysBadgeClass,
+  listActionButtonClass,
+  listFooterClass,
+  listRowClass,
+  listTableCardClass,
+  listTheadClass,
+  phaseChipActiveClass,
+  phaseChipClass,
+  segmentedButtonActiveClass,
+  segmentedButtonClass,
+  segmentedContainerClass,
+  stageColors,
+  stageIsNormal,
   columnClass,
   dragHandleSurfaceClass,
   dragOverlayCardClass,
@@ -34,7 +67,12 @@ import {
   mutedStateClass,
   primaryButtonClass,
 } from './board-ui';
-import { boardStages, leadIsConverted, leadsInStage } from './calculations';
+import {
+  boardStages,
+  daysInCurrentStage,
+  leadIsConverted,
+  leadsInStage,
+} from './calculations';
 import { LeadCard } from './LeadCard';
 import { MoveLeadDialog } from './MoveLeadDialog';
 import type { SalesOpsLead, SalesOpsLeadStage } from './types';
@@ -202,6 +240,46 @@ export function LeadsBoard({
 
   const columns = React.useMemo(() => boardStages(stages), [stages]);
 
+  const [leadView, setLeadView] = React.useState<'board' | 'list'>('board');
+  const [rawStageFilter, setLeadStageFilter] = React.useState<string>('');
+  // An archived stage drops out of `columns`; the filter then reads as "all"
+  // (derived, so no effect-driven reset is needed).
+  const leadStageFilter = columns.some((s) => s.id === rawStageFilter) ? rawStageFilter : '';
+
+  const colors = React.useMemo(() => stageColors(columns), [columns]);
+  const totalByStage = React.useMemo(
+    () =>
+      new Map(
+        columns.map((stage) => [
+          stage.id,
+          leadsInStage(leads, stage.id).reduce((sum, row) => sum + row.estimatedValueBrl, 0),
+        ]),
+      ),
+    [columns, leads],
+  );
+  const countByStage = React.useMemo(
+    () => new Map(columns.map((stage) => [stage.id, leadsInStage(leads, stage.id).length])),
+    [columns, leads],
+  );
+  const totalGeral = React.useMemo(
+    () => [...totalByStage.values()].reduce((sum, value) => sum + value, 0),
+    [totalByStage],
+  );
+  const orderedLeads = React.useMemo(
+    () =>
+      columns
+        .filter((stage) => !leadStageFilter || stage.id === leadStageFilter)
+        .flatMap((stage) => leadsInStage(leads, stage.id)),
+    [columns, leads, leadStageFilter],
+  );
+  const listTotalCents = orderedLeads.reduce((sum, row) => sum + row.estimatedValueBrl, 0);
+  const listCount = orderedLeads.length;
+  const scopeLabel = leadStageFilter
+    ? (columns.find((s) => s.id === leadStageFilter)?.name ?? ALL_PHASES_LABEL)
+    : ALL_PHASES_LABEL;
+  const fmtBrl0 = (cents: number) =>
+    formatMoneyBrl(cents, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+
   /*
     `moveLeadInList` is the SAME primitive the optimistic cache patch uses, so the
     preview and the real move cannot disagree about where the card lands.
@@ -338,27 +416,56 @@ export function LeadsBoard({
   return (
     <div className="flex flex-col gap-4" data-leads-board="true">
       <header className="flex flex-wrap items-center justify-between gap-3">
-        {sellerFilter ? (
-          <div className="w-[240px]">
-            <Combobox
-              aria-label="Vendedor"
-              className={comboboxTriggerClass}
-              onChange={(value) =>
-                sellerFilter.onChange(value === ALL_SELLERS_VALUE ? null : value)
-              }
-              options={[
-                { value: ALL_SELLERS_VALUE, label: 'Todos os vendedores' },
-                ...sellerFilter.options,
-              ]}
-              value={sellerFilter.value ?? ALL_SELLERS_VALUE}
-            />
+        <div className="flex items-center gap-2.5">
+          <div
+            aria-label="Alternar visualização"
+            className={segmentedContainerClass}
+            data-view-toggle="true"
+            role="group"
+          >
+            <button
+              aria-pressed={leadView === 'board'}
+              className={`${segmentedButtonClass}${leadView === 'board' ? ' ' + segmentedButtonActiveClass : ''}`}
+              data-view-option="board"
+              onClick={() => setLeadView('board')}
+              type="button"
+            >
+              <SquareKanban aria-hidden size={15} /> {BOARD_VIEW_LABEL.board}
+            </button>
+            <button
+              aria-pressed={leadView === 'list'}
+              className={`${segmentedButtonClass}${leadView === 'list' ? ' ' + segmentedButtonActiveClass : ''}`}
+              data-view-option="list"
+              onClick={() => setLeadView('list')}
+              type="button"
+            >
+              <List aria-hidden size={15} /> {BOARD_VIEW_LABEL.list}
+            </button>
           </div>
-        ) : (
-          <span />
-        )}
+          {sellerFilter ? (
+            <div className="w-[220px]">
+              <Combobox
+                aria-label="Vendedor"
+                className={comboboxTriggerClass}
+                onChange={(value) =>
+                  sellerFilter.onChange(value === ALL_SELLERS_VALUE ? null : value)
+                }
+                options={[
+                  { value: ALL_SELLERS_VALUE, label: 'Todos os vendedores' },
+                  ...sellerFilter.options,
+                ]}
+                value={sellerFilter.value ?? ALL_SELLERS_VALUE}
+              />
+            </div>
+          ) : null}
+        </div>
         {onCreateLead ? (
-          <button className={primaryButtonClass} onClick={onCreateLead} type="button">
-            Novo lead
+          <button
+            className={`${primaryButtonClass} gap-1.5`}
+            onClick={onCreateLead}
+            type="button"
+          >
+            <Plus aria-hidden size={16} /> Novo lead
           </button>
         ) : null}
       </header>
@@ -375,6 +482,7 @@ export function LeadsBoard({
         means the collision test is run against where a column USED to be, which
         reads to the operator as the board refusing a perfectly aimed drop.
       */}
+      {leadView === 'board' ? (
       <DndContext
         collisionDetection={closestCorners}
         measuring={{ droppable: { strategy: MeasuringStrategy.Always } }}
@@ -459,6 +567,178 @@ export function LeadsBoard({
           ) : null}
         </DragOverlay>
       </DndContext>
+      ) : (
+        <div className="flex flex-col gap-4" data-leads-list="true">
+          <div className="flex flex-wrap gap-2">
+            <button
+              aria-pressed={leadStageFilter === ''}
+              className={`${phaseChipClass}${leadStageFilter === '' ? ' ' + phaseChipActiveClass : ''}`}
+              data-phase-chip=""
+              onClick={() => setLeadStageFilter('')}
+              type="button"
+            >
+              <span>{ALL_PHASES_LABEL}</span>
+              <span className="sales-ops-num">{fmtBrl0(totalGeral)}</span>
+              <span data-phase-count>{leads.length}</span>
+            </button>
+            {columns.map((stage) => {
+              const color = colors.get(stage.id);
+              return (
+                <button
+                  aria-pressed={leadStageFilter === stage.id}
+                  className={`${phaseChipClass}${leadStageFilter === stage.id ? ' ' + phaseChipActiveClass : ''}`}
+                  data-phase-chip={stage.id}
+                  key={stage.id}
+                  onClick={() => setLeadStageFilter(stage.id)}
+                  type="button"
+                >
+                  <span
+                    className="inline-block h-2 w-2 rounded-full"
+                    style={{ backgroundColor: color?.dot }}
+                  />
+                  <span>{stage.name}</span>
+                  <span className="sales-ops-num opacity-75">
+                    {fmtBrl0(totalByStage.get(stage.id) ?? 0)}
+                  </span>
+                  <span
+                    className="rounded-full px-1.5 text-[11px] font-semibold"
+                    data-phase-count
+                    style={{ backgroundColor: color?.soft, color: color?.ink }}
+                  >
+                    {countByStage.get(stage.id) ?? 0}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className={listTableCardClass}>
+            <div className="min-w-[900px]">
+              <table className="w-full border-collapse text-left text-[13px]">
+                <thead className={listTheadClass}>
+                  <tr>
+                    <th className="px-4 py-2.5">{LIST_HEADERS.lead}</th>
+                    <th className="px-4 py-2.5">{LIST_HEADERS.phase}</th>
+                    <th className="px-4 py-2.5">{LIST_HEADERS.products}</th>
+                    <th className="px-4 py-2.5">{LIST_HEADERS.seller}</th>
+                    <th className="px-4 py-2.5">{LIST_HEADERS.inStage}</th>
+                    <th className="px-4 py-2.5 text-right">{LIST_HEADERS.value}</th>
+                    <th className="px-4 py-2.5 text-right">{LIST_HEADERS.actions}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {orderedLeads.map((row) => {
+                    const rowStage = columns.find((s) => s.id === row.stageId);
+                    const color = colors.get(row.stageId);
+                    const converted = leadIsConverted(row);
+                    const showBadge = rowStage ? stageIsNormal(rowStage) && !converted : false;
+                    const days = daysInCurrentStage(row.stageChangedAt, now);
+                    const products = leadProductLabels(row, lookups);
+                    const sellerLabel = leadSellerLabel(row, lookups);
+                    return (
+                      <tr className={listRowClass} data-list-row={row.id} key={row.id}>
+                        <td className="px-4 py-3">
+                          <div className="font-semibold text-[#201f24]">{row.contactName}</div>
+                          <div className="text-[12.5px] text-[#8b8b92]">
+                            {leadCompanyLabel(row, lookups)}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span
+                            className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[12px] font-semibold"
+                            data-row-phase={row.stageId}
+                            style={{ backgroundColor: color?.soft, color: color?.ink }}
+                          >
+                            <span
+                              className="inline-block h-1.5 w-1.5 rounded-full"
+                              style={{ backgroundColor: color?.dot }}
+                            />
+                            {rowStage?.name}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          {products.length > 0 ? products.join(', ') : NO_PRODUCTS_DASH}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="inline-flex items-center gap-2">
+                            <span className={avatarClass}>{avatarInitials(sellerLabel)}</span>
+                            {sellerLabel}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          {showBadge ? (
+                            <span
+                              className={`${daysBadgeClass} ${dayBadgeTone(days)}`}
+                              data-days-in-stage={days}
+                            >
+                              {describeDaysInStage(days)}
+                            </span>
+                          ) : (
+                            NO_PRODUCTS_DASH
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <span className="sales-ops-num font-bold">
+                            {fmtBrl0(row.estimatedValueBrl)}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center justify-end gap-2">
+                            {converted && onOpenSale && row.saleCode && row.saleId ? (
+                              <button
+                                className={listActionButtonClass}
+                                data-open-sale={row.saleId}
+                                onClick={() => onOpenSale(row.saleId!)}
+                                type="button"
+                              >
+                                <span className="font-mono">{row.saleCode}</span>
+                              </button>
+                            ) : null}
+                            {!converted ? (
+                              <button
+                                className={listActionButtonClass}
+                                data-move-trigger={row.id}
+                                onClick={() => openMoveDialog(row)}
+                                type="button"
+                              >
+                                {MOVE_LABEL}
+                              </button>
+                            ) : null}
+                            <button
+                              className={listActionButtonClass}
+                              data-edit-lead={row.id}
+                              onClick={() => onEditLead?.(row)}
+                              type="button"
+                            >
+                              {EDIT_LABEL}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {orderedLeads.length === 0 ? (
+                    <tr>
+                      <td className="px-4 py-6 text-center text-[#8b8b92]" colSpan={7}>
+                        {EMPTY_PHASE_LIST}
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+            <div className={listFooterClass}>
+              <span>{scopeLeadsCount(scopeLabel, listCount)}</span>
+              <span className="flex items-center gap-2">
+                <span>{TOTAL_LABEL}</span>
+                <span className="sales-ops-num" data-list-total>
+                  {fmtBrl0(listTotalCents)}
+                </span>
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {hasMore ? (
         <footer>
