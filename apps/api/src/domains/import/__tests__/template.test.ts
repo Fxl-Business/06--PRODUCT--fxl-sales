@@ -328,7 +328,7 @@ describe('template workbook', () => {
 
   it('Leia-me has one pt-BR sentence per row and covers the rules', async () => {
     const lines = buildLeiameLines(catalogFixture(), { example: false });
-    const dash = '—';
+    const dash = String.fromCharCode(0x2014);
     for (const l of lines) expect(l.text).not.toContain(dash);
     for (const l of lines.filter((x) => x.kind === 'body')) {
       expect(/[.:]$/.test(l.text)).toBe(true);
