@@ -1,7 +1,7 @@
 ---
 id: 04-compact-card
 milestone: v4.2.0
-status: todo
+status: done
 depends_on: [03-board-column-headers]
 files_modified:
   - apps/web/src/sales-ops/leads/LeadCard.tsx

@@ -1,7 +1,7 @@
 ---
 id: 01-ui-foundations
 milestone: v4.2.0
-status: todo
+status: done
 depends_on: []
 files_modified:
   - apps/web/src/sales-ops/leads/board-ui.ts

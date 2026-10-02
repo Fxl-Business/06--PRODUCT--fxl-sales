@@ -1,7 +1,7 @@
 ---
 id: 03-board-column-headers
 milestone: v4.2.0
-status: todo
+status: done
 depends_on: [02-list-mode-and-toggle]
 files_modified:
   - apps/web/src/sales-ops/leads/LeadsBoard.tsx

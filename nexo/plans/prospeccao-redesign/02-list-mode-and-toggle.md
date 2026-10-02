@@ -1,7 +1,7 @@
 ---
 id: 02-list-mode-and-toggle
 milestone: v4.2.0
-status: todo
+status: done
 depends_on: [01-ui-foundations]
 files_modified:
   - apps/web/src/sales-ops/leads/LeadsBoard.tsx
