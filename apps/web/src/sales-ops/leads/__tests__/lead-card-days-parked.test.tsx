@@ -156,4 +156,11 @@ describe('LeadCard days-parked badge', () => {
     expect(badge().getAttribute('data-days-in-stage')).toBe('1');
     expect(badge().textContent).toBe('há 1 dia');
   });
+
+  it('renders no badge when showDaysBadge is false', async () => {
+    await act(async () => {
+      root.render(<LeadCard lead={lead()} lookups={LOOKUPS} now={NOW} showDaysBadge={false} />);
+    });
+    expect(container.querySelector('[data-days-in-stage]')).toBeNull();
+  });
 });

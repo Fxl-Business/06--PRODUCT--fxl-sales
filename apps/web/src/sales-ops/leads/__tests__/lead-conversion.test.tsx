@@ -447,6 +447,7 @@ function moveRequests(): Write[] {
 
 /** Opens the `Mover para` dialog and drives it to the conversion column. */
 async function moveIntoConversionColumn() {
+  await click(required('[data-view-option="list"]'));
   await click(required(`[data-move-trigger="${LEAD_ID}"]`));
   const trigger = container.querySelector('[aria-labelledby="move-lead-stage-label"]');
   if (!trigger) throw new Error('destination picker not found');
@@ -457,6 +458,8 @@ async function moveIntoConversionColumn() {
   if (!row) throw new Error('conversion stage not offered as a move target');
   await click(row);
   await click(required('[data-move-confirm]'));
+  // Back to Quadro, where the tests assert the card's column.
+  await click(required('[data-view-option="board"]'));
 }
 
 /**

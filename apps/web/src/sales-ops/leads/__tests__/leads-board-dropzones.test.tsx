@@ -250,4 +250,26 @@ describe('a converted card names its proposta', () => {
     expect(container.querySelector('[data-open-sale]')).toBeNull();
     expect(container.querySelector('[data-sale-status]')?.textContent).toContain('Ganha');
   });
+
+  it('opens the editor when a non-converted Quadro card is clicked', async () => {
+    const onEditLead = vi.fn();
+    await act(async () => {
+      root.render(
+        <LeadsBoard
+          leads={[lead('l1', NOVO_ID)]}
+          lookups={LOOKUPS}
+          now={NOW}
+          onEditLead={onEditLead}
+          onMoveLead={vi.fn()}
+          stages={STAGES}
+        />,
+      );
+    });
+    const card = container.querySelector('[data-lead-card="l1"]');
+    expect(card?.querySelector('[data-move-trigger]')).toBeNull();
+    await act(async () => {
+      card?.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 0, clientY: 0 }));
+    });
+    expect(onEditLead).toHaveBeenCalledTimes(1);
+  });
 });

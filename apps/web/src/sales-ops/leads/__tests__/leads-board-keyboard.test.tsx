@@ -127,9 +127,9 @@ async function settle() {
   });
 }
 
-async function click(element: Element) {
+async function click(element: Element, init: MouseEventInit = {}) {
   await act(async () => {
-    element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, ...init }));
   });
   await settle();
 }
@@ -208,7 +208,19 @@ async function renderBoard(leads: SalesOpsLead[], overrides: BoardOverrides = {}
   return { onMoveLead };
 }
 
+async function showBoard() {
+  await click(required('[data-view-option="board"]'));
+}
+
+/** Confirms the dialog, then returns to Quadro where the card's column is asserted. */
+async function confirmMove() {
+  await click(confirmButton());
+  await showBoard();
+}
+
+/** The card has no move control any more: Mover lives on the List row. */
 async function openMoveDialog(leadId: string) {
+  await click(required('[data-view-option="list"]'));
   await click(required(`[data-move-trigger="${leadId}"]`));
 }
 
@@ -251,7 +263,7 @@ describe('LeadsBoard, driven by the keyboard Mover para dialog alone', () => {
     await openMoveDialog(LEAD_A);
     await pick(0, 'Negociação');
     await pick(1, 'Início da coluna');
-    await click(confirmButton());
+    await confirmMove();
 
     expect(onMoveLead).toHaveBeenCalledTimes(1);
     expect(onMoveLead).toHaveBeenCalledWith({
@@ -273,7 +285,7 @@ describe('LeadsBoard, driven by the keyboard Mover para dialog alone', () => {
     // The destination stays the lead's OWN column; only the slot changes. Same
     // dialog, same payload, same emitter.
     await pick(1, 'Depois de Carla');
-    await click(confirmButton());
+    await confirmMove();
 
     expect(onMoveLead).toHaveBeenCalledTimes(1);
     expect(onMoveLead).toHaveBeenCalledWith({
@@ -289,7 +301,7 @@ describe('LeadsBoard, driven by the keyboard Mover para dialog alone', () => {
 
     await openMoveDialog(LEAD_A);
     await pick(0, 'Negociação');
-    await click(confirmButton());
+    await confirmMove();
 
     expect(onMoveLead).toHaveBeenCalledTimes(1);
   });
@@ -302,12 +314,12 @@ describe('LeadsBoard, driven by the keyboard Mover para dialog alone', () => {
 
     expect(confirmButton().disabled).toBe(true);
     expect(dialogNode().textContent).toContain('Informe o motivo da perda.');
-    await click(confirmButton());
+    await confirmMove();
     expect(onMoveLead).not.toHaveBeenCalled();
 
     await type(textarea(), '  orçamento apertado  ');
     expect(confirmButton().disabled).toBe(false);
-    await click(confirmButton());
+    await confirmMove();
 
     expect(onMoveLead).toHaveBeenCalledTimes(1);
     expect(onMoveLead.mock.calls[0]?.[0]).toMatchObject({
@@ -359,7 +371,7 @@ describe('LeadsBoard, driven by the keyboard Mover para dialog alone', () => {
     );
 
     expect(query(`[data-move-trigger="${CONVERTED_ID}"]`)).toBeNull();
-    expect(query(`[data-move-trigger="${LEAD_B}"]`)).not.toBeNull();
+    expect(query(`[data-lead-card="${LEAD_B}"]`)).not.toBeNull();
 
     await openMoveDialog(LEAD_B);
     expect(await destinationOptions()).toEqual([
@@ -413,7 +425,7 @@ describe('LeadsBoard, driven by the keyboard Mover para dialog alone', () => {
     expect(dialogNode().textContent).toContain(
       'Esta etapa abre o wizard de proposta. O card só muda de etapa depois que a proposta for criada.',
     );
-    await click(confirmButton());
+    await confirmMove();
 
     expect(onRequestConversion).toHaveBeenCalledTimes(1);
     expect(onMoveLead).not.toHaveBeenCalled();
@@ -430,7 +442,7 @@ describe('LeadsBoard, driven by the keyboard Mover para dialog alone', () => {
 
     await openMoveDialog(LEAD_A);
     await pick(0, 'Proposta enviada');
-    await click(confirmButton());
+    await confirmMove();
 
     expect(onRequestConversion).toHaveBeenCalledWith({
       lead: expect.objectContaining({ id: LEAD_A }),
@@ -465,7 +477,7 @@ describe('LeadsBoard, driven by the keyboard Mover para dialog alone', () => {
 
     await openMoveDialog(LEAD_A);
     await pick(1, 'Depois de Bruno');
-    await click(confirmButton());
+    await confirmMove();
     expect(onMoveLead).toHaveBeenCalledTimes(1);
 
     // The move was emitted and the cache rejected it, so the SAME array comes
@@ -510,7 +522,7 @@ describe('a move into the conversion stage goes STRAIGHT to the wizard', () => {
 
     await openMoveDialog('L1');
     await pick(0, 'Proposta enviada');
-    await click(confirmButton());
+    await confirmMove();
 
     // The wizard was asked for, and NO second dialog stood in the way.
     expect(onRequestConversion).toHaveBeenCalledTimes(1);
@@ -547,7 +559,7 @@ describe('a move into the conversion stage goes STRAIGHT to the wizard', () => {
 
     await openMoveDialog('L1');
     await pick(0, 'Proposta enviada');
-    await click(confirmButton());
+    await confirmMove();
     expect(columnOrder(CONVERSAO_ID)).toContain('L1');
 
     await act(async () => {
@@ -559,5 +571,33 @@ describe('a move into the conversion stage goes STRAIGHT to the wizard', () => {
     expect(columnOrder(NOVO_ID)).toContain('L1');
     expect(columnOrder(CONVERSAO_ID)).not.toContain('L1');
     expect(onMoveLead).not.toHaveBeenCalled();
+  });
+
+  it('opens the editor when a non-converted card is clicked in Quadro', async () => {
+    const onEditLead = vi.fn();
+    await renderBoard([lead(LEAD_A, 'Ana', NOVO_ID)], { onEditLead });
+
+    const card = required(`[data-lead-card="${LEAD_A}"]`);
+    expect(card.querySelector('[data-move-trigger]')).toBeNull();
+    expect(card.querySelector('[data-edit-lead]')).toBeNull();
+    await click(card, { clientX: 0, clientY: 0 });
+
+    expect(onEditLead).toHaveBeenCalledTimes(1);
+    expect(onEditLead.mock.calls[0]?.[0]).toMatchObject({ id: LEAD_A });
+  });
+
+  it('does NOT open the editor for a click that follows a drag (pointer moved > 6px)', async () => {
+    const onEditLead = vi.fn();
+    await renderBoard([lead(LEAD_A, 'Ana', NOVO_ID)], { onEditLead });
+
+    const card = required(`[data-lead-card="${LEAD_A}"]`);
+    await act(async () => {
+      card.dispatchEvent(
+        new MouseEvent('pointerdown', { bubbles: true, clientX: 0, clientY: 0 }),
+      );
+    });
+    await click(card, { clientX: 20, clientY: 20 });
+
+    expect(onEditLead).not.toHaveBeenCalled();
   });
 });
