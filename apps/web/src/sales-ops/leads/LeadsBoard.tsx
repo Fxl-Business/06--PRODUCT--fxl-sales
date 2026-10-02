@@ -21,11 +21,14 @@ import {
   ALL_PHASES_LABEL,
   BOARD_VIEW_LABEL,
   EDIT_LABEL,
+  EMPTY_COLUMN_HINT,
   EMPTY_PHASE_LIST,
   LIST_HEADERS,
   MOVE_LABEL,
   NO_PRODUCTS_DASH,
+  PERCENT_OF_TOTAL,
   TOTAL_LABEL,
+  VIEW_IN_LIST_LABEL,
   leadCompanyLabel,
   leadProductLabels,
   leadSellerLabel,
@@ -63,8 +66,9 @@ import {
   dragHandleSurfaceClass,
   dragOverlayCardClass,
   comboboxTriggerClass,
-  columnHeaderClass,
-  mutedStateClass,
+  columnHeaderCardClass,
+  iconButtonClass,
+  proportionTrackClass,
   primaryButtonClass,
 } from './board-ui';
 import {
@@ -194,15 +198,26 @@ function SortableLeadCard({
  * Drag remains pure convenience: the `Mover para` dialog is the real control and
  * its oracles still pass with this entire layer deleted.
  */
-function StageDropZone({ stageId, children }: { stageId: string; children: React.ReactNode }) {
+function StageDropZone({
+  stageId,
+  dotColor,
+  children,
+}: {
+  stageId: string;
+  dotColor: string;
+  children: React.ReactNode;
+}) {
   const { setNodeRef, isOver } = useDroppable({ id: stageId });
   return (
     <div
-      className={`flex min-h-[72px] flex-col gap-2 rounded-md transition-colors${
-        isOver ? ' bg-[#eeeef6]' : ''
-      }`}
+      className="flex min-h-[72px] flex-col gap-2 rounded-md transition-colors"
       data-stage-dropzone={stageId}
       ref={setNodeRef}
+      style={
+        isOver
+          ? { backgroundColor: 'rgba(255,255,255,0.6)', outline: `1.5px solid ${dotColor}` }
+          : undefined
+      }
     >
       {children}
     </div>
@@ -265,6 +280,8 @@ export function LeadsBoard({
     () => [...totalByStage.values()].reduce((sum, value) => sum + value, 0),
     [totalByStage],
   );
+  const shareByStage = (stageId: string) =>
+    totalGeral > 0 ? Math.round(((totalByStage.get(stageId) ?? 0) / totalGeral) * 100) : 0;
   const orderedLeads = React.useMemo(
     () =>
       columns
@@ -500,20 +517,65 @@ export function LeadsBoard({
               .filter((row) => !leadIsConverted(row))
               .map((row) => row.id);
 
+            const c = colors.get(stage.id);
+            const share = shareByStage(stage.id);
+
             return (
               <section
                 className={columnClass}
+                style={{ backgroundColor: c?.soft, borderColor: c?.border }}
                 data-stage-column={stage.id}
                 key={stage.id}
                 {...(stageOpensConversion(stage) ? { 'data-conversion-column': 'true' } : {})}
               >
-                <header className={columnHeaderClass}>
-                  <span>{stage.name}</span>
-                  <span>{column.length}</span>
+                <header className={columnHeaderCardClass}>
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="h-[9px] w-[9px] shrink-0 rounded-full"
+                      style={{ backgroundColor: c?.dot }}
+                    />
+                    <span className="flex-1 truncate text-[13.5px] font-bold text-[#201f24]">
+                      {stage.name}
+                    </span>
+                    <span
+                      className="rounded-full px-2 py-0.5 text-[11.5px] font-bold"
+                      data-stage-count
+                      style={{ backgroundColor: c?.soft, color: c?.ink }}
+                    >
+                      {column.length}
+                    </span>
+                    <button
+                      aria-label={`${VIEW_IN_LIST_LABEL}: ${stage.name}`}
+                      className={iconButtonClass}
+                      data-view-in-list={stage.id}
+                      onClick={() => {
+                        setLeadStageFilter(stage.id);
+                        setLeadView('list');
+                      }}
+                      type="button"
+                    >
+                      <List aria-hidden size={15} />
+                    </button>
+                  </div>
+                  <div className="mt-2 flex items-baseline justify-between">
+                    <span className="sales-ops-num text-[20px] font-bold text-[#201f24]" data-stage-total>
+                      {fmtBrl0(totalByStage.get(stage.id) ?? 0)}
+                    </span>
+                    <span className="text-[11.5px] font-semibold text-[#9b9ba3]">
+                      {PERCENT_OF_TOTAL(share)}
+                    </span>
+                  </div>
+                  <div className={`mt-2 ${proportionTrackClass}`}>
+                    <div
+                      className="h-full rounded-full"
+                      data-stage-bar
+                      style={{ width: `${share}%`, backgroundColor: c?.dot }}
+                    />
+                  </div>
                 </header>
 
                 <SortableContext items={movableIds} strategy={verticalListSortingStrategy}>
-                  <StageDropZone stageId={stage.id}>
+                  <StageDropZone dotColor={c?.dot ?? '#cfcfd6'} stageId={stage.id}>
                     {column.map((lead) => {
                       const targets = moveTargetsFor(lead, columns, hasConversionHandler);
                       if (targets.length === 0) {
@@ -541,7 +603,13 @@ export function LeadsBoard({
                       );
                     })}
                     {column.length === 0 ? (
-                      <p className={mutedStateClass}>Nenhum lead nesta etapa.</p>
+                      <div
+                        className="flex min-h-[80px] items-center justify-center rounded-lg border-[1.5px] border-dashed p-3 text-center text-[12.5px] text-[#9b9ba3]"
+                        data-empty-column={stage.id}
+                        style={{ borderColor: c?.border }}
+                      >
+                        {EMPTY_COLUMN_HINT}
+                      </div>
                     ) : null}
                   </StageDropZone>
                 </SortableContext>
