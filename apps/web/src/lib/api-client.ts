@@ -39,6 +39,12 @@ export type ApiError = {
    * read. Absent when neither is available. Display data only.
    */
   retryAfterSeconds?: number;
+  /**
+   * The parsed JSON error body, set ONLY by `apiUpload`. The import commit answers
+   * `422` with a whole preview body that the screen must render. Display data only:
+   * classification still keys on `status`.
+   */
+  body?: unknown;
 };
 
 /** One ledger row named by a 409 body. `id` is for logic only, never for display. */
@@ -120,6 +126,38 @@ export async function apiFetchBlob(
   const disposition = res.headers.get('Content-Disposition');
   const match = disposition?.match(/filename="?([^"]+)"?/);
   return { blob: await res.blob(), filename: match?.[1] ?? null };
+}
+
+/**
+ * Multipart variant of apiFetch for file uploads (the spreadsheet import). Same base
+ * URL and Bearer chokepoint; deliberately NO Content-Type header, because the browser
+ * must write `multipart/form-data; boundary=...` itself. A failure throws an ApiError
+ * that also carries the parsed `body`.
+ */
+export async function apiUpload<T>(
+  path: string,
+  init: { token: string; form: FormData },
+): Promise<T> {
+  assertBearerToken(init.token);
+  const res = await fetch(`${baseUrl}${path}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${init.token}` },
+    body: init.form,
+  });
+  if (!res.ok) {
+    const body: unknown = await res.json().catch(() => ({}));
+    const record =
+      typeof body === 'object' && body !== null ? (body as Record<string, unknown>) : {};
+    const err: ApiError = {
+      error: typeof record.error === 'string' ? record.error : 'request_failed',
+      code: typeof record.code === 'string' ? record.code : undefined,
+      message: typeof record.message === 'string' ? record.message : undefined,
+      status: res.status,
+      body,
+    };
+    throw err;
+  }
+  return res.json() as Promise<T>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -5,6 +5,7 @@ import {
   Cog,
   ContactRound,
   Database,
+  FileSpreadsheet,
   Layers,
   LayoutGrid,
   ListChecks,
@@ -33,7 +34,8 @@ export type SalesOpsView =
   | 'funcoes'
   | 'geral'
   | 'leads'
-  | 'etapas';
+  | 'etapas'
+  | 'importacao';
 
 export type SalesOpsNavigationItem = {
   id: SalesOpsView;
@@ -91,8 +93,10 @@ const cadastros: SalesOpsNavigationItem[] = [
   /*
     Before `geral`, which is the settings-and-history catch-all and stays last.
     `produtos` remains `[0]`, so the Cadastros landing route does not move.
+    `importacao` goes before `geral` too.
   */
   { id: 'etapas', label: 'Etapas do funil', icon: ListChecks },
+  { id: 'importacao', label: 'Importação', icon: FileSpreadsheet },
   { id: 'geral', label: 'Geral', icon: Cog },
 ];
 
