@@ -1,0 +1,1 @@
+{"agent":"wave-verify","slice":"wave-1","status":"PASS","done":true,"suite":"2399/2399 unit · 305/305 integration","lint":0,"typecheck":0,"build":"ok","security":"0 high","flaky":[],"findings":["audit: 12 moderate, 1 low only","integration needs TEST_/ADMIN_DATABASE_URL (worktree has no .env); ran with local 5006 URLs"]}

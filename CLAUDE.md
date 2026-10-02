@@ -114,7 +114,7 @@ Full reference: `nexo/knowledge/reference/ui-controls.md`.
 
 Full reference: `nexo/knowledge/reference/sales-ops-routing.md`.
 
-- Routes: `tatico/dashboard`, `operacional/vendas|comissoes|leads`, `cadastros/produtos|areas|clientes|pessoas|funcoes|etapas|geral`, `meus-dados/vendedores|comissoes|leads|finders|vendas`, plus the proposta detail `operacional/vendas/:saleId` (and `meus-dados/vendas/:saleId`).
+- Routes: `tatico/dashboard`, `operacional/vendas|comissoes|leads`, `cadastros/produtos|areas|clientes|pessoas|funcoes|etapas|importacao|geral`, `meus-dados/vendedores|comissoes|leads|finders|vendas`, plus the proposta detail `operacional/vendas/:saleId` (and `meus-dados/vendas/:saleId`).
 - The URL is the single source of truth for the active workspace and page.
 - The open proposta detail is URL state too: one route `SALES_OPS_ROUTE_PATTERN` (`/:workspace/:view/:saleId?`) and `saleId` is honoured only on the `vendas` view; never hold the open detail in component state.
 - `buildSaleDetailPath` builds `/operacional/vendas/<id>`, the Finance `deepLinkPath`; an invisible workspace drops the id through the ordinary role default.
@@ -332,6 +332,24 @@ Full reference: `nexo/knowledge/reference/integracao-sales-finance.md`.
 - Boot wiring is `start-integration.ts`, reached from `server.ts` via `await import(...)` (keep the static-import discipline). The fake authority is selected ONLY through `getIntegrationAuthority()` in `apps/api/src/auth/select.ts` (the one file `auth-fake-isolation` allows to import `@fxl-sales/auth-fake`). The puller auto-starts only in real mode; no loop starts under `NODE_ENV=test`. The nightly prune uses a fail-closed `null` low-water and never drops below `OUTBOX_MIN_RETENTION_DAYS`.
 - Fake-dev: the fixture org `org_fake_integrado` is `FIXTURE_INTEGRATED_ORGANIZATION_ID` (imported, never hand-typed) with the `integrated-owner` identity; `getFakeIntegrationAuthority()` is a memoized singleton (`environment:'development'`). No new `FXL_HUB_*` var is introduced for this integration.
 - NOT built (non-goals): `fxl-sales.ledger.checkpoint` emission, backfill, the cold-entry deep-link route, and any real cross-process/real-Hub path (the Finance side of the layer does not exist here yet).
+
+## Importação por planilha
+
+Full reference: `nexo/knowledge/reference/importacao-por-planilha.md`.
+
+- `cadastros/importacao` is an admin-only screen; the three routes (`GET /import/template`, `POST /import/preview`, `POST /import/commit` under `/api/v1/sales-ops`) all sit behind `requireAdmin`, and the org is only `c.get('orgId')`, never anything from the file.
+- ONE definition: `apps/api/src/domains/import/workbook-schema.ts` drives the template, the parser and the planners. Never hand-type a header, tab name or column key elsewhere.
+- Create-only. An import never updates. An existing ACTIVE área, função, produto or etapa with the same name is an error (`duplicate_existing`), a reference to an archived record is an error (`archived_ref`), a same-name cliente or pessoa is only a warning (`possible_duplicate`).
+- Writes reuse the domain services (`createSale`, `createProduct`, `applyBaixaTx` and so on) inside one `withTenant` transaction. Never a raw INSERT into a business table, and never a second implementation of a rule.
+- Preview writes nothing: it plans inside a transaction that is always rolled back. Commit NEVER trusts the preview: it re-parses, re-reads the catalog inside its transaction, re-plans and executes only at zero errors, all or nothing.
+- Both routes seed the default etapas (`ensureLeadStages`) and the system funções (`ensureSystemFuncoes`) inside their transaction before `readImportCatalog`. `readImportCatalog` and the executor never seed.
+- Finance connected: when `isProducerFlowLive(orgId)`, `Ganha` propostas and every `Pagamentos` row are errors (`producer_flow_live`) in the plan and are re-checked by the executor. Never import history into a connected org.
+- A historical won day goes through `createSale(..., now = <wonOn>T15:00:00Z)`; a won day after `todayInSaoPaulo` is an error. A payment is a baixa through `applyBaixaTx` with the `manual` policy, never a direct write to `sales_ops_settlements`.
+- A lead cannot be imported into the conversion etapa; one in the lost etapa needs `Motivo da perda`.
+- Limits: 5 MB upload, 5000 data rows, 500 issues returned (`truncated`). No migration; `import.completed` is an `AuditActionSchema` addition, written once, last, in the same transaction.
+- The web classifies the import errors by HTTP status only; a 403 renders inline on the screen, never `ForbiddenPanel`; a 409 shows `body.message`. The web never parses xlsx.
+- Oracles: `import-routes.integration.test.ts` (round trip of the example template, all-or-nothing, producer-live, admin gate), `executor.integration.test.ts`, `template-example.test.ts`, `workbook-schema.test.ts`, `import-view.test.tsx`, `import-copy.test.ts`.
+- `exceljs` is pinned EXACTLY in `apps/api` (`exceljs-pin.test.ts`); run `pnpm install` after pulling.
 
 ## Environments
 

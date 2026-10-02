@@ -1,0 +1,1 @@
+{"agent":"wave-verify","slice":"wave-2","status":"PASS","done":true,"suite":"2518/2518 unit · 311/311 integration","lint":0,"typecheck":0,"build":"ok","security":"0 high","flaky":[],"findings":["pnpm audit --prod: 1 low, 12 moderate, 0 high/critical"]}

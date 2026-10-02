@@ -1,0 +1,1 @@
+{"agent":"wave-verify","slice":"wave-5","status":"PASS","done":true,"suite":"2664/2664 unit · 328/328 integration","lint":0,"typecheck":0,"build":"ok","security":"0 high","flaky":[],"findings":["audit: 1 low, 12 moderate, 0 high/critical","assert-web-bundle-clean: clean (ran in build)"]}

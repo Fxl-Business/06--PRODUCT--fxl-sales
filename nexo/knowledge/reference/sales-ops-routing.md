@@ -3,7 +3,7 @@
 Moved verbatim from `CLAUDE.md` on 2026-09-22 so the standing context stays short.
 `CLAUDE.md` keeps the rules; this file keeps the reasoning, history and oracle names.
 
-- Canonical Sales Ops routes are `tatico/dashboard`, `operacional/vendas|comissoes|leads`, `cadastros/produtos|areas|clientes|pessoas|funcoes|etapas|geral`, and `meus-dados/vendedores|comissoes|leads|finders|vendas`.
+- Canonical Sales Ops routes are `tatico/dashboard`, `operacional/vendas|comissoes|leads`, `cadastros/produtos|areas|clientes|pessoas|funcoes|etapas|importacao|geral`, and `meus-dados/vendedores|comissoes|leads|finders|vendas`.
 - `cadastros/vendedores` and `cadastros/finders` no longer exist; `resolveSalesOpsRoute` aliases both legacy views to `pessoas` and returns `redirect: true` so the URL is rewritten to `/cadastros/pessoas`.
 - `aliasLegacyView` returns the view unchanged unless the resolved workspace is `cadastros`, so the alias can only ever fire there. The `meus-dados/vendedores` and `meus-dados/finders` views keep those exact ids and must never be aliased.
 - The URL is the single source of truth for the active Sales Ops workspace and page.

@@ -1,0 +1,1 @@
+{"agent":"verify","slice":"07-routes-and-roundtrip","status":"PASS","done":true,"oracle":"10/10 integration (+6 route unit, 5 plan-index); full integration 328/328, unit 1126/1126","lint":0,"typecheck":0,"findings":[]}

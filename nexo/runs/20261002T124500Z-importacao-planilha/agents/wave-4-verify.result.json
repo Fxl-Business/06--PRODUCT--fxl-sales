@@ -1,0 +1,1 @@
+{"agent":"wave-verify","slice":"wave-4","status":"PASS","done":true,"suite":"2646/2646 unit · 318/318 integration","lint":0,"typecheck":0,"build":"ok","security":"0 high","flaky":[],"findings":["audit: 13 vulns (1 low, 12 moderate), none high/critical"]}

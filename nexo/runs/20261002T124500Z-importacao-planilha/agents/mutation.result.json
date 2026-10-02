@@ -1,0 +1,46 @@
+{
+ "agent": "mutation",
+ "slice": "feature",
+ "status": "PASS",
+ "done": true,
+ "score": "45/50",
+ "equivalent_excluded": [
+  {
+   "file": "apps/api/src/domains/import/plan/cadastros.ts",
+   "mutant": "funcao_required check disabled (funcoes.length === 0 -> < 0)",
+   "note": "unreachable: c.list returns null for an empty list and the required Funções column is reported as 'required' by the parser, so the branch is dead code"
+  },
+  {
+   "file": "apps/api/src/domains/import/plan/desfechos.ts",
+   "mutant": "wonOn/paidOn > today + 'z' (two mutants)",
+   "note": "string compare makes it equivalent; replaced by '&& false' and '>=' variants, all KILLED"
+  }
+ ],
+ "survivors": [
+  {
+   "file": "apps/api/src/domains/import/plan/propostas.ts",
+   "mutant": "installments_sum_mismatch only when sum < total (sum !== total -> sum < total)",
+   "why_it_matters": "Parcelas summing ABOVE the items total pass the preview with ok:true; createSale's own installments_sum_mismatch refuses at commit, so the user sees a 409 instead of a row-level preview error (AC3 quality, no bad write)"
+  },
+  {
+   "file": "apps/api/src/domains/import/plan/index.ts",
+   "mutant": "isPlanOk ignores file-level errors (sheet === null), e.g. total too_many_rows",
+   "why_it_matters": "Preview could report ok:true and enable Importar with a file-level error; the executor guard still throws import_plan_has_errors so nothing is written, but the response becomes a 500 rather than 422"
+  },
+  {
+   "file": "apps/api/src/domains/import/executor.ts",
+   "mutant": "settleReceivable per-operation isProducerFlowLive re-check removed",
+   "why_it_matters": "Redundant with the executor producer pre-scan (killed) and the planner gate (killed); no test pins the in-loop re-check, so it is defense in depth only"
+  },
+  {
+   "file": "apps/api/src/domains/import/executor.ts",
+   "mutant": "executor won_on_in_future re-check removed",
+   "why_it_matters": "Redundant with the planner won_date_in_future check (killed); no executor test feeds a future wonOn plan directly, so the D3 executor guard is unpinned"
+  },
+  {
+   "file": "apps/web/src/sales-ops/import/import-copy.ts",
+   "mutant": "errorsTitle always plural ('1 erros')",
+   "why_it_matters": "pt-BR copy regression only"
+  }
+ ]
+}

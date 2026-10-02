@@ -1,0 +1,1 @@
+{"agent":"verify","slice":"10-mutation-survivors","status":"PASS","done":true,"oracle":"28/28 web import + 63/63 api unit + 330/330 api integration","lint":0,"typecheck":0,"findings":["All 5 mutants re-applied; each new named test went red, others stayed green; files restored, git status clean","Diff is tests only (4 test files), no production change, no em dash"]}

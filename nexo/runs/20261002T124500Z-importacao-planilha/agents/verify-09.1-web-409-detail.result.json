@@ -1,0 +1,1 @@
+{"agent":"verify","slice":"09.1-web-409-detail","status":"PASS","done":true,"oracle":"6/6","lint":0,"typecheck":0,"findings":["import dir 27/27 pass; full web suite 1251/1251 pass","audit not run: web-copy-only diff, no deps changed"]}
