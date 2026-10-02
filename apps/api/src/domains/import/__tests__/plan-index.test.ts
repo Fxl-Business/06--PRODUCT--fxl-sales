@@ -120,6 +120,16 @@ describe('planImport', () => {
     expect(isPlanOk({ issues: [issue('warning', null, null)] })).toBe(true);
     expect(isPlanOk({ issues: [issue('warning', null, null), issue('error', 'areas', 2)] })).toBe(false);
   });
+
+  it('treats a file-level error (sheet null) as not ok', () => {
+    const fileLevel = issue('error', null, null, 'too_many_rows');
+    expect(isPlanOk({ issues: [fileLevel] })).toBe(false);
+    const parsed = emptyParsedWorkbook();
+    parsed.issues.push(fileLevel);
+    const plan = planImport(parsed, catalog);
+    expect(isPlanOk(plan)).toBe(false);
+    expect(toPreviewBody(plan).ok).toBe(false);
+  });
 });
 
 describe('toPreviewBody', () => {
