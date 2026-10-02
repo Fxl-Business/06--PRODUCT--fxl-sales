@@ -2,6 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { MUTATION_ERROR_COPY } from '../../mutation-error-copy';
 import { IMPORT_COPY, importErrorMessage } from '../import-copy';
 
+describe('IMPORT_COPY.errorsTitle', () => {
+  it('is singular for one error and plural otherwise', () => {
+    expect(IMPORT_COPY.errorsTitle(1)).toBe('1 erro');
+    expect(IMPORT_COPY.errorsTitle(2)).toBe('2 erros');
+  });
+});
+
 describe('importErrorMessage', () => {
   it('keys on status', () => {
     expect(importErrorMessage({ status: 403 })).toBe(MUTATION_ERROR_COPY.adminRequired);

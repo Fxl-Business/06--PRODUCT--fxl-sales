@@ -511,6 +511,43 @@ describe('executeImportPlan', () => {
     expect(after.audit_log).toBe(0);
   });
 
+  it('refuses a settleReceivable when the gate turns live after the pre-scan and rolls everything back', async () => {
+    const s = await seededOrg('live-late');
+    const before = await snapshot(s.orgId);
+    const ops = fullOperations(s);
+    // cadastros, the won proposta (index 9) and its baixa (index 14).
+    const pick = [0, 1, 2, 3, 4, 9, 14].map((i) => must(ops[i]));
+    expect(pick.map((o) => o.op).slice(-2)).toEqual(['createSale', 'settleReceivable']);
+    // The pre-scan asks twice (the won sale, the baixa); everything after that is the write
+    // phase. From the fourth call on the org reads as live, so only the per-operation guards
+    // (never the pre-scan) can refuse; the settlement's own re-check is what must catch it.
+    let calls = 0;
+    registerProducerFlowGate((id) => {
+      if (id !== s.orgId) return false;
+      calls += 1;
+      return calls >= 4;
+    });
+    const error = await run(s.orgId, { operations: pick, issues: [], counts: {} }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ImportExecutionError);
+    expect((error as ImportExecutionError).reason).toBe('producer_flow_live');
+    expect(((error as ImportExecutionError).operation as { op: string }).op).toBe('settleReceivable');
+    expect(calls).toBeGreaterThanOrEqual(4);
+    expect(await snapshot(s.orgId)).toEqual(before);
+  });
+
+  it('refuses a won proposta dated after today with won_on_in_future and writes nothing', async () => {
+    const s = await seededOrg('future');
+    const before = await snapshot(s.orgId);
+    // NOW is 2026-06-01 12:00 in Sao Paulo, so the next civil day is the future.
+    const sale = must(fullOperations(s)[9]);
+    if (sale.op !== 'createSale') throw new Error('expected the won createSale');
+    const plan: ImportPlan = { operations: [{ ...sale, wonOn: '2026-06-02' }], issues: [], counts: {} };
+    const error = await run(s.orgId, plan).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ImportExecutionError);
+    expect((error as ImportExecutionError).reason).toBe('won_on_in_future');
+    expect(await snapshot(s.orgId)).toEqual(before);
+  });
+
   it('executes cadastros and open propostas in a producer-live org with an empty outbox', async () => {
     const s = await seededOrg('live-ok');
     registerProducerFlowGate((id) => id === s.orgId);

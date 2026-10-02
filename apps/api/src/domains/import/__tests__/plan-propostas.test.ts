@@ -235,6 +235,21 @@ describe('full depth', () => {
     expect(result.issues[0]?.message).toContain('R$ 1.000,00');
   });
 
+  it('refuses Parcelas that sum ABOVE the items total', () => {
+    const result = run({
+      propostas: [{ ...BASE, produto: 'Licença' }],
+      parcelas: [
+        { ref: 'P1', vencimento: '2026-02-01', valor: 60000 },
+        { ref: 'P1', vencimento: '2026-03-01', valor: 50000 },
+      ],
+    });
+    expect(result.operations).toEqual([]);
+    expect(result.issues).toHaveLength(1);
+    expect(result.issues[0]).toMatchObject({ sheet: 'parcelas', row: 2, column: 'Valor (R$)', code: 'installments_sum_mismatch' });
+    expect(result.issues[0]?.message).toContain('R$ 1.100,00');
+    expect(result.issues[0]?.message).toContain('R$ 1.000,00');
+  });
+
   it('refuses a zero-value parcela', () => {
     const result = run({
       propostas: [{ ...BASE, produto: 'Licença' }],
