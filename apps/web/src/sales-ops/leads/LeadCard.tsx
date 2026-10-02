@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { formatMoneyBrl } from '../calculations';
 import {
+  CARD_TOOLTIP,
   SALE_STATUS_LABEL,
   leadCompanyLabel,
   leadProductLabels,
@@ -9,13 +10,15 @@ import {
 } from './board-labels';
 import { describeDaysInStage } from './board-move';
 import {
-  cardButtonClass,
   cardClass,
   cardDraggingClass,
   chipClass,
   saleLinkClass,
   saleLinkCodeClass,
   daysBadgeClass,
+  avatarClass,
+  dayBadgeTone,
+  avatarInitials,
   readOnlyCardClass,
 } from './board-ui';
 import { daysInCurrentStage, leadIsConverted } from './calculations';
@@ -26,22 +29,22 @@ import type { SalesOpsLead } from './types';
  * `apiFetch`, no clock of its own - `now` is injected so the days badge is
  * deterministic in a test and identical across every card of one render.
  *
- * The card element is deliberately NOT itself a button, and the move trigger is
- * NOT nested inside the drag handle. A control that is both draggable and
- * activatable has an activation behaviour that depends on how far the pointer
- * moved, which is the class of bug CLAUDE.md's `type="button"` paragraph is
- * about.
+ * The card IS clickable to edit, by design of the redesign (the old "the card
+ * is not activatable" principle was superseded deliberately). The element is
+ * still not a `<button>` and carries no `role`. The hazard of an edit firing at
+ * the end of a drag is handled by a pointer-distance guard: a click whose
+ * pointerdown-to-click movement exceeds the PointerSensor activation distance
+ * is a drag, not a click.
  */
 
 const MAX_PRODUCT_CHIPS = 3;
+const ACTIVATION_DISTANCE = 6; // same as the board's PointerSensor
 
 export type LeadCardProps = {
   lead: SalesOpsLead;
   lookups: LabelLookups;
   /** Injected clock. */
   now: Date;
-  /** Absent means no move trigger and no drag handle - a converted or otherwise immovable card. */
-  onRequestMove?: (lead: SalesOpsLead) => void;
   onEdit?: (lead: SalesOpsLead) => void;
   /**
    * Opens the proposta this lead became. Absent means the card renders the
@@ -52,17 +55,19 @@ export type LeadCardProps = {
   /** dnd-kit plumbing supplied by `LeadsBoard`. Absent on a read-only card. */
   dragHandleProps?: React.HTMLAttributes<HTMLElement> & Record<string, unknown>;
   isDragging?: boolean;
+  /** Computed by the board (normal stage and not converted). */
+  showDaysBadge?: boolean;
 };
 
 export function LeadCard({
   lead,
   lookups,
   now,
-  onRequestMove,
   onEdit,
   onOpenSale,
   dragHandleProps,
   isDragging = false,
+  showDaysBadge = true,
 }: LeadCardProps) {
   const readOnly = leadIsConverted(lead);
   const days = daysInCurrentStage(lead.stageChangedAt, now);
@@ -70,19 +75,53 @@ export function LeadCard({
   const productLabels = leadProductLabels(lead, lookups);
   const visibleProducts = productLabels.slice(0, MAX_PRODUCT_CHIPS);
   const hiddenProductCount = productLabels.length - visibleProducts.length;
+  const sellerLabel = leadSellerLabel(lead, lookups);
+  const pointerDown = React.useRef<{ x: number; y: number } | null>(null);
+
+  function handlePointerDown(event: React.PointerEvent<HTMLElement>) {
+    pointerDown.current = { x: event.clientX, y: event.clientY };
+    (dragHandleProps?.onPointerDown as ((e: React.PointerEvent<HTMLElement>) => void) | undefined)?.(
+      event,
+    );
+  }
+
+  function handleClick(event: React.MouseEvent<HTMLElement>) {
+    const start = pointerDown.current;
+    pointerDown.current = null;
+    if (start) {
+      const moved = Math.hypot(event.clientX - start.x, event.clientY - start.y);
+      if (moved > ACTIVATION_DISTANCE) return; // a drag, not a click
+    }
+    if (readOnly) {
+      if (lead.saleId && onOpenSale) onOpenSale(lead.saleId);
+      return;
+    }
+    onEdit?.(lead);
+  }
 
   return (
     <article
-      className={`${cardClass}${isDragging ? ` ${cardDraggingClass}` : ''}${
+      className={`${cardClass} cursor-pointer${isDragging ? ` ${cardDraggingClass}` : ''}${
         readOnly ? ` ${readOnlyCardClass}` : ''
       }`}
       data-lead-card={lead.id}
       {...(readOnly ? { 'data-read-only-card': 'true' } : {})}
       {...(dragHandleProps ?? {})}
+      onClick={handleClick}
+      onPointerDown={handlePointerDown}
+      title={readOnly ? undefined : CARD_TOOLTIP}
     >
-      <div className="flex flex-col gap-0.5">
-        <span className="text-[14px] font-semibold text-[#201f24]">{lead.contactName}</span>
-        <span className="text-[12.5px] text-[#8b8b92]">{leadCompanyLabel(lead, lookups)}</span>
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <span className="text-[14px] font-semibold text-[#201f24]">{lead.contactName}</span>
+          <span className="text-[12.5px] text-[#8b8b92]">{leadCompanyLabel(lead, lookups)}</span>
+        </div>
+        <span className="sales-ops-num shrink-0 text-[14px] font-bold text-[#201f24]">
+          {formatMoneyBrl(lead.estimatedValueBrl, {
+            minimumFractionDigits: 0,
+            maximumFractionDigits: 0,
+          })}
+        </span>
       </div>
 
       {productLabels.length > 0 ? (
@@ -98,30 +137,14 @@ export function LeadCard({
         </div>
       ) : null}
 
-      {/*
-        The label says "estimado" so this number can never be read as a closed
-        value: it is a guess an operator typed on a card and it reaches no
-        financial computation anywhere in the app.
-      */}
-      <div className="flex items-baseline justify-between gap-2">
-        <span className="text-[11.5px] uppercase tracking-[0.06em] text-[#9b9ba3]">
-          Valor estimado
-        </span>
-        <span className="sales-ops-num text-[13.5px] font-semibold text-[#201f24]">
-          {formatMoneyBrl(lead.estimatedValueBrl)}
-        </span>
-      </div>
-
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-[12.5px] text-[#57575f]">{leadSellerLabel(lead, lookups)}</span>
-        <span
-          aria-label={`${daysCopy} nesta etapa`}
-          className={daysBadgeClass}
-          data-days-in-stage={days}
+      {lead.lostReason ? (
+        <div
+          className="rounded-lg bg-[#fcf1f0] px-3 py-2 text-[12px] text-[#9b2f2a]"
+          data-lost-reason-note
         >
-          {daysCopy}
-        </span>
-      </div>
+          {lead.lostReason}
+        </div>
+      ) : null}
 
       {/*
         A converted card's proposta identity. The CODE is the load-bearing half:
@@ -142,7 +165,10 @@ export function LeadCard({
               )}
               className={saleLinkClass}
               data-open-sale={lead.saleId}
-              onClick={() => onOpenSale(lead.saleId as string)}
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenSale(lead.saleId as string);
+              }}
               type="button"
             >
               <span className="flex items-center gap-1.5">
@@ -163,31 +189,21 @@ export function LeadCard({
         </div>
       ) : null}
 
-      {onRequestMove || onEdit ? (
-        <div className="flex flex-wrap gap-2 pt-1">
-          {onRequestMove ? (
-            <button
-              aria-label={`Mover para… ${lead.contactName}`}
-              className={cardButtonClass}
-              data-move-trigger={lead.id}
-              onClick={() => onRequestMove(lead)}
-              type="button"
-            >
-              Mover para…
-            </button>
-          ) : null}
-          {onEdit ? (
-            <button
-              className={cardButtonClass}
-              data-edit-lead={lead.id}
-              onClick={() => onEdit(lead)}
-              type="button"
-            >
-              Editar
-            </button>
-          ) : null}
-        </div>
-      ) : null}
+      <div className="mt-1 flex items-center justify-between gap-2 border-t border-[#f0f0f3] pt-2.5">
+        <span className="flex min-w-0 items-center gap-2">
+          <span className={avatarClass}>{avatarInitials(sellerLabel)}</span>
+          <span className="truncate text-[12px] text-[#57575f]">{sellerLabel}</span>
+        </span>
+        {showDaysBadge && !readOnly ? (
+          <span
+            aria-label={`${daysCopy} nesta etapa`}
+            className={`${daysBadgeClass} ${dayBadgeTone(days)}`}
+            data-days-in-stage={days}
+          >
+            {daysCopy}
+          </span>
+        ) : null}
+      </div>
     </article>
   );
 }

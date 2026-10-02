@@ -136,9 +136,9 @@ type SortableCardProps = {
   lead: SalesOpsLead;
   lookups: LabelLookups;
   now: Date;
-  onRequestMove?: (lead: SalesOpsLead) => void;
   onEdit?: (lead: SalesOpsLead) => void;
   onOpenSale?: (saleId: string) => void;
+  showDaysBadge?: boolean;
 };
 
 /**
@@ -149,9 +149,9 @@ function SortableLeadCard({
   lead,
   lookups,
   now,
-  onRequestMove,
   onEdit,
   onOpenSale,
+  showDaysBadge,
 }: SortableCardProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: lead.id,
@@ -172,7 +172,7 @@ function SortableLeadCard({
         now={now}
         onEdit={onEdit}
         onOpenSale={onOpenSale}
-        onRequestMove={onRequestMove}
+        showDaysBadge={showDaysBadge}
       />
     </div>
   );
@@ -587,6 +587,7 @@ export function LeadsBoard({
                             now={now}
                             onEdit={onEditLead}
                             onOpenSale={onOpenSale}
+                            showDaysBadge={stageIsNormal(stage) && !leadIsConverted(lead)}
                           />
                         );
                       }
@@ -598,7 +599,7 @@ export function LeadsBoard({
                           now={now}
                           onEdit={onEditLead}
                           onOpenSale={onOpenSale}
-                          onRequestMove={(row) => openMoveDialog(row)}
+                          showDaysBadge={stageIsNormal(stage) && !leadIsConverted(lead)}
                         />
                       );
                     })}
@@ -630,7 +631,7 @@ export function LeadsBoard({
         <DragOverlay dropAnimation={null}>
           {activeLead ? (
             <div className={dragOverlayCardClass}>
-              <LeadCard lead={activeLead} lookups={lookups} now={now} />
+              <LeadCard lead={activeLead} lookups={lookups} now={now} showDaysBadge={false} />
             </div>
           ) : null}
         </DragOverlay>
