@@ -44,7 +44,10 @@ export const IMPORT_COPY = {
   notXlsxLocal: 'Escolha um arquivo .xlsx.',
 } as const;
 
-/** Keys on the HTTP status only, never on the body `code`, `reason` or `message`. */
+/**
+ * Classification keys on the HTTP status only, never on the body `code` or `reason`.
+ * The 409 branch additionally shows the server's row message when present.
+ */
 export function importErrorMessage(error: unknown): string {
   if (isForbiddenFailure(error)) return MUTATION_ERROR_COPY.adminRequired;
   if (isAuthFailure(error)) {
@@ -57,6 +60,17 @@ export function importErrorMessage(error: unknown): string {
   }
   if (status === 413) return IMPORT_COPY.tooLargeLocal;
   if (status === 409) {
+    const body = (error as { body?: unknown }).body;
+    const detail =
+      typeof body === 'object' &&
+      body !== null &&
+      typeof (body as { message?: unknown }).message === 'string'
+        ? (body as { message: string }).message.trim()
+        : '';
+    if (detail) {
+      const sentence = /[.!?]$/.test(detail) ? detail : `${detail}.`;
+      return `Nada foi importado: ${sentence} Valide a planilha novamente e tente outra vez.`;
+    }
     return 'Nada foi importado: um registro foi recusado durante a gravação. Valide a planilha novamente e tente outra vez.';
   }
   if (status === 422) {
