@@ -116,5 +116,11 @@
     "decision": "approved-tag-only",
     "decided_at": "2026-10-01",
     "note": "Gate 3a: owner approved pushing master and the v4.1.0 tag only; staging NOT promoted, production NOT promoted. Release-verify attempt 1 FAILED (API image did not build, fixed by slice 16); attempt 2 PASS at 04af2f0; 42ea895 differs only in release notes and records. Milestone stays open until production."
+  },
+  "gate1_prospeccao": {
+    "feature": "feature-20261002-prospeccao-redesign",
+    "decision": "skipped-autopilot",
+    "decided_at": "2026-10-02",
+    "note": "Operador invocou o redesign do quadro de leads (Prospecção/Operacional + Minha prospecção) em autopilot, a partir de .demo/design_handoff_prospeccao/README.md. 4 slices seriais (trunk master; nexo-wave-exec hardcoda main e worktrees pnpm sem node_modules, logo execucao serial): 01 fundacoes de UI (stageColors por object-lookup, dayBadgeTone, avatarInitials, stageIsNormal, tokens, strings), 02 segmentado Quadro/Lista + modo Lista completo, 03 cabecalho de coluna com valor/%/barra e cor por etapa + Ver em lista, 04 card compacto sem botoes (clique abre edicao, guard por limiar de ponteiro) e reescrita dos oraculos keyboard/dropzones/lead-conversion. Plan-check adversarial achou 1 bloqueante (lead-conversion.test.tsx dirige pelo data-move-trigger do card no Quadro) corrigido no replan 1. @dnd-kit, board-move.ts, MoveLeadDialog.tsx e SalesOpsApp.tsx intactos; write-surface preservado. Gate 2 por agente Verify separado por slice + suite web completa por wave. Gate 3 humano; a run para em master."
   }
 }
