@@ -26,7 +26,7 @@ Wiring:
 - The SDK is pinned EXACTLY at `@fxl-business/hub-sdk@2.5.0` in both apps (no caret). `hono` is pinned to `4.12.28` by a `pnpm-workspace.yaml` override so only one Hono copy resolves.
 
 Access gate:
-- Baseline access is the boolean `auth.claims.entitlements.access` and nothing else. Never read `entitlements.modules` for baseline access (the old `sales.core` module gate answered 402 to everyone). `modules` is for paid add-ons only, via `requireHubAuth`'s `requiredModule`.
+- Baseline access is the boolean `auth.claims.entitlements.access` and nothing else. Never read `entitlements.modules` for baseline access (the old `sales.core` module gate answered 402 to everyone). `modules` is for paid add-ons via `requireHubAuth`'s `requiredModule`, plus the Sales edition, resolved ONLY in `applyHubAuthContext` into `c.get('salesEdition')`.
 - `requireHubAuth` is the ONE access gate, fails closed, with `allowWithoutAccess` at its default `false`. Do not reintroduce `classifyHubAccess`, `hasHubOrgAccess`, `hasHubModule` or `requireHubModule`.
 - `MinimalHubAuthContext` is an alias of the SDK's `HubAuthContext`.
 - Deny taxonomy (bodies are byte-identical to the SDK's):
@@ -38,6 +38,7 @@ Access gate:
 - `SalesOpsApp` classifies in the order entitlement, forbidden, auth, generic. The generic `Verifique o servidor local` copy is reachable ONLY for an unclassified error. Oracle: `apps/web/src/sales-ops/__tests__/entitlement-dead-end.test.tsx`.
 - That classification is for the bootstrap READ only. A 403 on a mutation is `MutationErrorBanner` (`salesOpsMutationErrorMessage` in `apps/web/src/sales-ops/mutation-error-copy.ts`), keyed on the status like `isForbiddenFailure`.
 - `apps/api/src/middleware/__tests__/app-auth-access-gate.test.ts` drives the REAL verifier with an in-process keypair; keep it that way.
+- `requireCapability` (`apps/api/src/middleware/require-capability.ts`) is a CAPABILITY gate behind the access gate, never an access gate: `403 {"error":"forbidden","code":"edition_capability"}`, a missing edition is `full`, and gates are registered above every route of their router. Oracle: `apps/api/src/middleware/__tests__/edition-gate-map.test.ts`.
 
 Hub configuration:
 - Hub config is the SDK's (`loadHubConfig`), read only through `hubEnvBag` in `apps/api/src/config/auth-provider.ts`, never raw `process.env`. The only local addition is `hubConfigIsAbsent`, which reads `FXL_HUB_CONFIG` plus the five identity names.
