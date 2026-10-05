@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { requireCapability } from '../../middleware/require-capability.js';
 import { getDb } from '../../db/client.js';
 import {
   getFinderClickStats,
@@ -23,6 +24,9 @@ import { mapLinkError } from '../links/routes.js';
  * via setTenantContext + the clicks_select_tenant RLS policy).
  */
 export const finderRouter = new Hono();
+
+// Edition capability gate (edicao-leads). Registered before every route so it runs first.
+finderRouter.use('*', requireCapability('finders'));
 
 finderRouter.get('/apps', async (c) => {
   const apps = await listActiveAppsForFinder(getDb());

@@ -1,4 +1,5 @@
 import { sql, type SQL } from 'drizzle-orm';
+import type { SalesEdition } from '@fxl-sales/shared-utils/sales-edition';
 
 declare module 'hono' {
   interface ContextVariableMap {
@@ -6,6 +7,12 @@ declare module 'hono' {
     orgId: string;
     userRole: string | undefined;
     userRoles: Array<'admin' | 'seller' | 'finder'>;
+    /**
+     * The Sales edition of the ACTIVE organization, resolved once per request by
+     * `applyHubAuthContext` from the verified token's add-on modules. Read it
+     * through `requireCapability` or `leadFieldSet`, never by re-reading modules.
+     */
+    salesEdition: SalesEdition;
   }
 }
 

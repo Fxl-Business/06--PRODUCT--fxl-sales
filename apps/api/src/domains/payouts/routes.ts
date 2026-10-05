@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { requireCapability } from '../../middleware/require-capability.js';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { getAdminDb, getDb } from '../../db/client.js';
@@ -23,6 +24,10 @@ import {
  */
 export const payoutsRouter = new Hono();
 export const payoutsAdminRouter = new Hono();
+
+// Edition capability gate (edicao-leads). Registered before every route so it runs first.
+payoutsRouter.use('*', requireCapability('commissions'));
+payoutsAdminRouter.use('*', requireCapability('commissions'));
 
 const CreateBatchesSchema = z.object({
   finderIds: z.array(z.string().uuid()).min(1),
