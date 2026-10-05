@@ -4,6 +4,7 @@ import {
   pctOfCents,
   resolveProfessionalSplit,
 } from '@fxl-sales/shared-utils';
+import type { SalesEdition } from '@fxl-sales/shared-utils/sales-edition';
 import { isIsoDay, saoPauloDayOf, todayInSaoPaulo } from '@fxl-sales/shared-utils/sao-paulo-day';
 import { randomUUID } from 'node:crypto';
 import { and, asc, desc, eq, gt, inArray, isNull, ne, sql, type SQL } from 'drizzle-orm';
@@ -443,6 +444,39 @@ export function planPersonFuncoes(
   if (input.isCollaborator) slugs.push('prestador');
   if (slugs.length > 0) return { kind: 'slugs', slugs };
   return mode === 'create' ? 'funcao_required' : { kind: 'unchanged' };
+}
+
+/**
+ * Optional, trailing and empty by default, so every existing caller (the
+ * routes in the full edition, the import executor, the tests) keeps its exact
+ * call. Only the leads edition passes it.
+ */
+export type PersonWriteOptions = { edition?: SalesEdition };
+
+/**
+ * In the leads edition a pessoa IS a vendedor (edicao-leads D4): the server
+ * assigns the system `vendedor` função itself and ignores any funcaoIds or
+ * deprecated booleans in the body. This override runs BEFORE
+ * `planPersonFuncoes` (SEAM A3), so an empty `funcaoIds` never answers
+ * `funcao_required`. An UPDATE that carries no função key at all (the
+ * status-only `{status}` PATCH of Inativar / Reativar, or a name-only edit)
+ * leaves the função set untouched. The full edition plans exactly as today.
+ */
+function planPersonFuncoesForEdition(
+  input: Partial<PersonInput>,
+  mode: 'create' | 'update',
+  edition: SalesEdition,
+): PersonFuncaoPlan {
+  if (edition === 'leads') {
+    const touchesFuncoes =
+      input.funcaoIds !== undefined ||
+      input.isSeller !== undefined ||
+      input.isFinder !== undefined ||
+      input.isCollaborator !== undefined;
+    if (mode === 'update' && !touchesFuncoes) return { kind: 'unchanged' };
+    return { kind: 'slugs', slugs: ['vendedor'] };
+  }
+  return planPersonFuncoes(input, mode);
 }
 
 export const SettingsSchema = z.object({
@@ -1093,7 +1127,7 @@ export function buildSaleLedger(
         /*
           NOT a snapshot and NOT server-derived: unlike `personNameSnapshot`,
           this is the operator's own input, so the body wins. It is also
-          orthogonal to `costBrl` — that says how much, this says when — which
+          orthogonal to `costBrl` - that says how much, this says when - which
           is exactly why it is stored in basis points. See CLAUDE.md.
         */
         costSplitBp: professional.costSplitBp ?? null,
@@ -1283,7 +1317,7 @@ export function materializeWonPayables(input: MaterializeWonPayablesInput): Paya
     A professional is paid AS THE CLIENT PAYS: `professional_cost` is generated
     per INSTALLMENT receivable, like the commissions and the tax, split by the
     stored `costSplitBp` or pro rata by default. Recurring (`M`-prefixed) rows
-    are deliberately excluded — an indefinite recorrência generates no bounded
+    are deliberately excluded - an indefinite recorrência generates no bounded
     rows at all, and spreading a pay-once cost over 24 cycles would delay a
     professional's pay years past delivery. With NO eligible row the resolver
     returns the legacy one-shot part, which is what keeps a pure-recurring sale
@@ -1633,9 +1667,12 @@ export async function createPerson(
   db: Db,
   orgId: string,
   data: PersonInput,
+  options: PersonWriteOptions = {},
 ): Promise<PersonWithFuncoes | 'unknown_funcao' | 'funcao_required'> {
   return withTenant(db, orgId, async (tx) => {
-    const plan = planPersonFuncoes(data, 'create');
+    const edition = options.edition ?? 'full';
+    if (edition === 'leads') await ensureSystemFuncoes(tx, orgId);
+    const plan = planPersonFuncoesForEdition(data, 'create', edition);
     if (plan === 'funcao_required' || plan.kind === 'unchanged') return 'funcao_required';
     const resolved = await resolvePersonFuncoes(tx, orgId, plan);
     if (resolved === 'unknown_funcao') return 'unknown_funcao';
@@ -1666,9 +1703,11 @@ export async function updatePerson(
   id: string,
   data: Partial<PersonInput>,
   actor: CadastroActor,
+  options: PersonWriteOptions = {},
 ): Promise<PersonWithFuncoes | null | 'unknown_funcao' | 'funcao_required'> {
   return withTenant(db, orgId, async (tx) => {
-    const plan = planPersonFuncoes(data, 'update');
+    const edition = options.edition ?? 'full';
+    const plan = planPersonFuncoesForEdition(data, 'update', edition);
     if (plan === 'funcao_required') return 'funcao_required';
 
     // FOR UPDATE, not a plain read: without the row lock two concurrent archives
@@ -1681,6 +1720,7 @@ export async function updatePerson(
       .limit(1)
       .for('update');
     if (!current) return null;
+    if (edition === 'leads') await ensureSystemFuncoes(tx, orgId);
 
     let resolved: FuncaoRow[] | null = null;
     if (plan.kind !== 'unchanged') {
