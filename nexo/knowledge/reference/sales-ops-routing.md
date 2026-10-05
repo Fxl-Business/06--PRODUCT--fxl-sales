@@ -37,3 +37,9 @@ Moved verbatim from `CLAUDE.md` on 2026-09-22 so the standing context stays shor
   The lead board's converted-card link opens `/operacional/vendas/<saleId>` itself, still writing nothing.
   Harnesses that render `SalesView` alone use `ControlledSalesView` (`apps/web/src/sales-ops/__tests__/controlled-sales-view.tsx`) as their stand-in for the URL.
   Oracles: `navigation.test.ts` (`keeps a proposta id only on the vendas view`, `drops a proposta id for an operator who cannot see the workspace`), `sale-deep-link-route.test.ts`, `sale-deep-link.test.tsx`.
+- Sales edition (feature `edicao-leads`, v4.3.0). `profile.edition` comes from the token's `entitlements.modules` through `resolveSalesEdition` (`@fxl-sales/shared-utils/sales-edition`) in `profileFromToken`; `useSalesEdition()` reads it.
+  Every navigation export that takes roles takes a trailing `edition = 'full'`; the full branch is today's code verbatim and is pinned by literal tables in `navigation-edition.test.ts`.
+  Leads edition: `admin` sees `operacional` [`leads` Prospecção] and `cadastros` [`pessoas` labelled Vendedores, `etapas`]; a non-admin `seller` sees `meus-dados` [`leads` Minha prospecção]; `finder` grants nothing; `tatico` is never visible.
+  An admin does not get `meus-dados` in the leads edition, because every admin-bearing claim also yields `seller` and AC2 gives the gestor exactly three screens.
+  `NoRoleGuard` keys on `getVisibleWorkspaces(roles, edition)`; a leads-edition finder-only operator stays on `/no-role` with no loop (oracle `no-role-redirect.test.tsx`).
+  `SalesOpsApp` and `NoRoleGuard` read `profile.edition` from `useAuthProfile()`, never `useSalesEdition()`, so the shell harnesses that mock `@/auth/react` keep working.
