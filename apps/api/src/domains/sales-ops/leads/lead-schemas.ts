@@ -1,7 +1,8 @@
 import { z } from 'zod';
+import { isAfterTodayInSaoPaulo, isIsoDay } from '@fxl-sales/shared-utils/sao-paulo-day';
 
 /**
- * The lead entity's wire contract. Imports ONLY zod - no database, no service -
+ * The lead entity's wire contract. Imports only zod and the pure sao-paulo-day subpath - no database, no service -
  * which is what keeps `lead-contract.test.ts` a pure unit test.
  *
  * WHY `.strict()`, a deliberate deviation from the rest of this domain.
@@ -120,3 +121,68 @@ export type UpdateLeadInput = z.infer<typeof UpdateLeadSchema>;
 export type MoveLeadInput = z.infer<typeof MoveLeadSchema>;
 export type ListLeadsQuery = z.infer<typeof ListLeadsQuerySchema>;
 export type LeadProductInput = z.infer<typeof LeadProductSchema>;
+
+/**
+ * The LEADS EDITION wire contract (edicao-leads, SEAM-CONTRACT section 2).
+ *
+ * A separate schema rather than a widened LeadFieldsSchema, on purpose: the full
+ * schemas above stay byte-identical and `.strict()`, so an FXL client can never
+ * send a contact key, and a leads-edition client can never send an empresa,
+ * produtos or a value. The route picks one by `leadFieldSet(salesEdition)`.
+ *
+ * Every optional text normalizes the same way: trimmed, and an empty string is
+ * stored as NULL ("cleared"), while an ABSENT key stays absent (PATCH semantics).
+ */
+function blankToNull(value: string | null | undefined): string | null | undefined {
+  if (value === undefined || value === null) return value;
+  return value === '' ? null : value;
+}
+
+const ContactPhoneSchema = z.string().trim().max(40).nullish().transform(blankToNull);
+
+const ContactEmailSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .max(254)
+  .refine((value) => value === '' || z.string().email().safeParse(value).success, {
+    message: 'contactEmail must be a valid e-mail address',
+  })
+  .nullish()
+  .transform(blankToNull);
+
+/**
+ * A civil day, never after today in Sao Paulo. Compared as a string, never through Date.
+ * Zod runs every refine even after an earlier one failed, so the future check
+ * re-guards with `isIsoDay` (an impossible day is already reported above) instead
+ * of letting `isAfterTodayInSaoPaulo` throw its RangeError.
+ */
+const ContactBirthDateSchema = z
+  .string()
+  .trim()
+  .refine((value) => value === '' || isIsoDay(value), {
+    message: 'contactBirthDate must be a real calendar day (YYYY-MM-DD)',
+  })
+  .refine((value) => value === '' || !isIsoDay(value) || !isAfterTodayInSaoPaulo(value), {
+    message: 'contactBirthDate cannot be in the future',
+  })
+  .nullish()
+  .transform(blankToNull);
+
+export const ContactLeadFieldsSchema = z
+  .object({
+    contactName: z.string().trim().min(1).max(140),
+    contactPhone: ContactPhoneSchema,
+    contactEmail: ContactEmailSchema,
+    contactBirthDate: ContactBirthDateSchema,
+    // A2: null clears, '' is read as null, absent stays absent (PATCH semantics).
+    description: z.string().trim().max(4000).nullish().transform(blankToNull),
+    sellerPersonId: z.preprocess((value) => (value === '' ? null : value), uuid.nullish()),
+  })
+  .strict();
+
+export const CreateContactLeadSchema = ContactLeadFieldsSchema;
+export const UpdateContactLeadSchema = ContactLeadFieldsSchema.partial().strict();
+
+export type CreateContactLeadInput = z.infer<typeof CreateContactLeadSchema>;
+export type UpdateContactLeadInput = z.infer<typeof UpdateContactLeadSchema>;

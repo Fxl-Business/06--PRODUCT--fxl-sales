@@ -1,19 +1,25 @@
+import { leadFieldSet } from '@fxl-sales/shared-utils/sales-edition';
 import { type Context, Hono } from 'hono';
 import { z } from 'zod';
 import { getDb } from '../../../db/client.js';
 import {
+  CreateContactLeadSchema,
   CreateLeadSchema,
   ListLeadsQuerySchema,
   MoveLeadSchema,
+  UpdateContactLeadSchema,
   UpdateLeadSchema,
 } from './lead-schemas.js';
 import {
   LeadInputError,
   type LeadScope,
+  type WriteLeadResult,
+  createContactLead,
   createLead,
   getLead,
   listLeads,
   moveLead,
+  updateContactLead,
   updateLead,
 } from './lead-service.js';
 
@@ -53,6 +59,19 @@ function leadScope(c: Context): LeadScope {
     email: typeof email === 'string' && email.trim() !== '' ? email : null,
     isAdmin: (c.get('userRoles') ?? []).includes('admin'),
   };
+}
+
+/**
+ * Which lead wire contract this request speaks, from the edition the auth
+ * middleware resolved from the VERIFIED token. Absent means 'full', the same
+ * fail-to-full rule requireCapability applies, so it can never change FXL.
+ */
+function usesContactFields(c: Context): boolean {
+  return leadFieldSet(c.get('salesEdition') ?? 'full') === 'contact';
+}
+
+function validationResponse(c: Context, error: z.ZodError) {
+  return c.json({ error: 'validation_error', issues: error.flatten() }, 400);
 }
 
 /**
@@ -104,18 +123,24 @@ leadsRouter.get('/', async (c) => {
 });
 
 leadsRouter.post('/', async (c) => {
-  const parsed = CreateLeadSchema.safeParse(await c.req.json().catch(() => ({})));
-  if (!parsed.success) {
-    return c.json({ error: 'validation_error', issues: parsed.error.flatten() }, 400);
-  }
+  const body = await c.req.json().catch(() => ({}));
+  let result: WriteLeadResult;
   try {
-    const result = await createLead(getDb(), c.get('orgId'), parsed.data, leadScope(c));
-    if (!result.ok) return failureResponse(c, result.reason);
-    return c.json({ lead: result.lead }, 201);
+    if (usesContactFields(c)) {
+      const parsed = CreateContactLeadSchema.safeParse(body);
+      if (!parsed.success) return validationResponse(c, parsed.error);
+      result = await createContactLead(getDb(), c.get('orgId'), parsed.data, leadScope(c));
+    } else {
+      const parsed = CreateLeadSchema.safeParse(body);
+      if (!parsed.success) return validationResponse(c, parsed.error);
+      result = await createLead(getDb(), c.get('orgId'), parsed.data, leadScope(c));
+    }
   } catch (error) {
     if (error instanceof LeadInputError) return leadInputErrorResponse(c, error);
     throw error;
   }
+  if (!result.ok) return failureResponse(c, result.reason);
+  return c.json({ lead: result.lead }, 201);
 });
 
 leadsRouter.get('/:id', async (c) => {
@@ -129,24 +154,30 @@ leadsRouter.get('/:id', async (c) => {
 leadsRouter.patch('/:id', async (c) => {
   const id = leadIdSchema.safeParse(c.req.param('id'));
   if (!id.success) return c.json({ error: 'not_found' }, 404);
-  const parsed = UpdateLeadSchema.safeParse(await c.req.json().catch(() => ({})));
-  if (!parsed.success) {
-    return c.json({ error: 'validation_error', issues: parsed.error.flatten() }, 400);
-  }
+  const body = await c.req.json().catch(() => ({}));
+  let result: WriteLeadResult;
   try {
-    const result = await updateLead(
-      getDb(),
-      c.get('orgId'),
-      id.data,
-      parsed.data,
-      leadScope(c),
-    );
-    if (!result.ok) return failureResponse(c, result.reason);
-    return c.json({ lead: result.lead });
+    if (usesContactFields(c)) {
+      const parsed = UpdateContactLeadSchema.safeParse(body);
+      if (!parsed.success) return validationResponse(c, parsed.error);
+      result = await updateContactLead(
+        getDb(),
+        c.get('orgId'),
+        id.data,
+        parsed.data,
+        leadScope(c),
+      );
+    } else {
+      const parsed = UpdateLeadSchema.safeParse(body);
+      if (!parsed.success) return validationResponse(c, parsed.error);
+      result = await updateLead(getDb(), c.get('orgId'), id.data, parsed.data, leadScope(c));
+    }
   } catch (error) {
     if (error instanceof LeadInputError) return leadInputErrorResponse(c, error);
     throw error;
   }
+  if (!result.ok) return failureResponse(c, result.reason);
+  return c.json({ lead: result.lead });
 });
 
 leadsRouter.post('/:id/move', async (c) => {

@@ -11,10 +11,12 @@ import {
   salesOpsSales,
 } from '../../../db/schema.js';
 import type {
+  CreateContactLeadInput,
   CreateLeadInput,
   LeadProductInput,
   ListLeadsQuery,
   MoveLeadInput,
+  UpdateContactLeadInput,
   UpdateLeadInput,
 } from './lead-schemas.js';
 import { LEADS_DEFAULT_LIMIT } from './lead-schemas.js';
@@ -81,6 +83,11 @@ export type LeadView = {
   clientNameSnapshot: string;
   estimatedValueBrl: number;
   description: string | null;
+  /** Leads-edition contact data (edicao-leads). Always present; null for FXL leads. */
+  contactPhone: string | null;
+  contactEmail: string | null;
+  /** ISO civil day `YYYY-MM-DD`; never formatted through Date. */
+  contactBirthDate: string | null;
   sellerPersonId: string | null;
   sellerNameSnapshot: string;
   saleId: string | null;
@@ -400,6 +407,9 @@ function toLeadView(
     clientNameSnapshot: lead.clientNameSnapshot,
     estimatedValueBrl: lead.estimatedValueBrl,
     description: lead.description,
+    contactPhone: lead.contactPhone,
+    contactEmail: lead.contactEmail,
+    contactBirthDate: lead.contactBirthDate,
     sellerPersonId: lead.sellerPersonId,
     sellerNameSnapshot: lead.sellerNameSnapshot,
     saleId: lead.saleId,
@@ -548,10 +558,83 @@ export type WriteLeadResult =
       reason: 'not_found' | 'seller_scope' | 'seller_person_unmapped' | 'already_converted';
     };
 
-export async function createLead(
+/**
+ * The one normalized record both create paths insert. Internal: the full and the
+ * leads-edition wire shapes are mapped onto it by the two exported wrappers
+ * below, so the scope, seller and stage rules exist exactly once.
+ */
+type LeadCreateRecord = {
+  contactName: string;
+  clientId: string | null;
+  clientName: string;
+  estimatedValueBrl: number;
+  description: string | null;
+  sellerPersonId: string | null;
+  products: LeadProductInput[];
+  contactPhone: string | null;
+  contactEmail: string | null;
+  contactBirthDate: string | null;
+};
+
+export function createLead(
   db: Db,
   orgId: string,
   input: CreateLeadInput,
+  scope: LeadScope,
+): Promise<WriteLeadResult> {
+  return insertLead(
+    db,
+    orgId,
+    {
+      contactName: input.contactName,
+      clientId: input.clientId ?? null,
+      clientName: input.clientName,
+      estimatedValueBrl: input.estimatedValueBrl,
+      description: input.description ?? null,
+      sellerPersonId: input.sellerPersonId ?? null,
+      products: input.products,
+      contactPhone: null,
+      contactEmail: null,
+      contactBirthDate: null,
+    },
+    scope,
+  );
+}
+
+/**
+ * The leads-edition create. No empresa, no value and no produtos exist in that
+ * edition, so the NOT NULL columns get their neutral values: client_id NULL,
+ * client_name_snapshot '' and estimated_value_brl 0, and no product row.
+ */
+export function createContactLead(
+  db: Db,
+  orgId: string,
+  input: CreateContactLeadInput,
+  scope: LeadScope,
+): Promise<WriteLeadResult> {
+  return insertLead(
+    db,
+    orgId,
+    {
+      contactName: input.contactName,
+      clientId: null,
+      clientName: '',
+      estimatedValueBrl: 0,
+      description: input.description ?? null,
+      sellerPersonId: input.sellerPersonId ?? null,
+      products: [],
+      contactPhone: input.contactPhone ?? null,
+      contactEmail: input.contactEmail ?? null,
+      contactBirthDate: input.contactBirthDate ?? null,
+    },
+    scope,
+  );
+}
+
+async function insertLead(
+  db: Db,
+  orgId: string,
+  record: LeadCreateRecord,
   scope: LeadScope,
 ): Promise<WriteLeadResult> {
   return withTenant(db, orgId, async (tx) => {
@@ -561,15 +644,15 @@ export async function createLead(
     // A seller may only file their OWN leads, and may not file an unassigned one
     // either - `null !== gate.sellerPersonId` catches that. A loud 403 rather
     // than a 404, because they named the id themselves, so it leaks nothing.
-    const requestedSeller = input.sellerPersonId ?? null;
+    const requestedSeller = record.sellerPersonId;
     if (gate.sellerPersonId && requestedSeller !== gate.sellerPersonId) {
       return { ok: false, reason: 'seller_scope' } as const;
     }
 
     const seller = requestedSeller ? await resolveSellerPersonId(tx, orgId, requestedSeller) : null;
-    const clientName = input.clientId
-      ? await resolveClientName(tx, orgId, input.clientId)
-      : input.clientName;
+    const clientName = record.clientId
+      ? await resolveClientName(tx, orgId, record.clientId)
+      : record.clientName;
 
     // A new lead always lands in the first ACTIVE normal stage by board order.
     // "position" is double-quoted in every hand-written SQL string because it is
@@ -587,6 +670,7 @@ export async function createLead(
       )
       .orderBy(asc(salesOpsLeadStages.position), asc(salesOpsLeadStages.name))
       .limit(1);
+    // The edition-independent "no etapa yet" answer; the leads edition starts with zero etapas (edicao-leads AC4).
     if (!stage) throw new LeadInputError('no_open_stage');
 
     const [{ next }] = (await tx
@@ -602,11 +686,14 @@ export async function createLead(
         orgId,
         stageId: stage.id,
         position: next,
-        contactName: input.contactName,
-        clientId: input.clientId ?? null,
+        contactName: record.contactName,
+        clientId: record.clientId,
         clientNameSnapshot: clientName,
-        estimatedValueBrl: input.estimatedValueBrl,
-        description: input.description ?? null,
+        estimatedValueBrl: record.estimatedValueBrl,
+        description: record.description,
+        contactPhone: record.contactPhone,
+        contactEmail: record.contactEmail,
+        contactBirthDate: record.contactBirthDate,
         sellerPersonId: seller?.id ?? null,
         sellerNameSnapshot: seller?.displayName ?? '',
         // Both literal, and both unreachable from CreateLeadSchema: a lead
@@ -618,16 +705,49 @@ export async function createLead(
       })
       .returning();
 
-    await replaceLeadProducts(tx, orgId, lead!.id, input.products);
+    await replaceLeadProducts(tx, orgId, lead!.id, record.products);
     return { ok: true, lead: await readLeadView(tx, orgId, lead!.id) } as const;
   });
 }
 
-export async function updateLead(
+/**
+ * Everything a lead PATCH may carry, across both editions. The full wire schema
+ * never produces the three contact keys and the contact schema never produces
+ * clientId, clientName, estimatedValueBrl or products, so each edition can only
+ * touch its own columns.
+ */
+type LeadUpdatePatch = UpdateLeadInput & {
+  contactPhone?: string | null | undefined;
+  contactEmail?: string | null | undefined;
+  contactBirthDate?: string | null | undefined;
+};
+
+export function updateLead(
   db: Db,
   orgId: string,
   id: string,
   input: UpdateLeadInput,
+  scope: LeadScope,
+): Promise<WriteLeadResult> {
+  return applyLeadUpdate(db, orgId, id, input, scope);
+}
+
+/** The leads-edition PATCH. Leaves empresa, value and produtos untouched. */
+export function updateContactLead(
+  db: Db,
+  orgId: string,
+  id: string,
+  input: UpdateContactLeadInput,
+  scope: LeadScope,
+): Promise<WriteLeadResult> {
+  return applyLeadUpdate(db, orgId, id, input, scope);
+}
+
+async function applyLeadUpdate(
+  db: Db,
+  orgId: string,
+  id: string,
+  input: LeadUpdatePatch,
   scope: LeadScope,
 ): Promise<WriteLeadResult> {
   return withTenant(db, orgId, async (tx) => {
@@ -677,6 +797,11 @@ export async function updateLead(
           ? { estimatedValueBrl: input.estimatedValueBrl }
           : {}),
         ...(input.description !== undefined ? { description: input.description ?? null } : {}),
+        ...(input.contactPhone !== undefined ? { contactPhone: input.contactPhone } : {}),
+        ...(input.contactEmail !== undefined ? { contactEmail: input.contactEmail } : {}),
+        ...(input.contactBirthDate !== undefined
+          ? { contactBirthDate: input.contactBirthDate }
+          : {}),
         ...(input.sellerPersonId !== undefined
           ? {
               sellerPersonId: seller?.id ?? null,
