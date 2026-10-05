@@ -4,8 +4,10 @@ import {
   DEFAULT_IDENTITY_ID,
   DEV_TOKEN_SIGNATURE,
   DEV_TOKEN_TTL_SECONDS,
+  FIXTURE_LEADS_EDITION_ORGANIZATION_ID,
   FXL_SALES_DEV_FAKE_ROSTER_SENTINEL,
   IDENTITIES,
+  LEADS_EDITION_MODULE,
   SALES_APPLICATION,
   WORKSPACES_CLAIM_CAP,
   allFakeOrgIds,
@@ -69,8 +71,9 @@ describe('branch coverage', () => {
 
   it('covers every painel set the real visibility rule can produce', () => {
     const paineisSets = new Set(IDENTITIES.map((identity) => identity.expectedPaineis.join('|')));
+    // operacional|cadastros is the leads-edition gestor (modules: ['sales.edition.leads']).
     expect(paineisSets).toEqual(
-      new Set(['tatico|operacional|cadastros|meus-dados', 'meus-dados', '']),
+      new Set(['tatico|operacional|cadastros|meus-dados', 'operacional|cadastros', 'meus-dados', '']),
     );
   });
 
@@ -137,15 +140,23 @@ describe('toHubClaims', () => {
 
   it('carries Effective Access explicitly and never derives it from modules', () => {
     for (const identity of IDENTITIES) {
-      expect(identity.modules).toEqual([]);
       expect(toHubClaims(identity).entitlements).toEqual({
         access: identity.hasAccess,
-        modules: [],
+        modules: [...identity.modules],
       });
     }
     expect(IDENTITIES.some((identity) => identity.hasAccess && identity.modules.length === 0)).toBe(
       true,
     );
+  });
+
+  it('carries add-on modules only on the two leads-edition identities, and exactly the edition module', () => {
+    expect(LEADS_EDITION_MODULE).toBe('sales.edition.leads');
+    const withModules = IDENTITIES.filter((identity) => identity.modules.length > 0);
+    expect(withModules.map((identity) => identity.id)).toEqual(['leads-owner', 'leads-seller']);
+    for (const identity of withModules) {
+      expect(identity.modules).toEqual([LEADS_EDITION_MODULE]);
+    }
   });
 
   it('names the Audience as app.fxl-sales', () => {
@@ -370,9 +381,15 @@ describe('allFakeOrgIds', () => {
   it('lists every org id the roster references, deduplicated', () => {
     const ids = allFakeOrgIds();
     expect(new Set(ids).size).toBe(ids.length);
-    expect(ids.length).toBe(4);
+    expect(ids.length).toBe(5);
     expect(new Set(ids)).toEqual(
-      new Set(['org_fake_norte', 'org_fake_sul', 'org_fake_sem_acesso', 'org_fake_integrado']),
+      new Set([
+        'org_fake_norte',
+        'org_fake_sul',
+        'org_fake_sem_acesso',
+        'org_fake_integrado',
+        'org_fake_leads',
+      ]),
     );
   });
 
@@ -396,6 +413,73 @@ describe('allFakeOrgIds', () => {
     const ids = allFakeOrgIds();
     for (const identity of IDENTITIES) {
       expect(ids).toContain(identity.activeWorkspaceId);
+    }
+  });
+});
+
+describe('the leads edition fixture', () => {
+  it('names the fixture org org_fake_leads and lists it among the seeded orgs', () => {
+    expect(FIXTURE_LEADS_EDITION_ORGANIZATION_ID).toBe('org_fake_leads');
+    expect(allFakeOrgIds()).toContain(FIXTURE_LEADS_EDITION_ORGANIZATION_ID);
+  });
+
+  it('appends the two identities after the existing roster and keeps the default identity', () => {
+    expect(IDENTITIES.map((identity) => identity.id).slice(-2)).toEqual(['leads-owner', 'leads-seller']);
+    expect(IDENTITIES.length).toBe(12);
+    expect(DEFAULT_IDENTITY_ID).toBe('team-owner');
+  });
+
+  it('gives the gestor the Hub owner claim shape with the edition module', () => {
+    const identity = findIdentity('leads-owner')!;
+    const claims = toHubClaims(identity, { nowSeconds: FIXED_NOW }) as {
+      workspaceId: string;
+      workspaceName: string;
+      entitlements: unknown;
+      roles: unknown;
+    };
+    expect(claims.workspaceId).toBe(FIXTURE_LEADS_EDITION_ORGANIZATION_ID);
+    expect(claims.workspaceName).toBe('Leads Simples (fake)');
+    expect(claims.entitlements).toEqual({ access: true, modules: ['sales.edition.leads'] });
+    expect(claims.roles).toEqual({ workspace: 'owner' });
+    expect(identity.expectedRoles).toEqual(['admin', 'seller', 'finder']);
+    expect(identity.expectedPaineis).toEqual(['operacional', 'cadastros']);
+  });
+
+  it('gives the vendedor the Hub member plus seller Seat claim shape with the edition module', () => {
+    const identity = findIdentity('leads-seller')!;
+    const claims = toHubClaims(identity, { nowSeconds: FIXED_NOW }) as {
+      workspaceId: string;
+      entitlements: unknown;
+      roles: unknown;
+      email: string;
+    };
+    expect(claims.workspaceId).toBe(FIXTURE_LEADS_EDITION_ORGANIZATION_ID);
+    expect(claims.entitlements).toEqual({ access: true, modules: ['sales.edition.leads'] });
+    expect(claims.roles).toEqual({ workspace: 'member', productRoles: ['seller'] });
+    expect(claims.email).toBe(identity.profile.email);
+    expect(identity.expectedRoles).toEqual(['seller']);
+    expect(identity.expectedPaineis).toEqual(['meus-dados']);
+  });
+
+  it('keeps every module-bearing identity inside the fixture org, so the module never rides into a full-edition org', () => {
+    for (const identity of IDENTITIES.filter((entry) => entry.modules.length > 0)) {
+      expect(identity.workspaces.map((workspace) => workspace.workspaceId)).toEqual([
+        FIXTURE_LEADS_EDITION_ORGANIZATION_ID,
+      ]);
+      const claims = toHubClaims(identity, { organizationId: 'org_fake_norte' }) as {
+        workspaceId: string;
+      };
+      expect(claims.workspaceId).toBe(FIXTURE_LEADS_EDITION_ORGANIZATION_ID);
+    }
+  });
+
+  it('projects the same modules into the API auth context', () => {
+    for (const id of ['leads-owner', 'leads-seller']) {
+      const identity = findIdentity(id)!;
+      expect(toHubAuthContext(identity, { nowSeconds: FIXED_NOW }).entitlements).toEqual({
+        access: true,
+        modules: ['sales.edition.leads'],
+      });
     }
   });
 });

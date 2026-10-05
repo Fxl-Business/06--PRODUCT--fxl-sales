@@ -7,6 +7,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppAuthProvider, Protected, useAuthProfile } from '@/auth/react';
 import { getRolesFromHubClaims } from '@/auth/claims';
+import { resolveSalesEdition, SALES_EDITION_LEADS_MODULE } from '@fxl-sales/shared-utils/sales-edition';
 import { getVisibleWorkspaces } from '@/sales-ops/navigation';
 import { getDevIdentitySession, setDevIdentitySession } from '../dev-identity-registry';
 import { installDevIdentityIfEnabled } from '../install-dev-identity';
@@ -172,6 +173,8 @@ describe('dev identity roles', () => {
    * wrong value must ALSO fail here, which is the whole point: this is the
    * only place that checks those two fields are true of the real
    * translation rather than merely internally consistent.
+   *
+   * The edition the Probe passes comes from the REAL profile (slice 05), so leads-owner proves the leads-edition gestor narrowing end to end.
    */
   const REACHABLE_IDENTITIES = fakeRoster.IDENTITIES.filter((identity) => identity.hasAccess);
 
@@ -199,6 +202,10 @@ describe('dev identity roles', () => {
         Buffer.from(token.split('.')[1] ?? '', 'base64url').toString('utf8'),
       ) as HubClaimsLike;
       expect(getRolesFromHubClaims(claims)).toEqual([...identity.expectedRoles]);
+      const claimedModules = (claims as { entitlements?: { modules?: unknown[] } }).entitlements?.modules;
+      expect(resolveSalesEdition(claimedModules)).toBe(
+        identity.modules.includes(SALES_EDITION_LEADS_MODULE) ? 'leads' : 'full',
+      );
 
       teardown(host, root);
     },
@@ -326,5 +333,24 @@ describe('dev identity roles', () => {
     const adopted = await installDevIdentityIfEnabled();
 
     expect(adopted).toBe(fake.DEFAULT_IDENTITY_ID);
+  });
+
+  it('pins the roster module string to the shared edition contract', () => {
+    expect(fakeRoster.LEADS_EDITION_MODULE).toBe(SALES_EDITION_LEADS_MODULE);
+  });
+
+  it('adopts the leads-edition gestor and narrows the painéis to Prospecção and Cadastros', async () => {
+    vi.stubEnv('VITE_AUTH_FAKE', '1');
+    localStorage.setItem(STORAGE_KEY, 'leads-owner');
+
+    const adopted = await installDevIdentityIfEnabled();
+    expect(adopted).toBe('leads-owner');
+
+    const { host, root } = renderProbe();
+    await flush();
+
+    expect(workspacesText(host)).toBe('operacional,cadastros');
+
+    teardown(host, root);
   });
 });

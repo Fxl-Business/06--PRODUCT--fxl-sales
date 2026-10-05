@@ -33,9 +33,13 @@
  * fixture standing on it, and it records in a named test that no fixture declares `['admin']`
  * alone.
  *
- * F5 - `entitlements.modules` is empty for every identity on purpose: modules carry ADD-ON
- * products only and must never be read for baseline access, so every fixture proves Effective
- * Access is readable with an empty `modules` array.
+ * F5 - `entitlements.modules` is empty for every identity EXCEPT the two leads-edition fixtures
+ * (`leads-owner`, `leads-seller`), which carry exactly `LEADS_EDITION_MODULE`. Modules carry
+ * ADD-ON products only and must never be read for baseline access, so every other fixture
+ * still proves Effective Access is readable with an empty `modules` array. The module string
+ * is hardcoded here on purpose (this package depends on nothing in the workspace); its
+ * equality with `SALES_EDITION_LEADS_MODULE` in `@fxl-sales/shared-utils/sales-edition` is
+ * pinned by `apps/web/src/dev/__tests__/dev-identity-roles.test.tsx`.
  */
 
 import {
@@ -76,7 +80,7 @@ export interface FakeIdentity {
   activeWorkspaceId: string;
   /** Effective Access of the ACTIVE Organization. Carried EXPLICITLY, never derived. */
   hasAccess: boolean;
-  /** ADD-ON module ids only. Empty for every fixture today - see the docblock. */
+  /** ADD-ON module ids only. Empty except on the leads-edition fixtures - see the docblock F5. */
   modules: string[];
   /** The Hub Organization role in the ACTIVE Organization. */
   workspaceRole: FakeWorkspaceRole;
@@ -88,7 +92,7 @@ export interface FakeIdentity {
   /** What `getRolesFromHubClaims` MUST return for this identity, in that exact order.
    *  A DECLARED expectation, cross-checked against the real function by slice 03. */
   expectedRoles: readonly FakeAppRole[];
-  /** What `getVisibleWorkspaces(expectedRoles)` MUST return, in that exact order. */
+  /** What `getVisibleWorkspaces(expectedRoles, edition)` MUST return, in that exact order, where the edition is the one `modules` resolves to ('leads' only for the edition module, otherwise 'full'). */
   expectedPaineis: readonly FakeSalesPainel[];
 }
 
@@ -112,6 +116,14 @@ export const DEV_TOKEN_SIGNATURE = 'development-not-a-signature';
  *  docblock so a tree-shaker cannot drop it from the package source. */
 export const FXL_SALES_DEV_FAKE_ROSTER_SENTINEL = 'FXL_SALES_DEV_FAKE_ROSTER_SENTINEL';
 
+/** The Sales leads-edition module id, as the Hub puts it in `entitlements.modules`. Hardcoded:
+ *  this package depends on nothing in the workspace. Pinned equal to the shared-utils constant
+ *  by apps/web/src/dev/__tests__/dev-identity-roles.test.tsx. */
+export const LEADS_EDITION_MODULE = 'sales.edition.leads';
+
+/** The leads-edition fixture Organization. Seeded with no etapas by apps/api/scripts/seed-dev.ts. */
+export const FIXTURE_LEADS_EDITION_ORGANIZATION_ID = 'org_fake_leads';
+
 /** Builds one Organization membership in the Hub's wire shape. */
 function workspace(
   workspaceId: string,
@@ -128,7 +140,7 @@ function asRole(org: FakeWorkspace, role: FakeWorkspaceRole): FakeWorkspace {
   return { ...org, role };
 }
 
-// Four Organizations, and exactly four. No accented characters in the org NAMES: these
+// Five Organizations, and exactly five. No accented characters in the org NAMES: these
 // strings travel through a hand-rolled base64url minter and a hand-rolled base64 decoder, and
 // keeping them ASCII removes an entire class of encoding question from a development fixture.
 const NORTE = workspace('org_fake_norte', 'Agencia Norte'); // entitled, the everyday org
@@ -136,8 +148,10 @@ const SUL = workspace('org_fake_sul', 'Consultoria Sul'); // entitled, the switc
 const SEM = workspace('org_fake_sem_acesso', 'Marca Sem Acesso', 'member', []); // NOT entitled
 // The shared Sales/Finance integration fixture. The id is imported, never hand-typed.
 const INTEGRADO = workspace(FIXTURE_INTEGRATED_ORGANIZATION_ID, 'Grupo Integrado'); // entitled
+// The leads-edition fixture: only the two module-bearing identities belong to it.
+const LEADS = workspace(FIXTURE_LEADS_EDITION_ORGANIZATION_ID, 'Leads Simples (fake)'); // entitled
 
-// Ten identities, in this exact order. IDENTITIES[0] is the everyday driver, so
+// Twelve identities, in this exact order. IDENTITIES[0] is the everyday driver, so
 // DEFAULT_IDENTITY_ID needs no separate concept.
 export const IDENTITIES: readonly FakeIdentity[] = [
   // 1. team-owner - the everyday path, and the `workspaceRole === 'owner'` literal in
@@ -317,6 +331,41 @@ export const IDENTITIES: readonly FakeIdentity[] = [
     workspaces: [INTEGRADO],
     expectedRoles: ['admin', 'seller', 'finder'],
     expectedPaineis: ['tatico', 'operacional', 'cadastros', 'meus-dados'],
+  },
+  // 11. leads-owner - the gestor of the leads edition: workspace owner (so getRolesFromHubClaims
+  //     yields the full-access role set) whose token carries the edition module, so the
+  //     navigation narrows to operacional (Prospeccao) and cadastros (Vendedores, Etapas).
+  {
+    id: 'leads-owner',
+    label: 'Lara (gestora, edicao leads)',
+    exercises: 'dona da organizacao na edicao leads: Prospeccao, Vendedores e Etapas do funil, sem propostas',
+    accountId: 'user_fake_lara',
+    activeWorkspaceId: LEADS.workspaceId,
+    hasAccess: true,
+    modules: [LEADS_EDITION_MODULE],
+    workspaceRole: 'owner',
+    profile: { name: 'Lara Gestora', email: 'lara@fake.local' },
+    workspaces: [LEADS],
+    expectedRoles: ['admin', 'seller', 'finder'],
+    expectedPaineis: ['operacional', 'cadastros'],
+  },
+  // 12. leads-seller - a vendedor of the leads edition: workspace member with the seller Seat.
+  //     The seed gives org_fake_leads one UNBOUND vendedor pessoa with this email, so the first
+  //     access exercises the real email self-claim, exactly like a Construbom vendedor.
+  {
+    id: 'leads-seller',
+    label: 'Leo (vendedor, edicao leads)',
+    exercises: 'somente Seat vendedor na edicao leads: ve apenas Minha prospeccao',
+    accountId: 'user_fake_leo',
+    activeWorkspaceId: LEADS.workspaceId,
+    hasAccess: true,
+    modules: [LEADS_EDITION_MODULE],
+    workspaceRole: 'member',
+    productRoles: ['seller'],
+    profile: { name: 'Leo Vendedor', email: 'leo@fake.local' },
+    workspaces: [asRole(LEADS, 'member')],
+    expectedRoles: ['seller'],
+    expectedPaineis: ['meus-dados'],
   },
 ];
 

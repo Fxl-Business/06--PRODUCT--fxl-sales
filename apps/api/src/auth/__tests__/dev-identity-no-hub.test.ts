@@ -255,4 +255,31 @@ describe('the development identity adapter with no Hub configuration at all', ()
     });
     expect(res.status).toBe(200);
   });
+  it('resolves the leads edition from a leads identity token and full from every other', async () => {
+    const expectations: Array<[string, string]> = [
+      ['leads-owner', 'leads'],
+      ['leads-seller', 'leads'],
+      ['team-owner', 'full'],
+      ['seller', 'full'],
+    ];
+    for (const [identityId, edition] of expectations) {
+      const res = await app.request('http://localhost/probe', {
+        headers: { 'x-fake-identity': identityId },
+      });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.salesEdition).toBe(edition);
+    }
+  });
+
+  it('serves the leads identities on the leads fixture org', async () => {
+    const fake = await import('@fxl-sales/auth-fake');
+    for (const identityId of ['leads-owner', 'leads-seller']) {
+      const res = await app.request('http://localhost/probe', {
+        headers: { 'x-fake-identity': identityId },
+      });
+      const body = await res.json();
+      expect(body.orgId).toBe(fake.FIXTURE_LEADS_EDITION_ORGANIZATION_ID);
+    }
+  });
 });
