@@ -67,3 +67,14 @@ Moved verbatim from `CLAUDE.md` on 2026-09-22 so the standing context stays shor
 - With the adapter installed, `getInvitationsClient()` in `apps/api/src/domains/sellers/invitations-client.ts` returns null even when `apps/api/.env` carries a valid Hub configuration, so a fake bearer never reaches the real Hub.
 - The check is `isAppAuthAdapterInstalled()` in `apps/api/src/middleware/app-auth.ts`, which reads the adapter slot filled once at boot; it is decided lazily on the first call and memoized, and it never reads `SALES_AUTH_FAKE`.
 - Creating a seller under `make dev-fake` saves the row and shows the `hub_auth_not_configured` operator copy; the row then offers `Enviar convite`.
+
+## Leads edition fixture (v4.3.0)
+
+- The roster carries two leads-edition identities, `leads-owner` (Hub workspace `owner`) and `leads-seller` (workspace `member` with the `seller` Seat), both only members of `org_fake_leads`, named `Leads Simples (fake)`.
+- They are the only identities whose token carries `entitlements.modules`, exactly `['sales.edition.leads']`, so the edition travels the REAL path: `applyHubAuthContext` resolves `salesEdition` on the API and `profileFromToken` resolves `profile.edition` on the web.
+- The module string is hardcoded in `packages/auth-fake` as `LEADS_EDITION_MODULE` because the package depends on nothing in the workspace; `apps/web/src/dev/__tests__/dev-identity-roles.test.tsx` pins it equal to `SALES_EDITION_LEADS_MODULE`.
+- Their `expectedPaineis` are what `getVisibleWorkspaces(roles, edition)` returns: `operacional,cadastros` for the gestor and `meus-dados` for the vendedor.
+- Both identities belong only to the fixture org, so switching Organization can never carry the module into a full-edition org.
+- `buildDevSeedPlan` takes `leadsEditionOrgIds`; `seed-dev.ts` passes the fixture org, which then gets no settings row, no etapa, no catalog and no proposta, only the two system funcoes and one active vendedor pessoa with `contact_email` equal to `leads-seller`'s email and `hub_account_id` NULL.
+- The pessoa is unbound on purpose: the first `leads-seller` request goes through the real email self-claim (`resolveCallerPersonId`), the same path a Construbom vendedor takes. Re-running the seed resets the claim.
+- The production activation of the edition is documented in `nexo/playbooks/ativar-edicao-leads.md`.

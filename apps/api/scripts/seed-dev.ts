@@ -258,7 +258,9 @@ async function main(): Promise<void> {
   // Step 4: the roster, dynamically imported and mapped onto SeedIdentity[].
   // This is the ONE place in this file that knows the roster's real field
   // names.
-  const { allFakeOrgIds, IDENTITIES } = await import('@fxl-sales/auth-fake');
+  const { allFakeOrgIds, IDENTITIES, FIXTURE_LEADS_EDITION_ORGANIZATION_ID } = await import(
+    '@fxl-sales/auth-fake'
+  );
   const identities: SeedIdentity[] = IDENTITIES.map((identity) => ({
     accountId: identity.accountId,
     workspaceIds: identity.workspaces.map((workspace) => workspace.workspaceId),
@@ -289,7 +291,13 @@ async function main(): Promise<void> {
   }
 
   const cutoff = parseSeedCutoff(resolveCutoffIso());
-  const plan: DevSeedPlan = buildDevSeedPlan({ orgIds, identities, cutoff });
+  const plan: DevSeedPlan = buildDevSeedPlan({
+    orgIds,
+    identities,
+    cutoff,
+    // The leads-edition fixture org gets zero etapas and one unbound vendedor.
+    leadsEditionOrgIds: [FIXTURE_LEADS_EDITION_ORGANIZATION_ID],
+  });
 
   // Step 6: everything database-shaped loads here, after the guard has had its
   // say.
