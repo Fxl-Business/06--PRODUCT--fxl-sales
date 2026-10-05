@@ -30,16 +30,9 @@ import {
 import { and, eq, sql } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { deleteSettlementsForOrgs } from '../../../db/__tests__/settlement-test-cleanup.js';
+import { purgeOrgLedgerForTests } from '../../../db/__tests__/settlement-test-cleanup.js';
 import { closeDb, getAdminDb, getDb } from '../../../db/client.js';
-import {
-  salesOpsPayables,
-  salesOpsReceivables,
-  salesOpsSaleItems,
-  salesOpsSaleProfessionals,
-  salesOpsSales,
-  salesOpsSettlements,
-} from '../../../db/schema.js';
+import { salesOpsReceivables, salesOpsSales, salesOpsSettlements } from '../../../db/schema.js';
 import { transitionSale } from '../../sales-ops/service.js';
 import {
   deriveSettlementAnomaly,
@@ -218,6 +211,10 @@ async function receivableRow(id: string) {
 }
 
 beforeAll(async () => {
+  // FIX is the dev seed's fixture org too, and both share the local database:
+  // start from an empty ledger so seeded sales, leads and outbox rows can never
+  // collide with this file's sequences or survive into its assertions.
+  await purgeOrgLedgerForTests([FIX]);
   const got = await authority.ticketClient.get({ organizationId: FIX, producerApplicationId: SALES_APP });
   expect(got.status).toBe('ok');
   if (got.status !== 'ok') return;
@@ -228,16 +225,7 @@ beforeAll(async () => {
 });
 
 afterEach(async () => {
-  await deleteSettlementsForOrgs([FIX]);
-  const db = getAdminDb();
-  await db.delete(salesOpsPayables).where(eq(salesOpsPayables.orgId, FIX));
-  await db.delete(salesOpsReceivables).where(eq(salesOpsReceivables.orgId, FIX));
-  await db.delete(salesOpsSaleProfessionals).where(eq(salesOpsSaleProfessionals.orgId, FIX));
-  await db.delete(salesOpsSaleItems).where(eq(salesOpsSaleItems.orgId, FIX));
-  await db.delete(salesOpsSales).where(eq(salesOpsSales.orgId, FIX));
-  await db.execute(sql`DELETE FROM integration_outbox WHERE organization_id = ${FIX}`);
-  await db.execute(sql`DELETE FROM integration_inbox WHERE organization_id = ${FIX}`);
-  await db.execute(sql`DELETE FROM integration_cursor WHERE organization_id = ${FIX}`);
+  await purgeOrgLedgerForTests([FIX]);
 });
 
 afterAll(async () => {

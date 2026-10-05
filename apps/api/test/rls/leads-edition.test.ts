@@ -87,7 +87,13 @@ describe('sales operations leads edition: contact leads, vendedor-only pessoas, 
   });
 
   afterAll(async () => {
+    // Archiving and restoring a pessoa (the status-only case) appends hash-chained
+    // audit_log rows. Delete them while they are still the ledger TAIL (safe only
+    // because the integration project runs files serially): a leftover tail makes
+    // the next file that verifies a chain from genesis (conversion-ingest) fail,
+    // depending on which file vitest happens to schedule in between.
     for (const orgId of orgIds) {
+      await adminClient`DELETE FROM audit_log WHERE actor_org_id = ${orgId}`;
       await adminClient`DELETE FROM sales_ops_lead_products WHERE org_id = ${orgId}`;
       await adminClient`DELETE FROM sales_ops_leads WHERE org_id = ${orgId}`;
       await adminClient`DELETE FROM sales_ops_lead_stages WHERE org_id = ${orgId}`;
