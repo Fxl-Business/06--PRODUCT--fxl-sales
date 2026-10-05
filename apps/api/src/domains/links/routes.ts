@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { requireCapability } from '../../middleware/require-capability.js';
 import { getDb } from '../../db/client.js';
 import { env } from '../../env.js';
 import { CreateLinkSchema, RevokeLinkSchema, createLink, listFinderLinks, revokeLink } from './service.js';
@@ -9,6 +10,9 @@ import { CreateLinkSchema, RevokeLinkSchema, createLink, listFinderLinks, revoke
  * the provider account id and resolve to finders.id internally (resolveFinderId).
  */
 export const linksRouter = new Hono();
+
+// Edition capability gate (edicao-leads). Registered before every route so it runs first.
+linksRouter.use('*', requireCapability('finders'));
 
 /**
  * Maps a thrown service Error message to an HTTP status + JSON body. A missing

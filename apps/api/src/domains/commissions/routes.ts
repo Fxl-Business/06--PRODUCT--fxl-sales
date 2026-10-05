@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { requireCapability } from '../../middleware/require-capability.js';
 import { getAdminDb, getDb } from '../../db/client.js';
 import { setTenantContext } from '../../middleware/auth.js';
 import { resolveFinderId } from '../links/service.js';
@@ -23,6 +24,10 @@ import {
  */
 export const commissionsRouter = new Hono();
 export const commissionsAdminRouter = new Hono();
+
+// Edition capability gate (edicao-leads). Registered before every route so it runs first.
+commissionsRouter.use('*', requireCapability('commissions'));
+commissionsAdminRouter.use('*', requireCapability('commissions'));
 
 function mapError(message: string): { status: 404 | 409; body: { error: string } } | null {
   switch (message) {

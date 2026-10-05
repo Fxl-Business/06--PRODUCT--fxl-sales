@@ -70,6 +70,7 @@ beforeAll(async () => {
       orgId: c.get('orgId'),
       userRole: c.get('userRole'),
       userRoles: c.get('userRoles'),
+      salesEdition: c.get('salesEdition'),
       actorName: appAuth.getHubActorDisplayName(c.get('hubAuth')),
       // The value `leadScope` in domains/sales-ops/leads/lead-routes.ts reads.
       email: c.get('hubAuth')?.claims?.email ?? null,
@@ -222,6 +223,30 @@ describe('the development identity adapter with no Hub configuration at all', ()
     const body = await res.json();
     expect(body.email).not.toBeNull();
     expect(body.email).toBe(identity.profile.email);
+  });
+
+  it('resolves the sales edition through applyHubAuthContext for every entitled roster identity', async () => {
+    const fake = await import('@fxl-sales/auth-fake');
+    const { resolveSalesEdition } = await import('@fxl-sales/shared-utils/sales-edition');
+    let served = 0;
+    for (const identity of fake.IDENTITIES) {
+      const res = await app.request('http://localhost/probe', {
+        headers: { 'x-fake-identity': identity.id },
+      });
+      if (res.status !== 200) continue;
+      served += 1;
+      const body = await res.json();
+      expect(body.salesEdition).toBe(resolveSalesEdition(identity.modules));
+    }
+    expect(served).toBeGreaterThan(0);
+  });
+
+  it("serves today's roster as the full edition", async () => {
+    const res = await app.request('http://localhost/probe', {
+      headers: { 'x-fake-identity': 'team-admin' },
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()).salesEdition).toBe('full');
   });
 
   it('does not contact any Hub', async () => {

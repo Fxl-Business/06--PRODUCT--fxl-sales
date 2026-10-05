@@ -30,7 +30,9 @@ vi.hoisted(() => {
   vi.stubEnv('FXL_HUB_AUDIENCE', '');
 });
 
+import { Hono } from 'hono';
 import {
+  applyHubAuthContext,
   getHubLegacyAuthContext,
   resolveHubPostLoginErrorRedirect,
   resolveHubPostLoginRedirect,
@@ -170,5 +172,46 @@ describe('resolveHubPostLoginRedirect', () => {
   it('falls back to / and /?error=auth when neither the pair nor CORS_ORIGIN is set', () => {
     expect(resolveHubPostLoginRedirect({})).toBe('/');
     expect(resolveHubPostLoginErrorRedirect({})).toBe('/?error=auth');
+  });
+});
+
+describe('applyHubAuthContext resolves the sales edition once', () => {
+  async function probe(entitlements: { access?: boolean; modules?: string[] }) {
+    const app = new Hono();
+    app.use('*', (c, next) => applyHubAuthContext(c, hubAuthContext({ entitlements }), next));
+    app.get('/', (c) => c.json({ salesEdition: c.get('salesEdition'), orgId: c.get('orgId') }));
+    return (await app.request('http://localhost/')).json();
+  }
+
+  it('modules [] resolves full', async () => {
+    expect((await probe({ modules: [] })).salesEdition).toBe('full');
+  });
+
+  it('the leads module resolves leads', async () => {
+    expect((await probe({ modules: ['sales.edition.leads'] })).salesEdition).toBe('leads');
+  });
+
+  it('an unrelated add-on resolves full', async () => {
+    expect((await probe({ modules: ['sales.some-other-addon'] })).salesEdition).toBe('full');
+  });
+
+  it('the leads module beside another add-on resolves leads', async () => {
+    const body = await probe({ modules: ['sales.some-other-addon', 'sales.edition.leads'] });
+    expect(body.salesEdition).toBe('leads');
+  });
+
+  it('a near-miss spelling resolves full', async () => {
+    expect((await probe({ modules: ['SALES.EDITION.LEADS'] })).salesEdition).toBe('full');
+    expect((await probe({ modules: ['sales.edition.leads '] })).salesEdition).toBe('full');
+  });
+
+  it('absent modules resolve full', async () => {
+    expect((await probe({ modules: undefined })).salesEdition).toBe('full');
+  });
+
+  it('tenancy is unchanged', async () => {
+    const body = await probe({ modules: ['sales.edition.leads'] });
+    expect(body.salesEdition).toBe('leads');
+    expect(body.orgId).toBe('org_active_1');
   });
 });

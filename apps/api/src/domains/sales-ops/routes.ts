@@ -6,6 +6,7 @@ import {
   hasAdminRole,
   requireAdmin,
 } from '../../middleware/require-admin.js';
+import { requireCapability } from '../../middleware/require-capability.js';
 import { HISTORY_MAX_LIMIT, listOrgAuditHistory } from '../audit/history-service.js';
 import { importRouter } from '../import/routes.js';
 import { cadastroActor } from './cadastro-actor.js';
@@ -67,6 +68,25 @@ import {
 const saleIdSchema = z.string().uuid();
 
 export const salesOpsRouter = new Hono();
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Edition capability gates (edicao-leads). They MUST stay above every route in
+// this file: Hono runs matched handlers in registration order, so a gate
+// registered below a handler never runs before it. `/x/*` also matches `/x`.
+// Open in every edition, deliberately: /bootstrap, GET /settings, /people,
+// /lead-stages and /leads. The capability set per edition lives in
+// `@fxl-sales/shared-utils/sales-edition`; the full edition passes every gate.
+// PUT /settings is gated inline on its route below because GET /settings stays open.
+// ─────────────────────────────────────────────────────────────────────────────
+salesOpsRouter.use('/summary/*', requireCapability('proposals'));
+salesOpsRouter.use('/sales/*', requireCapability('proposals'));
+salesOpsRouter.use('/settlements/*', requireCapability('proposals'));
+salesOpsRouter.use('/products/*', requireCapability('catalog'));
+salesOpsRouter.use('/clients/*', requireCapability('catalog'));
+salesOpsRouter.use('/areas/*', requireCapability('catalog'));
+salesOpsRouter.use('/funcoes/*', requireCapability('catalog'));
+salesOpsRouter.use('/import/*', requireCapability('import'));
+salesOpsRouter.use('/history/*', requireCapability('history'));
 
 salesOpsRouter.get('/bootstrap', async (c) => {
   const snapshot = await getSalesOpsSnapshot(getDb(), c.get('orgId'));
@@ -447,7 +467,7 @@ salesOpsRouter.get('/settings', async (c) => {
   return c.json({ settings });
 });
 
-salesOpsRouter.put('/settings', requireAdmin, async (c) => {
+salesOpsRouter.put('/settings', requireCapability('history'), requireAdmin, async (c) => {
   const parsed = SettingsSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) {
     return c.json({ error: 'validation_error', issues: parsed.error.flatten() }, 400);
