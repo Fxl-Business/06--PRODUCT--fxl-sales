@@ -54,8 +54,10 @@ function jwt(claims: Record<string, unknown>): string {
 type HubClaimsLike = Parameters<typeof getRolesFromHubClaims>[0];
 
 function Probe() {
-  const { roles } = useAuthProfile();
-  return <output data-testid="workspaces">{getVisibleWorkspaces(roles).join(',')}</output>;
+  const { roles, edition } = useAuthProfile();
+  return (
+    <output data-testid="workspaces">{getVisibleWorkspaces(roles, edition).join(',')}</output>
+  );
 }
 
 function freshQueryClient(): QueryClient {
@@ -247,6 +249,32 @@ describe('dev identity roles', () => {
     // `parseJwtPayload`/`getRolesFromHubClaims` rather than reading some
     // ready-made shape off the identity object.
     expect(workspacesText(host)).toBe('');
+
+    teardown(host, root);
+  });
+
+  it('decodes the leads edition from a dev-minted token through the real provider', async () => {
+    vi.stubEnv('VITE_AUTH_FAKE', '1');
+    const fake = await import('@fxl-sales/auth-fake');
+    const identity = fake.findIdentity('team-owner');
+    if (!identity) throw new Error('team-owner identity missing from the roster');
+
+    const claims = fake.toHubClaims(identity) as Record<string, unknown>;
+    claims.entitlements = { access: true, modules: ['sales.edition.leads'] };
+    const leadsToken = jwt(claims);
+
+    setDevIdentitySession({
+      identityId: identity.id,
+      label: identity.label,
+      client: buildStubClient(leadsToken),
+      requestToken: async () => ({ token: leadsToken }),
+    });
+
+    const { host, root } = renderProbe();
+    await flush();
+
+    // The owner holds every role; the leads edition still shows the gestor only these two.
+    expect(workspacesText(host)).toBe('operacional,cadastros');
 
     teardown(host, root);
   });

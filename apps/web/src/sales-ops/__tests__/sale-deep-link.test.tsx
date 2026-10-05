@@ -46,6 +46,7 @@ vi.mock('@/auth/react', () => ({
     setActive: vi.fn(async () => undefined),
     client: hubClient,
   }),
+  useSalesEdition: () => 'full',
 }));
 
 const funcaoVendedor: SalesOpsFuncao = {

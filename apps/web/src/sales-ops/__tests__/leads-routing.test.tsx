@@ -3,8 +3,9 @@
 import * as React from 'react';
 import type { HTMLAttributes } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { SalesEdition } from '@fxl-sales/shared-utils/sales-edition';
 import type { AppRole } from '@/auth/claims';
 import { SalesOpsApp } from '../SalesOpsApp';
 import type { SalesOpsFuncao } from '../types';
@@ -44,6 +45,7 @@ const act = (
 ).act;
 
 let profileRoles: AppRole[] = [];
+let profileEdition: SalesEdition | undefined;
 
 const authMocks = vi.hoisted(() => ({
   logout: vi.fn(async () => undefined),
@@ -59,6 +61,7 @@ vi.mock('@/auth/react', () => ({
     isLoaded: true,
     isSignedIn: true,
     roles: profileRoles,
+    edition: profileEdition,
     name: 'Test User',
     email: 'test.user@fxl.example',
   }),
@@ -71,6 +74,7 @@ vi.mock('@/auth/react', () => ({
     setActive: authMocks.setActive,
     client: hubClient,
   }),
+  useSalesEdition: () => profileEdition ?? 'full',
 }));
 
 const mutation = {
@@ -197,13 +201,22 @@ afterEach(async () => {
   vi.clearAllMocks();
 });
 
-async function renderRoute(path: string, roles: AppRole[]) {
+function LocationProbe() {
+  const { pathname } = useLocation();
+  return <output data-testid="location-path">{pathname}</output>;
+}
+
+const locationPath = () =>
+  container.querySelector('[data-testid="location-path"]')?.textContent;
+
+async function renderRoute(path: string, roles: AppRole[], edition?: SalesEdition) {
   if (root) {
     await act(async () => root?.unmount());
   }
   containerProps.board.mockClear();
   containerProps.stages.mockClear();
   profileRoles = [...roles];
+  profileEdition = edition;
   root = createRoot(container);
   await act(async () => {
     root?.render(
@@ -215,10 +228,14 @@ async function renderRoute(path: string, roles: AppRole[]) {
           <Route element={<SalesOpsApp />} path="/" />
           <Route element={<SalesOpsApp />} path="/:workspace/:view" />
         </Routes>
+        <LocationProbe />
       </MemoryRouter>,
     );
   });
-  await act(async () => Promise.resolve());
+  // Three ticks, as in no-role-redirect.test.tsx, so a `<Navigate>` hop settles.
+  for (let index = 0; index < 3; index += 1) {
+    await act(async () => Promise.resolve());
+  }
 }
 
 function boardProps(): Record<string, unknown> {
@@ -286,5 +303,118 @@ describe('lead screens inside the Sales Ops shell', () => {
     // shell that renders no header at all.
     await renderRoute('/operacional/vendas', ['admin']);
     expect(headerText()).toContain('Nova proposta');
+  });
+});
+
+const navLabel = (label: string) => container.querySelector(`aside button[aria-label="${label}"]`);
+
+async function openWorkspaceMenu() {
+  const trigger = container.querySelector<HTMLButtonElement>('button[title="Trocar painel"]');
+  if (!trigger) throw new Error('Trocar painel trigger not rendered');
+  await act(async () => trigger.click());
+}
+
+/** The menu rows under the `Painéis` heading, in render order. */
+function workspaceMenuLabels(): string[] {
+  const heading = [...container.querySelectorAll('aside div')].find(
+    (node) => node.textContent?.trim() === 'Painéis',
+  );
+  const menu = heading?.parentElement;
+  if (!menu) throw new Error('Painéis menu not open');
+  return [...menu.querySelectorAll(':scope > button')].map((button) => button.textContent?.trim() ?? '');
+}
+
+/*
+  Every case below renders on the bootstrap fixture above, whose `settings` is `null`: a
+  freshly activated leads-edition Organization has no settings row, so the shell must
+  render without one.
+*/
+describe('the leads edition inside the Sales Ops shell', () => {
+  const gestor: AppRole[] = ['admin', 'seller', 'finder'];
+
+  it('lands a leads-edition gestor on operacional/leads', async () => {
+    await renderRoute('/', gestor, 'leads');
+    expect(locationPath()).toBe('/operacional/leads');
+    expect(container.querySelector('[data-leads-board]')).not.toBeNull();
+    expect(container.querySelector('h1')?.textContent?.trim()).toBe('Prospecção');
+  });
+
+  it('redirects operacional/vendas to the gestor default', async () => {
+    await renderRoute('/operacional/vendas', gestor, 'leads');
+    expect(locationPath()).toBe('/operacional/leads');
+    expect(headerText()).not.toContain('Nova proposta');
+  });
+
+  it('redirects every screen outside the edition', async () => {
+    for (const path of [
+      '/tatico/dashboard',
+      '/operacional/comissoes',
+      '/cadastros/produtos',
+      '/cadastros/funcoes',
+      '/cadastros/importacao',
+      '/cadastros/geral',
+      '/meus-dados/leads',
+      '/meus-dados/vendedores',
+    ]) {
+      await renderRoute(path, gestor, 'leads');
+      expect(locationPath(), path).toBe('/operacional/leads');
+    }
+  });
+
+  it('shows the gestor only Prospecção in operacional', async () => {
+    await renderRoute('/operacional/leads', gestor, 'leads');
+    expect(navLabel('Prospecção')).not.toBeNull();
+    expect(navLabel('Propostas')).toBeNull();
+    expect(navLabel('Comissões')).toBeNull();
+  });
+
+  it('shows Vendedores and Etapas do funil in cadastros', async () => {
+    await renderRoute('/cadastros/etapas', gestor, 'leads');
+    expect(navLabel('Vendedores')).not.toBeNull();
+    expect(navLabel('Etapas do funil')).not.toBeNull();
+    for (const label of ['Pessoas', 'Produtos & Serviços', 'Funções', 'Importação', 'Geral']) {
+      expect(navLabel(label), label).toBeNull();
+    }
+    expect(container.querySelector('[data-lead-stages]')).not.toBeNull();
+  });
+
+  it('offers only Operacional and Cadastros under Trocar painel', async () => {
+    await renderRoute('/operacional/leads', gestor, 'leads');
+    await openWorkspaceMenu();
+    expect(workspaceMenuLabels()).toEqual(['Operacional', 'Cadastros']);
+
+    const heading = [...container.querySelectorAll('aside div')].find(
+      (node) => node.textContent?.trim() === 'Painéis',
+    );
+    const cadastrosRow = [...(heading?.parentElement?.querySelectorAll(':scope > button') ?? [])].find(
+      (button) => button.textContent?.trim() === 'Cadastros',
+    );
+    if (!(cadastrosRow instanceof HTMLButtonElement)) throw new Error('Cadastros row not rendered');
+    await act(async () => cadastrosRow.click());
+    for (let index = 0; index < 3; index += 1) {
+      await act(async () => Promise.resolve());
+    }
+    expect(locationPath()).toBe('/cadastros/pessoas');
+  });
+
+  it('lands a leads-edition vendedor on meus-dados/leads only', async () => {
+    await renderRoute('/', ['seller'], 'leads');
+    expect(locationPath()).toBe('/meus-dados/leads');
+    expect(boardProps().showSellerFilter).toBe(false);
+    expect(navLabel('Meu painel')).toBeNull();
+    expect(navLabel('Comissões')).toBeNull();
+
+    await renderRoute('/meus-dados/vendedores', ['seller'], 'leads');
+    expect(locationPath()).toBe('/meus-dados/leads');
+  });
+
+  it('full edition control: the same gestor lands on tatico/dashboard', async () => {
+    await renderRoute('/', gestor, 'full');
+    expect(locationPath()).toBe('/tatico/dashboard');
+
+    await renderRoute('/', gestor);
+    expect(locationPath()).toBe('/tatico/dashboard');
+    await openWorkspaceMenu();
+    expect(workspaceMenuLabels()).toEqual(['Tático', 'Operacional', 'Cadastros', 'Meus dados']);
   });
 });

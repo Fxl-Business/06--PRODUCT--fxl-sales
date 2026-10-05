@@ -97,9 +97,9 @@ import {
   canSettleInWorkspace,
   getDefaultSalesOpsRoute,
   getSalesOpsNavigation,
+  getSalesOpsWorkspaces,
   getVisibleWorkspaces,
   resolveSalesOpsRoute,
-  salesOpsWorkspaces,
   workspaceForView,
   type SalesOpsView,
   type SalesOpsWorkspace,
@@ -1280,6 +1280,12 @@ export function SalesOpsApp() {
   const location = useLocation();
   const routeParams = useParams();
   const profile = useAuthProfile();
+  /**
+   * Read off the profile this component already holds, never through a second hook:
+   * the shell's test harnesses mock `@/auth/react` with a hand-written profile, and an
+   * absent `edition` there must fall into navigation.ts's default `'full'`.
+   */
+  const edition = profile.edition;
   const logout = useLogout();
   const bootstrapQuery = useSalesOpsBootstrap();
   const savePerson = useSaveSalesOpsPerson();
@@ -1327,10 +1333,10 @@ export function SalesOpsApp() {
   const mountedRef = useRef(true);
 
   const visibleWorkspaceIds = useMemo(
-    () => getVisibleWorkspaces(profile.roles),
-    [profile.roles],
+    () => getVisibleWorkspaces(profile.roles, edition),
+    [profile.roles, edition],
   );
-  const resolution = resolveSalesOpsRoute(routeParams, profile.roles);
+  const resolution = resolveSalesOpsRoute(routeParams, profile.roles, edition);
   const { workspace, view } = resolution.route;
   /** The open proposta detail. URL state only (`/:workspace/vendas/:saleId`). */
   const detailSaleId = resolution.route.saleId ?? null;
@@ -1421,14 +1427,14 @@ export function SalesOpsApp() {
       return true;
     });
   }, [bootstrap.sales, bootstrap.saleItems, salesFilters]);
-  const navItems = getSalesOpsNavigation(workspace, profile.roles);
+  const navItems = getSalesOpsNavigation(workspace, profile.roles, edition);
   const title = titleForView(view, workspace);
   /**
    * The redundant `admin` check is belt and braces: `getVisibleWorkspaces` already
    * refuses the `cadastros` workspace to anyone without the role.
    */
   const canManageCadastros = workspace === 'cadastros' && profile.roles.includes('admin');
-  const canSettle = canSettleInWorkspace(workspace, profile.roles);
+  const canSettle = canSettleInWorkspace(workspace, profile.roles, edition);
   const canManagePeople = canManageCadastros && view === 'pessoas';
   const canManageFuncoes = canManageCadastros && view === 'funcoes';
   const personModalMatchesRoute = canManagePeople && modal?.kind === 'person';
@@ -1642,7 +1648,7 @@ export function SalesOpsApp() {
   function setWorkspace(next: SalesOpsWorkspace) {
     setWorkspaceMenuOpen(false);
     setModal((current) => (current?.kind === 'person' ? null : current));
-    navigate(buildSalesOpsPath(getDefaultSalesOpsRoute(profile.roles, next)));
+    navigate(buildSalesOpsPath(getDefaultSalesOpsRoute(profile.roles, next, edition)));
   }
 
   function go(next: SalesOpsView) {
@@ -1650,7 +1656,7 @@ export function SalesOpsApp() {
     setModal((current) => (current?.kind === 'person' ? null : current));
     const targetWorkspace = navItems.some((item) => item.id === next)
       ? workspace
-      : workspaceForView(next, profile.roles);
+      : workspaceForView(next, profile.roles, edition);
     navigate(buildSalesOpsPath({ workspace: targetWorkspace, view: next }));
   }
 
@@ -1707,10 +1713,11 @@ export function SalesOpsApp() {
                 : view === 'vendedores' || view === 'finders'
                   ? null
                   : 'Nova proposta';
-  const availableWorkspaces = salesOpsWorkspaces.filter((item) =>
+  const workspaceCatalogue = getSalesOpsWorkspaces(edition);
+  const availableWorkspaces = workspaceCatalogue.filter((item) =>
     visibleWorkspaceIds.includes(item.id),
   );
-  const activeWorkspaceMeta = salesOpsWorkspaces.find((item) => item.id === workspace);
+  const activeWorkspaceMeta = workspaceCatalogue.find((item) => item.id === workspace);
   const activeWorkspaceVisual = workspaceVisuals[workspace];
   const ActiveWorkspaceIcon = activeWorkspaceVisual.icon;
 

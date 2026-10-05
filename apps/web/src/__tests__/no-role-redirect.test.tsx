@@ -9,6 +9,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import '@/i18n';
+import type { SalesEdition } from '@fxl-sales/shared-utils/sales-edition';
 import type { AppRole } from '@/auth/claims';
 import {
   buildSalesOpsPath,
@@ -30,6 +31,7 @@ const readSource = (relative: string) => readFileSync(path.join(webRoot, relativ
 const UNAUTHORIZED = 'Acesso não autorizado';
 
 let profileRoles: AppRole[] = [];
+let profileEdition: SalesEdition | undefined;
 let profileLoaded = true;
 let profileName: string | undefined = 'Test User';
 let profileEmail: string | undefined = 'test.user@fxl.example';
@@ -48,6 +50,7 @@ vi.mock('@/auth/react', () => ({
     isLoaded: profileLoaded,
     isSignedIn: profileLoaded,
     roles: profileRoles,
+    edition: profileEdition,
     name: profileName,
     email: profileEmail,
     avatarUrl: profileAvatarUrl,
@@ -62,6 +65,7 @@ vi.mock('@/auth/react', () => ({
     switchAccount: authMocks.switchAccount,
     client: {},
   }),
+  useSalesEdition: () => profileEdition ?? 'full',
 }));
 
 const mutation = {
@@ -100,6 +104,15 @@ vi.mock('@/sales-ops/hooks', () => ({
   useSaveSalesOpsProduct: () => mutation,
   useSaveSalesOpsSettings: () => mutation,
   useSetSalesOpsCadastroStatus: () => mutation,
+}));
+
+/*
+  The leads edition lands on `operacional/leads` and `meus-dados/leads`, which mount the
+  board. This harness tests navigation only, and the real board needs a query client and
+  a token, so it is a marker here exactly as in `leads-routing.test.tsx`.
+*/
+vi.mock('@/sales-ops/leads/LeadsBoardContainer', () => ({
+  LeadsBoardContainer: () => <div data-leads-board />,
 }));
 
 vi.mock('@/components/ui/dialog', () => ({
@@ -184,6 +197,7 @@ beforeEach(() => {
   root = null;
   visited = [];
   profileRoles = [];
+  profileEdition = undefined;
   profileLoaded = true;
   profileName = 'Test User';
   profileEmail = 'test.user@fxl.example';
@@ -424,6 +438,52 @@ describe('the /no-role redirect cannot ping-pong with the SalesOpsApp redirect',
   ])('a %j operator entering at / lands on %s', (roles, destination) => {
     expect(buildSalesOpsPath(getDefaultSalesOpsRoute(roles))).toBe(destination);
   });
+});
+
+describe('the leads edition shares one predicate between NoRoleGuard and SalesOpsApp', () => {
+  it.each([
+    [['admin', 'seller', 'finder'] as AppRole[], '/operacional/leads'],
+    [['admin'] as AppRole[], '/operacional/leads'],
+    [['seller'] as AppRole[], '/meus-dados/leads'],
+    [['seller', 'finder'] as AppRole[], '/meus-dados/leads'],
+  ])('sends a leads-edition %j operator from /no-role to %s in exactly two navigations', async (roles, destination) => {
+    profileEdition = 'leads';
+    profileRoles = roles;
+    await renderAt('/no-role');
+    expect(visited).toEqual(['/no-role', '/', destination]);
+    expect(container.textContent).not.toContain(UNAUTHORIZED);
+  });
+
+  /** THE decisive case: keyed on roles alone, NoRoleGuard ping-pongs here. */
+  it('keeps a leads-edition finder-only operator on /no-role without a loop', async () => {
+    profileEdition = 'leads';
+    profileRoles = ['finder'];
+    await renderAt('/no-role');
+    expect(visited).toEqual(['/no-role']);
+    expect(container.textContent).toContain(UNAUTHORIZED);
+  });
+
+  it('sends a leads-edition finder-only operator entering at / to /no-role and stops there', async () => {
+    profileEdition = 'leads';
+    profileRoles = ['finder'];
+    await renderAt('/');
+    expect(visited).toEqual(['/', '/no-role']);
+    expect(container.textContent).toContain(UNAUTHORIZED);
+  });
+
+  it.each(NON_EMPTY_ROLE_SETS)(
+    'in the leads edition the default route for %j is canonical whenever a workspace is visible',
+    (roles) => {
+      if (getVisibleWorkspaces(roles, 'leads').length === 0) {
+        expect(roles).toEqual(['finder']);
+        return;
+      }
+      const route = getDefaultSalesOpsRoute(roles, undefined, 'leads');
+      const resolution = resolveSalesOpsRoute(route, roles, 'leads');
+      expect(resolution.redirect).toBe(false);
+      expect(resolution.path).toBe(buildSalesOpsPath(route));
+    },
+  );
 });
 
 describe('router wiring', () => {

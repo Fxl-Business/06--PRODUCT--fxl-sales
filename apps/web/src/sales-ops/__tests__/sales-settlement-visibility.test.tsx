@@ -43,6 +43,7 @@ vi.mock('@/auth/react', () => ({
     setActive: vi.fn(async () => undefined),
     client: { checkoutUrl: vi.fn(async () => 'https://hub.example/checkout') },
   }),
+  useSalesEdition: () => 'full',
 }));
 
 const idleMutation = { isPending: false, mutate: vi.fn(), mutateAsync: vi.fn(async () => ({})) };

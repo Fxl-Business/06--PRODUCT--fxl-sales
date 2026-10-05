@@ -22,6 +22,7 @@ import type { SalesOpsBootstrap } from '../types';
 */
 vi.mock('@/auth/react', () => ({
   useAccessToken: () => ({ getToken: async () => 'test-token' }),
+  useSalesEdition: () => 'full',
 }));
 
 vi.mock('@/components/ui/alert-dialog', () => ({

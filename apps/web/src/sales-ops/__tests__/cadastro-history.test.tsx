@@ -34,6 +34,7 @@ import type {
 
 vi.mock('@/auth/react', () => ({
   useAccessToken: () => ({ getToken: async () => 'test-token' }),
+  useSalesEdition: () => 'full',
 }));
 
 /*

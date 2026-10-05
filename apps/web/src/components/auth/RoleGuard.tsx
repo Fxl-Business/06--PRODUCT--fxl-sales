@@ -32,7 +32,7 @@ export function RoleGuard({ role, children }: { role: Role; children: React.Reac
  * opened an `/admin/*` URL, stayed on the unauthorized screen holding real roles with
  * no way out but retyping a URL by hand.
  *
- * The condition is `getVisibleWorkspaces(...).length > 0`, which is the LITERAL
+ * The condition is `getVisibleWorkspaces(roles, edition).length > 0`, which is the LITERAL
  * negation of the `visibleWorkspaceIds.length === 0` test that `SalesOpsApp` redirects
  * here on, evaluated by the same function over the same `useAuthProfile()` value in the
  * same render pass. That is what makes a ping-pong between the two impossible by
@@ -44,20 +44,25 @@ export function RoleGuard({ role, children }: { role: Role; children: React.Reac
  * day a role is added that maps to no workspace. The failure mode is an infinite
  * `/` to `/no-role` redirect loop, two files away from the change that caused it.
  *
+ * The EDITION is part of the predicate for the same reason. In the leads edition a
+ * finder-only operator holds a role but sees no workspace; keyed on roles alone this guard
+ * would send them to `/` while `SalesOpsApp` (which reads the edition) sends them straight
+ * back, the exact ping-pong this comment exists to forbid.
+ *
  * `!isLoaded` renders the same `Skeleton` as `RoleGuard`, so a profile that is still
  * resolving shows neither the unauthorized screen nor a navigation. While a session is
  * LOST the profile is loaded with `roles: []`, so this guard is inert and the children
  * `HubProtected` keeps mounted under its overlay stay exactly where they are.
  */
 export function NoRoleGuard({ children }: { children: React.ReactNode }) {
-  const { isLoaded, roles } = useAuthProfile();
+  const { isLoaded, roles, edition } = useAuthProfile();
 
   if (!isLoaded) return <Skeleton className="h-screen w-full" />;
 
   // `/` is `SalesOpsApp`, which resolves this operator's default workspace from these
   // same roles, so the landing decision stays in one place. `replace` so Back cannot
   // walk into the dead end again.
-  if (getVisibleWorkspaces(roles).length > 0) {
+  if (getVisibleWorkspaces(roles, edition).length > 0) {
     return <Navigate to="/" replace />;
   }
 

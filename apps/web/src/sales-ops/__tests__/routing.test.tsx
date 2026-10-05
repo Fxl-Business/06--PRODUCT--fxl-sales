@@ -76,6 +76,7 @@ vi.mock('@/auth/react', () => ({
     setActive: authMocks.setActive,
     client: hubClient,
   }),
+  useSalesEdition: () => 'full',
 }));
 
 const mutation = {
