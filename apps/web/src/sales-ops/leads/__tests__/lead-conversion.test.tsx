@@ -58,6 +58,7 @@ vi.mock('@/auth/react', () => ({
   useLogout: () => mocks.logout,
   useAccessToken: () => ({ getToken: mocks.getToken }),
   useOrganizations: () => organizationSeam,
+  useSalesEdition: () => 'full',
 }));
 
 vi.mock('@/components/ui/dialog', () => ({

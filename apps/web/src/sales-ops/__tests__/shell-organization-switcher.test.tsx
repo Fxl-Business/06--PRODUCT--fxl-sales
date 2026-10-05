@@ -66,6 +66,7 @@ vi.mock('@/auth/react', () => ({
     switchAccount: authMocks.switchAccount,
     client: hubClient,
   }),
+  useSalesEdition: () => 'full',
 }));
 
 const funcaoVendedor: SalesOpsFuncao = {

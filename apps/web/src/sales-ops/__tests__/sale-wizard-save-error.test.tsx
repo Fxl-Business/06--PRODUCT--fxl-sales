@@ -27,6 +27,7 @@ vi.mock('@/auth/react', () => ({
     setActive: vi.fn(),
     client: null,
   }),
+  useSalesEdition: () => 'full',
 }));
 
 vi.mock('@/components/ui/dialog', () => ({

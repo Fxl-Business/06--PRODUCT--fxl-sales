@@ -9,6 +9,7 @@ import { MUTATION_ERROR_COPY } from '../../mutation-error-copy';
 
 vi.mock('@/auth/react', () => ({
   useAccessToken: () => ({ getToken: async () => 'test-token' }),
+  useSalesEdition: () => 'full',
 }));
 
 /* The CloseCtx version from cadastro-history.test.tsx: Cancel really closes. */

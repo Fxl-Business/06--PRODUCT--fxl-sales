@@ -19,6 +19,7 @@ import { Combobox } from '@/components/ui/combobox';
 import { Skeleton } from '@/components/ui/skeleton';
 import { isOrgLabelFallback, orgLabel } from '@/lib/displayNames';
 import { getRoleFromHubClaims, getRolesFromHubClaims, parseJwtPayload, type AppRole } from './claims';
+import { resolveSalesEdition, type SalesEdition } from '@fxl-sales/shared-utils/sales-edition';
 import { getDevIdentitySession } from '../dev/dev-identity-registry';
 import { getHubBffBasePath, loadHubBrowserConfig } from './provider';
 import { requestHubAccessToken, TRANSIENT_TOKEN_RESULT, type HubTokenResult } from './refresh';
@@ -76,6 +77,15 @@ type AuthProfile = {
   isSignedIn: boolean;
   role?: AppRole;
   roles: AppRole[];
+  /**
+   * The Sales edition of the ACTIVE Organization, derived from the verified token's
+   * `entitlements.modules` by the shared `resolveSalesEdition` (the API resolves the same
+   * claim the same way in `applyHubAuthContext`). Always present: `'full'` while signed out
+   * and for any token that does not carry exactly `sales.edition.leads`, which is FXL.
+   * It changes with the token, so a workspace switch into a leads-edition Organization
+   * flips it in the same `setProfile` as the roles.
+   */
+  edition: SalesEdition;
   name?: string;
   email?: string;
   avatarUrl?: string;
@@ -181,17 +191,28 @@ function readWorkspaces(value: unknown): HubWorkspacePreview[] {
   }, []);
 }
 
+/**
+ * `entitlements.modules` as the token carries it, or `undefined` when the claim is absent
+ * or not an array. Validation of the entries is `resolveSalesEdition`'s job, not this one.
+ */
+function readEntitlementModules(entitlements: unknown): readonly unknown[] | undefined {
+  if (typeof entitlements !== 'object' || entitlements === null) return undefined;
+  const modules = (entitlements as { modules?: unknown }).modules;
+  return Array.isArray(modules) ? modules : undefined;
+}
+
 function profileFromToken(token: string | null): Omit<AuthProfile, 'isLoaded' | 'isSignedIn'> & {
   workspaces: HubWorkspacePreview[];
 } {
   const claims = token ? parseJwtPayload(token) : null;
   if (!claims) {
-    return { roles: [], workspaces: [] };
+    return { roles: [], edition: 'full', workspaces: [] };
   }
 
   return {
     role: getRoleFromHubClaims(claims),
     roles: getRolesFromHubClaims(claims),
+    edition: resolveSalesEdition(readEntitlementModules(claims.entitlements)),
     name: readString(claims.name),
     email: readString(claims.email),
     avatarUrl: readString(claims.avatarUrl),
@@ -326,6 +347,7 @@ function HubAuthProvider({ children }: { children: ReactNode }) {
     isLoaded: false,
     isSignedIn: false,
     roles: [],
+    edition: 'full',
   });
   const [workspaces, setWorkspaces] = useState<HubWorkspacePreview[]>([]);
   const [sessionLost, setSessionLost] = useState(false);
@@ -355,6 +377,7 @@ function HubAuthProvider({ children }: { children: ReactNode }) {
       isSignedIn: token !== null,
       role: next.role,
       roles: next.roles,
+      edition: next.edition,
       name: next.name,
       email: next.email,
       avatarUrl: next.avatarUrl,
@@ -978,19 +1001,39 @@ function useHubAccessToken() {
 }
 
 function useHubProfile(): AuthProfile {
-  const { isLoaded, isSignedIn, role, roles, name, email, avatarUrl, workspaceId, workspaceName } =
-    useHubAuthContext();
+  const {
+    isLoaded,
+    isSignedIn,
+    role,
+    roles,
+    edition,
+    name,
+    email,
+    avatarUrl,
+    workspaceId,
+    workspaceName,
+  } = useHubAuthContext();
   return {
     isLoaded,
     isSignedIn,
     role,
     roles,
+    edition,
     name,
     email,
     avatarUrl,
     workspaceId,
     workspaceName,
   };
+}
+
+/**
+ * The ONE read of the Sales edition for components (slices 06 and 07). Shell code that
+ * already holds `useAuthProfile()` reads `profile.edition` instead, so the many test files
+ * that mock this module with a hand-written profile keep working unchanged.
+ */
+function useHubSalesEdition(): SalesEdition {
+  return useHubAuthContext().edition;
 }
 
 function useHubLogout(): () => Promise<void> {
@@ -1168,6 +1211,7 @@ export const AppAuthProvider = HubAuthProvider;
 export const Protected = HubProtected;
 export const useAccessToken: AccessTokenHook = useHubAccessToken;
 export const useAuthProfile = useHubProfile;
+export const useSalesEdition = useHubSalesEdition;
 export const useLogout: LogoutHook = useHubLogout;
 export const useOrganizations = useHubOrganizations;
 export const UserControls = HubUserControls;

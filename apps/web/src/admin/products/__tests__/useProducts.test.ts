@@ -8,6 +8,7 @@ import { useCreateProduct } from '../useProducts';
 
 vi.mock('@/auth/react', () => ({
   useAccessToken: () => ({ getToken: async () => 'test-token' }),
+  useSalesEdition: () => 'full',
 }));
 
 vi.mock('@/lib/api-client', () => ({

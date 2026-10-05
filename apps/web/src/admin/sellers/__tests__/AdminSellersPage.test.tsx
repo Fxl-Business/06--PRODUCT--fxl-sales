@@ -26,6 +26,7 @@ const TOKEN = 'admin-hub-access-token';
 
 vi.mock('@/auth/react', () => ({
   useAccessToken: () => ({ getToken: async () => TOKEN }),
+  useSalesEdition: () => 'full',
 }));
 
 /*

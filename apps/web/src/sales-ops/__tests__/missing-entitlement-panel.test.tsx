@@ -36,6 +36,7 @@ let profile: Profile;
 vi.mock('@/auth/react', () => ({
   useOrganizations: () => seam,
   useAuthProfile: () => ({ isLoaded: true, isSignedIn: true, roles: [], ...profile }),
+  useSalesEdition: () => 'full',
 }));
 
 const act = (

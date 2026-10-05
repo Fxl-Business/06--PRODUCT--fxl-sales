@@ -9,7 +9,7 @@ import { AccountAvatar } from '@/sales-ops/AccountAvatar';
  *
  * Two live navigators send them here: `RoleGuard`, when a legacy `/admin/*`, `/finder/*`
  * or `/seller/*` URL asks for an `AppRole` the profile does not hold, and `SalesOpsApp`,
- * when `getVisibleWorkspaces(roles)` is empty. `NoRoleGuard` is the way back out and
+ * when `getVisibleWorkspaces(roles, edition)` is empty. `NoRoleGuard` is the way back out and
  * redirects to `/` the moment either of those facts stops being true.
  *
  * The usual cause is being signed in with the WRONG account, so the page names the

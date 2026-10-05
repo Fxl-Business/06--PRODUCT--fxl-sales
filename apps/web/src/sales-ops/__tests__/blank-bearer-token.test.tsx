@@ -23,6 +23,7 @@ vi.mock('@/auth/react', () => ({
   }),
   useLogout: () => mocks.logout,
   useAccessToken: () => ({ getToken: mocks.getToken }),
+  useSalesEdition: () => 'full',
 }));
 
 vi.mock('@/components/ui/dialog', () => ({

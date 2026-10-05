@@ -39,6 +39,7 @@ vi.mock('@/auth/react', () => ({
     setActive: vi.fn(async () => undefined),
     client: { checkoutUrl: vi.fn(async () => 'https://hub.example/checkout') },
   }),
+  useSalesEdition: () => 'full',
 }));
 
 function sale(overrides: Partial<SalesOpsSale> & { id: string; code: string }): SalesOpsSale {

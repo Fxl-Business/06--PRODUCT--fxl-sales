@@ -5,6 +5,7 @@ import {
   buildSalesOpsPath,
   getDefaultSalesOpsRoute,
   getSalesOpsNavigation,
+  getSalesOpsWorkspaces,
   getVisibleWorkspaces,
   resolveSalesOpsRoute,
   salesOpsWorkspaces,
@@ -533,5 +534,9 @@ describe('sales operations navigation', () => {
     const asSeller = resolveSalesOpsRoute({ workspace: 'cadastros', view: 'importacao' }, seller);
     expect(asSeller.redirect).toBe(true);
     expect(asSeller.route.view).not.toBe('importacao');
+  });
+
+  it('hands the full edition the very same workspace catalogue', () => {
+    expect(getSalesOpsWorkspaces()).toBe(salesOpsWorkspaces);
   });
 });

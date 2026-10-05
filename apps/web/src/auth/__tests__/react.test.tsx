@@ -78,6 +78,7 @@ import {
   useAccessToken,
   useAuthProfile,
   useOrganizations,
+  useSalesEdition,
 } from '../react';
 import { LOGIN_ATTEMPTS_KEY, LOGOUT_INTENT_KEY, RETURN_TO_KEY } from '../session-recovery';
 
@@ -244,6 +245,47 @@ function OrganizationProbe() {
     </div>
   );
 }
+
+/** A token shaped like the Hub mints it, with an optional `entitlements` claim. */
+function editionToken(entitlements?: unknown, workspaceName = 'Alpha'): string {
+  return jwt({
+    name: 'Ada Lovelace',
+    email: 'ada@example.com',
+    workspaceName,
+    roles: { workspace: 'admin' },
+    workspaces: [
+      { workspaceId: 'workspace-alpha', name: 'Alpha' },
+      { workspaceId: 'workspace-beta', name: 'Beta' },
+    ],
+    ...(entitlements === undefined ? {} : { entitlements }),
+  });
+}
+
+function EditionProbe() {
+  const profile = useAuthProfile();
+  const edition = useSalesEdition();
+  return <output data-testid="edition">{`${profile.edition}|${edition}`}</output>;
+}
+
+function renderEditionProvider() {
+  const host = document.createElement('div');
+  document.body.append(host);
+  const editionRoot = createRoot(host);
+  act(() => {
+    editionRoot.render(
+      <QueryClientProvider client={queryClient}>
+        <AppAuthProvider>
+          <EditionProbe />
+          <UserControls />
+        </AppAuthProvider>
+      </QueryClientProvider>,
+    );
+  });
+  return { container: host, root: editionRoot };
+}
+
+const editionText = (host: HTMLElement) =>
+  host.querySelector('[data-testid="edition"]')?.textContent;
 
 type TokenReader = () => Promise<string | null>;
 
@@ -2259,5 +2301,53 @@ describe('active organization and the useOrganizations seam', () => {
     if (!namelessRow) throw new Error('nameless organization row not found');
     const description = namelessRow.querySelector('.text-muted-foreground');
     expect(description?.textContent).toBe('workspace-nameless');
+  });
+});
+
+describe('Sales edition from the token', () => {
+  it.each([
+    [
+      'reads the leads edition from entitlements.modules',
+      ok(editionToken({ access: true, modules: ['sales.edition.leads'] })),
+      'leads|leads',
+    ],
+    ['stays full when the token carries no entitlements claim', ok(editionToken()), 'full|full'],
+    ['stays full for empty modules', ok(editionToken({ access: true, modules: [] })), 'full|full'],
+    [
+      'stays full for unknown or malformed modules',
+      ok(editionToken({ access: true, modules: ['sales.edition.leadsx', 42, null] })),
+      'full|full',
+    ],
+    [
+      'stays full when modules is not an array',
+      ok(editionToken({ access: true, modules: 'sales.edition.leads' })),
+      'full|full',
+    ],
+    ['is full while signed out', expired, 'full|full'],
+    [
+      'reads the module beside paid add-ons',
+      ok(editionToken({ access: true, modules: ['sales.addon.x', 'sales.edition.leads'] })),
+      'leads|leads',
+    ],
+  ])('%s', async (_name, tokenResult, expected) => {
+    mocks.cache.getToken.mockResolvedValue(tokenResult);
+    ({ container, root } = renderEditionProvider());
+    await flushReact();
+    expect(editionText(container)).toBe(expected);
+  });
+
+  it('flips the edition with the token on a workspace switch', async () => {
+    mocks.cache.getToken.mockResolvedValue(ok(editionToken({ access: true, modules: [] })));
+    mocks.client.setActive.mockResolvedValue({
+      accessToken: editionToken({ access: true, modules: ['sales.edition.leads'] }, 'Beta'),
+      expiresIn: 120,
+      organizationId: 'workspace-beta',
+    });
+    ({ container, root } = renderEditionProvider());
+    await flushReact();
+    expect(editionText(container)).toBe('full|full');
+
+    await switchWorkspace(container, 'Beta');
+    expect(editionText(container)).toBe('leads|leads');
   });
 });

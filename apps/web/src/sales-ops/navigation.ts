@@ -15,6 +15,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import type { AppRole } from '@/auth/claims';
+import type { SalesEdition } from '@fxl-sales/shared-utils/sales-edition';
 
 export type SalesOpsWorkspace = 'tatico' | 'operacional' | 'cadastros' | 'meus-dados';
 /**
@@ -116,6 +117,26 @@ const meusDadosFinder: SalesOpsNavigationItem[] = [
   { id: 'vendas', label: 'Indicações', icon: BriefcaseBusiness },
 ];
 
+/*
+  THE LEADS EDITION (Construbom). Three short lists, never a filter over the full ones:
+  a filter would make every full-edition label and order depend on the leads rules, and
+  the full edition must stay byte-identical (oracle: navigation-edition.test.ts).
+  `[0]` is still the landing route of each workspace.
+*/
+const leadsEditionOperational: SalesOpsNavigationItem[] = [
+  { id: 'leads', label: 'Prospecção', icon: LayoutGrid },
+];
+
+/** A pessoa is always a vendedor in this edition, so the screen is labelled for it. */
+const leadsEditionCadastros: SalesOpsNavigationItem[] = [
+  { id: 'pessoas', label: 'Vendedores', icon: UsersRound },
+  { id: 'etapas', label: 'Etapas do funil', icon: ListChecks },
+];
+
+const leadsEditionMeusDadosSeller: SalesOpsNavigationItem[] = [
+  { id: 'leads', label: 'Minha prospecção', icon: LayoutGrid },
+];
+
 export const salesOpsWorkspaces: Array<{
   id: SalesOpsWorkspace;
   label: string;
@@ -127,8 +148,37 @@ export const salesOpsWorkspaces: Array<{
   { id: 'meus-dados', label: 'Meus dados', description: 'Painel e comissões pessoais' },
 ];
 
-export function getVisibleWorkspaces(roles: readonly AppRole[]): SalesOpsWorkspace[] {
+const leadsEditionWorkspaces: ReadonlyArray<{
+  id: SalesOpsWorkspace;
+  label: string;
+  description: string;
+}> = salesOpsWorkspaces.map((item) =>
+  item.id === 'operacional' ? { ...item, description: 'Prospecção' } : item,
+);
+
+/**
+ * The workspace catalogue for an edition. The full edition gets the SAME
+ * `salesOpsWorkspaces` array object, so nothing about it can drift.
+ */
+export function getSalesOpsWorkspaces(
+  edition: SalesEdition = 'full',
+): ReadonlyArray<{ id: SalesOpsWorkspace; label: string; description: string }> {
+  return edition === 'leads' ? leadsEditionWorkspaces : salesOpsWorkspaces;
+}
+
+export function getVisibleWorkspaces(
+  roles: readonly AppRole[],
+  edition: SalesEdition = 'full',
+): SalesOpsWorkspace[] {
   const roleSet = new Set(roles);
+  if (edition === 'leads') {
+    // The gestor always also holds `seller` (getRolesFromHubClaims), and AC2 gives the
+    // gestor exactly Prospecção, Vendedores and Etapas, so `admin` wins outright here.
+    // `finder` grants nothing: this edition has no finder screen.
+    if (roleSet.has('admin')) return ['operacional', 'cadastros'];
+    if (roleSet.has('seller')) return ['meus-dados'];
+    return [];
+  }
   const visible: SalesOpsWorkspace[] = [];
   if (roleSet.has('admin')) {
     visible.push('tatico', 'operacional', 'cadastros');
@@ -144,18 +194,33 @@ export function getVisibleWorkspaces(roles: readonly AppRole[]): SalesOpsWorkspa
  * `meus-dados` reuses the same views and stays read-only for everyone. Both terms
  * are load-bearing; the admin one is belt and braces today because only an admin
  * can stand in `operacional`.
+ * The leads edition has no proposta, so it never settles.
  */
 export function canSettleInWorkspace(
   workspace: SalesOpsWorkspace,
   roles: readonly AppRole[],
+  edition: SalesEdition = 'full',
 ): boolean {
-  return workspace === 'operacional' && roles.includes('admin');
+  return edition !== 'leads' && workspace === 'operacional' && roles.includes('admin');
 }
 
 export function getSalesOpsNavigation(
   workspace: SalesOpsWorkspace,
   roles: readonly AppRole[],
+  edition: SalesEdition = 'full',
 ): SalesOpsNavigationItem[] {
+  if (edition === 'leads') {
+    switch (workspace) {
+      case 'tatico':
+        return [];
+      case 'operacional':
+        return leadsEditionOperational;
+      case 'cadastros':
+        return leadsEditionCadastros;
+      case 'meus-dados':
+        return roles.includes('seller') ? leadsEditionMeusDadosSeller : [];
+    }
+  }
   switch (workspace) {
     case 'tatico':
       return tacticalTeam;
@@ -186,17 +251,18 @@ export function buildSaleDetailPath(saleId: string): string {
 export function getDefaultSalesOpsRoute(
   roles: readonly AppRole[],
   preferredWorkspace?: SalesOpsWorkspace,
+  edition: SalesEdition = 'full',
 ): SalesOpsRoute {
-  const visible = getVisibleWorkspaces(roles);
+  const visible = getVisibleWorkspaces(roles, edition);
 
   if (preferredWorkspace && visible.includes(preferredWorkspace)) {
-    const preferredView = getSalesOpsNavigation(preferredWorkspace, roles)[0]?.id;
+    const preferredView = getSalesOpsNavigation(preferredWorkspace, roles, edition)[0]?.id;
     if (preferredView) return { workspace: preferredWorkspace, view: preferredView };
   }
 
   const workspace = visible[0];
   if (workspace) {
-    const view = getSalesOpsNavigation(workspace, roles)[0]?.id;
+    const view = getSalesOpsNavigation(workspace, roles, edition)[0]?.id;
     if (view) return { workspace, view };
   }
 
@@ -229,11 +295,12 @@ function aliasLegacyView(
 export function resolveSalesOpsRoute(
   params: SalesOpsRouteParams,
   roles: readonly AppRole[],
+  edition: SalesEdition = 'full',
 ): SalesOpsRouteResolution {
-  const workspace = getVisibleWorkspaces(roles).find((id) => id === params.workspace);
+  const workspace = getVisibleWorkspaces(roles, edition).find((id) => id === params.workspace);
   const requestedView = workspace ? aliasLegacyView(workspace, params.view) : params.view;
   const view = workspace
-    ? getSalesOpsNavigation(workspace, roles).find((item) => item.id === requestedView)?.id
+    ? getSalesOpsNavigation(workspace, roles, edition).find((item) => item.id === requestedView)?.id
     : undefined;
 
   if (workspace && view) {
@@ -251,18 +318,19 @@ export function resolveSalesOpsRoute(
     };
   }
 
-  const route = getDefaultSalesOpsRoute(roles);
+  const route = getDefaultSalesOpsRoute(roles, undefined, edition);
   return { route, path: buildSalesOpsPath(route), redirect: true };
 }
 
 export function workspaceForView(
   view: SalesOpsView,
   roles: readonly AppRole[],
+  edition: SalesEdition = 'full',
 ): SalesOpsWorkspace {
-  for (const workspace of getVisibleWorkspaces(roles)) {
-    if (getSalesOpsNavigation(workspace, roles).some((item) => item.id === view)) {
+  for (const workspace of getVisibleWorkspaces(roles, edition)) {
+    if (getSalesOpsNavigation(workspace, roles, edition).some((item) => item.id === view)) {
       return workspace;
     }
   }
-  return getDefaultSalesOpsRoute(roles).workspace;
+  return getDefaultSalesOpsRoute(roles, undefined, edition).workspace;
 }

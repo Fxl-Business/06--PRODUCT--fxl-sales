@@ -11,6 +11,7 @@ import type { SalesOpsSettings } from '../types';
 
 vi.mock('@/auth/react', () => ({
   useAccessToken: () => ({ getToken: async () => 'test-token' }),
+  useSalesEdition: () => 'full',
 }));
 
 import { SettingsView } from '../SalesOpsApp';
