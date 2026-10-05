@@ -14,6 +14,7 @@
  * of the roster, maps it onto `SeedIdentity[]`, calls `buildDevSeedPlan`, and
  * inserts `plan.rows` verbatim. This module never reads a table object, never
  * opens a connection, and never knows what `getDb()` is.
+ * An org listed in `leadsEditionOrgIds` gets the leads-edition shape instead of the full catalog.
  */
 
 import { createHash } from 'node:crypto';
@@ -127,12 +128,17 @@ function isoDateTime(dateOnly: string): string {
 // yields full access) and the fact that a person write is a full-set
 // replacement the API refuses empty (funcao_required) - see CLAUDE.md.
 // ─────────────────────────────────────────────────────────────────────────────
-export function seededFuncaoSlugsFor(identity: SeedIdentity): string[] {
-  const isAdminLike =
+/** getRolesFromHubClaims' full-access branches: workspace owner/admin, or the admin Seat. */
+function isAdminLikeIdentity(identity: SeedIdentity): boolean {
+  return (
     identity.workspaceRole === 'owner' ||
     identity.workspaceRole === 'admin' ||
-    identity.productRoles.includes('admin');
-  if (isAdminLike) return ['vendedor', 'finder'];
+    identity.productRoles.includes('admin')
+  );
+}
+
+export function seededFuncaoSlugsFor(identity: SeedIdentity): string[] {
+  if (isAdminLikeIdentity(identity)) return ['vendedor', 'finder'];
 
   const slugs: string[] = [];
   if (identity.productRoles.includes('seller')) slugs.push('vendedor');
@@ -696,7 +702,7 @@ type PersonSeed = {
 };
 
 type OrgRows = {
-  settings: SettingsRow;
+  settings: SettingsRow | null;
   areas: AreaRow[];
   funcoes: FuncaoRow[];
   people: PersonRow[];
@@ -1616,11 +1622,99 @@ function buildOrgRows(orgId: string, identities: readonly SeedIdentity[], cutoff
   };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// The LEADS-edition org shape. Models a freshly activated leads-edition org
+// (Construbom): no settings row, no área, cliente, produto, etapa, lead or
+// proposta; only the two system funcoes, and one pessoa per non-admin seller
+// identity of the org carrying exactly the vendedor funcao. The pessoa is
+// UNBOUND (hubAccountId null) on purpose, so the identity's first access goes
+// through the real email self-claim in lead-service.ts.
+// ─────────────────────────────────────────────────────────────────────────────
+function buildLeadsEditionOrgRows(
+  orgId: string,
+  identities: readonly SeedIdentity[],
+  cutoff: SeedCutoff,
+): OrgRows {
+  const nowIso = isoDateTime(cutoff.iso);
+
+  const systemDefs = FUNCAO_DEFS.filter((def) => def.isSystem);
+  const funcoes: FuncaoRow[] = systemDefs.map((def) => ({
+    id: deterministicUuid(`${orgId}:funcao:${def.slug}`),
+    orgId,
+    name: def.name,
+    slug: def.slug,
+    isSystem: true,
+    status: 'active',
+    archivedAt: null,
+    createdAt: nowIso,
+    updatedAt: nowIso,
+  }));
+  const vendedorId = funcoes.find((row) => row.slug === 'vendedor')!.id;
+
+  const sellers = identities.filter(
+    (identity) =>
+      identity.workspaceIds.includes(orgId) &&
+      !isAdminLikeIdentity(identity) &&
+      identity.productRoles.includes('seller'),
+  );
+  const mirrors = booleanMirrorsFor(['vendedor']);
+
+  const people: PersonRow[] = sellers.map((identity) => ({
+    id: deterministicUuid(`${orgId}:person:account:${identity.accountId}`),
+    orgId,
+    displayName: identity.name,
+    contactEmail: identity.email,
+    hubAccountId: null,
+    status: 'active',
+    archivedAt: null,
+    isSeller: mirrors.isSeller,
+    isFinder: mirrors.isFinder,
+    isCollaborator: mirrors.isCollaborator,
+    createdAt: nowIso,
+    updatedAt: nowIso,
+  }));
+
+  const personFuncoes: PersonFuncaoRow[] = sellers.map((identity, index) => ({
+    id: deterministicUuid(`${orgId}:person-funcao:${identity.accountId}:vendedor`),
+    orgId,
+    personId: people[index]!.id,
+    funcaoId: vendedorId,
+    createdAt: nowIso,
+  }));
+
+  return {
+    settings: null,
+    areas: [],
+    funcoes,
+    people,
+    personFuncoes,
+    clients: [],
+    products: [],
+    productFuncaoCosts: [],
+    leadStages: [],
+    sales: [],
+    saleItems: [],
+    saleProfessionals: [],
+    receivables: [],
+    payables: [],
+    leads: [],
+    leadProducts: [],
+  };
+}
+
 export function buildDevSeedPlan(input: {
   orgIds: string[];
   identities: SeedIdentity[];
   cutoff: SeedCutoff;
+  /** Orgs seeded in the leads-edition shape (buildLeadsEditionOrgRows). Each MUST be in orgIds. */
+  leadsEditionOrgIds?: readonly string[];
 }): DevSeedPlan {
+  const leadsEditionOrgIds = new Set(input.leadsEditionOrgIds ?? []);
+  for (const orgId of leadsEditionOrgIds) {
+    if (!input.orgIds.includes(orgId)) {
+      throw new Error(`[dev-seed] leads edition org "${orgId}" is not one of the seeded org ids.`);
+    }
+  }
   const settings: SettingsRow[] = [];
   const areas: AreaRow[] = [];
   const funcoes: FuncaoRow[] = [];
@@ -1639,8 +1733,10 @@ export function buildDevSeedPlan(input: {
   const leadProducts: LeadProductRow[] = [];
 
   for (const orgId of input.orgIds) {
-    const org = buildOrgRows(orgId, input.identities, input.cutoff);
-    settings.push(org.settings);
+    const org = leadsEditionOrgIds.has(orgId)
+      ? buildLeadsEditionOrgRows(orgId, input.identities, input.cutoff)
+      : buildOrgRows(orgId, input.identities, input.cutoff);
+    if (org.settings) settings.push(org.settings);
     areas.push(...org.areas);
     funcoes.push(...org.funcoes);
     people.push(...org.people);

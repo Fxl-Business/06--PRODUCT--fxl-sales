@@ -641,3 +641,107 @@ describe('buildDevSeedPlan - the integration fixture org', () => {
     expect(receivables.length).toBeGreaterThan(0);
   });
 });
+
+describe('buildDevSeedPlan - the leads edition fixture org', () => {
+  // Literal on purpose: this file never imports the roster. The id equals the package's
+  // FIXTURE_LEADS_EDITION_ORGANIZATION_ID, which the auth-fake roster test pins.
+  const ORG_LEADS = 'org_fake_leads';
+  const LEADS_IDENTITIES: SeedIdentity[] = [
+    ...IDENTITIES,
+    {
+      accountId: 'acct_leads_owner',
+      workspaceIds: [ORG_LEADS],
+      workspaceRole: 'owner',
+      productRoles: [],
+      name: 'Leads Owner Test',
+      email: 'leads-owner@test.local',
+    },
+    {
+      accountId: 'acct_leads_seller',
+      workspaceIds: [ORG_LEADS],
+      workspaceRole: 'member',
+      productRoles: ['seller'],
+      name: 'Leads Seller Test',
+      email: 'Leads-Seller@test.local',
+    },
+  ];
+  const LEADS_INPUT = {
+    orgIds: [ORG_ALPHA, ORG_LEADS],
+    identities: LEADS_IDENTITIES,
+    cutoff: CUTOFF,
+    leadsEditionOrgIds: [ORG_LEADS],
+  };
+  const plan = buildDevSeedPlan(LEADS_INPUT);
+  const inLeads = <T extends { orgId: string }>(rows: readonly T[]): T[] =>
+    rows.filter((row) => row.orgId === ORG_LEADS);
+
+  it('seeds no etapa, no lead, no proposta, no ledger, no catalog and no settings row', () => {
+    expect(inLeads(plan.rows.salesOpsLeadStages)).toEqual([]);
+    expect(inLeads(plan.rows.salesOpsLeads)).toEqual([]);
+    expect(inLeads(plan.rows.salesOpsLeadProducts)).toEqual([]);
+    expect(inLeads(plan.rows.salesOpsSales)).toEqual([]);
+    expect(inLeads(plan.rows.salesOpsSaleItems)).toEqual([]);
+    expect(inLeads(plan.rows.salesOpsSaleProfessionals)).toEqual([]);
+    expect(inLeads(plan.rows.salesOpsReceivables)).toEqual([]);
+    expect(inLeads(plan.rows.salesOpsPayables)).toEqual([]);
+    expect(inLeads(plan.rows.salesOpsSettlements)).toEqual([]);
+    expect(inLeads(plan.rows.salesOpsAreas)).toEqual([]);
+    expect(inLeads(plan.rows.salesOpsClients)).toEqual([]);
+    expect(inLeads(plan.rows.salesOpsProducts)).toEqual([]);
+    expect(inLeads(plan.rows.salesOpsProductFuncaoCosts)).toEqual([]);
+    expect(inLeads(plan.rows.salesOpsSettings)).toEqual([]);
+  });
+
+  it('seeds exactly the two system funcoes', () => {
+    const funcoes = inLeads(plan.rows.salesOpsFuncoes);
+    expect(funcoes.map((row) => row.slug).sort()).toEqual(['finder', 'vendedor']);
+    for (const row of funcoes) {
+      expect(row.isSystem).toBe(true);
+      expect(row.status).toBe('active');
+    }
+  });
+
+  it('seeds exactly one active, UNBOUND vendedor pessoa carrying the seller identity email', () => {
+    const people = inLeads(plan.rows.salesOpsPeople);
+    expect(people.length).toBe(1);
+    const person = people[0]!;
+    expect(person.contactEmail).toBe('Leads-Seller@test.local');
+    expect(person.displayName).toBe('Leads Seller Test');
+    expect(person.hubAccountId).toBeNull();
+    expect(person.status).toBe('active');
+    expect(person.archivedAt).toBeNull();
+    expect([person.isSeller, person.isFinder, person.isCollaborator]).toEqual([true, false, false]);
+
+    const vendedor = inLeads(plan.rows.salesOpsFuncoes).find((row) => row.slug === 'vendedor')!;
+    const links = inLeads(plan.rows.salesOpsPersonFuncoes);
+    expect(links.map((row) => [row.personId, row.funcaoId])).toEqual([[person.id, vendedor.id]]);
+  });
+
+  it('leaves every other org byte-identical to a plan built without the flag', () => {
+    const baseline = buildDevSeedPlan({ orgIds: [ORG_ALPHA], identities: IDENTITIES, cutoff: CUTOFF });
+    for (const [table, rows] of Object.entries(plan.rows)) {
+      const alphaRows = (rows as readonly { orgId: string }[]).filter((row) => row.orgId === ORG_ALPHA);
+      const baselineRows = (
+        baseline.rows[table as keyof DevSeedPlan['rows']] as readonly { orgId: string }[]
+      ).filter((row) => row.orgId === ORG_ALPHA);
+      expect(JSON.stringify(alphaRows), table).toBe(JSON.stringify(baselineRows));
+    }
+  });
+
+  it('seeds the full catalog for the same org when it is not flagged, so the flag alone drives the shape', () => {
+    const unflagged = buildDevSeedPlan({ orgIds: [ORG_LEADS], identities: LEADS_IDENTITIES, cutoff: CUTOFF });
+    expect(inLeads(unflagged.rows.salesOpsLeadStages).length).toBeGreaterThan(0);
+  });
+
+  it('is deterministic and never repeats an id', () => {
+    expect(JSON.stringify(buildDevSeedPlan(LEADS_INPUT))).toBe(JSON.stringify(plan));
+    const ids = collectIds(plan);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('refuses a leads edition org that is not one of the seeded orgs', () => {
+    expect(() =>
+      buildDevSeedPlan({ ...LEADS_INPUT, orgIds: [ORG_ALPHA], leadsEditionOrgIds: [ORG_LEADS] }),
+    ).toThrow(/org_fake_leads/);
+  });
+});
