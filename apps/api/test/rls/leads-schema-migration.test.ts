@@ -418,7 +418,10 @@ describe('leads schema migration 0022', () => {
     expect(columns).toEqual([
       { column_name: 'client_id', data_type: 'uuid', is_nullable: 'YES' },
       { column_name: 'client_name_snapshot', data_type: 'text', is_nullable: 'NO' },
+      { column_name: 'contact_birth_date', data_type: 'date', is_nullable: 'YES' },
+      { column_name: 'contact_email', data_type: 'text', is_nullable: 'YES' },
       { column_name: 'contact_name', data_type: 'text', is_nullable: 'NO' },
+      { column_name: 'contact_phone', data_type: 'text', is_nullable: 'YES' },
       { column_name: 'created_at', data_type: 'timestamp with time zone', is_nullable: 'NO' },
       { column_name: 'description', data_type: 'text', is_nullable: 'YES' },
       { column_name: 'estimated_value_brl', data_type: 'integer', is_nullable: 'NO' },

@@ -1004,6 +1004,16 @@ export const salesOpsLeads = pgTable(
     orgId: text('org_id').notNull(),
     contactName: text('contact_name').notNull(),
     /**
+     * Contact details (migration 0027). All three are nullable with no default,
+     * so every lead written before them, and every lead the full edition writes,
+     * reads NULL. Only the leads edition's contact field set writes them (slice
+     * 04 of edicao-leads). The birth date is a CIVIL day: string mode, never a JS
+     * Date, exactly like sales_ops_settlements.paid_on.
+     */
+    contactPhone: text('contact_phone'),
+    contactEmail: text('contact_email'),
+    contactBirthDate: date('contact_birth_date', { mode: 'string' }),
+    /**
      * Empresa. Nullable id + ALWAYS-written snapshot, exactly as
      * sales_ops_sales.(client_id, client_name_snapshot). The snapshot IS the
      * free-text fallback: a lead may name a company that has no cadastro row, and
