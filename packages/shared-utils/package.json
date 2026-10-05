@@ -33,6 +33,10 @@
     "./liquidacao": {
       "types": "./dist/liquidacao.d.ts",
       "import": "./dist/liquidacao.js"
+    },
+    "./sales-edition": {
+      "types": "./dist/sales-edition.d.ts",
+      "import": "./dist/sales-edition.js"
     }
   },
   "scripts": {
