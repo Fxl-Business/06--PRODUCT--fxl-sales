@@ -23,6 +23,7 @@ import type { IntegrationDiscovery } from '../hub-client.js';
 import { createIntegrationPooledAdapter } from '../outbox-adapter.js';
 
 const FINANCE = 'app.fxl-finance';
+const ORG_PREFIX = 'org_cons_';
 const seededOrgIds: string[] = [];
 
 function must<T>(v: T | undefined): T {
@@ -31,7 +32,7 @@ function must<T>(v: T | undefined): T {
 }
 
 async function seed(status: 'open' | 'void' = 'open') {
-  const orgId = `org_cons_${randomUUID()}`;
+  const orgId = `${ORG_PREFIX}${randomUUID()}`;
   seededOrgIds.push(orgId);
   const db = getAdminDb();
   const [sale] = await db
@@ -153,9 +154,14 @@ async function inboxCount(orgId: string): Promise<number> {
   )) as unknown as Array<{ n: number }>;
   return rows[0]!.n;
 }
+/**
+ * Outbox rows of THIS file's orgs (every seeded org is `org_cons_<uuid>`). The
+ * outbox is shared by every integration file and by the dev seed's fixture org,
+ * so a table-wide count would read another file's residue as an echo.
+ */
 async function outboxCount(): Promise<number> {
   const rows = (await getAdminDb().execute(
-    sql`SELECT count(*)::int AS n FROM integration_outbox`,
+    sql`SELECT count(*)::int AS n FROM integration_outbox WHERE starts_with(organization_id, ${ORG_PREFIX})`,
   )) as unknown as Array<{ n: number }>;
   return rows[0]!.n;
 }
