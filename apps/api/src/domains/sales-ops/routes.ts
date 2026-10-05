@@ -118,7 +118,13 @@ salesOpsRouter.post('/people', requireAdmin, async (c) => {
   if (!parsed.success) {
     return c.json({ error: 'validation_error', issues: parsed.error.flatten() }, 400);
   }
-  const person = await createPerson(getDb(), c.get('orgId'), parsed.data);
+  // The leads edition forces the função set to exactly [vendedor] in the service.
+  // The full edition keeps today's exact three-argument call.
+  const edition = c.get('salesEdition') ?? 'full';
+  const person =
+    edition === 'leads'
+      ? await createPerson(getDb(), c.get('orgId'), parsed.data, { edition })
+      : await createPerson(getDb(), c.get('orgId'), parsed.data);
   if (isPersonFuncaoError(person)) {
     return c.json({ error: 'validation_error', reason: person }, 400);
   }
@@ -130,13 +136,13 @@ salesOpsRouter.patch('/people/:id', requireAdmin, async (c) => {
   if (!parsed.success) {
     return c.json({ error: 'validation_error', issues: parsed.error.flatten() }, 400);
   }
-  const person = await updatePerson(
-    getDb(),
-    c.get('orgId'),
-    c.req.param('id'),
-    parsed.data,
-    cadastroActor(c),
-  );
+  const edition = c.get('salesEdition') ?? 'full';
+  const person =
+    edition === 'leads'
+      ? await updatePerson(getDb(), c.get('orgId'), c.req.param('id'), parsed.data, cadastroActor(c), {
+          edition,
+        })
+      : await updatePerson(getDb(), c.get('orgId'), c.req.param('id'), parsed.data, cadastroActor(c));
   if (isPersonFuncaoError(person)) {
     return c.json({ error: 'validation_error', reason: person }, 400);
   }
