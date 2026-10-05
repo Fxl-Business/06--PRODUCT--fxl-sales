@@ -1,0 +1,1 @@
+{"agent":"planner","slice":"04-api-leads-edition","status":"PASS","done":true,"files_modified":["nexo/plans/edicao-leads/04-api-leads-edition.md"],"oracle":"apps/api/test/rls/leads-edition.test.ts"}

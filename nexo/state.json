@@ -130,5 +130,12 @@
     "decision": "approved-cut-staging-production",
     "decided_at": "2026-10-02",
     "note": "Owner approved in chat to merge, cut and push production in this session, skipping the human gate pause. Release-verify PASS at 24c75f6 (2576 unit + 91 guards, 330 integration, clean web build, API image with exceljs). master, staging and production fast-forwarded to 24c75f6; staging/production came from v4.0.0, so v4.1.0 (migrations 0022-0026) shipped in the same push. Closes milestones v4.1.0 and v4.2.0."
+  },
+  "gate1_edicao_leads": {
+    "feature": "edicao-leads",
+    "run": "20261005T221616Z-edicao-leads",
+    "decision": "skipped-autopilot",
+    "decided_at": "2026-10-05",
+    "note": "Owner brainstormed the WHAT in-session (edition resolved from Hub module sales.edition.leads; FXL unchanged; leads-only Kanban with contact fields; empty configurable etapas; gestor + vendedores) and then said 'Siga em autopilot'. Eight slices in four waves, executed serially. Gate 2 per slice and per wave; Gate 3 untouched."
   }
 }
