@@ -84,6 +84,22 @@ Slice 06 gave the leads edition a contact-only board on the web, with the full e
 - Zero active etapas render `[data-no-stages]`: the gestor (`admin` role) gets the copy plus `Ir para Etapas do funil`, which navigates to `/cadastros/etapas`, and the vendedor gets `Fale com o gestor`; `Novo lead` is disabled in both.
 - The container no longer waits on the board query when there are zero etapas, because `useLeadsBoard` is disabled without stage rows and would leave the Skeleton up forever.
 - In the leads edition the board is never handed `onRequestConversion` or `onOpenSale`, so even a stray conversion-kind etapa opens no proposta door.
-- A contact save uses `mutateAsync`; a `400` with `reason: 'no_open_stage'` (read from `ApiError.reason`, set by `apiFetch` only when the body sends one) renders the inline `[data-lead-save-error]` no-etapa notice and any other failure the generic save notice; the full edition keeps `mutate`.
+- A contact save uses `mutateAsync`; a `400` with `reason: 'no_open_stage'` (read from `ApiError.reason`, set by `apiFetch` only when the body sends one) renders the `[data-lead-save-error]` no-etapa notice and any other failure the generic save notice; the full edition keeps `mutate`.
+  Since slice 07.1 that notice renders inside the still-open dialog (see below).
 - `contact-lead.ts` and `ContactLeadDialog.tsx` joined the `board-write-surface.test.ts` `OWNED_FILES`.
 - Oracles: `leads/__tests__/leads-contact-board.test.tsx`, `leads/__tests__/leads-contact-container.test.tsx`, `leads/__tests__/leads-full-edition.test.tsx` (innerHTML equality with `fieldSet` omitted and `'full'`), `leads/__tests__/contact-lead.test.ts`, `leads/__tests__/contact-lead-dialog.test.tsx` and `lib/__tests__/api-client-reason.test.ts`.
+
+Slice 07.1 closed the seller usability gap found in the slice 07 browser walk, with the full edition (FXL) unchanged except the move-dialog fix.
+
+- D-07.1a: in the leads edition a scoped seller (`gate.sellerPersonId` set) who creates a contact lead with `sellerPersonId` absent or `null` gets it assigned to their own pessoa.
+  `createContactLead` passes `{ defaultSellerToCaller: true }` to the private `insertLead`; `createLead` never passes it, so a full-edition seller naming no vendedor still answers `403 seller_scope`.
+  An explicit other vendedor still answers `403 seller_scope` in both editions, and an admin naming no vendedor still files an unassigned lead.
+- D-07.1b: `LeadsBoardContainer` hands `ContactLeadDialog` `showSellerPicker={isAdmin}` (the same `roles.includes('admin')` read as `canManageStages`).
+  A non-admin sees no Vendedor field, and `buildContactLeadPayload(draft, id, { includeSeller: false })` omits the `sellerPersonId` KEY: a create defaults to the caller, an edit leaves the stored vendedor untouched.
+  `ContactLeadPayload.sellerPersonId` is optional for that reason.
+- D-07.1c: `ContactLeadDialog` awaits `onSubmit` and closes only when it resolves.
+  A rejection keeps the dialog open with every typed value and renders `contactLeadSaveErrorCopy(error)` as `[data-lead-save-error]` inside the dialog; `Salvar` is disabled while the request is in flight.
+- D-07.1d: `MoveLeadDialog` renders `[data-move-blocked]` only after the operator changes a field.
+  `Mover` stays disabled while `validateMove` refuses, exactly as before, and the dialog is still the single `MoveLeadPayload` emitter.
+- D-07.1e: the contact dialog's vendedor `Combobox` carries `aria-label="Vendedor responsável"` and the shared `DialogContent` close button carries `aria-label="Fechar"`.
+- Oracles: `test/rls/leads-edition.test.ts` (seller default, explicit other id, admin unassigned, full-edition `seller_scope`), `leads/__tests__/contact-lead-dialog.test.tsx`, `leads/__tests__/leads-contact-container.test.tsx`, `leads/__tests__/contact-lead.test.ts` and `leads/__tests__/move-lead-dialog.test.tsx`.
