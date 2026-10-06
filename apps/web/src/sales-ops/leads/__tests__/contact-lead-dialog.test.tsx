@@ -187,16 +187,54 @@ describe('ContactLeadDialog', () => {
   it('blocks a blank name until one is typed', async () => {
     await renderDialog();
     expect(saveButton().disabled).toBe(true);
-    expect(blockedText()).toBe('Informe o nome.');
 
     await typeInto(input('lead-contact-name'), 'Ana');
     expect(saveButton().disabled).toBe(false);
     expect(blockedText()).toBeNull();
   });
 
+  it('opens with no validation text, on create and on edit', async () => {
+    await renderDialog();
+    expect(blockedText()).toBeNull();
+    expect(dialogNode().textContent).not.toContain('Informe o nome.');
+    expect(saveButton().disabled).toBe(true);
+  });
+
+  it('shows the name error only after Nome changes, and clears it once valid', async () => {
+    await renderDialog();
+    await typeInto(input('lead-contact-name'), 'A');
+    expect(blockedText()).toBeNull();
+    await typeInto(input('lead-contact-name'), '');
+    expect(blockedText()).toBe('Informe o nome.');
+    expect(saveButton().disabled).toBe(true);
+    await typeInto(input('lead-contact-name'), 'Ana');
+    expect(blockedText()).toBeNull();
+  });
+
+  it('does not show the email error while only another field changed', async () => {
+    await renderDialog({
+      initial: {
+        contactName: 'Ana',
+        contactEmail: 'ana@',
+        contactPhone: null,
+        contactBirthDate: null,
+        description: null,
+        sellerPersonId: SELLER_ID,
+      },
+    });
+    expect(blockedText()).toBeNull();
+    await typeInto(input('lead-phone'), '11999999999');
+    expect(blockedText()).toBeNull();
+    expect(saveButton().disabled).toBe(true);
+    await typeInto(input('lead-email'), 'ana@x');
+    await typeInto(input('lead-email'), 'ana@');
+    expect(blockedText()).toBe('Informe um email válido.');
+  });
+
   it('blocks a future birthday and accepts today', async () => {
     await renderDialog();
     await typeInto(input('lead-contact-name'), 'Ana');
+    expect(blockedText()).toBeNull();
 
     await typeInto(input('lead-birth-date'), '2026-10-06');
     expect(saveButton().disabled).toBe(true);
