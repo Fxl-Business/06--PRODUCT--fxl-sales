@@ -1,3 +1,4 @@
+import type { SalesEdition } from '@fxl-sales/shared-utils/sales-edition';
 import { and, asc, eq, sql, type SQL } from 'drizzle-orm';
 import type { getDb } from '../../../db/client.js';
 import {
@@ -20,6 +21,7 @@ import type {
   UpdateLeadInput,
 } from './lead-schemas.js';
 import { LEADS_DEFAULT_LIMIT } from './lead-schemas.js';
+import { PersonSchema, createPersonTx } from '../service.js';
 import { withTenant } from './with-tenant.js';
 
 /**
@@ -45,7 +47,21 @@ import { withTenant } from './with-tenant.js';
 type Db = ReturnType<typeof getDb>;
 
 /** The caller, built at the route boundary from the VERIFIED context only. */
-export type LeadScope = { userId: string; email: string | null; isAdmin: boolean };
+export type LeadScope = {
+  userId: string;
+  email: string | null;
+  isAdmin: boolean;
+  /** The verified token display name, or null. Read only by the leads-edition auto-provision. */
+  name?: string | null;
+  /** Whether the verified `userRoles` carry `seller`. Read only by the leads-edition auto-provision. */
+  hasSellerRole?: boolean;
+  /**
+   * The edition the auth middleware resolved from the verified token. Absent
+   * means 'full', so every caller that does not pass it (the import executor,
+   * the FXL routes before this field existed) keeps today's behaviour.
+   */
+  edition?: SalesEdition;
+};
 
 /**
  * Shape and the `itemIndex: -1` convention are copied verbatim from
@@ -193,7 +209,132 @@ export async function resolveLeadScopePredicate(
   if (scope.isAdmin) return { ok: true, sellerPersonId: null };
   const personId = await resolveCallerPersonId(tx, orgId, scope);
   if (personId) return { ok: true, sellerPersonId: personId };
+  // The full edition never reaches the provisioning code: an FXL seller without
+  // a pessoa is an operator cadastro gap and keeps answering unmapped.
+  if (scope.edition === 'leads') {
+    const provisioned = await provisionLeadsSellerPerson(tx, orgId, scope);
+    if (provisioned) return { ok: true, sellerPersonId: provisioned };
+  }
   return { ok: false, reason: 'seller_person_unmapped' };
+}
+
+/** `sales_ops_people.display_name` is capped by `PersonSchema` at this length. */
+const PROVISIONED_NAME_MAX = 120;
+
+/** The verified name, trimmed and capped, else the e-mail local part. */
+function provisionedDisplayName(scope: LeadScope, email: string): string {
+  let name = (scope.name ?? '').trim().slice(0, PROVISIONED_NAME_MAX);
+  // Never cut a surrogate pair in half.
+  if (/[\uD800-\uDBFF]$/.test(name)) name = name.slice(0, -1);
+  name = name.trimEnd();
+  if (name !== '') return name;
+  const localPart = email.split('@')[0] ?? '';
+  return localPart !== '' ? localPart : email;
+}
+
+const HUB_ACCOUNT_UNIQUE_INDEX = 'sales_ops_people_org_hub_account_idx';
+
+/** A UNIQUE violation of the one-pessoa-per-Hub-account index (a concurrent provision or bind won). */
+function isHubAccountUniqueViolation(error: unknown): boolean {
+  // postgres.js puts code/constraint_name on the error; drizzle re-throws it
+  // wrapped, exposing the original under `cause`.
+  const candidates = [error, (error as { cause?: unknown } | null)?.cause];
+  for (const candidate of candidates) {
+    const pgError = candidate as
+      | { code?: string; constraint_name?: string; constraint?: string }
+      | null
+      | undefined;
+    if (!pgError || pgError.code !== '23505') continue;
+    if ((pgError.constraint_name ?? pgError.constraint) === HUB_ACCOUNT_UNIQUE_INDEX) return true;
+  }
+  return false;
+}
+
+/**
+ * Leads edition only: creates the caller's OWN pessoa on their first leads
+ * request, after binding by account and the e-mail self-claim both found
+ * nothing.
+ *
+ * Safe because the Hub already verified the account, the org and the app role
+ * `seller`, and the row created is the caller's own, so scoping still shows
+ * only their leads. It never guesses: any pessoa in the org already carrying
+ * the token e-mail (two unbound ones, an inactive one, one bound elsewhere) is
+ * a cadastro an admin made, and the caller stays `seller_person_unmapped`.
+ *
+ * Runs inside the request's tenant transaction through `createPersonTx` with
+ * the leads edition, so the pessoa is exactly a vendedor and the system
+ * funções are seeded in the same transaction.
+ *
+ * Concurrent first requests for one account. The transaction is READ
+ * COMMITTED, so EVERY statement takes a fresh snapshot, and a winner may commit
+ * between any two of the loser's statements. Two interleavings follow, and both
+ * end on the winner's row through {@link boundPersonId}, re-read by account:
+ *  - The winner commits after the loser's account lookup (a miss) but before
+ *    its e-mail check, which then sees the winner's pessoa carrying the e-mail.
+ *    Every e-mail hit re-reads by account BEFORE refusing, so a pessoa bound to
+ *    this very account is returned as the caller's own.
+ *  - The winner has not committed by the e-mail check. Both reach the INSERT;
+ *    the partial unique index on (org_id, hub_account_id) makes the loser wait
+ *    for the winner's commit and fail with 23505 inside a SAVEPOINT, so the
+ *    request transaction survives, and the loser re-reads.
+ * One account never gets two pessoas, and the loser is never refused.
+ *
+ * Exported for the oracle, which forces the first interleaving; the only
+ * product caller is `resolveLeadScopePredicate`.
+ */
+export async function provisionLeadsSellerPerson(
+  tx: Db,
+  orgId: string,
+  scope: LeadScope,
+): Promise<string | null> {
+  if (scope.hasSellerRole !== true) return null;
+  const email = scope.email?.trim().toLowerCase() ?? '';
+  if (email === '') return null;
+
+  const [existing] = await tx
+    .select({ id: salesOpsPeople.id })
+    .from(salesOpsPeople)
+    .where(
+      and(
+        eq(salesOpsPeople.orgId, orgId),
+        sql`lower(btrim(${salesOpsPeople.contactEmail})) = ${email}`,
+      ),
+    )
+    .limit(1);
+  // A fresh statement, so it sees a pessoa a concurrent request bound to this
+  // account after our account lookup missed. Only a pessoa bound elsewhere, or
+  // unbound, is somebody else's cadastro and a refusal.
+  if (existing) return boundPersonId(tx, orgId, scope.userId);
+
+  const input = PersonSchema.safeParse({
+    displayName: provisionedDisplayName(scope, email),
+    contactEmail: email,
+    status: 'active',
+    hubAccountId: scope.userId,
+  });
+  if (!input.success) return null;
+
+  try {
+    const created = await tx.transaction((savepoint) =>
+      createPersonTx(savepoint as unknown as Db, orgId, input.data, { edition: 'leads' }),
+    );
+    return typeof created === 'string' ? null : created.id;
+  } catch (error) {
+    if (!isHubAccountUniqueViolation(error)) throw error;
+  }
+  // The 23505 is raised only after the winner committed, so this statement's
+  // snapshot always contains the winner's row.
+  return boundPersonId(tx, orgId, scope.userId);
+}
+
+/** The pessoa bound to the account, read with a fresh statement snapshot. */
+async function boundPersonId(tx: Db, orgId: string, userId: string): Promise<string | null> {
+  const [bound] = await tx
+    .select({ id: salesOpsPeople.id })
+    .from(salesOpsPeople)
+    .where(and(eq(salesOpsPeople.orgId, orgId), eq(salesOpsPeople.hubAccountId, userId)))
+    .limit(1);
+  return bound?.id ?? null;
 }
 
 type ResolvedSeller = { id: string; displayName: string };

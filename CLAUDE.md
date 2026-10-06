@@ -343,6 +343,8 @@ Full reference: `nexo/knowledge/reference/kanban-de-leads.md` (section Edição 
 - A non-admin vendedor creating a lead in the leads edition sends no `sellerPersonId`: `createContactLead` (only) assigns the caller's own pessoa, the Vendedor picker is hidden for non-admins, and an explicit other id is still `403 seller_scope`.
 - The contact lead dialog stays open with the typed values and an inline error when a save is refused; the `Mover para` dialog shows no refusal before the operator interacts.
 - An admin in the leads edition never sees `meus-dados` (product decision); a finder-only operator stays on `/no-role`.
+- A non-admin `seller` with an e-mail claim and no pessoa is auto-provisioned on the first leads request (leads edition only, after bind-by-account and the e-mail self-claim): `provisionLeadsSellerPerson` creates a vendedor through `createPersonTx` in the same transaction, and a concurrent duplicate is absorbed by the `hub_account_id` unique index inside a savepoint plus a re-read.
+  Any pessoa already carrying that e-mail, a finder-only caller, no e-mail claim and the full edition still answer `403 seller_person_unmapped`, which the leads board renders with its own copy.
 
 ## Integração Sales-Finance (plano de controle)
 

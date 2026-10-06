@@ -61,6 +61,7 @@ const TOKEN_EMAIL = 'ana@example.test';
 
 let currentRoles: string[];
 let currentEdition: 'full' | 'leads' | undefined;
+let currentName: string | undefined;
 
 function createTestApp() {
   const app = new Hono();
@@ -75,6 +76,7 @@ function createTestApp() {
         accountId: 'verified-account',
         workspaceId: 'verified-org',
         email: TOKEN_EMAIL,
+        ...(currentName !== undefined ? { name: currentName } : {}),
       }),
     );
     if (currentEdition !== undefined) c.set('salesEdition', currentEdition);
@@ -103,6 +105,7 @@ describe('Sales Ops lead routes per sales edition', () => {
   beforeEach(() => {
     currentRoles = ['admin'];
     currentEdition = 'leads';
+    currentName = undefined;
     for (const mock of Object.values(serviceMocks)) {
       mock.mockReset();
       mock.mockResolvedValue({ ok: true, lead: leadView });
@@ -117,7 +120,14 @@ describe('Sales Ops lead routes per sales edition', () => {
       mockedDb,
       'verified-org',
       { contactName: 'Ana' },
-      { userId: 'verified-account', email: TOKEN_EMAIL, isAdmin: true },
+      {
+        userId: 'verified-account',
+        email: TOKEN_EMAIL,
+        isAdmin: true,
+        name: null,
+        hasSellerRole: false,
+        edition: 'leads',
+      },
     ]);
     expect(serviceMocks.createLead).not.toHaveBeenCalled();
   });
@@ -223,6 +233,43 @@ describe('Sales Ops lead routes per sales edition', () => {
       userId: 'verified-account',
       email: TOKEN_EMAIL,
       isAdmin: false,
+      name: null,
+      hasSellerRole: true,
+      edition: 'leads',
+    });
+  });
+
+  // seller-auto-provision: the provisioning inputs come from the verified
+  // context only; the strict contact schema refuses any body attempt.
+  it('builds the auto-provision inputs from the verified token, never from the body', async () => {
+    currentRoles = ['seller'];
+    currentName = 'Ana Martins';
+    const response = await jsonRequest('POST', '/leads', { contactName: 'Ana' });
+    expect(response.status).toBe(201);
+    expect(serviceMocks.createContactLead.mock.calls[0]![3]).toEqual({
+      userId: 'verified-account',
+      email: TOKEN_EMAIL,
+      isAdmin: false,
+      name: 'Ana Martins',
+      hasSellerRole: true,
+      edition: 'leads',
+    });
+
+    const smuggled = await jsonRequest('POST', '/leads', {
+      contactName: 'Ana',
+      name: 'Outro',
+      edition: 'leads',
+      hasSellerRole: true,
+    });
+    expect(smuggled.status).toBe(400);
+    expect(serviceMocks.createContactLead).toHaveBeenCalledTimes(1);
+
+    currentRoles = ['finder'];
+    currentEdition = undefined;
+    await jsonRequest('POST', '/leads', { contactName: 'Ana', clientName: 'Empresa Um' });
+    expect(serviceMocks.createLead.mock.calls[0]![3]).toMatchObject({
+      hasSellerRole: false,
+      edition: 'full',
     });
   });
 });

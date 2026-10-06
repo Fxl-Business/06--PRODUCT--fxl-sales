@@ -53,11 +53,19 @@ const leadIdSchema = z.string().uuid();
  * never the middleware and never the client.
  */
 function leadScope(c: Context): LeadScope {
-  const email = c.get('hubAuth')?.claims?.email;
+  const claims = c.get('hubAuth')?.claims;
+  const email = claims?.email;
+  const name = claims?.name;
+  const roles = c.get('userRoles') ?? [];
   return {
     userId: c.get('userId'),
     email: typeof email === 'string' && email.trim() !== '' ? email : null,
-    isAdmin: (c.get('userRoles') ?? []).includes('admin'),
+    isAdmin: roles.includes('admin'),
+    // Read only by the leads-edition seller auto-provision; the full edition
+    // never reaches it (see resolveLeadScopePredicate).
+    name: typeof name === 'string' && name.trim() !== '' ? name : null,
+    hasSellerRole: roles.includes('seller'),
+    edition: c.get('salesEdition') ?? 'full',
   };
 }
 

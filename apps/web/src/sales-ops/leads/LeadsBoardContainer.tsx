@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { leadFieldSet } from '@fxl-sales/shared-utils/sales-edition';
+import { type LeadFieldSet, leadFieldSet } from '@fxl-sales/shared-utils/sales-edition';
 import { useAuthProfile, useSalesEdition } from '@/auth/react';
 import type { ComboboxOption } from '@/components/ui/combobox';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -25,6 +25,31 @@ import type { LeadBoardFilters, SalesOpsLead } from './types';
  * It classifies no auth or entitlement failure: `SalesOpsApp` already owns that
  * chain one level up, and a second classifier would be a second gate.
  */
+
+const BOARD_LOAD_FAILED = 'Não foi possível carregar o funil de leads.';
+const SELLER_PERSON_UNMAPPED =
+  'Seu acesso ainda não está vinculado a um vendedor. Peça ao gestor para conferir seu cadastro em Vendedores.';
+
+/**
+ * The board read failure copy. Only the leads edition names the one refusal an
+ * operator can fix: `403 {reason:'seller_person_unmapped'}`, which survives the
+ * server's auto-provision only when the cadastro is ambiguous (two pessoas, an
+ * inactive one) or the token carries no e-mail. Keyed on the status plus
+ * `ApiError.reason`, like every other leads-edition refusal. The full edition
+ * keeps the generic copy byte-for-byte.
+ */
+function boardLoadErrorCopy(error: unknown, fieldSet: LeadFieldSet): string {
+  if (
+    fieldSet === 'contact' &&
+    typeof error === 'object' &&
+    error !== null &&
+    (error as { status?: unknown }).status === 403 &&
+    (error as { reason?: unknown }).reason === 'seller_person_unmapped'
+  ) {
+    return SELLER_PERSON_UNMAPPED;
+  }
+  return BOARD_LOAD_FAILED;
+}
 
 export type LeadsBoardContainerProps = {
   clients: SalesOpsClient[];
@@ -148,7 +173,10 @@ export function LeadsBoardContainer({
   }
 
   if (stagesQuery.isError || boardQuery.isError) {
-    return <p className={mutedStateClass}>Não foi possível carregar o funil de leads.</p>;
+    const copy = boardQuery.isError
+      ? boardLoadErrorCopy(boardQuery.error, fieldSet)
+      : BOARD_LOAD_FAILED;
+    return <p className={mutedStateClass}>{copy}</p>;
   }
 
   // One clock per render, handed down, so no presentational component reads it.

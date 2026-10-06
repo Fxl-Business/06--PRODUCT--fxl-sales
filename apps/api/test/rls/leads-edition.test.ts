@@ -29,6 +29,7 @@ import {
   getLead,
   listLeads,
   moveLead,
+  provisionLeadsSellerPerson,
   updateContactLead,
 } from '../../src/domains/sales-ops/leads/lead-service.js';
 import { LeadStageSchema } from '../../src/domains/sales-ops/leads/schemas.js';
@@ -42,6 +43,7 @@ import {
   UpdatePersonSchema,
   createPerson,
   updatePerson,
+  withTenant,
 } from '../../src/domains/sales-ops/service.js';
 
 const { appUrl: APP_DB_URL, adminUrl: ADMIN_DB_URL } = testDatabaseUrls();
@@ -53,6 +55,26 @@ const LEADS = { edition: 'leads' } as const;
 
 function sellerScope(userId: string, email: string | null = null): LeadScope {
   return { userId, email, isAdmin: false };
+}
+
+/**
+ * A non-admin caller exactly as `leadScope` builds it in the leads edition:
+ * verified e-mail, verified name, the seller flag from `userRoles`.
+ */
+function leadsSellerScope(
+  userId: string,
+  email: string | null,
+  overrides: Partial<LeadScope> = {},
+): LeadScope {
+  return {
+    userId,
+    email,
+    isAdmin: false,
+    name: null,
+    hasSellerRole: true,
+    edition: 'leads',
+    ...overrides,
+  };
 }
 
 function okLead(result: WriteLeadResult): LeadView {
@@ -645,6 +667,312 @@ describe('sales operations leads edition: contact leads, vendedor-only pessoas, 
 
     // The same row id: the status-only PATCH never rewrote the função set.
     expect(await personFuncaoRows(orgId, dani.id)).toEqual(rowsBefore);
+  });
+
+  async function peopleRows(orgId: string) {
+    return adminClient<
+      Array<{
+        id: string;
+        display_name: string;
+        contact_email: string | null;
+        status: string;
+        hub_account_id: string | null;
+        is_seller: boolean;
+      }>
+    >`
+      SELECT id, display_name, contact_email, status, hub_account_id, is_seller
+      FROM sales_ops_people WHERE org_id = ${orgId} ORDER BY created_at, id`;
+  }
+
+  async function funcaoSlugsOfPerson(orgId: string, personId: string): Promise<string[]> {
+    const rows = await adminClient<Array<{ slug: string }>>`
+      SELECT f.slug FROM sales_ops_person_funcoes pf
+      JOIN sales_ops_funcoes f ON f.org_id = pf.org_id AND f.id = pf.funcao_id
+      WHERE pf.org_id = ${orgId} AND pf.person_id = ${personId}`;
+    return rows.map((row) => row.slug).sort();
+  }
+
+  async function boardOf(orgId: string, stageId: string, scope: LeadScope) {
+    return listLeads(db, orgId, ListLeadsQuerySchema.parse({ stageId }), scope);
+  }
+
+  describe('seller auto-provision (leads edition)', () => {
+    it('provisions the pessoa on the first request and reuses it on the second', async () => {
+      const orgId = newOrg('prov');
+      const stage = await normalStage(orgId, 'Contato');
+      const scope = leadsSellerScope('hub_joao', ' Joao@Construbom.TEST ', {
+        name: '  João Vendedor  ',
+      });
+
+      const first = await boardOf(orgId, stage.id, scope);
+      expect(first).toMatchObject({ ok: true, leads: [] });
+
+      const people = await peopleRows(orgId);
+      expect(people).toHaveLength(1);
+      expect(people[0]).toMatchObject({
+        display_name: 'João Vendedor',
+        contact_email: 'joao@construbom.test',
+        status: 'active',
+        hub_account_id: 'hub_joao',
+        is_seller: true,
+      });
+      expect(await funcaoSlugsOfPerson(orgId, people[0]!.id)).toEqual(['vendedor']);
+
+      const own = okLead(await createContactLead(db, orgId, contactLead(), scope));
+      expect(own).toMatchObject({
+        sellerPersonId: people[0]!.id,
+        sellerNameSnapshot: 'João Vendedor',
+      });
+      const second = await boardOf(orgId, stage.id, scope);
+      if (!second.ok) throw new Error(`unexpected refusal: ${second.reason}`);
+      expect(second.leads.map((lead) => lead.sellerPersonId)).toEqual([people[0]!.id]);
+      expect(await peopleRows(orgId)).toHaveLength(1);
+    });
+
+    it('names the pessoa after the e-mail local part when the token has no name', async () => {
+      const orgId = newOrg('provname');
+      const stage = await normalStage(orgId, 'Contato');
+      const result = await boardOf(
+        orgId,
+        stage.id,
+        leadsSellerScope('hub_maria', 'maria.silva@construbom.test', { name: '   ' }),
+      );
+      expect(result.ok).toBe(true);
+      const people = await peopleRows(orgId);
+      expect(people.map((person) => person.display_name)).toEqual(['maria.silva']);
+    });
+
+    it('caps a long token name at the people schema length', async () => {
+      const orgId = newOrg('provlong');
+      const stage = await normalStage(orgId, 'Contato');
+      const result = await boardOf(
+        orgId,
+        stage.id,
+        leadsSellerScope('hub_long', 'long@construbom.test', { name: 'N'.repeat(300) }),
+      );
+      expect(result.ok).toBe(true);
+      const people = await peopleRows(orgId);
+      expect(people.map((person) => person.display_name)).toEqual(['N'.repeat(120)]);
+    });
+
+    it('claims the single unbound pessoa with the e-mail instead of creating one', async () => {
+      const orgId = newOrg('provclaim');
+      const stage = await normalStage(orgId, 'Contato');
+      const carla = await leadsVendedor(orgId, 'Carla', 'carla@construbom.test');
+
+      const result = await boardOf(
+        orgId,
+        stage.id,
+        leadsSellerScope('hub_carla', 'Carla@Construbom.test', { name: 'Outro Nome' }),
+      );
+      expect(result.ok).toBe(true);
+      const people = await peopleRows(orgId);
+      expect(people).toHaveLength(1);
+      expect(people[0]).toMatchObject({
+        id: carla.id,
+        display_name: 'Carla',
+        hub_account_id: 'hub_carla',
+      });
+    });
+
+    it('still refuses two unbound pessoas sharing the e-mail and creates nothing', async () => {
+      const orgId = newOrg('provtwo');
+      const stage = await normalStage(orgId, 'Contato');
+      await leadsVendedor(orgId, 'Dani A', 'dani@construbom.test');
+      await leadsVendedor(orgId, 'Dani B', 'dani@construbom.test');
+
+      expect(
+        await boardOf(orgId, stage.id, leadsSellerScope('hub_dani', 'dani@construbom.test')),
+      ).toEqual({ ok: false, reason: 'seller_person_unmapped' });
+      const people = await peopleRows(orgId);
+      expect(people).toHaveLength(2);
+      expect(people.every((person) => person.hub_account_id === null)).toBe(true);
+    });
+
+    it('never provisions over an inactive pessoa with the e-mail', async () => {
+      const orgId = newOrg('provinactive');
+      const stage = await normalStage(orgId, 'Contato');
+      const eva = await leadsVendedor(orgId, 'Eva', 'eva@construbom.test');
+      await adminClient`
+        UPDATE sales_ops_people SET status = 'inactive'
+        WHERE org_id = ${orgId} AND id = ${eva.id}`;
+
+      expect(
+        await boardOf(orgId, stage.id, leadsSellerScope('hub_eva', 'eva@construbom.test')),
+      ).toEqual({ ok: false, reason: 'seller_person_unmapped' });
+      expect(await peopleRows(orgId)).toHaveLength(1);
+    });
+
+    it('keeps a finder-only caller unmapped and creates nothing', async () => {
+      const orgId = newOrg('provfinder');
+      const stage = await normalStage(orgId, 'Contato');
+      expect(
+        await boardOf(
+          orgId,
+          stage.id,
+          leadsSellerScope('hub_finder', 'finder@construbom.test', { hasSellerRole: false }),
+        ),
+      ).toEqual({ ok: false, reason: 'seller_person_unmapped' });
+      expect(await peopleRows(orgId)).toHaveLength(0);
+    });
+
+    it('FXL oracle: a full-edition seller with no pessoa stays unmapped and creates nothing', async () => {
+      const orgId = newOrg('provfull');
+      await ensureLeadStagesForOrg(db, orgId);
+      const [stage] = await stageIds(orgId);
+      for (const edition of ['full', undefined] as const) {
+        expect(
+          await boardOf(
+            orgId,
+            stage!,
+            leadsSellerScope('hub_full', 'full@construbom.test', { edition }),
+          ),
+        ).toEqual({ ok: false, reason: 'seller_person_unmapped' });
+      }
+      expect(await peopleRows(orgId)).toHaveLength(0);
+      const [funcoes] = await adminClient<Array<{ n: number }>>`
+        SELECT count(*)::int AS n FROM sales_ops_funcoes WHERE org_id = ${orgId}`;
+      expect(funcoes!.n).toBe(0);
+    });
+
+    it('keeps a caller without an e-mail claim unmapped and creates nothing', async () => {
+      const orgId = newOrg('provnoemail');
+      const stage = await normalStage(orgId, 'Contato');
+      expect(
+        await boardOf(
+          orgId,
+          stage.id,
+          leadsSellerScope('hub_noemail', null, { name: 'Sem Email' }),
+        ),
+      ).toEqual({ ok: false, reason: 'seller_person_unmapped' });
+      expect(await peopleRows(orgId)).toHaveLength(0);
+    });
+
+    it('seeds the system funções for an org that has none and makes the pessoa a vendedor', async () => {
+      const orgId = newOrg('provseed');
+      const stage = await normalStage(orgId, 'Contato');
+      const [before] = await adminClient<Array<{ n: number }>>`
+        SELECT count(*)::int AS n FROM sales_ops_funcoes WHERE org_id = ${orgId}`;
+      expect(before!.n).toBe(0);
+
+      const result = await boardOf(
+        orgId,
+        stage.id,
+        leadsSellerScope('hub_seed', 'seed@construbom.test'),
+      );
+      expect(result.ok).toBe(true);
+      const funcoes = await adminClient<Array<{ slug: string; is_system: boolean }>>`
+        SELECT slug, is_system FROM sales_ops_funcoes WHERE org_id = ${orgId} ORDER BY slug`;
+      expect(funcoes).toEqual([
+        { slug: 'finder', is_system: true },
+        { slug: 'vendedor', is_system: true },
+      ]);
+      const [person] = await peopleRows(orgId);
+      expect(await funcaoSlugsOfPerson(orgId, person!.id)).toEqual(['vendedor']);
+    });
+
+    // Many rounds, because one round loses the race only sometimes: under READ
+    // COMMITTED each statement takes a fresh snapshot, so a loser can miss the
+    // winner's row on the account lookup and see it, committed, one statement
+    // later (the e-mail check). Every round is a FRESH org, so every winner also
+    // seeds the system funções, which is what widens that window enough to lose.
+    it('ends every concurrent first request on the one pessoa of its account', async () => {
+      const ROUNDS = 20;
+      for (let round = 0; round < ROUNDS; round += 1) {
+        const orgId = newOrg(`provrace${round}`);
+        const stage = await normalStage(orgId, 'Contato');
+        const scope = leadsSellerScope('hub_race', 'race@construbom.test', { name: 'Race' });
+        const results = await Promise.all([
+          boardOf(orgId, stage.id, scope),
+          boardOf(orgId, stage.id, scope),
+          boardOf(orgId, stage.id, scope),
+          createContactLead(db, orgId, contactLead(), scope),
+        ]);
+        expect({ round, oks: results.map((result) => result.ok) }).toEqual({
+          round,
+          oks: [true, true, true, true],
+        });
+        const people = await peopleRows(orgId);
+        expect({ round, accounts: people.map((person) => person.hub_account_id) }).toEqual({
+          round,
+          accounts: ['hub_race'],
+        });
+        expect(await funcaoSlugsOfPerson(orgId, people[0]!.id)).toEqual(['vendedor']);
+      }
+    });
+
+    // The e-mail-check interleaving, forced. The race loser ran its account
+    // lookup BEFORE the winner committed (a miss), and its e-mail check runs
+    // AFTER (a fresh READ COMMITTED snapshot), so the check sees the winner's
+    // committed pessoa, bound to the SAME account. That pessoa is the caller's
+    // own and must be returned, never refused as somebody else's cadastro.
+    it('returns the caller own pessoa that becomes visible between the account lookup and the e-mail check', async () => {
+      const orgId = newOrg('provmine');
+      const own = await leadsVendedor(orgId, 'Winner', 'mine@construbom.test');
+      await adminClient`
+        UPDATE sales_ops_people SET hub_account_id = 'hub_mine'
+        WHERE org_id = ${orgId} AND id = ${own.id}`;
+      const scope = leadsSellerScope('hub_mine', 'MINE@construbom.test');
+
+      const provisioned = await withTenant(db, orgId, (tx) =>
+        provisionLeadsSellerPerson(tx, orgId, scope),
+      );
+      expect(provisioned).toBe(own.id);
+      expect((await peopleRows(orgId)).map((person) => person.id)).toEqual([own.id]);
+
+      // Somebody else's cadastro with the e-mail is still a refusal.
+      const otherOrg = newOrg('provother');
+      await leadsVendedor(otherOrg, 'Outro', 'mine@construbom.test');
+      expect(
+        await withTenant(db, otherOrg, (tx) => provisionLeadsSellerPerson(tx, otherOrg, scope)),
+      ).toBeNull();
+      expect(await peopleRows(otherOrg)).toHaveLength(1);
+    });
+
+    // The insert-conflict interleaving, forced: a concurrent provision of the
+    // same account holds its uncommitted row, so the request's account lookup
+    // and e-mail check both miss it and its INSERT blocks on the unique index.
+    // Committing the holder turns that INSERT into a 23505, and the request must
+    // end on the holder's row instead of refusing or failing.
+    it('ends a request whose INSERT loses on the unique index on the winner row', async () => {
+      const orgId = newOrg('provforced');
+      const stage = await normalStage(orgId, 'Contato');
+      const scope = leadsSellerScope('hub_forced', 'forced@construbom.test', { name: 'Forced' });
+
+      let release!: () => void;
+      const released = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let inserted!: () => void;
+      const holderInserted = new Promise<void>((resolve) => {
+        inserted = resolve;
+      });
+      let winnerId = '';
+      const holder = adminClient.begin(async (sql) => {
+        const [row] = await sql<Array<{ id: string }>>`
+          INSERT INTO sales_ops_people (org_id, display_name, contact_email, hub_account_id)
+          VALUES (${orgId}, 'Winner', 'forced@construbom.test', 'hub_forced')
+          RETURNING id`;
+        winnerId = row!.id;
+        inserted();
+        await released;
+      });
+      await holderInserted;
+
+      let settled = false;
+      const request = boardOf(orgId, stage.id, scope).finally(() => {
+        settled = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      // Still blocked on the unique index behind the uncommitted holder.
+      expect(settled).toBe(false);
+
+      release();
+      await holder;
+      expect(await request).toMatchObject({ ok: true });
+      const people = await peopleRows(orgId);
+      expect(people.map((person) => person.id)).toEqual([winnerId]);
+    });
   });
 
   it('FXL oracle: full-edition people and leads are unchanged', async () => {

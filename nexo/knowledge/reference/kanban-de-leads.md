@@ -103,3 +103,19 @@ Slice 07.1 closed the seller usability gap found in the slice 07 browser walk, w
   `Mover` stays disabled while `validateMove` refuses, exactly as before, and the dialog is still the single `MoveLeadPayload` emitter.
 - D-07.1e: the contact dialog's vendedor `Combobox` carries `aria-label="Vendedor responsável"` and the shared `DialogContent` close button carries `aria-label="Fechar"`.
 - Oracles: `test/rls/leads-edition.test.ts` (seller default, explicit other id, admin unassigned, full-edition `seller_scope`), `leads/__tests__/contact-lead-dialog.test.tsx`, `leads/__tests__/leads-contact-container.test.tsx`, `leads/__tests__/contact-lead.test.ts` and `leads/__tests__/move-lead-dialog.test.tsx`.
+
+Seller auto-provision (2026-10-06, seller-auto-provision) closed a production refusal: a leads-edition vendedor got `403 seller_person_unmapped` because no pessoa carried his e-mail.
+
+- `resolveLeadScopePredicate` tries, in order, the pessoa bound to the account, the single unbound active pessoa with the token e-mail (the self-claim), and then, only when `scope.edition === 'leads'`, `provisionLeadsSellerPerson`.
+  `resolveCallerPersonId` itself is unchanged, so the full edition (FXL) never reaches the provisioning code and still answers `seller_person_unmapped`.
+- It provisions only for a non-admin whose verified `userRoles` carry `seller` and whose token has an e-mail, and only when NO pessoa in the org carries that e-mail (two unbound ones, an inactive one, one bound to another account all stay `seller_person_unmapped`, because that cadastro is an admin's to fix).
+- The pessoa is created through `createPersonTx` (the tenant-transaction body of `createPerson`) with the leads edition, so the system funções are seeded in the same transaction and the pessoa is exactly a vendedor.
+  Name is the verified token `name` trimmed and capped at 120 (the `PersonSchema` limit), else the e-mail local part; `contact_email` is the lowercased token e-mail; `hub_account_id` is the caller's account id; the input goes through `PersonSchema.safeParse`.
+- `LeadScope` gained the optional `name`, `hasSellerRole` and `edition`, built only in `leadScope` from the verified context; it is `hasSellerRole` and not `isSeller` because `lead-contract.test.ts` bans the deprecated mirror's name from `lead-service.ts`.
+  The import executor's scope passes none of them, so it is the full path.
+- Race: the transaction is READ COMMITTED, so every statement takes a fresh snapshot and the winner can commit between any two of the loser's statements; both interleavings end on the winner's row re-read by account (`boundPersonId`).
+  If the winner commits after the loser's account lookup but before its e-mail check, the check sees the winner's pessoa; every e-mail hit re-reads by account BEFORE refusing, so a pessoa bound to the caller's own account is returned (this was a Gate 2 flake: the loser answered a spurious `seller_person_unmapped`).
+  Otherwise both reach the INSERT; the partial unique index `sales_ops_people_org_hub_account_idx` makes the loser wait for the winner's commit and fail with `23505` inside a SAVEPOINT (`tx.transaction`), so the request transaction survives, and the loser re-reads; any other error is rethrown.
+  Oracles: a direct call of the exported `provisionLeadsSellerPerson` forces the e-mail-check interleaving, an uncommitted holder row forces the `23505` one, and a 20-round fresh-org race runs it end to end.
+- Web: in the leads edition only, a board read failing with `403` and `ApiError.reason === 'seller_person_unmapped'` renders "Seu acesso ainda não está vinculado a um vendedor. Peça ao gestor para conferir seu cadastro em Vendedores." instead of the generic copy.
+- Oracles: `test/rls/leads-edition.test.ts` (describe `seller auto-provision (leads edition)`, including the concurrent-request case) and `leads/__tests__/leads-contact-container.test.tsx`.

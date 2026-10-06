@@ -1669,32 +1669,45 @@ export async function createPerson(
   data: PersonInput,
   options: PersonWriteOptions = {},
 ): Promise<PersonWithFuncoes | 'unknown_funcao' | 'funcao_required'> {
-  return withTenant(db, orgId, async (tx) => {
-    const edition = options.edition ?? 'full';
-    if (edition === 'leads') await ensureSystemFuncoes(tx, orgId);
-    const plan = planPersonFuncoesForEdition(data, 'create', edition);
-    if (plan === 'funcao_required' || plan.kind === 'unchanged') return 'funcao_required';
-    const resolved = await resolvePersonFuncoes(tx, orgId, plan);
-    if (resolved === 'unknown_funcao') return 'unknown_funcao';
+  return withTenant(db, orgId, (tx) => createPersonTx(tx, orgId, data, options));
+}
 
-    const [person] = await tx
-      .insert(salesOpsPeople)
-      .values({
-        displayName: data.displayName,
-        status: data.status,
-        orgId,
-        contactEmail: data.contactEmail || null,
-        // Conditional, so a body with no hubAccountId key writes nothing and the
-        // column keeps its NULL default. createPerson does NOT spread `data`, so
-        // an unconditional key here is the only way this reaches the row.
-        ...(data.hubAccountId !== undefined ? { hubAccountId: data.hubAccountId } : {}),
-        ...deriveBooleanMirrors(resolved),
-      })
-      .returning();
-    await replacePersonFuncoes(tx, orgId, person!.id, resolved.map((funcao) => funcao.id));
-    const funcoes = toAttached(resolved);
-    return { ...person!, funcoes, funcaoIds: funcoes.map((funcao) => funcao.id) };
-  });
+/**
+ * The body of {@link createPerson}, for a caller that already holds the tenant
+ * transaction. The leads board's seller auto-provision is that caller: it must
+ * create the caller's own pessoa inside the SAME transaction as the request it
+ * scopes, so it reuses every person rule here instead of a second INSERT.
+ */
+export async function createPersonTx(
+  tx: Db,
+  orgId: string,
+  data: PersonInput,
+  options: PersonWriteOptions = {},
+): Promise<PersonWithFuncoes | 'unknown_funcao' | 'funcao_required'> {
+  const edition = options.edition ?? 'full';
+  if (edition === 'leads') await ensureSystemFuncoes(tx, orgId);
+  const plan = planPersonFuncoesForEdition(data, 'create', edition);
+  if (plan === 'funcao_required' || plan.kind === 'unchanged') return 'funcao_required';
+  const resolved = await resolvePersonFuncoes(tx, orgId, plan);
+  if (resolved === 'unknown_funcao') return 'unknown_funcao';
+
+  const [person] = await tx
+    .insert(salesOpsPeople)
+    .values({
+      displayName: data.displayName,
+      status: data.status,
+      orgId,
+      contactEmail: data.contactEmail || null,
+      // Conditional, so a body with no hubAccountId key writes nothing and the
+      // column keeps its NULL default. createPerson does NOT spread `data`, so
+      // an unconditional key here is the only way this reaches the row.
+      ...(data.hubAccountId !== undefined ? { hubAccountId: data.hubAccountId } : {}),
+      ...deriveBooleanMirrors(resolved),
+    })
+    .returning();
+  await replacePersonFuncoes(tx, orgId, person!.id, resolved.map((funcao) => funcao.id));
+  const funcoes = toAttached(resolved);
+  return { ...person!, funcoes, funcaoIds: funcoes.map((funcao) => funcao.id) };
 }
 
 export async function updatePerson(
