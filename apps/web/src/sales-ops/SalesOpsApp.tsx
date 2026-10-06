@@ -131,6 +131,7 @@ import { computeSaleFinancials } from '@fxl-sales/shared-utils/sale-financials';
 */
 import { SPLIT_BP_TOTAL } from '@fxl-sales/shared-utils/professional-split';
 import { todayInSaoPaulo } from '@fxl-sales/shared-utils/sao-paulo-day';
+import { hasCapability } from '@fxl-sales/shared-utils/sales-edition';
 import { CadastroHistorySection } from './CadastroHistoryPanel';
 import { ForbiddenPanel } from './ForbiddenPanel';
 import { AccountAvatar } from './AccountAvatar';
@@ -154,6 +155,8 @@ import type { LeadConversionRequest } from './leads/LeadsBoard';
 import { LeadsBoardContainer } from './leads/LeadsBoardContainer';
 import { LeadStagesContainer } from './leads/LeadStagesContainer';
 import { ImportContainer } from './import/ImportContainer';
+import { VendedorDialog, VendedoresView } from './people/VendedoresView';
+import { VENDEDORES_COPY } from './people/vendedores';
 import {
   addMonthsToIsoDate,
   buildDashboardModel,
@@ -1428,7 +1431,14 @@ export function SalesOpsApp() {
     });
   }, [bootstrap.sales, bootstrap.saleItems, salesFilters]);
   const navItems = getSalesOpsNavigation(workspace, profile.roles, edition);
-  const title = titleForView(view, workspace);
+  /*
+    The leads edition renames the people cadastro to Vendedores. Overridden here
+    rather than inside `titleForView` so the full-edition map stays byte-identical.
+  */
+  const title =
+    edition === 'leads' && view === 'pessoas'
+      ? VENDEDORES_COPY.pageTitle
+      : titleForView(view, workspace);
   /**
    * The redundant `admin` check is belt and braces: `getVisibleWorkspaces` already
    * refuses the `cadastros` workspace to anyone without the role.
@@ -1704,7 +1714,9 @@ export function SalesOpsApp() {
             ? 'Novo cliente'
             : view === 'pessoas'
               ? canManagePeople
-                ? 'Nova pessoa'
+                ? edition === 'leads'
+                  ? VENDEDORES_COPY.newAction
+                  : 'Nova pessoa'
                 : null
               : view === 'funcoes'
                 ? canManageFuncoes
@@ -1950,7 +1962,12 @@ export function SalesOpsApp() {
         </nav>
 
         <div className="mt-auto flex flex-col gap-3">
-          {!sidebarCollapsed ? (
+          {/*
+            The payables card and the proposta shortcut belong to the full product:
+            in the leads edition the `commissions` and `proposals` capabilities are
+            off, so the card would always read R$ 0 and the wizard could only fail.
+          */}
+          {!sidebarCollapsed && hasCapability(edition ?? 'full', 'commissions') ? (
             <div className="rounded-2xl border border-[#343439] bg-[#242428] p-4">
               <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[#7c7c85]">
                 A pagar este mês
@@ -1963,10 +1980,12 @@ export function SalesOpsApp() {
               </div>
             </div>
           ) : null}
-          <AccentButton onClick={() => setSaleWizard({ mode: 'create' })}>
-            <Plus className="h-4 w-4" />
-            {!sidebarCollapsed ? <span>Nova proposta</span> : null}
-          </AccentButton>
+          {hasCapability(edition ?? 'full', 'proposals') ? (
+            <AccentButton onClick={() => setSaleWizard({ mode: 'create' })}>
+              <Plus className="h-4 w-4" />
+              {!sidebarCollapsed ? <span>Nova proposta</span> : null}
+            </AccentButton>
+          ) : null}
           <DropdownMenu onOpenChange={setAccountMenuOpen} open={accountMenuOpen}>
             <DropdownMenuTrigger asChild>
               <button
@@ -2065,11 +2084,14 @@ export function SalesOpsApp() {
                 Filtros
               </SecondaryButton>
             ) : null}
-            <div className="hidden items-center gap-2 rounded-xl border border-[#dcdce2] bg-white px-[14px] py-[9px] text-sm font-semibold text-[#57575f] xl:flex">
-              <CalendarDays className="h-[15px] w-[15px] text-[#9c7210]" />
-              Julho 2026
-              <ChevronDown className="h-[13px] w-[13px] text-[#8b8b92]" />
-            </div>
+            {/* A static period chip of the full product; nothing in the leads edition is period-scoped. */}
+            {edition === 'leads' ? null : (
+              <div className="hidden items-center gap-2 rounded-xl border border-[#dcdce2] bg-white px-[14px] py-[9px] text-sm font-semibold text-[#57575f] xl:flex">
+                <CalendarDays className="h-[15px] w-[15px] text-[#9c7210]" />
+                Julho 2026
+                <ChevronDown className="h-[13px] w-[13px] text-[#8b8b92]" />
+              </div>
+            )}
           </div>
         </header>
 
@@ -2258,11 +2280,34 @@ export function SalesOpsApp() {
                   />
                 ) : null}
                 {view === 'pessoas' ? (
-                  <PessoasView
-                    bootstrap={bootstrap}
-                    onArchive={changeCadastroStatus}
-                    onEdit={(person) => setModal({ kind: 'person', person })}
-                  />
+                  edition === 'leads' ? (
+                    <VendedoresView
+                      onEdit={(person) => setModal({ kind: 'person', person })}
+                      onInactivate={(person) =>
+                        changeCadastroStatus({
+                          cadastro: 'pessoa',
+                          id: person.id,
+                          name: person.displayName,
+                          status: 'inactive',
+                        })
+                      }
+                      onReactivate={(person) =>
+                        changeCadastroStatus({
+                          cadastro: 'pessoa',
+                          id: person.id,
+                          name: person.displayName,
+                          status: 'active',
+                        })
+                      }
+                      people={bootstrap.people}
+                    />
+                  ) : (
+                    <PessoasView
+                      bootstrap={bootstrap}
+                      onArchive={changeCadastroStatus}
+                      onEdit={(person) => setModal({ kind: 'person', person })}
+                    />
+                  )
                 ) : null}
                 {view === 'funcoes' ? (
                   /*
@@ -2377,16 +2422,29 @@ export function SalesOpsApp() {
         }}
         saving={saveFuncao.isPending}
       />
-      <PersonDialog
-        funcoes={persistedBootstrap.funcoes}
-        modal={personModalMatchesRoute && modal?.kind === 'person' ? modal : null}
-        onClose={() => setModal(null)}
-        onCreateFuncao={createFuncaoByName}
-        onSave={(payload) => {
-          savePerson.mutate(payload, { onSuccess: () => setModal(null) });
-        }}
-        saving={savePerson.isPending}
-      />
+      {edition === 'leads' ? (
+        <VendedorDialog
+          funcoes={persistedBootstrap.funcoes}
+          onClose={() => setModal(null)}
+          onSave={(payload) => {
+            savePerson.mutate(payload, { onSuccess: () => setModal(null) });
+          }}
+          open={personModalMatchesRoute && modal?.kind === 'person'}
+          person={modal?.kind === 'person' ? (modal.person ?? null) : null}
+          saving={savePerson.isPending}
+        />
+      ) : (
+        <PersonDialog
+          funcoes={persistedBootstrap.funcoes}
+          modal={personModalMatchesRoute && modal?.kind === 'person' ? modal : null}
+          onClose={() => setModal(null)}
+          onCreateFuncao={createFuncaoByName}
+          onSave={(payload) => {
+            savePerson.mutate(payload, { onSuccess: () => setModal(null) });
+          }}
+          saving={savePerson.isPending}
+        />
+      )}
       {bootstrapQuery.isSuccess ? (
         <SaleWizardDialog
           bootstrap={persistedBootstrap}

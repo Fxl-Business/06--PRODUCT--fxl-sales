@@ -84,6 +84,8 @@ Full reference: `nexo/knowledge/reference/development-identity-mode.md`.
 - KNOWN GAP: the production API image still contains `packages/auth-fake`. What holds it closed is `NODE_ENV=production` baked into `apps/api/Dockerfile` plus the boot refusal. Fixing the Dockerfile (`--prod`, scoped `packages` copy, artifact test) is filed on `nexo/ROADMAP.md`.
 - Fake identities emit Hub-shaped CLAIMS that go through `getRolesFromHubClaims` and `getVisibleWorkspaces`; never write `profile.roles` directly.
 - The roster is `team-owner`, `team-admin`, `product-admin` in `packages/auth-fake/src/index.ts`. An admin-only identity without `meus-dados` is impossible today (see Sales Ops Routing).
+- `leads-owner` and `leads-seller` (on `org_fake_leads`, `FIXTURE_LEADS_EDITION_ORGANIZATION_ID`) are the ONLY identities with `modules`, exactly `['sales.edition.leads']`; `LEADS_EDITION_MODULE` is pinned equal to `SALES_EDITION_LEADS_MODULE` by `dev-identity-roles.test.tsx`.
+  The seed gives that org no etapas, no settings row and one UNBOUND vendedor pessoa with `leads-seller`'s email.
 - `apps/api/scripts/seed-dev.ts` seeds the roster's orgs against LOCAL Postgres only.
 
 ## Tenancy
@@ -122,6 +124,8 @@ Full reference: `nexo/knowledge/reference/sales-ops-routing.md`.
 - An unknown or other-org id renders `Proposta não encontrada` without the id; closing pops history when opened in-app (`SALE_DETAIL_OPENED_IN_APP`) and otherwise replaces the URL with the list.
 - `cadastros/vendedores` and `cadastros/finders` redirect to `/cadastros/pessoas`; `aliasLegacyView` only fires in `cadastros`.
 - Visibility comes only from `profile.roles` via `getVisibleWorkspaces`: `admin` sees `tatico`, `operacional`, `cadastros`; `seller` or `finder` adds `meus-dados`; no roles keeps `/no-role`. `admin` is synthesized from the Hub workspace `owner`/`admin` flag in `getRolesFromHubClaims`.
+- In the leads edition (`profile.edition === 'leads'`, from `entitlements.modules`) every navigation function takes a trailing `edition`: `admin` sees only `operacional` [`leads`] and `cadastros` [`pessoas` labelled Vendedores, `etapas`], a non-admin `seller` only `meus-dados` [`leads`], and `NoRoleGuard` keys on `getVisibleWorkspaces(roles, edition)`.
+  Oracle: `navigation-edition.test.ts`.
 - OPEN PRODUCT QUESTION: every admin-bearing claim shape also returns `seller` and `finder`, so "team-only without `meus-dados`" is unreachable. Do not resolve it by changing `claims.ts` without a product decision.
 - `meus-dados` reuses existing panels; `MeuPainelView` is read-only. Pessoa and função editing live only under Cadastros.
 - Keep the legacy trees `/admin/*`, `/finder/*`, `/seller/*`, `/no-role` unchanged. `/no-role` is wrapped in `NoRoleGuard` (inside `<Protected>`), keyed on `getVisibleWorkspaces(roles).length > 0`, never `roles.length > 0`.
@@ -316,6 +320,27 @@ Full reference: `nexo/knowledge/reference/kanban-de-leads.md`.
 - Seller scoping is server-side inside `withTenant`, never a client filter.
 - Routes: `operacional/leads` (team), `meus-dados/leads` (seller), `cadastros/etapas`. Nav entries are appended, never prepended, because the first entry is the landing route.
 - Lead screens live in `apps/web/src/sales-ops/leads/`, never inside `SalesOpsApp.tsx`, mounted through `LeadStagesContainer` / `LeadsBoardContainer`, and use `mutateAsync`.
+
+## Edição Leads
+
+Full reference: `nexo/knowledge/reference/kanban-de-leads.md` (section Edição Leads), `pessoas-e-funcoes.md`, `sales-ops-routing.md`, `auth-model.md`.
+
+- The edition is DERIVED per request from the verified token: `resolveSalesEdition(entitlements.modules)` from `@fxl-sales/shared-utils/sales-edition` (subpath only).
+  Only the exact module `sales.edition.leads` selects `leads`; absent, empty or unknown modules are `full`, which is FXL byte-for-byte.
+  It is never stored and never read from a body.
+- API: `c.get('salesEdition')` is set only in `applyHubAuthContext`; services take the edition as an explicit argument from the route (`c.get('salesEdition') ?? 'full'`) and never read the Hono context.
+- Web: the shell reads `profile.edition`; leaf components read `useSalesEdition()`.
+  Every `vi.mock('@/auth/react')` factory exports `useSalesEdition` (`auth-mock-edition-export.test.ts`).
+  The sidebar payables card, the sidebar `Nova proposta` and the period chip render only when the edition has the capability (`hasCapability`); never show full-product chrome in the leads edition.
+- Leads writes use `ContactLeadFieldsSchema` (strict, `null` or `''` clears an optional) through `createContactLead` / `updateContactLead`, chosen by `leadFieldSet`; the full schemas stay byte-identical and still reject the contact keys.
+  A leads-edition lead stores `client_id NULL`, `''`, `0` and no produtos.
+- No etapa is ever seeded in the leads edition.
+  Creating a lead with no active `normal` etapa answers the existing `400` `reason: 'no_open_stage'`; the web keys on status 400 plus `ApiError.reason`.
+  The board shows `[data-no-stages]` and never receives `onRequestConversion` / `onOpenSale`.
+- In the leads edition `POST/PATCH /people` force exactly `[vendedor]` (seeding the system funções in the same transaction) before `planPersonFuncoes`; a status-only PATCH leaves funções untouched.
+  The Vendedores screen (`apps/web/src/sales-ops/people/VendedoresView.tsx`) lists inactive vendedores with `Reativar`, because Geral and `GET /history` are gated.
+  Oracle: `vendedores-routing.test.tsx`.
+- An admin in the leads edition never sees `meus-dados` (product decision); a finder-only operator stays on `/no-role`.
 
 ## Integração Sales-Finance (plano de controle)
 

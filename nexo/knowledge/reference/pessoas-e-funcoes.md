@@ -22,3 +22,14 @@ Moved verbatim from `CLAUDE.md` on 2026-09-22 so the standing context stays shor
 - `planPersonFuncoesForEdition` holds that override and runs before `planPersonFuncoes`, which itself is unchanged.
 - In the full edition, or with no edition, the routes keep the exact three-argument `createPerson` and five-argument `updatePerson` calls, which is what keeps the `toHaveBeenCalledWith` oracles in `routes.test.ts` green.
 - Oracles: `apps/api/src/domains/sales-ops/__tests__/people-routes-edition.test.ts` and `apps/api/test/rls/leads-edition.test.ts`.
+
+### Leads edition (v4.3.0) - web Vendedores screen
+
+- In the leads edition the Cadastros > Pessoas route renders `VendedoresView` and `VendedorDialog` from `apps/web/src/sales-ops/people/VendedoresView.tsx`; `SalesOpsApp` only chooses between them and `PessoasView` / `PersonDialog`.
+- The page title is `Vendedores` and the header action `Novo vendedor`, overridden in `SalesOpsApp` so `titleForView` stays byte-identical for the full edition.
+- The leads screen shows Nome, E-mail and Ações only, and the dialog Nome and E-mail with the self-claim helper; no função UI exists there because the server forces exactly `[vendedor]`.
+- `buildVendedorPayload` in `apps/web/src/sales-ops/people/vendedores.ts` sends the catalogue's system vendedor id when known and `[]` otherwise, never an unknown id, and never blocks a save on funções.
+- In the leads edition the Vendedores screen lists inactive vendedores last, muted with an `Inativo` badge, and offers `Reativar` (a status-only `PATCH /people/:id` with `status: 'active'`, which slice 04 accepts without touching funções), because Geral and `GET /history` are gated off in that edition (SEAM A4).
+- The leads inactivation copy points to this screen for a restore and never to Geral or the histórico.
+- Nothing under `apps/web/src/sales-ops/people/` imports `SalesOpsApp`; its style constants are local copies, because `SalesOpsApp` imports that folder.
+- Oracle: `apps/web/src/sales-ops/__tests__/vendedores-routing.test.tsx` pins both editions on the same route; `people/__tests__/vendedores.test.ts` and `people/__tests__/vendedores-view.test.tsx` pin the payload, copy and components.

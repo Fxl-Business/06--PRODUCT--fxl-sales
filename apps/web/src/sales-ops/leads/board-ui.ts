@@ -193,10 +193,19 @@ export const proportionTrackClass = 'h-[5px] w-full overflow-hidden rounded-full
 export const iconButtonClass =
   'inline-flex h-7 w-7 items-center justify-center rounded-lg text-[#9b9ba3] hover:bg-[#f2f2f4]';
 
-export const phaseChipClass =
-  'inline-flex items-center gap-2 whitespace-nowrap rounded-full border border-[#e2e2e7] bg-white px-3 py-1.5 text-[13px] font-semibold text-[#201f24]';
+const phaseChipBaseClass =
+  'inline-flex items-center gap-2 whitespace-nowrap rounded-full border px-3 py-1.5 text-[13px] font-semibold';
+const phaseChipIdleClass = 'border-[#e2e2e7] bg-white text-[#201f24]';
+const phaseChipActiveClass = 'border-transparent bg-[#201f24] text-white';
 
-export const phaseChipActiveClass = 'border-transparent bg-[#201f24] text-white';
+/**
+ * Idle and active colours are DISJOINT on purpose: two utilities for the same
+ * property have equal specificity, so appending the active colours to the idle ones
+ * let Tailwind's source order pick `bg-white` and the active chip read white on white.
+ */
+export function phaseChipClassName(active: boolean): string {
+  return `${phaseChipBaseClass} ${active ? phaseChipActiveClass : phaseChipIdleClass}`;
+}
 
 export const listTableCardClass = 'overflow-x-auto rounded-[18px] border border-[#e8e8ec]';
 
