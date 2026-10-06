@@ -43,3 +43,5 @@ Moved verbatim from `CLAUDE.md` on 2026-09-22 so the standing context stays shor
   An admin does not get `meus-dados` in the leads edition, because every admin-bearing claim also yields `seller` and AC2 gives the gestor exactly three screens.
   `NoRoleGuard` keys on `getVisibleWorkspaces(roles, edition)`; a leads-edition finder-only operator stays on `/no-role` with no loop (oracle `no-role-redirect.test.tsx`).
   `SalesOpsApp` and `NoRoleGuard` read `profile.edition` from `useAuthProfile()`, never `useSalesEdition()`, so the shell harnesses that mock `@/auth/react` keep working.
+  The shell chrome follows the capabilities too: the sidebar `A pagar este mês` card renders only with `commissions`, the sidebar `Nova proposta` only with `proposals` (both through `hasCapability`), and the static period chip only in the full edition.
+  The 2026-10-05 browser walk found all three on the leads gestor's screens, where the card always read R$ 0 and the proposta wizard could only fail; oracle `vendedores-routing.test.tsx` pins both editions.

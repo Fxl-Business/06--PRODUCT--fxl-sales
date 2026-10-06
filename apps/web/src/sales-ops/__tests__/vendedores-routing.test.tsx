@@ -356,6 +356,13 @@ describe('/cadastros/pessoas in the full edition', () => {
     expect(container.textContent).not.toContain('Caio Arquivado');
   });
 
+  it('full edition keeps the sidebar payables card, Nova proposta and the period chip', async () => {
+    await renderRoute('/cadastros/pessoas', ['admin'], 'full');
+    const aside = container.querySelector('aside')?.textContent ?? '';
+    expect(aside).toContain('A pagar este mês');
+    expect(aside).toContain('Nova proposta');
+    expect(header().textContent).toContain('Julho 2026');
+  });
 });
 
 describe('/cadastros/pessoas in the leads edition', () => {
@@ -420,6 +427,14 @@ describe('/cadastros/pessoas in the leads edition', () => {
       id: vendedorFixture.id,
       status: 'inactive',
     });
+  });
+
+  it('leads edition drops the full-product sidebar card, Nova proposta and the period chip', async () => {
+    await renderRoute('/cadastros/pessoas', ['admin'], 'leads');
+    const aside = container.querySelector('aside')?.textContent ?? '';
+    expect(aside).not.toContain('A pagar este mês');
+    expect(container.textContent).not.toContain('Nova proposta');
+    expect(header().textContent).not.toContain('Julho 2026');
   });
 
   it('leads edition reactivates through the people resource', async () => {
