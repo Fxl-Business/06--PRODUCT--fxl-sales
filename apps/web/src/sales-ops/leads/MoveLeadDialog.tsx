@@ -92,6 +92,11 @@ export function MoveLeadDialog({
   const [stagePick, setStagePick] = React.useState<string | null>(null);
   const [indexPick, setIndexPick] = React.useState<number | null>(null);
   const [reason, setReason] = React.useState('');
+  // D-07.1d: the refusal is only RENDERED once the operator has changed a field.
+  // A dialog that opens incomplete (a lone lead on its own column, a drag handed
+  // to a lost etapa) is not an error yet; `Mover` stays disabled either way, so
+  // the gate itself is unchanged.
+  const [touched, setTouched] = React.useState(false);
 
   const selectedStageId = stagePick ?? seedStageId;
   const selectedStage = targets.find((stage) => stage.id === selectedStageId) ?? null;
@@ -143,6 +148,7 @@ export function MoveLeadDialog({
               aria-labelledby="move-lead-stage-label"
               className={formSelectClass}
               onChange={(value) => {
+                setTouched(true);
                 setStagePick(value);
                 // The chosen slot belongs to the old column, so it is released
                 // here and the new column's first slot becomes the default.
@@ -161,7 +167,10 @@ export function MoveLeadDialog({
             <Combobox
               aria-labelledby="move-lead-position-label"
               className={formSelectClass}
-              onChange={(value) => setIndexPick(Number(value))}
+              onChange={(value) => {
+                setTouched(true);
+                setIndexPick(Number(value));
+              }}
               options={positionOptions.map((option) => ({
                 value: option.value,
                 label: option.label,
@@ -181,7 +190,10 @@ export function MoveLeadDialog({
                 aria-required="true"
                 className={formTextareaClass}
                 data-lost-reason="true"
-                onChange={(event) => setReason(event.target.value)}
+                onChange={(event) => {
+                  setTouched(true);
+                  setReason(event.target.value);
+                }}
                 required
                 value={reason}
               />
@@ -196,7 +208,7 @@ export function MoveLeadDialog({
             </p>
           ) : null}
 
-          {refusal !== null ? (
+          {touched && refusal !== null ? (
             <p className={blockedNoticeClass} data-move-blocked="true">
               {refusal}
             </p>

@@ -24,6 +24,7 @@ import {
   CONTACT_LEAD_COPY,
   buildContactLeadPayload,
   contactDraftFromSeed,
+  contactLeadSaveErrorCopy,
   validateContactLeadDraft,
   type ContactLeadDraft,
 } from './contact-lead';
@@ -38,6 +39,10 @@ import {
  *
  * State is MOUNT-SCOPED (the caller keys it by the seed), so there is no reset
  * effect to race the operator's typing.
+ *
+ * The dialog closes only once `onSubmit`'s promise resolves. A rejection keeps
+ * it open with every typed value and renders the mapped error inline
+ * (D-07.1c), so a refused save never throws the operator's work away.
  */
 
 export type ContactLeadDialogProps = {
@@ -47,7 +52,13 @@ export type ContactLeadDialogProps = {
   initial: SaveContactLeadPayload | null;
   /** Pessoas with the vendedor função, resolved by the caller (same list LeadDialog gets). */
   sellers: ComboboxOption[];
-  onSubmit: (payload: SaveContactLeadPayload) => void;
+  /**
+   * False hides the Vendedor field and omits `sellerPersonId` from the payload
+   * (a non-admin viewer, D-07.1b). Defaults to true.
+   */
+  showSellerPicker?: boolean;
+  /** The dialog awaits it: resolve closes, reject keeps it open with an inline error. */
+  onSubmit: (payload: SaveContactLeadPayload) => Promise<unknown> | void;
   pending?: boolean;
   /** Injected for tests; defaults to todayInSaoPaulo() read once at mount. */
   today?: string;
@@ -58,12 +69,15 @@ export function ContactLeadDialog({
   onOpenChange,
   initial,
   sellers,
+  showSellerPicker = true,
   onSubmit,
   pending = false,
   today,
 }: ContactLeadDialogProps) {
   const [draft, setDraft] = React.useState<ContactLeadDraft>(() => contactDraftFromSeed(initial));
   const [todayDay] = React.useState(() => today ?? todayInSaoPaulo());
+  const [submitting, setSubmitting] = React.useState(false);
+  const [saveError, setSaveError] = React.useState<string | null>(null);
 
   const blocked = validateContactLeadDraft(draft, todayDay);
 
@@ -71,9 +85,20 @@ export function ContactLeadDialog({
     setDraft((current) => ({ ...current, [key]: value }));
   }
 
-  function save() {
-    if (blocked !== null) return;
-    onSubmit(buildContactLeadPayload(draft, initial?.id));
+  async function save() {
+    if (blocked !== null || submitting) return;
+    setSubmitting(true);
+    setSaveError(null);
+    try {
+      await onSubmit(
+        buildContactLeadPayload(draft, initial?.id, { includeSeller: showSellerPicker }),
+      );
+    } catch (error: unknown) {
+      setSaveError(contactLeadSaveErrorCopy(error));
+      setSubmitting(false);
+      return;
+    }
+    setSubmitting(false);
     onOpenChange(false);
   }
 
@@ -159,24 +184,32 @@ export function ContactLeadDialog({
             />
           </div>
 
-          <div className="flex flex-col gap-1.5">
-            <span className={fieldLabelClass} id="lead-seller-label">
-              {CONTACT_LEAD_COPY.sellerLabel}
-            </span>
-            {/* No `onCreate`: a pessoa is invalid without a função. */}
-            <Combobox
-              aria-labelledby="lead-seller-label"
-              className={formSelectClass}
-              onChange={(value) => setField('sellerPersonId', value)}
-              options={sellers}
-              placeholder={CONTACT_LEAD_COPY.sellerPlaceholder}
-              value={draft.sellerPersonId}
-            />
-          </div>
+          {showSellerPicker ? (
+            <div className="flex flex-col gap-1.5">
+              <span className={fieldLabelClass} id="lead-seller-label">
+                {CONTACT_LEAD_COPY.sellerLabel}
+              </span>
+              {/* No `onCreate`: a pessoa is invalid without a função. */}
+              <Combobox
+                aria-label={CONTACT_LEAD_COPY.sellerLabel}
+                className={formSelectClass}
+                onChange={(value) => setField('sellerPersonId', value)}
+                options={sellers}
+                placeholder={CONTACT_LEAD_COPY.sellerPlaceholder}
+                value={draft.sellerPersonId}
+              />
+            </div>
+          ) : null}
 
           {blocked !== null ? (
             <p className={blockedNoticeClass} data-lead-blocked="true">
               {blocked}
+            </p>
+          ) : null}
+
+          {saveError !== null ? (
+            <p className={blockedNoticeClass} data-lead-save-error="true" role="alert">
+              {saveError}
             </p>
           ) : null}
         </div>
@@ -192,8 +225,10 @@ export function ContactLeadDialog({
           <button
             className={primaryButtonClass}
             data-lead-save="true"
-            disabled={blocked !== null || pending}
-            onClick={save}
+            disabled={blocked !== null || pending || submitting}
+            onClick={() => {
+              void save();
+            }}
             type="button"
           >
             Salvar

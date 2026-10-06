@@ -300,6 +300,109 @@ describe('ContactLeadDialog', () => {
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
+  it('names the vendedor picker and the close button for assistive technology (D-07.1e)', async () => {
+    await renderDialog();
+    expect(sellerTrigger().getAttribute('aria-label')).toBe('Vendedor responsável');
+    const close = [...dialogNode().querySelectorAll('button')].find(
+      (node) => node.getAttribute('aria-label') === 'Fechar',
+    );
+    expect(close).toBeDefined();
+  });
+
+  it('hides the vendedor and sends no sellerPersonId key when the picker is not offered (D-07.1b)', async () => {
+    const { onSubmit } = await renderDialog({ showSellerPicker: false });
+    expect(dialogNode().querySelector('[role="combobox"]')).toBeNull();
+    expect(dialogNode().textContent).not.toContain('Vendedor responsável');
+
+    await typeInto(input('lead-contact-name'), 'Ana');
+    await click(saveButton());
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit.mock.calls[0]?.[0]).toEqual({
+      contactName: 'Ana',
+      contactPhone: null,
+      contactEmail: null,
+      contactBirthDate: null,
+      description: null,
+    });
+  });
+
+  it('an edit without the picker leaves the stored vendedor out of the payload', async () => {
+    const { onSubmit } = await renderDialog({
+      showSellerPicker: false,
+      initial: {
+        id: LEAD_ID,
+        contactName: 'Ana',
+        contactPhone: null,
+        contactEmail: null,
+        contactBirthDate: null,
+        description: null,
+        sellerPersonId: SELLER_ID,
+      },
+    });
+    await click(saveButton());
+    expect(onSubmit.mock.calls[0]?.[0]).toEqual({
+      id: LEAD_ID,
+      contactName: 'Ana',
+      contactPhone: null,
+      contactEmail: null,
+      contactBirthDate: null,
+      description: null,
+    });
+  });
+
+  it('a rejected save keeps the dialog open with the typed values and an inline error (D-07.1c)', async () => {
+    const onSubmit = vi.fn(() => Promise.reject({ status: 403, error: 'forbidden' }));
+    const { onOpenChange } = await renderDialog({ onSubmit });
+    await typeInto(input('lead-contact-name'), 'Ana Construbom');
+    await typeInto(input('lead-phone'), '(11) 98888-7777');
+
+    await click(saveButton());
+
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onOpenChange).not.toHaveBeenCalledWith(false);
+    expect(input('lead-contact-name').value).toBe('Ana Construbom');
+    expect(input('lead-phone').value).toBe('(11) 98888-7777');
+    expect(dialogNode().querySelector('[data-lead-save-error]')?.textContent).toBe(
+      'Não foi possível salvar o lead. Tente novamente.',
+    );
+    expect(saveButton().disabled).toBe(false);
+  });
+
+  it('a 400 no_open_stage keeps the dialog open with the no-etapa copy', async () => {
+    const onSubmit = vi.fn(() =>
+      Promise.reject({ status: 400, error: 'validation_error', reason: 'no_open_stage' }),
+    );
+    const { onOpenChange } = await renderDialog({ onSubmit });
+    await typeInto(input('lead-contact-name'), 'Ana');
+    await click(saveButton());
+
+    expect(onOpenChange).not.toHaveBeenCalledWith(false);
+    expect(dialogNode().querySelector('[data-lead-save-error]')?.textContent).toBe(
+      'Nenhuma etapa ativa no funil. O lead não foi salvo.',
+    );
+  });
+
+  it('closes only once the save resolves', async () => {
+    let resolve: (value: unknown) => void = () => undefined;
+    const onSubmit = vi.fn(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+        }),
+    );
+    const { onOpenChange } = await renderDialog({ onSubmit });
+    await typeInto(input('lead-contact-name'), 'Ana');
+    await click(saveButton());
+    expect(onOpenChange).not.toHaveBeenCalled();
+    // A second click while the request is in flight sends nothing.
+    expect(saveButton().disabled).toBe(true);
+
+    await act(async () => resolve({ lead: {} }));
+    await settle();
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(dialogNode().querySelector('[data-lead-save-error]')).toBeNull();
+  });
+
   it('never renders a raw seller id', async () => {
     await renderDialog({
       initial: {

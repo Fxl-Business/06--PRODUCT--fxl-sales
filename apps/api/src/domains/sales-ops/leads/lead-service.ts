@@ -628,14 +628,25 @@ export function createContactLead(
       contactBirthDate: input.contactBirthDate ?? null,
     },
     scope,
+    { defaultSellerToCaller: true },
   );
 }
+
+type InsertLeadOptions = {
+  /**
+   * Leads edition only (D-07.1a): a scoped seller who names no vendedor files
+   * the lead as their own instead of being refused. The full edition never
+   * passes it, so its `seller_scope` rule stays byte-for-byte.
+   */
+  defaultSellerToCaller?: boolean;
+};
 
 async function insertLead(
   db: Db,
   orgId: string,
   record: LeadCreateRecord,
   scope: LeadScope,
+  options: InsertLeadOptions = {},
 ): Promise<WriteLeadResult> {
   return withTenant(db, orgId, async (tx) => {
     const gate = await resolveLeadScopePredicate(tx, orgId, scope);
@@ -644,7 +655,12 @@ async function insertLead(
     // A seller may only file their OWN leads, and may not file an unassigned one
     // either - `null !== gate.sellerPersonId` catches that. A loud 403 rather
     // than a 404, because they named the id themselves, so it leaks nothing.
-    const requestedSeller = record.sellerPersonId;
+    // The leads edition defaults an unnamed vendedor to the caller first, so
+    // only an explicit OTHER id is refused there.
+    const requestedSeller =
+      options.defaultSellerToCaller && gate.sellerPersonId && record.sellerPersonId === null
+        ? gate.sellerPersonId
+        : record.sellerPersonId;
     if (gate.sellerPersonId && requestedSeller !== gate.sellerPersonId) {
       return { ok: false, reason: 'seller_scope' } as const;
     }

@@ -8,9 +8,9 @@ import { buildSalesOpsPath } from '../navigation';
 import type { SalesOpsClient, SalesOpsPerson, SalesOpsProduct } from '../types';
 import type { SaveContactLeadPayload, SaveLeadPayload } from './api';
 import { buildLabelLookups } from './board-labels';
-import { blockedNoticeClass, mutedStateClass } from './board-ui';
+import { mutedStateClass } from './board-ui';
 import { ContactLeadDialog } from './ContactLeadDialog';
-import { contactLeadSaveErrorCopy, leadToContactSeed } from './contact-lead';
+import { leadToContactSeed } from './contact-lead';
 import { LeadDialog } from './LeadDialog';
 import { LeadsBoard, type LeadConversionRequest } from './LeadsBoard';
 import { useLeadsBoard, useLeadStages, useMoveLead, useSaveLead } from './hooks';
@@ -82,10 +82,13 @@ export function LeadsBoardContainer({
   // The edition is read ONCE here and handed down as `fieldSet`, so every
   // presentational leads component stays free of auth hooks.
   const fieldSet = leadFieldSet(useSalesEdition());
-  const canManageStages = useAuthProfile().roles.includes('admin');
+  // One admin read serves both decisions: managing etapas and, in the leads
+  // edition, being offered the vendedor picker (D-07.1b). A seller's own lead
+  // is assigned to them by the API, so they are never asked to pick themselves.
+  const isAdmin = useAuthProfile().roles.includes('admin');
+  const canManageStages = isAdmin;
   const navigate = useNavigate();
   const [contactSeed, setContactSeed] = React.useState<SaveContactLeadPayload | null>(null);
-  const [saveError, setSaveError] = React.useState<string | null>(null);
   const [sellerPersonId, setSellerPersonId] = React.useState<string | null>(null);
   // The columns are resolved FIRST: the board query fans out one request per
   // stage and the API requires a `stageId`, so without the stage list there is
@@ -152,12 +155,6 @@ export function LeadsBoardContainer({
 
   return (
     <>
-      {saveError !== null ? (
-        <p className={blockedNoticeClass} data-lead-save-error="true" role="alert">
-          {saveError}
-        </p>
-      ) : null}
-
       <LeadsBoard
         canManageStages={canManageStages}
         fieldSet={fieldSet}
@@ -170,13 +167,11 @@ export function LeadsBoardContainer({
         onCreateLead={() => {
           setDialogSeed(null);
           setContactSeed(null);
-          setSaveError(null);
           setDialogOpen(true);
         }}
         onEditLead={(lead) => {
           setDialogSeed(leadToSeed(lead));
           setContactSeed(leadToContactSeed(lead));
-          setSaveError(null);
           setDialogOpen(true);
         }}
         onLoadMore={() => {
@@ -224,17 +219,14 @@ export function LeadsBoardContainer({
           initial={contactSeed}
           key={contactSeed?.id ?? 'novo'}
           onOpenChange={setDialogOpen}
-          onSubmit={(payload) => {
-            setSaveError(null);
-            // The dialog closes before the request answers, so a rejection is
-            // surfaced here, inline above the board (400 no_open_stage included).
-            saveLead.mutateAsync(payload).catch((error: unknown) => {
-              setSaveError(contactLeadSaveErrorCopy(error));
-            });
-          }}
+          // The dialog awaits the save: it closes on success and, on a rejection
+          // (400 no_open_stage included), stays open with the typed values and
+          // the mapped error inline (D-07.1c).
+          onSubmit={(payload) => saveLead.mutateAsync(payload)}
           open
           pending={saveLead.isPending}
           sellers={sellers}
+          showSellerPicker={isAdmin}
         />
       ) : null}
     </>
