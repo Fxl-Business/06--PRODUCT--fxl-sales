@@ -58,7 +58,10 @@ export type SaveLeadPayload = {
 
 /**
  * The leads-edition write body, mirroring `ContactLeadFieldsSchema` key for key.
- * Every optional key is always SENT (null when empty) so a PATCH can clear it.
+ * Every optional key is always SENT (null when empty) so a PATCH can clear it,
+ * except `sellerPersonId`, which is OMITTED when the viewer is not offered the
+ * vendedor picker: the API then defaults a create to the caller's own pessoa and
+ * an edit leaves the stored vendedor untouched (D-07.1a/b).
  * There is no clientName, no products and no estimatedValueBrl: the API stores
  * client_id null, an empty snapshot and 0 itself.
  */
@@ -68,7 +71,7 @@ export type ContactLeadPayload = {
   contactEmail: string | null;
   contactBirthDate: string | null;
   description: string | null;
-  sellerPersonId: string | null;
+  sellerPersonId?: string | null;
 };
 
 export type SaveContactLeadPayload = ContactLeadPayload & { id?: string };

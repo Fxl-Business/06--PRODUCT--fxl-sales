@@ -287,7 +287,7 @@ describe('LeadsBoardContainer, leads edition', () => {
     expect(mocks.mutate).not.toHaveBeenCalled();
   });
 
-  it('a 400 no_open_stage renders the inline no-etapa notice', async () => {
+  it('a 400 no_open_stage keeps the dialog open with the inline no-etapa notice', async () => {
     mocks.mutateAsync.mockRejectedValue({
       status: 400,
       error: 'validation_error',
@@ -299,19 +299,69 @@ describe('LeadsBoardContainer, leads edition', () => {
     await clickSelector('[data-lead-save]');
 
     expect(saveErrorText()).toBe('Nenhuma etapa ativa no funil. O lead não foi salvo.');
-    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    const dialog = document.querySelector('[role="dialog"]');
+    expect(dialog).not.toBeNull();
+    expect(dialog?.querySelector('[data-lead-save-error]')).not.toBeNull();
+    expect((document.getElementById('lead-contact-name') as HTMLInputElement).value).toBe('Ana');
   });
 
-  it('any other failure renders the generic notice, cleared by reopening', async () => {
-    mocks.mutateAsync.mockRejectedValue({ status: 500 });
+  it('any other failure keeps the typed values, and a reopened dialog starts clean', async () => {
+    mocks.mutateAsync.mockRejectedValue({ status: 403, error: 'forbidden' });
     await renderContainer();
     await clickSelector('[data-stub="create"]');
     await typeInto('lead-contact-name', 'Ana');
     await clickSelector('[data-lead-save]');
     expect(saveErrorText()).toBe('Não foi possível salvar o lead. Tente novamente.');
+    expect((document.getElementById('lead-contact-name') as HTMLInputElement).value).toBe('Ana');
+
+    const cancel = [...document.querySelectorAll('[role="dialog"] button')].find(
+      (node) => node.textContent?.trim() === 'Cancelar',
+    );
+    if (!cancel) throw new Error('Cancelar not rendered');
+    await act(async () => {
+      cancel.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    });
+    await settle();
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
 
     await clickSelector('[data-stub="create"]');
     expect(saveErrorText()).toBeNull();
+    expect((document.getElementById('lead-contact-name') as HTMLInputElement).value).toBe('');
+  });
+
+  it('a successful save closes the dialog', async () => {
+    await renderContainer();
+    await clickSelector('[data-stub="create"]');
+    await typeInto('lead-contact-name', 'Ana');
+    await clickSelector('[data-lead-save]');
+    expect(mocks.mutateAsync).toHaveBeenCalledTimes(1);
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(saveErrorText()).toBeNull();
+  });
+
+  it('a seller gets no vendedor picker and creates with no sellerPersonId key (D-07.1b)', async () => {
+    mocks.roles = ['seller'];
+    await renderContainer();
+    await clickSelector('[data-stub="create"]');
+    expect(document.querySelector('[role="dialog"] [role="combobox"]')).toBeNull();
+
+    await typeInto('lead-contact-name', 'Ana');
+    await clickSelector('[data-lead-save]');
+    expect(mocks.mutateAsync).toHaveBeenCalledTimes(1);
+    const payload = mocks.mutateAsync.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(payload.contactName).toBe('Ana');
+    expect('sellerPersonId' in payload).toBe(false);
+  });
+
+  it('an admin keeps the vendedor picker and sends the key', async () => {
+    await renderContainer();
+    await clickSelector('[data-stub="create"]');
+    expect(document.querySelector('[role="dialog"] [role="combobox"]')).not.toBeNull();
+
+    await typeInto('lead-contact-name', 'Ana');
+    await clickSelector('[data-lead-save]');
+    const payload = mocks.mutateAsync.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(payload).toHaveProperty('sellerPersonId', null);
   });
 });
 

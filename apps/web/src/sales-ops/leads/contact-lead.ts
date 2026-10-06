@@ -88,11 +88,17 @@ function trimmedOrNull(value: string): string | null {
 /**
  * The six-key write body (plus `id` when editing). Every optional key is always
  * sent, null when blank, so a PATCH clears it. No lowercasing: the API owns it.
+ *
+ * `includeSeller: false` (a viewer who is not offered the vendedor picker) drops
+ * the `sellerPersonId` KEY, never sends null: the API defaults a create to the
+ * caller's own pessoa, and an edit leaves the stored vendedor untouched.
  */
 export function buildContactLeadPayload(
   draft: ContactLeadDraft,
   id?: string,
+  options: { includeSeller?: boolean } = {},
 ): SaveContactLeadPayload {
+  const includeSeller = options.includeSeller ?? true;
   return {
     ...(id ? { id } : {}),
     contactName: draft.contactName.trim(),
@@ -100,7 +106,7 @@ export function buildContactLeadPayload(
     contactEmail: trimmedOrNull(draft.contactEmail),
     contactBirthDate: trimmedOrNull(draft.contactBirthDate),
     description: trimmedOrNull(draft.description),
-    sellerPersonId: draft.sellerPersonId,
+    ...(includeSeller ? { sellerPersonId: draft.sellerPersonId } : {}),
   };
 }
 
@@ -133,6 +139,7 @@ export function leadBirthdayLabel(lead: SalesOpsLead): string | null {
 /**
  * SEAM A1: a create with no active normal etapa answers 400 with
  * `reason: 'no_open_stage'`. Anything else is the generic save failure.
+ * Rendered INSIDE the still-open contact dialog (D-07.1c).
  */
 export function contactLeadSaveErrorCopy(error: unknown): string {
   if (

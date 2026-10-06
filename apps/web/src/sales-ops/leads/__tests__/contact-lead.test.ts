@@ -152,6 +152,20 @@ describe('buildContactLeadPayload', () => {
     expect(payload.id).toBe(LEAD_ID);
     expect('id' in buildContactLeadPayload(draft())).toBe(false);
   });
+
+  it('omits sellerPersonId entirely when the vendedor is not offered (D-07.1b)', () => {
+    const created = buildContactLeadPayload(draft({ sellerPersonId: SELLER_ID }), undefined, {
+      includeSeller: false,
+    });
+    expect(Object.keys(created)).toEqual(CONTACT_KEYS.filter((key) => key !== 'sellerPersonId'));
+
+    // On an edit the key is absent too, so the PATCH leaves the stored vendedor untouched.
+    const edited = buildContactLeadPayload(draft({ sellerPersonId: SELLER_ID }), LEAD_ID, {
+      includeSeller: false,
+    });
+    expect('sellerPersonId' in edited).toBe(false);
+    expect(edited.id).toBe(LEAD_ID);
+  });
 });
 
 describe('contact seed round trip', () => {
