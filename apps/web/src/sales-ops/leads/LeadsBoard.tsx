@@ -13,7 +13,7 @@ import {
 } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { List, Plus, SquareKanban } from 'lucide-react';
+import { Filter, List, Plus, SquareKanban } from 'lucide-react';
 import type { LeadFieldSet } from '@fxl-sales/shared-utils/sales-edition';
 import { Combobox, type ComboboxOption } from '@/components/ui/combobox';
 import { formatMoneyBrl } from '../calculations';
@@ -84,6 +84,7 @@ import {
   leadContactLine,
 } from './contact-lead';
 import { LeadCard } from './LeadCard';
+import { LeadsFunnelView } from './LeadsFunnelView';
 import { MoveLeadDialog } from './MoveLeadDialog';
 import type { SalesOpsLead, SalesOpsLeadStage } from './types';
 
@@ -277,7 +278,7 @@ export function LeadsBoard({
   const contact = fieldSet === 'contact';
   const noStages = contact && columns.length === 0;
 
-  const [leadView, setLeadView] = React.useState<'board' | 'list'>('board');
+  const [leadView, setLeadView] = React.useState<'board' | 'list' | 'funnel'>('board');
   const [rawStageFilter, setLeadStageFilter] = React.useState<string>('');
   // An archived stage drops out of `columns`; the filter then reads as "all"
   // (derived, so no effect-driven reset is needed).
@@ -479,6 +480,15 @@ export function LeadsBoard({
               type="button"
             >
               <List aria-hidden size={15} /> {BOARD_VIEW_LABEL.list}
+            </button>
+            <button
+              aria-pressed={leadView === 'funnel'}
+              className={`${segmentedButtonClass}${leadView === 'funnel' ? ' ' + segmentedButtonActiveClass : ''}`}
+              data-view-option="funnel"
+              onClick={() => setLeadView('funnel')}
+              type="button"
+            >
+              <Filter aria-hidden size={15} /> {BOARD_VIEW_LABEL.funnel}
             </button>
           </div>
           {sellerFilter ? (
@@ -690,6 +700,8 @@ export function LeadsBoard({
           ) : null}
         </DragOverlay>
       </DndContext>
+      ) : leadView === 'funnel' ? (
+        <LeadsFunnelView leads={leads} stages={stages} />
       ) : (
         <div className="flex flex-col gap-4" data-leads-list="true">
           <div className="flex flex-wrap gap-2">

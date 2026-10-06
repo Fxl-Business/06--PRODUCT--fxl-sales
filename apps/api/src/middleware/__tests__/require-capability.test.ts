@@ -12,11 +12,18 @@ const ALL_CAPABILITIES: readonly SalesCapability[] = [
   'proposals',
   'commissions',
   'catalog',
+  'clients',
   'import',
   'finders',
   'history',
   'leadFullFields',
 ];
+
+/** The leads edition (Construbom) grants these two; everything else is refused. */
+const LEADS_GRANTED: readonly SalesCapability[] = ['clients', 'import'];
+const LEADS_REFUSED: readonly SalesCapability[] = ALL_CAPABILITIES.filter(
+  (capability) => !LEADS_GRANTED.includes(capability),
+);
 
 function appFor(edition: SalesEdition | undefined, capability: SalesCapability) {
   const app = new Hono();
@@ -35,11 +42,17 @@ describe('requireCapability', () => {
     );
   });
 
-  it.each(ALL_CAPABILITIES)('the leads edition is refused %s with the byte-exact 403', async (capability) => {
+  it.each(LEADS_REFUSED)('the leads edition is refused %s with the byte-exact 403', async (capability) => {
     const res = await appFor('leads', capability).request('http://localhost/probe');
     expect(res.status).toBe(403);
     expect(res.headers.get('content-type')).toContain('application/json');
     expect(await res.text()).toBe('{"error":"forbidden","code":"edition_capability"}');
+  });
+
+  it.each(LEADS_GRANTED)('the leads edition passes %s (clients + import)', async (capability) => {
+    const res = await appFor('leads', capability).request('http://localhost/probe');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ reached: true });
   });
 
   it.each(ALL_CAPABILITIES)('the full edition passes %s', async (capability) => {

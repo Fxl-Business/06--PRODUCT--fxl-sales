@@ -346,7 +346,10 @@ describe('LeadsBoardContainer, leads edition', () => {
     mocks.roles = ['seller'];
     await renderContainer();
     await clickSelector('[data-stub="create"]');
-    expect(document.querySelector('[role="dialog"] [role="combobox"]')).toBeNull();
+    // Only the vendedor picker is hidden for a seller; the Cliente picker remains.
+    expect(
+      document.querySelector('[role="dialog"] [role="combobox"][aria-label="Vendedor responsável"]'),
+    ).toBeNull();
 
     await typeInto('lead-contact-name', 'Ana');
     await clickSelector('[data-lead-save]');

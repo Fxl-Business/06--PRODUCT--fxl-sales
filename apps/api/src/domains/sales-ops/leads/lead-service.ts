@@ -743,9 +743,10 @@ export function createLead(
 }
 
 /**
- * The leads-edition create. No empresa, no value and no produtos exist in that
- * edition, so the NOT NULL columns get their neutral values: client_id NULL,
- * client_name_snapshot '' and estimated_value_brl 0, and no product row.
+ * The leads-edition create. It carries an optional empresa (`clientId` resolves
+ * the snapshot, otherwise the free-text `clientName`) and a valor estimado, but
+ * never produtos: that child table stays full-edition only, so `products` is
+ * always empty here.
  */
 export function createContactLead(
   db: Db,
@@ -758,9 +759,9 @@ export function createContactLead(
     orgId,
     {
       contactName: input.contactName,
-      clientId: null,
-      clientName: '',
-      estimatedValueBrl: 0,
+      clientId: input.clientId ?? null,
+      clientName: input.clientName ?? '',
+      estimatedValueBrl: input.estimatedValueBrl ?? 0,
       description: input.description ?? null,
       sellerPersonId: input.sellerPersonId ?? null,
       products: [],
@@ -870,10 +871,13 @@ async function insertLead(
 /**
  * Everything a lead PATCH may carry, across both editions. The full wire schema
  * never produces the three contact keys and the contact schema never produces
- * clientId, clientName, estimatedValueBrl or products, so each edition can only
- * touch its own columns.
+ * products, so each edition can only touch its own columns. Empresa
+ * (clientId/clientName) and estimatedValueBrl are shared by both editions.
  */
-type LeadUpdatePatch = UpdateLeadInput & {
+type LeadUpdatePatch = Omit<UpdateLeadInput, 'clientName'> & {
+  // The contact schema clears the empresa with `null`; the full schema's
+  // clientName is `string | undefined`, so the patch widens it to carry both.
+  clientName?: string | null | undefined;
   contactPhone?: string | null | undefined;
   contactEmail?: string | null | undefined;
   contactBirthDate?: string | null | undefined;
@@ -889,7 +893,7 @@ export function updateLead(
   return applyLeadUpdate(db, orgId, id, input, scope);
 }
 
-/** The leads-edition PATCH. Leaves empresa, value and produtos untouched. */
+/** The leads-edition PATCH. May set empresa and valor; never touches produtos. */
 export function updateContactLead(
   db: Db,
   orgId: string,
@@ -938,7 +942,9 @@ async function applyLeadUpdate(
           // label: the body's text wins, and the stored snapshot is the floor.
           (input.clientName ?? current.clientNameSnapshot);
     } else if (input.clientName !== undefined) {
-      clientNameSnapshot = input.clientName;
+      // NOT NULL floor: a null clear keeps the stored snapshot, matching the
+      // clientId branch above.
+      clientNameSnapshot = input.clientName ?? current.clientNameSnapshot;
     }
 
     await tx

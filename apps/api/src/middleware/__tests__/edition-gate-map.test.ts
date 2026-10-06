@@ -98,18 +98,12 @@ const GATED: readonly RouteCase[] = [
   r('salesOps', 'GET', '/products', `${SO}/products`),
   r('salesOps', 'POST', '/products', `${SO}/products`),
   r('salesOps', 'PATCH', '/products/:id', `${SO}/products/${ID}`),
-  r('salesOps', 'GET', '/clients', `${SO}/clients`),
-  r('salesOps', 'POST', '/clients', `${SO}/clients`),
-  r('salesOps', 'PATCH', '/clients/:id', `${SO}/clients/${ID}`),
   r('salesOps', 'GET', '/areas', `${SO}/areas`),
   r('salesOps', 'POST', '/areas', `${SO}/areas`),
   r('salesOps', 'PATCH', '/areas/:id', `${SO}/areas/${ID}`),
   r('salesOps', 'GET', '/funcoes', `${SO}/funcoes`),
   r('salesOps', 'POST', '/funcoes', `${SO}/funcoes`),
   r('salesOps', 'PATCH', '/funcoes/:id', `${SO}/funcoes/${ID}`),
-  r('salesOps', 'GET', '/import/template', `${SO}/import/template`),
-  r('salesOps', 'POST', '/import/preview', `${SO}/import/preview`),
-  r('salesOps', 'POST', '/import/commit', `${SO}/import/commit`),
   r('salesOps', 'PUT', '/settings', `${SO}/settings`),
   r('salesOps', 'GET', '/history', `${SO}/history`),
   r('commissions', 'GET', '/', '/api/v1/commissions'),
@@ -131,6 +125,23 @@ const GATED: readonly RouteCase[] = [
   r('finder', 'GET', '/apps/:appId/products', `/api/v1/finder/apps/${ID}/products`),
   r('finder', 'GET', '/clicks', '/api/v1/finder/clicks'),
   r('finder', 'GET', '/clicks/stats', '/api/v1/finder/clicks/stats'),
+];
+
+/**
+ * Capability-gated routers that the LEADS edition is granted (`clients` + `import`).
+ * They carry a `requireCapability` gate like the GATED set, but the leads edition
+ * HAS those capabilities, so they never answer the edition 403 to a leads owner -
+ * they reach their handler (or, for the admin-only importer, the admin gate). For
+ * any edition lacking the capability they would 403, which the full-edition oracle
+ * does not exercise but the route gate still enforces.
+ */
+const LEADS_GRANTED: readonly RouteCase[] = [
+  r('salesOps', 'GET', '/clients', `${SO}/clients`),
+  r('salesOps', 'POST', '/clients', `${SO}/clients`),
+  r('salesOps', 'PATCH', '/clients/:id', `${SO}/clients/${ID}`),
+  r('salesOps', 'GET', '/import/template', `${SO}/import/template`),
+  r('salesOps', 'POST', '/import/preview', `${SO}/import/preview`),
+  r('salesOps', 'POST', '/import/commit', `${SO}/import/commit`),
 ];
 
 const OPEN: readonly RouteCase[] = [
@@ -297,7 +308,9 @@ function registeredKeys(key: RouterKey): Set<string> {
 
 function classifiedKeys(key: RouterKey): Set<string> {
   return new Set(
-    [...GATED, ...OPEN].filter((route) => route.router === key).map((route) => `${route.method} ${route.pattern}`),
+    [...GATED, ...OPEN, ...LEADS_GRANTED]
+      .filter((route) => route.router === key)
+      .map((route) => `${route.method} ${route.pattern}`),
   );
 }
 
@@ -345,6 +358,21 @@ describe('the leads edition', () => {
     expect(await isEditionDenial(res)).toBe(false);
   });
 
+  it.each(LEADS_GRANTED)(
+    '$method $url is granted (never the edition 403) to a leads-edition owner',
+    async (granted) => {
+      const res = await send(granted, tokens.leadsOwner);
+      expect(await isEditionDenial(res)).toBe(false);
+    },
+  );
+
+  it('GET /clients reaches its handler for a leads-edition owner (clients capability granted)', async () => {
+    const res = await send(route('GET', `${SO}/clients`), tokens.leadsOwner);
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual(HANDLER_REACHED);
+    expect(dbCalls.count).toBeGreaterThan(0);
+  });
+
   it('GET /bootstrap reaches its handler for a leads-edition owner (non-vacuity)', async () => {
     const res = await send(route('GET', `${SO}/bootstrap`), tokens.leadsOwner);
     expect(res.status).toBe(500);
@@ -365,14 +393,14 @@ describe('the leads edition', () => {
 });
 
 describe('the full edition (FXL oracle)', () => {
-  it.each([...GATED, ...OPEN])(
+  it.each([...GATED, ...OPEN, ...LEADS_GRANTED])(
     '$method $url never answers the edition 403 with modules []',
     async (anyRoute) => {
       expect(await isEditionDenial(await send(anyRoute, tokens.fullOwner))).toBe(false);
     },
   );
 
-  it.each([...GATED, ...OPEN])(
+  it.each([...GATED, ...OPEN, ...LEADS_GRANTED])(
     '$method $url never answers the edition 403 with an unrelated add-on module',
     async (anyRoute) => {
       expect(await isEditionDenial(await send(anyRoute, tokens.addonOwner))).toBe(false);

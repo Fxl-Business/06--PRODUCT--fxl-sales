@@ -120,7 +120,7 @@ describe('leadsApi', () => {
     });
   });
 
-  it('saveLead sends the leads-edition contact body with exactly six keys', async () => {
+  it('saveLead sends the leads-edition contact body with empresa and valor keys', async () => {
     const draft = {
       ...contactDraftFromSeed(null),
       contactName: 'Ana',
@@ -132,6 +132,9 @@ describe('leadsApi', () => {
       'contactEmail',
       'contactBirthDate',
       'description',
+      'clientId',
+      'clientName',
+      'estimatedValueBrl',
       'sellerPersonId',
     ];
 

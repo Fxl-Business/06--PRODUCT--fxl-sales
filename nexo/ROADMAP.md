@@ -192,3 +192,11 @@ está defendida por RLS nesse caminho, não pela suíte. Conserto: um teste sobr
 A guarda de mover card convertido e a guarda de PATCH em lead convertido só morrem COLATERALMENTE,
 num teste sobre `saleId` que move um card convertido como passo de fixture. Nenhum teste nomeia
 essas duas propriedades no nível de serviço.
+
+### Importador agnóstico de edição na edição Leads
+A tela de Importação foi exposta na edição Leads (Construbom) via capability `import`, mas o
+`workbook-schema` ainda carrega abas de produtos/clientes/propostas/pagamentos. Numa org da edição
+Leads isso permitiria importar dados de produto que a edição normalmente suprime (a tela é admin- e
+org-escopada, então não corrompe, mas foge ao escopo da edição). Conserto: o preview/commit recusar
+as abas full-product quando `leadFieldSet(edition) === 'contact'`, com oráculo em
+`import-routes.integration.test.ts`.

@@ -82,7 +82,9 @@ salesOpsRouter.use('/summary/*', requireCapability('proposals'));
 salesOpsRouter.use('/sales/*', requireCapability('proposals'));
 salesOpsRouter.use('/settlements/*', requireCapability('proposals'));
 salesOpsRouter.use('/products/*', requireCapability('catalog'));
-salesOpsRouter.use('/clients/*', requireCapability('catalog'));
+// Clients are a capability of their own: the leads edition grants `clients` but
+// not `catalog`, so the Clientes cadastro works there while produtos/areas/funcoes stay out.
+salesOpsRouter.use('/clients/*', requireCapability('clients'));
 salesOpsRouter.use('/areas/*', requireCapability('catalog'));
 salesOpsRouter.use('/funcoes/*', requireCapability('catalog'));
 salesOpsRouter.use('/import/*', requireCapability('import'));

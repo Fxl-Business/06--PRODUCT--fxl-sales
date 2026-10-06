@@ -2336,6 +2336,10 @@ export function SalesOpsApp() {
                   */
                   <LeadsBoardContainer
                     clients={persistedBootstrap.clients}
+                    onCreateClient={async (name) => {
+                      const client = await createClientByName(name);
+                      return client ? { value: client.id, label: client.name } : null;
+                    }}
                     people={persistedBootstrap.people}
                     onOpenSale={openSaleFromBoard}
                     onRequestConversion={requestLeadConversion}

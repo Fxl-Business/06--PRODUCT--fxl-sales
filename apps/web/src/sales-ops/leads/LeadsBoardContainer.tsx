@@ -77,6 +77,12 @@ export type LeadsBoardContainerProps = {
   onRequestConversion?: (request: LeadConversionRequest) => Promise<string | null>;
   /** Opens the proposta a converted lead became. Forwarded verbatim. */
   onOpenSale?: (saleId: string) => void;
+  /**
+   * Leads edition only: create a client by name inline from the contact dialog's
+   * empresa picker. Owned by `SalesOpsApp` (the one client-create seam), so this
+   * container keeps naming only leads hooks. Absent means the Criar row is hidden.
+   */
+  onCreateClient?: (name: string) => Promise<ComboboxOption | null>;
 };
 
 /** The edit path maps a rendered lead back into the write payload the dialog seeds from. */
@@ -103,6 +109,7 @@ export function LeadsBoardContainer({
   showSellerFilter = false,
   onRequestConversion,
   onOpenSale,
+  onCreateClient,
 }: LeadsBoardContainerProps) {
   // The edition is read ONCE here and handed down as `fieldSet`, so every
   // presentational leads component stays free of auth hooks.
@@ -244,8 +251,10 @@ export function LeadsBoardContainer({
 
       {dialogOpen && fieldSet === 'contact' ? (
         <ContactLeadDialog
+          clients={clientOptions}
           initial={contactSeed}
           key={contactSeed?.id ?? 'novo'}
+          onCreateClient={onCreateClient}
           onOpenChange={setDialogOpen}
           // The dialog awaits the save: it closes on success and, on a rejection
           // (400 no_open_stage included), stays open with the typed values and

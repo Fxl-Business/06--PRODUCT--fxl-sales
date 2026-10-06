@@ -351,7 +351,6 @@ describe('the leads edition inside the Sales Ops shell', () => {
       '/operacional/comissoes',
       '/cadastros/produtos',
       '/cadastros/funcoes',
-      '/cadastros/importacao',
       '/cadastros/geral',
       '/meus-dados/leads',
       '/meus-dados/vendedores',
@@ -368,11 +367,12 @@ describe('the leads edition inside the Sales Ops shell', () => {
     expect(navLabel('Comissões')).toBeNull();
   });
 
-  it('shows Vendedores and Etapas do funil in cadastros', async () => {
+  it('shows Vendedores, Clientes, Etapas do funil and Importação in cadastros', async () => {
     await renderRoute('/cadastros/etapas', gestor, 'leads');
-    expect(navLabel('Vendedores')).not.toBeNull();
-    expect(navLabel('Etapas do funil')).not.toBeNull();
-    for (const label of ['Pessoas', 'Produtos & Serviços', 'Funções', 'Importação', 'Geral']) {
+    for (const label of ['Vendedores', 'Clientes', 'Etapas do funil', 'Importação']) {
+      expect(navLabel(label), label).not.toBeNull();
+    }
+    for (const label of ['Pessoas', 'Produtos & Serviços', 'Funções', 'Geral']) {
       expect(navLabel(label), label).toBeNull();
     }
     expect(container.querySelector('[data-lead-stages]')).not.toBeNull();

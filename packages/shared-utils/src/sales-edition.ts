@@ -16,11 +16,12 @@ export type SalesEdition = 'full' | 'leads';
 export type SalesCapability =
   | 'proposals' // propostas, wizard, conversion, settlements, summary/dashboard
   | 'commissions' // comissoes, payouts, legacy commissions routes
-  | 'catalog' // produtos, areas, clientes, funcoes cadastros
+  | 'catalog' // produtos, areas, funcoes cadastros
+  | 'clients' // clientes cadastro (split from catalog so the leads edition can grant it alone)
   | 'import' // importacao por planilha
   | 'finders' // finder workspace and legacy finder/links routes
   | 'history' // Geral settings + historico de arquivamentos
-  | 'leadFullFields'; // empresa, produtos, valor estimado on leads
+  | 'leadFullFields'; // produtos on leads (empresa/valor are available to the leads edition too)
 
 export type LeadFieldSet = 'full' | 'contact';
 
@@ -44,13 +45,21 @@ const FULL_CAPABILITIES = frozenCapabilitySet([
   'proposals',
   'commissions',
   'catalog',
+  'clients',
   'import',
   'finders',
   'history',
   'leadFullFields',
 ]);
 
-const LEADS_CAPABILITIES = frozenCapabilitySet([]);
+/**
+ * The leads edition (Construbom) grants exactly `clients` and `import`: the
+ * Clientes cadastro and the spreadsheet importer, nothing else. It deliberately
+ * does NOT grant `catalog` (produtos/areas/funcoes stay out of this edition) nor
+ * `leadFullFields` (no produtos on a lead); empresa and valor estimado on a lead
+ * are carried by the contact lead schema itself, not by a capability.
+ */
+const LEADS_CAPABILITIES = frozenCapabilitySet(['clients', 'import']);
 
 /** Absent, empty or unknown modules => 'full'. Only the exact module string flips it. */
 export function resolveSalesEdition(
@@ -60,7 +69,7 @@ export function resolveSalesEdition(
   return modules.some((module) => module === SALES_EDITION_LEADS_MODULE) ? 'leads' : 'full';
 }
 
-/** 'full' => every capability; 'leads' => none of them. Frozen sets. */
+/** 'full' => every capability; 'leads' => clients + import only. Frozen sets. */
 export function editionCapabilities(edition: SalesEdition): ReadonlySet<SalesCapability> {
   return edition === 'leads' ? LEADS_CAPABILITIES : FULL_CAPABILITIES;
 }

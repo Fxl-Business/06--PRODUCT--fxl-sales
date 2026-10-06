@@ -7,8 +7,8 @@ import { ContactLeadDialog } from '../ContactLeadDialog';
 
 /**
  * The leads edition's contact dialog, driven through the REAL `Dialog` and the
- * REAL `Combobox`. It asks for contact data only and sends the six-key
- * `ContactLeadPayload`; empresa, produtos and valor do not exist here.
+ * REAL `Combobox`. It carries the contact data plus an empresa (Cliente) picker
+ * and a valor estimado; produtos still do not exist here.
  */
 
 const act = (React as typeof React & { act: typeof import('react-dom/test-utils').act }).act;
@@ -108,7 +108,8 @@ function blockedText(): string | null {
 }
 
 function sellerTrigger(): HTMLButtonElement {
-  const node = dialogNode().querySelector('[role="combobox"]');
+  // Two comboboxes now (Cliente then Vendedor); target the vendedor by its label.
+  const node = dialogNode().querySelector('[role="combobox"][aria-label="Vendedor responsável"]');
   if (!(node instanceof HTMLButtonElement)) throw new Error('vendedor picker missing');
   return node;
 }
@@ -127,6 +128,21 @@ async function pickSeller(label: string) {
     (node) => node.textContent?.trim() === label,
   );
   if (!row) throw new Error(`option "${label}" not offered`);
+  await click(row);
+}
+
+function clientTrigger(): HTMLButtonElement {
+  const node = dialogNode().querySelector('[role="combobox"][aria-labelledby="lead-client-label"]');
+  if (!(node instanceof HTMLButtonElement)) throw new Error('cliente picker missing');
+  return node;
+}
+
+async function pickClient(label: string) {
+  await click(clientTrigger());
+  const row = [...document.querySelectorAll('[role="listbox"] [role="option"]')].find(
+    (node) => node.textContent?.trim() === label,
+  );
+  if (!row) throw new Error(`client option "${label}" not offered`);
   await click(row);
 }
 
@@ -153,13 +169,17 @@ async function renderDialog(overrides: Overrides = {}) {
 }
 
 describe('ContactLeadDialog', () => {
-  it('renders exactly the six contact fields, in order', async () => {
+  it('renders the contact fields plus empresa and valor, in order', async () => {
     await renderDialog();
-    const labels = [...dialogNode().querySelectorAll('label, [id="lead-seller-label"]')].map(
-      (node) => node.textContent?.trim(),
-    );
+    const labels = [
+      ...dialogNode().querySelectorAll(
+        'label, [id="lead-client-label"], [id="lead-seller-label"]',
+      ),
+    ].map((node) => node.textContent?.trim());
     expect(labels).toEqual([
-      'Nome *',
+      'Nome do contato (comprador) *',
+      'Cliente',
+      'Valor estimado (R$)',
       'Data de aniversário',
       'Número (telefone/WhatsApp)',
       'Email',
@@ -168,13 +188,13 @@ describe('ContactLeadDialog', () => {
     ]);
   });
 
-  it('has no empresa, produtos, valor or numeric input', async () => {
+  it('has the empresa and valor fields but no produtos', async () => {
     await renderDialog();
     const text = dialogNode().textContent ?? '';
-    for (const banned of ['Empresa', 'Produtos', 'Valor estimado', 'R$']) {
-      expect(text).not.toContain(banned);
-    }
-    expect(dialogNode().querySelector('input[type="number"]')).toBeNull();
+    expect(text).toContain('Cliente');
+    expect(text).toContain('Valor estimado');
+    expect(text).not.toContain('Produtos');
+    expect(dialogNode().querySelector('input[type="number"]')).not.toBeNull();
   });
 
   it('the birthday is a date input capped at today', async () => {
@@ -252,9 +272,10 @@ describe('ContactLeadDialog', () => {
     expect(blockedText()).toBe('Informe um email válido.');
   });
 
-  it('sends the six-key payload and closes', async () => {
+  it('sends the contact payload with empresa/valor and closes', async () => {
     const { onSubmit, onOpenChange } = await renderDialog();
     await typeInto(input('lead-contact-name'), 'Ana Construbom');
+    await typeInto(input('lead-estimated-value'), '1500');
     await typeInto(input('lead-birth-date'), '1990-02-28');
     await typeInto(input('lead-phone'), '(11) 98888-7777');
     await typeInto(input('lead-email'), 'ana@construbom.com.br');
@@ -270,9 +291,47 @@ describe('ContactLeadDialog', () => {
       contactEmail: 'ana@construbom.com.br',
       contactBirthDate: '1990-02-28',
       description: 'Indicação da feira',
+      clientId: null,
+      clientName: null,
+      estimatedValueBrl: 150000,
       sellerPersonId: SELLER_TWO,
     });
     expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it('selects an existing client and sends its id and name', async () => {
+    const CLIENT_ID = 'c0000000-0000-4000-8000-000000000001';
+    const { onSubmit } = await renderDialog({
+      clients: [{ value: CLIENT_ID, label: 'Construtora Alfa' }],
+    });
+    await typeInto(input('lead-contact-name'), 'Ana');
+    await pickClient('Construtora Alfa');
+    await click(saveButton());
+
+    const payload = onSubmit.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(payload.clientId).toBe(CLIENT_ID);
+    expect(payload.clientName).toBe('Construtora Alfa');
+  });
+
+  it('creates a client by name inline through onCreateClient', async () => {
+    const CREATED_ID = 'c0000000-0000-4000-8000-0000000000aa';
+    const onCreateClient = vi.fn(async () => ({ value: CREATED_ID, label: 'Nova Obra' }));
+    const { onSubmit } = await renderDialog({ onCreateClient });
+    await typeInto(input('lead-contact-name'), 'Ana');
+
+    await click(clientTrigger());
+    await typeInto(comboboxSearch(), 'Nova Obra');
+    const createRow = [...document.querySelectorAll('[role="listbox"] [role="option"]')].find(
+      (node) => node.textContent?.toLowerCase().includes('criar'),
+    );
+    if (!createRow) throw new Error('create row not offered');
+    await click(createRow);
+    expect(onCreateClient).toHaveBeenCalledWith('Nova Obra');
+
+    await click(saveButton());
+    const payload = onSubmit.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(payload.clientId).toBe(CREATED_ID);
+    expect(payload.clientName).toBe('Nova Obra');
   });
 
   it('clearing a field on an edit sends null and carries the id', async () => {
@@ -299,6 +358,9 @@ describe('ContactLeadDialog', () => {
       contactEmail: null,
       contactBirthDate: '1990-02-28',
       description: null,
+      clientId: null,
+      clientName: null,
+      estimatedValueBrl: 0,
       sellerPersonId: SELLER_ID,
     });
   });
@@ -349,7 +411,10 @@ describe('ContactLeadDialog', () => {
 
   it('hides the vendedor and sends no sellerPersonId key when the picker is not offered (D-07.1b)', async () => {
     const { onSubmit } = await renderDialog({ showSellerPicker: false });
-    expect(dialogNode().querySelector('[role="combobox"]')).toBeNull();
+    // The Cliente picker still renders; only the vendedor one is hidden.
+    expect(
+      dialogNode().querySelector('[role="combobox"][aria-label="Vendedor responsável"]'),
+    ).toBeNull();
     expect(dialogNode().textContent).not.toContain('Vendedor responsável');
 
     await typeInto(input('lead-contact-name'), 'Ana');
@@ -361,6 +426,9 @@ describe('ContactLeadDialog', () => {
       contactEmail: null,
       contactBirthDate: null,
       description: null,
+      clientId: null,
+      clientName: null,
+      estimatedValueBrl: 0,
     });
   });
 
@@ -385,6 +453,9 @@ describe('ContactLeadDialog', () => {
       contactEmail: null,
       contactBirthDate: null,
       description: null,
+      clientId: null,
+      clientName: null,
+      estimatedValueBrl: 0,
     });
   });
 
