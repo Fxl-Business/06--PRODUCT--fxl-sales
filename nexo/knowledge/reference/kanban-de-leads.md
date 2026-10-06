@@ -74,3 +74,16 @@ Slice 04 made the lead write paths edition-aware on the API, with the full editi
 - `leads-edition-no-seed.test.ts` pins the only two `ensureLeadStages` callers outside tests, `domains/import/routes.ts` (closed by the `import` capability in that edition) and `stages-seed.ts` itself.
 - A move between `normal` etapas works in an org with no conversion and no lost etapa, because `moveLead` only reads the destination kind.
 - Oracles: `leads/__tests__/contact-lead-contract.test.ts`, `leads/__tests__/lead-routes-edition.test.ts`, `leads/__tests__/leads-edition-no-seed.test.ts`, `__tests__/people-routes-edition.test.ts` and `test/rls/leads-edition.test.ts`.
+
+Slice 06 gave the leads edition a contact-only board on the web, with the full edition (FXL) rendering exactly today's markup.
+
+- `LeadsBoardContainer` reads `leadFieldSet(useSalesEdition())` once and passes `fieldSet` down; `LeadsBoard`, `LeadCard` and the dialogs stay pure props-in components with no auth hook.
+- `LeadDialog.tsx` is untouched; `ContactLeadDialog.tsx` is the leads-edition dialog (Nome, Data de aniversário, Número, Email, Descrição, Vendedor responsável) and sends the six-key `ContactLeadPayload` built by `buildContactLeadPayload` in `contact-lead.ts`, every optional key sent as `null` when blank so a PATCH clears it.
+- The birthday is an `<Input type="date">` with `max={todayInSaoPaulo()}`, validated by `validateContactLeadDraft` with `isIsoDay` and a string comparison with today, and displayed only through `displayDate`, never `new Date`.
+- The contact card and the Lista show phone, email and the birthday (`leadContactLine`, `leadBirthdayLabel`) and never empresa, produtos, valor, any R$ total, `% do total`, the proportion bar or the footer `TOTAL`.
+- Zero active etapas render `[data-no-stages]`: the gestor (`admin` role) gets the copy plus `Ir para Etapas do funil`, which navigates to `/cadastros/etapas`, and the vendedor gets `Fale com o gestor`; `Novo lead` is disabled in both.
+- The container no longer waits on the board query when there are zero etapas, because `useLeadsBoard` is disabled without stage rows and would leave the Skeleton up forever.
+- In the leads edition the board is never handed `onRequestConversion` or `onOpenSale`, so even a stray conversion-kind etapa opens no proposta door.
+- A contact save uses `mutateAsync`; a `400` with `reason: 'no_open_stage'` (read from `ApiError.reason`, set by `apiFetch` only when the body sends one) renders the inline `[data-lead-save-error]` no-etapa notice and any other failure the generic save notice; the full edition keeps `mutate`.
+- `contact-lead.ts` and `ContactLeadDialog.tsx` joined the `board-write-surface.test.ts` `OWNED_FILES`.
+- Oracles: `leads/__tests__/leads-contact-board.test.tsx`, `leads/__tests__/leads-contact-container.test.tsx`, `leads/__tests__/leads-full-edition.test.tsx` (innerHTML equality with `fieldSet` omitted and `'full'`), `leads/__tests__/contact-lead.test.ts`, `leads/__tests__/contact-lead-dialog.test.tsx` and `lib/__tests__/api-client-reason.test.ts`.

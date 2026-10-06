@@ -1,10 +1,16 @@
 import * as React from 'react';
+import { useNavigate } from 'react-router-dom';
+import { leadFieldSet } from '@fxl-sales/shared-utils/sales-edition';
+import { useAuthProfile, useSalesEdition } from '@/auth/react';
 import type { ComboboxOption } from '@/components/ui/combobox';
 import { Skeleton } from '@/components/ui/skeleton';
+import { buildSalesOpsPath } from '../navigation';
 import type { SalesOpsClient, SalesOpsPerson, SalesOpsProduct } from '../types';
-import type { SaveLeadPayload } from './api';
+import type { SaveContactLeadPayload, SaveLeadPayload } from './api';
 import { buildLabelLookups } from './board-labels';
-import { mutedStateClass } from './board-ui';
+import { blockedNoticeClass, mutedStateClass } from './board-ui';
+import { ContactLeadDialog } from './ContactLeadDialog';
+import { contactLeadSaveErrorCopy, leadToContactSeed } from './contact-lead';
 import { LeadDialog } from './LeadDialog';
 import { LeadsBoard, type LeadConversionRequest } from './LeadsBoard';
 import { useLeadsBoard, useLeadStages, useMoveLead, useSaveLead } from './hooks';
@@ -73,6 +79,13 @@ export function LeadsBoardContainer({
   onRequestConversion,
   onOpenSale,
 }: LeadsBoardContainerProps) {
+  // The edition is read ONCE here and handed down as `fieldSet`, so every
+  // presentational leads component stays free of auth hooks.
+  const fieldSet = leadFieldSet(useSalesEdition());
+  const canManageStages = useAuthProfile().roles.includes('admin');
+  const navigate = useNavigate();
+  const [contactSeed, setContactSeed] = React.useState<SaveContactLeadPayload | null>(null);
+  const [saveError, setSaveError] = React.useState<string | null>(null);
   const [sellerPersonId, setSellerPersonId] = React.useState<string | null>(null);
   // The columns are resolved FIRST: the board query fans out one request per
   // stage and the API requires a `stageId`, so without the stage list there is
@@ -123,7 +136,11 @@ export function LeadsBoardContainer({
     [products],
   );
 
-  if (stagesQuery.isPending || boardQuery.isPending) {
+  // `useLeadsBoard` is disabled while there are zero stage rows, so its query
+  // stays pending forever; waiting on it would leave a fresh leads-edition org
+  // on the Skeleton instead of its empty-state. FXL always has stage rows, so
+  // its behaviour is unchanged.
+  if (stagesQuery.isPending || (stages.length > 0 && boardQuery.isPending)) {
     return <Skeleton className="h-[420px] w-full" />;
   }
 
@@ -135,7 +152,15 @@ export function LeadsBoardContainer({
 
   return (
     <>
+      {saveError !== null ? (
+        <p className={blockedNoticeClass} data-lead-save-error="true" role="alert">
+          {saveError}
+        </p>
+      ) : null}
+
       <LeadsBoard
+        canManageStages={canManageStages}
+        fieldSet={fieldSet}
         hasMore={boardQuery.data?.hasMore ?? false}
         leads={boardQuery.data?.leads ?? []}
         loadingMore={boardQuery.isFetchingNextPage}
@@ -144,18 +169,28 @@ export function LeadsBoardContainer({
         now={now}
         onCreateLead={() => {
           setDialogSeed(null);
+          setContactSeed(null);
+          setSaveError(null);
           setDialogOpen(true);
         }}
         onEditLead={(lead) => {
           setDialogSeed(leadToSeed(lead));
+          setContactSeed(leadToContactSeed(lead));
+          setSaveError(null);
           setDialogOpen(true);
         }}
         onLoadMore={() => {
           void boardQuery.fetchNextPage();
         }}
         onMoveLead={(payload) => moveLead.mutate(payload)}
-        onOpenSale={onOpenSale}
-        onRequestConversion={onRequestConversion}
+        // The leads edition has no proposta, so the board is never handed the
+        // conversion door, even if a conversion-kind etapa somehow exists:
+        // `moveTargetsFor` then excludes it and `emitMove` returns early.
+        onOpenSale={fieldSet === 'full' ? onOpenSale : undefined}
+        onOpenStagesCadastro={() =>
+          navigate(buildSalesOpsPath({ workspace: 'cadastros', view: 'etapas' }))
+        }
+        onRequestConversion={fieldSet === 'full' ? onRequestConversion : undefined}
         {...(showSellerFilter
           ? {
               sellerFilter: {
@@ -168,7 +203,7 @@ export function LeadsBoardContainer({
         stages={stages}
       />
 
-      {dialogOpen ? (
+      {dialogOpen && fieldSet === 'full' ? (
         <LeadDialog
           clients={clientOptions}
           initial={dialogSeed}
@@ -180,6 +215,25 @@ export function LeadsBoardContainer({
           open
           pending={saveLead.isPending}
           products={productOptions}
+          sellers={sellers}
+        />
+      ) : null}
+
+      {dialogOpen && fieldSet === 'contact' ? (
+        <ContactLeadDialog
+          initial={contactSeed}
+          key={contactSeed?.id ?? 'novo'}
+          onOpenChange={setDialogOpen}
+          onSubmit={(payload) => {
+            setSaveError(null);
+            // The dialog closes before the request answers, so a rejection is
+            // surfaced here, inline above the board (400 no_open_stage included).
+            saveLead.mutateAsync(payload).catch((error: unknown) => {
+              setSaveError(contactLeadSaveErrorCopy(error));
+            });
+          }}
+          open
+          pending={saveLead.isPending}
           sellers={sellers}
         />
       ) : null}

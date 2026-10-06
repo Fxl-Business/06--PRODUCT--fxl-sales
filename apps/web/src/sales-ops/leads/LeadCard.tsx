@@ -1,4 +1,5 @@
 import * as React from 'react';
+import type { LeadFieldSet } from '@fxl-sales/shared-utils/sales-edition';
 import { formatMoneyBrl } from '../calculations';
 import {
   CARD_TOOLTIP,
@@ -22,6 +23,7 @@ import {
   readOnlyCardClass,
 } from './board-ui';
 import { daysInCurrentStage, leadIsConverted } from './calculations';
+import { CONTACT_LEAD_COPY, leadBirthdayLabel, leadContactLine } from './contact-lead';
 import type { SalesOpsLead } from './types';
 
 /**
@@ -57,6 +59,8 @@ export type LeadCardProps = {
   isDragging?: boolean;
   /** Computed by the board (normal stage and not converted). */
   showDaysBadge?: boolean;
+  /** 'contact' in the leads edition: contact data instead of empresa, valor and produtos. */
+  fieldSet?: LeadFieldSet;
 };
 
 export function LeadCard({
@@ -68,7 +72,10 @@ export function LeadCard({
   dragHandleProps,
   isDragging = false,
   showDaysBadge = true,
+  fieldSet = 'full',
 }: LeadCardProps) {
+  const contact = fieldSet === 'contact';
+  const birthday = contact ? leadBirthdayLabel(lead) : null;
   const readOnly = leadIsConverted(lead);
   const days = daysInCurrentStage(lead.stageChangedAt, now);
   const daysCopy = describeDaysInStage(days);
@@ -111,20 +118,34 @@ export function LeadCard({
       onPointerDown={handlePointerDown}
       title={readOnly ? undefined : CARD_TOOLTIP}
     >
-      <div className="flex items-start justify-between gap-2">
+      {contact ? (
         <div className="flex min-w-0 flex-col gap-0.5">
           <span className="text-[14px] font-semibold text-[#201f24]">{lead.contactName}</span>
-          <span className="text-[12.5px] text-[#8b8b92]">{leadCompanyLabel(lead, lookups)}</span>
+          <span className="truncate text-[12.5px] text-[#8b8b92]" data-lead-contact>
+            {leadContactLine(lead)}
+          </span>
+          {birthday !== null ? (
+            <span className="text-[12px] text-[#8b8b92]" data-lead-birthday>
+              {`${CONTACT_LEAD_COPY.birthdayPrefix} ${birthday}`}
+            </span>
+          ) : null}
         </div>
-        <span className="sales-ops-num shrink-0 text-[14px] font-bold text-[#201f24]">
-          {formatMoneyBrl(lead.estimatedValueBrl, {
-            minimumFractionDigits: 0,
-            maximumFractionDigits: 0,
-          })}
-        </span>
-      </div>
+      ) : (
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex min-w-0 flex-col gap-0.5">
+            <span className="text-[14px] font-semibold text-[#201f24]">{lead.contactName}</span>
+            <span className="text-[12.5px] text-[#8b8b92]">{leadCompanyLabel(lead, lookups)}</span>
+          </div>
+          <span className="sales-ops-num shrink-0 text-[14px] font-bold text-[#201f24]">
+            {formatMoneyBrl(lead.estimatedValueBrl, {
+              minimumFractionDigits: 0,
+              maximumFractionDigits: 0,
+            })}
+          </span>
+        </div>
+      )}
 
-      {productLabels.length > 0 ? (
+      {!contact && productLabels.length > 0 ? (
         <div className="flex flex-wrap gap-1">
           {visibleProducts.map((label, index) => (
             <span className={chipClass} key={`${label}-${index}`}>
