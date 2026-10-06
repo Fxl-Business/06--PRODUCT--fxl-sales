@@ -29,6 +29,7 @@ import {
   getLead,
   listLeads,
   moveLead,
+  provisionLeadsSellerPerson,
   updateContactLead,
 } from '../../src/domains/sales-ops/leads/lead-service.js';
 import { LeadStageSchema } from '../../src/domains/sales-ops/leads/schemas.js';
@@ -42,6 +43,7 @@ import {
   UpdatePersonSchema,
   createPerson,
   updatePerson,
+  withTenant,
 } from '../../src/domains/sales-ops/service.js';
 
 const { appUrl: APP_DB_URL, adminUrl: ADMIN_DB_URL } = testDatabaseUrls();
@@ -869,21 +871,107 @@ describe('sales operations leads edition: contact leads, vendedor-only pessoas, 
       expect(await funcaoSlugsOfPerson(orgId, person!.id)).toEqual(['vendedor']);
     });
 
-    it('creates exactly one pessoa when two first requests race', async () => {
-      const orgId = newOrg('provrace');
-      const stage = await normalStage(orgId, 'Contato');
-      const scope = leadsSellerScope('hub_race', 'race@construbom.test', { name: 'Race' });
+    // Many rounds, because one round loses the race only sometimes: under READ
+    // COMMITTED each statement takes a fresh snapshot, so a loser can miss the
+    // winner's row on the account lookup and see it, committed, one statement
+    // later (the e-mail check). Every round is a FRESH org, so every winner also
+    // seeds the system funções, which is what widens that window enough to lose.
+    it('ends every concurrent first request on the one pessoa of its account', async () => {
+      const ROUNDS = 20;
+      for (let round = 0; round < ROUNDS; round += 1) {
+        const orgId = newOrg(`provrace${round}`);
+        const stage = await normalStage(orgId, 'Contato');
+        const scope = leadsSellerScope('hub_race', 'race@construbom.test', { name: 'Race' });
+        const results = await Promise.all([
+          boardOf(orgId, stage.id, scope),
+          boardOf(orgId, stage.id, scope),
+          boardOf(orgId, stage.id, scope),
+          createContactLead(db, orgId, contactLead(), scope),
+        ]);
+        expect({ round, oks: results.map((result) => result.ok) }).toEqual({
+          round,
+          oks: [true, true, true, true],
+        });
+        const people = await peopleRows(orgId);
+        expect({ round, accounts: people.map((person) => person.hub_account_id) }).toEqual({
+          round,
+          accounts: ['hub_race'],
+        });
+        expect(await funcaoSlugsOfPerson(orgId, people[0]!.id)).toEqual(['vendedor']);
+      }
+    });
 
-      const results = await Promise.all([
-        boardOf(orgId, stage.id, scope),
-        boardOf(orgId, stage.id, scope),
-        createContactLead(db, orgId, contactLead(), scope),
-      ]);
-      expect(results.map((result) => result.ok)).toEqual([true, true, true]);
+    // The e-mail-check interleaving, forced. The race loser ran its account
+    // lookup BEFORE the winner committed (a miss), and its e-mail check runs
+    // AFTER (a fresh READ COMMITTED snapshot), so the check sees the winner's
+    // committed pessoa, bound to the SAME account. That pessoa is the caller's
+    // own and must be returned, never refused as somebody else's cadastro.
+    it('returns the caller own pessoa that becomes visible between the account lookup and the e-mail check', async () => {
+      const orgId = newOrg('provmine');
+      const own = await leadsVendedor(orgId, 'Winner', 'mine@construbom.test');
+      await adminClient`
+        UPDATE sales_ops_people SET hub_account_id = 'hub_mine'
+        WHERE org_id = ${orgId} AND id = ${own.id}`;
+      const scope = leadsSellerScope('hub_mine', 'MINE@construbom.test');
+
+      const provisioned = await withTenant(db, orgId, (tx) =>
+        provisionLeadsSellerPerson(tx, orgId, scope),
+      );
+      expect(provisioned).toBe(own.id);
+      expect((await peopleRows(orgId)).map((person) => person.id)).toEqual([own.id]);
+
+      // Somebody else's cadastro with the e-mail is still a refusal.
+      const otherOrg = newOrg('provother');
+      await leadsVendedor(otherOrg, 'Outro', 'mine@construbom.test');
+      expect(
+        await withTenant(db, otherOrg, (tx) => provisionLeadsSellerPerson(tx, otherOrg, scope)),
+      ).toBeNull();
+      expect(await peopleRows(otherOrg)).toHaveLength(1);
+    });
+
+    // The insert-conflict interleaving, forced: a concurrent provision of the
+    // same account holds its uncommitted row, so the request's account lookup
+    // and e-mail check both miss it and its INSERT blocks on the unique index.
+    // Committing the holder turns that INSERT into a 23505, and the request must
+    // end on the holder's row instead of refusing or failing.
+    it('ends a request whose INSERT loses on the unique index on the winner row', async () => {
+      const orgId = newOrg('provforced');
+      const stage = await normalStage(orgId, 'Contato');
+      const scope = leadsSellerScope('hub_forced', 'forced@construbom.test', { name: 'Forced' });
+
+      let release!: () => void;
+      const released = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let inserted!: () => void;
+      const holderInserted = new Promise<void>((resolve) => {
+        inserted = resolve;
+      });
+      let winnerId = '';
+      const holder = adminClient.begin(async (sql) => {
+        const [row] = await sql<Array<{ id: string }>>`
+          INSERT INTO sales_ops_people (org_id, display_name, contact_email, hub_account_id)
+          VALUES (${orgId}, 'Winner', 'forced@construbom.test', 'hub_forced')
+          RETURNING id`;
+        winnerId = row!.id;
+        inserted();
+        await released;
+      });
+      await holderInserted;
+
+      let settled = false;
+      const request = boardOf(orgId, stage.id, scope).finally(() => {
+        settled = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      // Still blocked on the unique index behind the uncommitted holder.
+      expect(settled).toBe(false);
+
+      release();
+      await holder;
+      expect(await request).toMatchObject({ ok: true });
       const people = await peopleRows(orgId);
-      expect(people).toHaveLength(1);
-      expect(people[0]!.hub_account_id).toBe('hub_race');
-      expect(await funcaoSlugsOfPerson(orgId, people[0]!.id)).toEqual(['vendedor']);
+      expect(people.map((person) => person.id)).toEqual([winnerId]);
     });
   });
 

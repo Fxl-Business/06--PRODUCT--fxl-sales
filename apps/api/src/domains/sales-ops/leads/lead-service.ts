@@ -263,13 +263,26 @@ function isHubAccountUniqueViolation(error: unknown): boolean {
  *
  * Runs inside the request's tenant transaction through `createPersonTx` with
  * the leads edition, so the pessoa is exactly a vendedor and the system
- * funções are seeded in the same transaction. Two concurrent first requests
- * both reach the INSERT; the partial unique index on (org_id, hub_account_id)
- * makes the second wait for the first to commit and then fail, inside a
- * SAVEPOINT so the request transaction survives, and the loser re-reads the
- * winner's row. One account never gets two pessoas.
+ * funções are seeded in the same transaction.
+ *
+ * Concurrent first requests for one account. The transaction is READ
+ * COMMITTED, so EVERY statement takes a fresh snapshot, and a winner may commit
+ * between any two of the loser's statements. Two interleavings follow, and both
+ * end on the winner's row through {@link boundPersonId}, re-read by account:
+ *  - The winner commits after the loser's account lookup (a miss) but before
+ *    its e-mail check, which then sees the winner's pessoa carrying the e-mail.
+ *    Every e-mail hit re-reads by account BEFORE refusing, so a pessoa bound to
+ *    this very account is returned as the caller's own.
+ *  - The winner has not committed by the e-mail check. Both reach the INSERT;
+ *    the partial unique index on (org_id, hub_account_id) makes the loser wait
+ *    for the winner's commit and fail with 23505 inside a SAVEPOINT, so the
+ *    request transaction survives, and the loser re-reads.
+ * One account never gets two pessoas, and the loser is never refused.
+ *
+ * Exported for the oracle, which forces the first interleaving; the only
+ * product caller is `resolveLeadScopePredicate`.
  */
-async function provisionLeadsSellerPerson(
+export async function provisionLeadsSellerPerson(
   tx: Db,
   orgId: string,
   scope: LeadScope,
@@ -288,7 +301,10 @@ async function provisionLeadsSellerPerson(
       ),
     )
     .limit(1);
-  if (existing) return null;
+  // A fresh statement, so it sees a pessoa a concurrent request bound to this
+  // account after our account lookup missed. Only a pessoa bound elsewhere, or
+  // unbound, is somebody else's cadastro and a refusal.
+  if (existing) return boundPersonId(tx, orgId, scope.userId);
 
   const input = PersonSchema.safeParse({
     displayName: provisionedDisplayName(scope, email),
@@ -306,13 +322,19 @@ async function provisionLeadsSellerPerson(
   } catch (error) {
     if (!isHubAccountUniqueViolation(error)) throw error;
   }
+  // The 23505 is raised only after the winner committed, so this statement's
+  // snapshot always contains the winner's row.
+  return boundPersonId(tx, orgId, scope.userId);
+}
 
-  const [winner] = await tx
+/** The pessoa bound to the account, read with a fresh statement snapshot. */
+async function boundPersonId(tx: Db, orgId: string, userId: string): Promise<string | null> {
+  const [bound] = await tx
     .select({ id: salesOpsPeople.id })
     .from(salesOpsPeople)
-    .where(and(eq(salesOpsPeople.orgId, orgId), eq(salesOpsPeople.hubAccountId, scope.userId)))
+    .where(and(eq(salesOpsPeople.orgId, orgId), eq(salesOpsPeople.hubAccountId, userId)))
     .limit(1);
-  return winner?.id ?? null;
+  return bound?.id ?? null;
 }
 
 type ResolvedSeller = { id: string; displayName: string };
