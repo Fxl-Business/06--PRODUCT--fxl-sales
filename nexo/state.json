@@ -145,5 +145,13 @@
     "decision": "approved-cut-staging-production",
     "decided_at": "2026-10-05",
     "note": "Owner approved in chat ('Isso, pode seguir com o deploy') after being told the plan: cut v4.3.0 and push master -> staging -> production, then activate Construbom in the Hub via the playbook. Release-verify PASS at 1ff1c83 (unit 3209 + 91 guards, 348 integration, clean-clone web build, API image ok, migration 0027 additive). Audit: new dev-only advisories (2 critical tinypool via vitest); --prod shows 0 high/critical."
+  },
+  "gate3_v4_4_0": {
+    "release": "v4.4.0",
+    "commit": "54abf8473ef440ce68c4dbde2a2d352d593acccf",
+    "flow": "ship-prod-ready",
+    "decision": "approved-cut-staging-production",
+    "decided_at": "2026-10-06",
+    "note": "Owner approved in chat ('Pode commitar e inclusive subir para prod'). Cut v4.4.0 and promote master -> staging -> production, fast-forward only. Promotes TWO things ahead of v4.3.0: (1) this session's Funil view plus empresa/valor on the leads-edition lead and the Clientes and Importacao screens in that edition, and (2) the already-merged seller-auto-provision feature (on master since 3fa17a4, never promoted). Release-verify PASS by a SEPARATE agent at the merge tip 54abf84: type-check 0, lint 0, CI=true pnpm test 0 (unit auth-fake 48, shared-utils 174, api 1426, web 1574, plus 91 guard tests), integration 361 across 46 files, and a COLD pnpm run build 0 with every *.tsbuildinfo and all dist/ deleted first, bundle-clean passing. ZERO migrations in the range, so rollback is a pure code revert. New capability clients split from catalog; the leads edition grants clients + import, so /clients/* is re-gated to requireCapability(clients) while produtos/areas/funcoes stay catalog-gated (403 in leads). KNOWN OPEN ITEM carried forward: the spreadsheet importer is now reachable in the leads edition but is still edition-agnostic (it would accept full-product tabs in a leads org); it is admin- and org-scoped so it does not corrupt data, and the lock-down is filed in nexo/ROADMAP.md. Tag v4.4.0 placed on the gate-3 record commit; master, staging and production fast-forwarded to it with plain non-force pushes."
   }
 }
