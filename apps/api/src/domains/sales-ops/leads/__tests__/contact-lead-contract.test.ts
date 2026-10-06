@@ -16,13 +16,13 @@ import {
 const SOME_UUID = '11111111-1111-4111-8111-111111111111';
 
 describe('contact lead wire contract (leads edition)', () => {
-  it('accepts a contact lead with only contactName', () => {
+  it('accepts a contact lead with only contactName (estimatedValueBrl defaults to 0)', () => {
     const result = CreateContactLeadSchema.parse({ contactName: '  Ana  ' });
-    expect(result).toEqual({ contactName: 'Ana' });
-    expect(Object.keys(result)).toEqual(['contactName']);
+    expect(result).toEqual({ contactName: 'Ana', estimatedValueBrl: 0 });
+    expect(Object.keys(result).sort()).toEqual(['contactName', 'estimatedValueBrl']);
   });
 
-  it('accepts and normalizes every contact field', () => {
+  it('accepts and normalizes every contact field, including empresa and valor', () => {
     const result = CreateContactLeadSchema.parse({
       contactName: 'Ana',
       contactPhone: ' (11) 98888-7777 ',
@@ -30,6 +30,9 @@ describe('contact lead wire contract (leads edition)', () => {
       contactBirthDate: '1990-05-17',
       description: 'Gosta de WhatsApp',
       sellerPersonId: SOME_UUID,
+      clientId: SOME_UUID,
+      clientName: '  Empresa Um  ',
+      estimatedValueBrl: 150000,
     });
     expect(result).toEqual({
       contactName: 'Ana',
@@ -38,6 +41,9 @@ describe('contact lead wire contract (leads edition)', () => {
       contactBirthDate: '1990-05-17',
       description: 'Gosta de WhatsApp',
       sellerPersonId: SOME_UUID,
+      clientId: SOME_UUID,
+      clientName: 'Empresa Um',
+      estimatedValueBrl: 150000,
     });
   });
 
@@ -58,10 +64,11 @@ describe('contact lead wire contract (leads edition)', () => {
         description: '  ',
         sellerPersonId: '',
       }),
-    ).toEqual({ contactName: 'Ana', ...cleared });
+    ).toEqual({ contactName: 'Ana', ...cleared, estimatedValueBrl: 0 });
     expect(CreateContactLeadSchema.parse({ contactName: 'Ana', ...cleared })).toEqual({
       contactName: 'Ana',
       ...cleared,
+      estimatedValueBrl: 0,
     });
     expect(UpdateContactLeadSchema.parse({ description: '', sellerPersonId: null })).toEqual({
       description: null,
@@ -69,11 +76,10 @@ describe('contact lead wire contract (leads edition)', () => {
     });
   });
 
-  it('rejects every full-edition key', () => {
+  it('rejects every full-edition-only key (produtos and the move/terminal keys)', () => {
+    // empresa (clientId/clientName) and estimatedValueBrl are NOW accepted in the
+    // leads edition; produtos and the move/terminal keys stay refused.
     const extras: Array<Record<string, unknown>> = [
-      { clientName: 'Empresa' },
-      { clientId: SOME_UUID },
-      { estimatedValueBrl: 100 },
       { products: [] },
       { stageId: SOME_UUID },
       { saleId: SOME_UUID },
@@ -143,13 +149,16 @@ describe('contact lead wire contract (leads edition)', () => {
     ]);
   });
 
-  it('ContactLeadFieldsSchema keys are exactly the seam list', () => {
+  it('ContactLeadFieldsSchema keys are exactly the seam list (now with empresa and valor)', () => {
     expect(Object.keys(ContactLeadFieldsSchema.shape).sort()).toEqual([
+      'clientId',
+      'clientName',
       'contactBirthDate',
       'contactEmail',
       'contactName',
       'contactPhone',
       'description',
+      'estimatedValueBrl',
       'sellerPersonId',
     ]);
   });

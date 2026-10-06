@@ -81,7 +81,11 @@ export const SALE_STATUS_LABEL: Record<SalesOpsStatus, string> = {
   cancelled: 'Cancelada',
 };
 
-export const BOARD_VIEW_LABEL = { board: 'Quadro', list: 'Lista' } as const;
+export const BOARD_VIEW_LABEL = { board: 'Quadro', list: 'Lista', funnel: 'Funil' } as const;
+/** `N leads` / `1 lead`, for the funnel rows and footer. */
+export const leadsCountLabel = (n: number): string => `${n} ${n === 1 ? 'lead' : 'leads'}`;
+export const FUNNEL_TOTAL_LABEL = 'Total do funil';
+export const FUNNEL_EMPTY = 'Nenhuma etapa no funil.';
 export const ALL_PHASES_LABEL = 'Todas as fases';
 export const VIEW_IN_LIST_LABEL = 'Ver em lista';
 export const EMPTY_COLUMN_HINT = 'Arraste um lead para cá';

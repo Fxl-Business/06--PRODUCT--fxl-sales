@@ -124,7 +124,7 @@ Full reference: `nexo/knowledge/reference/sales-ops-routing.md`.
 - An unknown or other-org id renders `Proposta não encontrada` without the id; closing pops history when opened in-app (`SALE_DETAIL_OPENED_IN_APP`) and otherwise replaces the URL with the list.
 - `cadastros/vendedores` and `cadastros/finders` redirect to `/cadastros/pessoas`; `aliasLegacyView` only fires in `cadastros`.
 - Visibility comes only from `profile.roles` via `getVisibleWorkspaces`: `admin` sees `tatico`, `operacional`, `cadastros`; `seller` or `finder` adds `meus-dados`; no roles keeps `/no-role`. `admin` is synthesized from the Hub workspace `owner`/`admin` flag in `getRolesFromHubClaims`.
-- In the leads edition (`profile.edition === 'leads'`, from `entitlements.modules`) every navigation function takes a trailing `edition`: `admin` sees only `operacional` [`leads`] and `cadastros` [`pessoas` labelled Vendedores, `etapas`], a non-admin `seller` only `meus-dados` [`leads`], and `NoRoleGuard` keys on `getVisibleWorkspaces(roles, edition)`.
+- In the leads edition (`profile.edition === 'leads'`, from `entitlements.modules`) every navigation function takes a trailing `edition`: `admin` sees only `operacional` [`leads`] and `cadastros` [`pessoas` labelled Vendedores, `clientes`, `etapas`, `importacao`], a non-admin `seller` only `meus-dados` [`leads`], and `NoRoleGuard` keys on `getVisibleWorkspaces(roles, edition)`.
   Oracle: `navigation-edition.test.ts`.
 - OPEN PRODUCT QUESTION: every admin-bearing claim shape also returns `seller` and `finder`, so "team-only without `meus-dados`" is unreachable. Do not resolve it by changing `claims.ts` without a product decision.
 - `meus-dados` reuses existing panels; `MeuPainelView` is read-only. Pessoa and função editing live only under Cadastros.
@@ -333,7 +333,10 @@ Full reference: `nexo/knowledge/reference/kanban-de-leads.md` (section Edição 
   Every `vi.mock('@/auth/react')` factory exports `useSalesEdition` (`auth-mock-edition-export.test.ts`).
   The sidebar payables card, the sidebar `Nova proposta` and the period chip render only when the edition has the capability (`hasCapability`); never show full-product chrome in the leads edition.
 - Leads writes use `ContactLeadFieldsSchema` (strict, `null` or `''` clears an optional) through `createContactLead` / `updateContactLead`, chosen by `leadFieldSet`; the full schemas stay byte-identical and still reject the contact keys.
-  A leads-edition lead stores `client_id NULL`, `''`, `0` and no produtos.
+  A leads-edition lead MAY carry an empresa (`clientId` resolves the snapshot, else the free-text `clientName`) and a `estimatedValueBrl`; it still stores no produtos. The contact schema rejects `products` and the move/terminal keys.
+- The leads edition grants exactly two capabilities, `clients` and `import` (`LEADS_CAPABILITIES` in `sales-edition.ts`); `clients` is its OWN capability split from `catalog`, so `/clients/*` is `requireCapability('clients')` while produtos/areas/funcoes stay `catalog` (403 in leads). Empresa and valor on a lead are carried by the contact schema, NOT by `leadFullFields`.
+- The contact dialog's empresa picker creates a client by name inline: the create seam is `SalesOpsApp`'s `createClientByName` handed to `LeadsBoardContainer` as `onCreateClient`, never a hook inside the container. A vendedor may create (POST `/clients` carries no `requireAdmin`).
+- The funil (`LeadsBoard` third view `funnel`, `BOARD_VIEW_LABEL.funnel`) shows volume and value per etapa via the pure `buildLeadFunnel`; the value share drives the proportion bar, exactly as the Quadro header's `% do total`.
 - No etapa is ever seeded in the leads edition.
   Creating a lead with no active `normal` etapa answers the existing `400` `reason: 'no_open_stage'`; the web keys on status 400 plus `ApiError.reason`.
   The board shows `[data-no-stages]` and never receives `onRequestConversion` / `onOpenSale`.

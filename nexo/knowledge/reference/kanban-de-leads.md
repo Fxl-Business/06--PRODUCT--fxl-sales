@@ -61,12 +61,12 @@ A partir do handoff de design em `.demo/design_handoff_prospeccao/`, o quadro ga
 Slice 04 made the lead write paths edition-aware on the API, with the full edition (FXL) byte-for-byte unchanged.
 
 - The leads edition writes leads through `CreateContactLeadSchema` and `UpdateContactLeadSchema` (built on `ContactLeadFieldsSchema` in `lead-schemas.ts`), both `.strict()`.
-- They accept exactly `contactName`, `contactPhone`, `contactEmail`, `contactBirthDate`, `description` and `sellerPersonId`, so an empresa, a value or produtos are a loud 400.
+- They accept `contactName`, `contactPhone`, `contactEmail`, `contactBirthDate`, `description`, `sellerPersonId`, and (SINCE the Funil change) an empresa (`clientId`/`clientName`) and `estimatedValueBrl`; produtos and the move/terminal keys are still a loud 400.
 - `contactPhone` is trimmed (max 40), `contactEmail` is trimmed, lowercased and validated (max 254), and `contactBirthDate` must pass `isIsoDay` and must not be after `todayInSaoPaulo()`.
 - An empty string on any of the five optional keys is stored as NULL (cleared), `null` clears too, and an absent key stays absent (SEAM A2).
 - `lead-routes.ts` picks the schema with `leadFieldSet(c.get('salesEdition') ?? 'full')`, so an absent edition is the full edition and `CreateLeadSchema` / `UpdateLeadSchema` keep refusing the three contact keys.
 - `createContactLead` and `updateContactLead` sit beside the unchanged `createLead` / `updateLead`; all four delegate to the private `insertLead` / `applyLeadUpdate`, so the scope, seller and stage rules exist once.
-- A leads-edition create stores the neutral values `client_id NULL`, `client_name_snapshot ''`, `estimated_value_brl 0` and no `sales_ops_lead_products` row.
+- A leads-edition create now stores the empresa and valor it is given (`client_id`, resolved `client_name_snapshot`, `estimated_value_brl`), defaulting to `NULL` / `''` / `0` when absent, and still writes no `sales_ops_lead_products` row. The resolve-snapshot and default-seller rules are the shared `insertLead` / `applyLeadUpdate`.
 - Every lead projection (list, get, create, update, move) carries `contactPhone`, `contactEmail` and `contactBirthDate` through `toLeadView`; they are null for FXL leads.
 - `contactBirthDate` is a `date` column read in string mode, so it travels as `YYYY-MM-DD` and is never formatted through `Date`.
 - A lead with no active `normal` etapa still answers the existing `400 {"error":"validation_error","reason":"no_open_stage","itemIndex":-1}`; there is no new `no_stage` code (SEAM A1).
@@ -87,6 +87,18 @@ Slice 06 gave the leads edition a contact-only board on the web, with the full e
 - A contact save uses `mutateAsync`; a `400` with `reason: 'no_open_stage'` (read from `ApiError.reason`, set by `apiFetch` only when the body sends one) renders the `[data-lead-save-error]` no-etapa notice and any other failure the generic save notice; the full edition keeps `mutate`.
   Since slice 07.1 that notice renders inside the still-open dialog (see below).
 - `contact-lead.ts` and `ContactLeadDialog.tsx` joined the `board-write-surface.test.ts` `OWNED_FILES`.
+
+### Funil, valor, empresa e Clientes na edição Leads (Construbom)
+
+A later change (this one) gave the leads edition a Funil view, a captured empresa and valor on the lead, the Clientes cadastro and the Importação screen.
+
+- The board gained a third view, `funnel` (`LeadsBoard` `leadView: 'board' | 'list' | 'funnel'`, label `BOARD_VIEW_LABEL.funnel = 'Funil'`). The pure `buildLeadFunnel(leads, stages)` in `leads/calculations.ts` returns one row per active stage `{ stageId, name, kind, count, totalBrl, share }` plus `totalCount`/`totalBrl`; the share is by VALUE (matching the Quadro header's `% do total`), so a zero-value funnel draws empty bars while the counts still read. `LeadsFunnelView.tsx` renders it (data hooks `data-funnel-row/-count/-total/-share/-bar/-footer/-grand-count/-grand-total`). The Funil shows value in BOTH editions; the Quadro/Lista value block stays gated on `!contact`, so the card and Lista in the leads edition still hide value - the Funil is that edition's financial surface.
+- `ContactLeadFieldsSchema` gained `clientId` (nullish, `''`→null), `clientName` (trimmed, nullish, `''`→null) and `estimatedValueBrl` (CENTS, default 0). `createContactLead` passes them through; `updateContactLead` already flows through `applyLeadUpdate`. The web `ContactLeadPayload`/`contact-lead.ts` carry them, and `ContactLeadDialog` renders a `Valor estimado (R$)` numeric input and a `Cliente` combobox.
+- The `Cliente` combobox creates a client by name INLINE. The one create seam stays `SalesOpsApp`'s `createClientByName`, handed to `LeadsBoardContainer` as the `onCreateClient` prop (never a hook inside the container, so the slice's mock boundary holds); the container forwards it to the dialog. `leadToContactSeed` normalizes an empty `client_name_snapshot` to null so the draft round-trips.
+- The name label is `Nome do contato (comprador)` (`CONTACT_LEAD_COPY.nameLabel`).
+- Capabilities: `clients` is a NEW capability split out of `catalog`; `LEADS_CAPABILITIES = ['clients', 'import']`. `/clients/*` is re-gated to `requireCapability('clients')`, so the Clientes cadastro works in the leads edition while produtos/areas/funcoes (still `catalog`) 403. The importer was already `requireCapability('import')`; granting `import` exposes it. `leadsEditionCadastros` appends `clientes` and `importacao` (pessoas stays `[0]`, the landing route).
+- KNOWN GAP: the spreadsheet importer is edition-agnostic - its template still carries produto/cliente/proposta tabs, so a leads-edition org could import full-product rows. Exposing the screen is admin- and org-scoped and safe for vendedores/leads; locking the importer to the edition is a follow-up on `nexo/ROADMAP.md`.
+- Oracles: `leads/__tests__/lead-funnel.test.tsx`, updated `contact-lead.test.ts`, `contact-lead-dialog.test.tsx`, `contact-lead-contract.test.ts`, `lead-routes-edition.test.ts`, `navigation-edition.test.ts`, `leads-routing.test.tsx`, `edition-gate-map.test.ts`, `require-capability.test.ts`, `sales-edition.test.ts`.
 - Oracles: `leads/__tests__/leads-contact-board.test.tsx`, `leads/__tests__/leads-contact-container.test.tsx`, `leads/__tests__/leads-full-edition.test.tsx` (innerHTML equality with `fieldSet` omitted and `'full'`), `leads/__tests__/contact-lead.test.ts`, `leads/__tests__/contact-lead-dialog.test.tsx` and `lib/__tests__/api-client-reason.test.ts`.
 
 Slice 07.1 closed the seller usability gap found in the slice 07 browser walk, with the full edition (FXL) unchanged except the move-dialog fix.

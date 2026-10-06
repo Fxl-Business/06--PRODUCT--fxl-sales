@@ -119,7 +119,7 @@ describe('Sales Ops lead routes per sales edition', () => {
     expect(serviceMocks.createContactLead.mock.calls[0]).toEqual([
       mockedDb,
       'verified-org',
-      { contactName: 'Ana' },
+      { contactName: 'Ana', estimatedValueBrl: 0 },
       {
         userId: 'verified-account',
         email: TOKEN_EMAIL,
@@ -132,16 +132,30 @@ describe('Sales Ops lead routes per sales edition', () => {
     expect(serviceMocks.createLead).not.toHaveBeenCalled();
   });
 
-  it('leads: refuses an empresa on create', async () => {
-    const response = await jsonRequest('POST', '/leads', {
+  it('leads: accepts an empresa and a valor on create, still refuses produtos', async () => {
+    const ok = await jsonRequest('POST', '/leads', {
       contactName: 'Ana',
       clientName: 'Empresa',
+      estimatedValueBrl: 250000,
     });
-    expect(response.status).toBe(400);
-    expect((await response.json()) as { error: string }).toMatchObject({
+    expect(ok.status).toBe(201);
+    expect(serviceMocks.createContactLead).toHaveBeenCalledTimes(1);
+    expect(serviceMocks.createContactLead.mock.calls[0]![2]).toMatchObject({
+      contactName: 'Ana',
+      clientName: 'Empresa',
+      estimatedValueBrl: 250000,
+    });
+
+    serviceMocks.createContactLead.mockClear();
+    const withProducts = await jsonRequest('POST', '/leads', {
+      contactName: 'Ana',
+      products: [],
+    });
+    expect(withProducts.status).toBe(400);
+    expect((await withProducts.json()) as { error: string }).toMatchObject({
       error: 'validation_error',
     });
-    expectNoCreate();
+    expect(serviceMocks.createContactLead).not.toHaveBeenCalled();
   });
 
   it('leads: refuses a future birth day and a bad e-mail', async () => {
@@ -178,11 +192,12 @@ describe('Sales Ops lead routes per sales edition', () => {
     expect(serviceMocks.updateLead).not.toHaveBeenCalled();
   });
 
-  it('leads: a PATCH refuses a value', async () => {
+  it('leads: a PATCH updates the value through updateContactLead', async () => {
     const response = await jsonRequest('PATCH', `/leads/${LEAD_ID}`, { estimatedValueBrl: 100 });
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(200);
+    expect(serviceMocks.updateContactLead).toHaveBeenCalledTimes(1);
+    expect(serviceMocks.updateContactLead.mock.calls[0]![3]).toEqual({ estimatedValueBrl: 100 });
     expect(serviceMocks.updateLead).not.toHaveBeenCalled();
-    expect(serviceMocks.updateContactLead).not.toHaveBeenCalled();
   });
 
   it('full: refuses the contact keys and creates through createLead', async () => {

@@ -1,4 +1,4 @@
-import type { SalesOpsLead, SalesOpsLeadStage } from './types';
+import type { LeadStageKind, SalesOpsLead, SalesOpsLeadStage } from './types';
 
 /**
  * Pure board derivations. Imports only types, and every question the board, the
@@ -109,4 +109,52 @@ export function daysInCurrentStage(stageChangedAt: string, now: Date): number {
  */
 export function leadIsConverted(lead: SalesOpsLead): boolean {
   return lead.saleId !== null;
+}
+
+/** One funnel row: a stage with its lead count, value total (cents) and value share. */
+export type LeadFunnelRow = {
+  stageId: string;
+  name: string;
+  kind: LeadStageKind;
+  count: number;
+  totalBrl: number;
+  /** 0-100 integer, the stage's share of the funnel's total VALUE (matches `% do total`). */
+  share: number;
+};
+
+export type LeadFunnel = {
+  rows: LeadFunnelRow[];
+  totalCount: number;
+  totalBrl: number;
+};
+
+/**
+ * The sales funnel: volume (count) and value (cents) per active stage, in board
+ * order. Shares are by VALUE, the same figure the Quadro column header shows as
+ * `% do total`, so a zero-value funnel simply draws empty bars while the counts
+ * still read. Pure; reuses `boardStages` and `leadsInStage` so the funnel can
+ * never disagree with the board about which cards sit where.
+ */
+export function buildLeadFunnel(
+  leads: readonly SalesOpsLead[],
+  stages: readonly SalesOpsLeadStage[],
+): LeadFunnel {
+  const columns = boardStages(stages);
+  const base = columns.map((stage) => {
+    const inStage = leadsInStage(leads, stage.id);
+    return {
+      stageId: stage.id,
+      name: stage.name,
+      kind: stage.kind,
+      count: inStage.length,
+      totalBrl: inStage.reduce((sum, row) => sum + row.estimatedValueBrl, 0),
+    };
+  });
+  const totalBrl = base.reduce((sum, row) => sum + row.totalBrl, 0);
+  const totalCount = base.reduce((sum, row) => sum + row.count, 0);
+  const rows: LeadFunnelRow[] = base.map((row) => ({
+    ...row,
+    share: totalBrl > 0 ? Math.round((row.totalBrl / totalBrl) * 100) : 0,
+  }));
+  return { rows, totalCount, totalBrl };
 }

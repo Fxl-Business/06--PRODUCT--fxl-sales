@@ -127,8 +127,9 @@ export type LeadProductInput = z.infer<typeof LeadProductSchema>;
  *
  * A separate schema rather than a widened LeadFieldsSchema, on purpose: the full
  * schemas above stay byte-identical and `.strict()`, so an FXL client can never
- * send a contact key, and a leads-edition client can never send an empresa,
- * produtos or a value. The route picks one by `leadFieldSet(salesEdition)`.
+ * send a contact key, and a leads-edition client can never send produtos. The
+ * leads edition DOES carry an empresa (`clientId`/`clientName`) and a valor
+ * estimado (`estimatedValueBrl`). The route picks one by `leadFieldSet(salesEdition)`.
  *
  * Every optional text normalizes the same way: trimmed, and an empty string is
  * stored as NULL ("cleared"), while an ABSENT key stays absent (PATCH semantics).
@@ -178,6 +179,14 @@ export const ContactLeadFieldsSchema = z
     // A2: null clears, '' is read as null, absent stays absent (PATCH semantics).
     description: z.string().trim().max(4000).nullish().transform(blankToNull),
     sellerPersonId: z.preprocess((value) => (value === '' ? null : value), uuid.nullish()),
+    // The leads edition (Construbom) DOES carry an empresa and a valor estimado:
+    // `clientId` optionally links a sales_ops_clients row (the vendedor may create
+    // one by name), `clientName` is the free-text snapshot used when no link
+    // resolves, and `estimatedValueBrl` is integer cents feeding the funil's
+    // financial view. Produtos remain full-edition only.
+    clientId: z.preprocess((value) => (value === '' ? null : value), uuid.nullish()),
+    clientName: z.string().trim().max(200).nullish().transform(blankToNull),
+    estimatedValueBrl: money.default(0),
   })
   .strict();
 

@@ -127,10 +127,17 @@ const leadsEditionOperational: SalesOpsNavigationItem[] = [
   { id: 'leads', label: 'Prospecção', icon: LayoutGrid },
 ];
 
-/** A pessoa is always a vendedor in this edition, so the screen is labelled for it. */
+/**
+ * A pessoa is always a vendedor in this edition, so the screen is labelled for it.
+ * Clientes and Importação are granted to this edition too (the `clients` and
+ * `import` capabilities): the gestor manages clients and imports vendedores/leads
+ * by planilha. `pessoas` stays `[0]`, the landing route; the rest are appended.
+ */
 const leadsEditionCadastros: SalesOpsNavigationItem[] = [
   { id: 'pessoas', label: 'Vendedores', icon: UsersRound },
+  { id: 'clientes', label: 'Clientes', icon: ContactRound },
   { id: 'etapas', label: 'Etapas do funil', icon: ListChecks },
+  { id: 'importacao', label: 'Importação', icon: FileSpreadsheet },
 ];
 
 const leadsEditionMeusDadosSeller: SalesOpsNavigationItem[] = [

@@ -287,7 +287,12 @@ const PREFERRED_PATH_LEADS: Record<ComboName, [string, string, string, string]> 
 const TEAM_NAV_LEADS: Record<'tatico' | 'operacional' | 'cadastros', Array<[SalesOpsView, string]>> = {
   'tatico': [],
   'operacional': [['leads', 'Prospecção']],
-  'cadastros': [['pessoas', 'Vendedores'], ['etapas', 'Etapas do funil']],
+  'cadastros': [
+    ['pessoas', 'Vendedores'],
+    ['clientes', 'Clientes'],
+    ['etapas', 'Etapas do funil'],
+    ['importacao', 'Importação'],
+  ],
 };
 
 const MEUS_DADOS_NAV_LEADS: Record<ComboName, Array<[SalesOpsView, string]>> = {
@@ -329,7 +334,7 @@ const RESOLVE_LEADS: Record<ComboName, Record<string, [string, boolean]>> = {
     '/cadastros/pessoas': ['/cadastros/pessoas', false],
     '/cadastros/vendedores': ['/cadastros/pessoas', true],
     '/cadastros/etapas': ['/cadastros/etapas', false],
-    '/cadastros/importacao': ['/operacional/leads', true],
+    '/cadastros/importacao': ['/cadastros/importacao', false],
     '/cadastros/geral': ['/operacional/leads', true],
     '/meus-dados/vendedores': ['/operacional/leads', true],
     '/meus-dados/comissoes': ['/operacional/leads', true],
@@ -380,7 +385,7 @@ const RESOLVE_LEADS: Record<ComboName, Record<string, [string, boolean]>> = {
     '/cadastros/pessoas': ['/cadastros/pessoas', false],
     '/cadastros/vendedores': ['/cadastros/pessoas', true],
     '/cadastros/etapas': ['/cadastros/etapas', false],
-    '/cadastros/importacao': ['/operacional/leads', true],
+    '/cadastros/importacao': ['/cadastros/importacao', false],
     '/cadastros/geral': ['/operacional/leads', true],
     '/meus-dados/vendedores': ['/operacional/leads', true],
     '/meus-dados/comissoes': ['/operacional/leads', true],
@@ -397,7 +402,7 @@ const RESOLVE_LEADS: Record<ComboName, Record<string, [string, boolean]>> = {
     '/cadastros/pessoas': ['/cadastros/pessoas', false],
     '/cadastros/vendedores': ['/cadastros/pessoas', true],
     '/cadastros/etapas': ['/cadastros/etapas', false],
-    '/cadastros/importacao': ['/operacional/leads', true],
+    '/cadastros/importacao': ['/cadastros/importacao', false],
     '/cadastros/geral': ['/operacional/leads', true],
     '/meus-dados/vendedores': ['/operacional/leads', true],
     '/meus-dados/comissoes': ['/operacional/leads', true],
@@ -431,7 +436,7 @@ const RESOLVE_LEADS: Record<ComboName, Record<string, [string, boolean]>> = {
     '/cadastros/pessoas': ['/cadastros/pessoas', false],
     '/cadastros/vendedores': ['/cadastros/pessoas', true],
     '/cadastros/etapas': ['/cadastros/etapas', false],
-    '/cadastros/importacao': ['/operacional/leads', true],
+    '/cadastros/importacao': ['/cadastros/importacao', false],
     '/cadastros/geral': ['/operacional/leads', true],
     '/meus-dados/vendedores': ['/operacional/leads', true],
     '/meus-dados/comissoes': ['/operacional/leads', true],

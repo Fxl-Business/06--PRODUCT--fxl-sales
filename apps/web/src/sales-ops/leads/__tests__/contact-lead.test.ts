@@ -27,6 +27,9 @@ const CONTACT_KEYS = [
   'contactEmail',
   'contactBirthDate',
   'description',
+  'clientId',
+  'clientName',
+  'estimatedValueBrl',
   'sellerPersonId',
 ];
 
@@ -38,6 +41,9 @@ function draft(patch: Partial<ContactLeadDraft> = {}): ContactLeadDraft {
     contactBirthDate: '',
     description: '',
     sellerPersonId: null,
+    clientId: null,
+    clientName: '',
+    estimatedValue: '',
     ...patch,
   };
 }
@@ -113,7 +119,7 @@ describe('validateContactLeadDraft', () => {
 });
 
 describe('buildContactLeadPayload', () => {
-  it('sends exactly the six contact keys, blanks as null', () => {
+  it('sends the contact keys plus empresa and valor, blanks as null', () => {
     const payload = buildContactLeadPayload(draft({ contactName: '  Ana  ', description: '   ' }));
     expect(Object.keys(payload)).toEqual(CONTACT_KEYS);
     expect(payload).toEqual({
@@ -122,8 +128,20 @@ describe('buildContactLeadPayload', () => {
       contactEmail: null,
       contactBirthDate: null,
       description: null,
+      clientId: null,
+      clientName: null,
+      estimatedValueBrl: 0,
       sellerPersonId: null,
     });
+  });
+
+  it('carries the chosen empresa and parses the valor to cents', () => {
+    const payload = buildContactLeadPayload(
+      draft({ clientId: LEAD_ID, clientName: '  Empresa Um  ', estimatedValue: '1.234,56' }),
+    );
+    expect(payload.clientId).toBe(LEAD_ID);
+    expect(payload.clientName).toBe('Empresa Um');
+    expect(payload.estimatedValueBrl).toBe(123456);
   });
 
   it('trims every typed field and never lowercases', () => {
@@ -142,6 +160,9 @@ describe('buildContactLeadPayload', () => {
       contactEmail: 'Ana@X.com',
       contactBirthDate: '1990-02-28',
       description: 'Indicação',
+      clientId: null,
+      clientName: null,
+      estimatedValueBrl: 0,
       sellerPersonId: SELLER_ID,
     });
   });
@@ -180,7 +201,19 @@ describe('contact seed round trip', () => {
       contactBirthDate: '1990-02-28',
       description: 'Indicação da feira',
       sellerPersonId: SELLER_ID,
+      clientId: null,
+      clientName: null,
+      estimatedValueBrl: 0,
     });
+    expect(buildContactLeadPayload(contactDraftFromSeed(seed), seed.id)).toEqual(seed);
+  });
+
+  it('a lead with an empresa and valor round-trips', () => {
+    const row = lead({ clientId: LEAD_ID, clientNameSnapshot: 'Empresa Um', estimatedValueBrl: 150000 });
+    const seed = leadToContactSeed(row);
+    expect(seed.clientId).toBe(LEAD_ID);
+    expect(seed.clientName).toBe('Empresa Um');
+    expect(seed.estimatedValueBrl).toBe(150000);
     expect(buildContactLeadPayload(contactDraftFromSeed(seed), seed.id)).toEqual(seed);
   });
 
@@ -192,6 +225,9 @@ describe('contact seed round trip', () => {
       contactBirthDate: '',
       description: '',
       sellerPersonId: null,
+      clientId: null,
+      clientName: '',
+      estimatedValue: '',
     });
   });
 

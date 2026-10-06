@@ -14,11 +14,15 @@ const ALL_CAPABILITIES: readonly SalesCapability[] = [
   'proposals',
   'commissions',
   'catalog',
+  'clients',
   'import',
   'finders',
   'history',
   'leadFullFields',
 ];
+
+/** What the leads edition (Construbom) grants: the Clientes cadastro and the importer. */
+const LEADS_GRANTED_CAPABILITIES: readonly SalesCapability[] = ['clients', 'import'];
 
 describe('SALES_EDITION_LEADS_MODULE', () => {
   it('is the exact Hub module string', () => {
@@ -67,14 +71,15 @@ describe('resolveSalesEdition', () => {
 });
 
 describe('editionCapabilities', () => {
-  it('full carries exactly the 7 capabilities', () => {
+  it('full carries exactly the 8 capabilities', () => {
     const caps = editionCapabilities('full');
-    expect(caps.size).toBe(7);
+    expect(caps.size).toBe(8);
     expect([...caps].sort()).toEqual([...ALL_CAPABILITIES].sort());
   });
 
-  it('leads carries none', () => {
-    expect(editionCapabilities('leads').size).toBe(0);
+  it('leads carries exactly clients and import', () => {
+    const caps = editionCapabilities('leads');
+    expect([...caps].sort()).toEqual([...LEADS_GRANTED_CAPABILITIES].sort());
   });
 
   it('returns the same frozen instance on every call', () => {
@@ -94,7 +99,7 @@ describe('editionCapabilities', () => {
       expect([...editionCapabilities(edition)].sort()).toEqual(before);
     }
     expect(editionCapabilities('leads').has('proposals')).toBe(false);
-    expect(editionCapabilities('full').size).toBe(7);
+    expect(editionCapabilities('full').size).toBe(8);
   });
 });
 
@@ -105,9 +110,10 @@ describe('hasCapability', () => {
     }
   });
 
-  it('leads has none', () => {
+  it('leads has clients and import only', () => {
     for (const capability of ALL_CAPABILITIES) {
-      expect(hasCapability('leads', capability)).toBe(false);
+      const granted = LEADS_GRANTED_CAPABILITIES.includes(capability);
+      expect(hasCapability('leads', capability)).toBe(granted);
     }
   });
 });

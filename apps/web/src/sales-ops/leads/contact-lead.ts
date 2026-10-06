@@ -1,4 +1,5 @@
 import { isIsoDay } from '@fxl-sales/shared-utils/sao-paulo-day';
+import { parseCurrencyInputToCents } from '../calculations';
 import { displayDate } from '../civil-day';
 import type { SaveContactLeadPayload } from './api';
 import type { SalesOpsLead } from './types';
@@ -13,13 +14,17 @@ import type { SalesOpsLead } from './types';
 
 export const CONTACT_LEAD_COPY = {
   dialogDescription: 'Dados de contato do lead.',
-  nameLabel: 'Nome',
+  nameLabel: 'Nome do contato (comprador)',
   birthDateLabel: 'Data de aniversário',
   phoneLabel: 'Número (telefone/WhatsApp)',
   emailLabel: 'Email',
   descriptionLabel: 'Descrição',
   sellerLabel: 'Vendedor responsável',
   sellerPlaceholder: 'Selecione o vendedor',
+  clientLabel: 'Cliente',
+  clientPlaceholder: 'Selecione ou crie um cliente',
+  valueLabel: 'Valor estimado (R$)',
+  clearLabel: 'Limpar',
   nameRequired: 'Informe o nome.',
   birthDateInvalid: 'Informe uma data de aniversário válida.',
   birthDateFuture: 'A data de aniversário não pode ser no futuro.',
@@ -42,7 +47,7 @@ export const CONTACT_LIST_HEADERS = {
   actions: 'Ações',
 } as const;
 
-/** Form state: every field a string except the picker. */
+/** Form state: every field a string except the pickers. */
 export type ContactLeadDraft = {
   contactName: string;
   contactPhone: string;
@@ -50,11 +55,17 @@ export type ContactLeadDraft = {
   contactBirthDate: string;
   description: string;
   sellerPersonId: string | null;
+  /** Links a sales_ops_clients row, or null. The dialog creates one by name inline. */
+  clientId: string | null;
+  /** The chosen/created client's name, used as the trigger label and the snapshot fallback. */
+  clientName: string;
+  /** Valor estimado as typed reais (string); parsed to cents on build. */
+  estimatedValue: string;
 };
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-/** Null-safe: every null becomes '' (the picker stays null). */
+/** Null-safe: every null becomes '' (the pickers stay null). */
 export function contactDraftFromSeed(initial: SaveContactLeadPayload | null): ContactLeadDraft {
   return {
     contactName: initial?.contactName ?? '',
@@ -63,6 +74,9 @@ export function contactDraftFromSeed(initial: SaveContactLeadPayload | null): Co
     contactBirthDate: initial?.contactBirthDate ?? '',
     description: initial?.description ?? '',
     sellerPersonId: initial?.sellerPersonId ?? null,
+    clientId: initial?.clientId ?? null,
+    clientName: initial?.clientName ?? '',
+    estimatedValue: initial?.estimatedValueBrl ? (initial.estimatedValueBrl / 100).toFixed(2) : '',
   };
 }
 
@@ -106,6 +120,11 @@ export function buildContactLeadPayload(
     contactEmail: trimmedOrNull(draft.contactEmail),
     contactBirthDate: trimmedOrNull(draft.contactBirthDate),
     description: trimmedOrNull(draft.description),
+    // Empresa: the link wins when present; the snapshot rides along for the
+    // free-text fallback the API applies when no link resolves.
+    clientId: draft.clientId,
+    clientName: trimmedOrNull(draft.clientName),
+    estimatedValueBrl: parseCurrencyInputToCents(draft.estimatedValue),
     ...(includeSeller ? { sellerPersonId: draft.sellerPersonId } : {}),
   };
 }
@@ -119,6 +138,11 @@ export function leadToContactSeed(lead: SalesOpsLead): SaveContactLeadPayload {
     contactBirthDate: lead.contactBirthDate,
     description: lead.description,
     sellerPersonId: lead.sellerPersonId,
+    clientId: lead.clientId,
+    // The snapshot is NOT NULL ('' when no empresa); seed it as null so the draft
+    // and the rebuilt payload round-trip exactly.
+    clientName: lead.clientNameSnapshot || null,
+    estimatedValueBrl: lead.estimatedValueBrl,
   };
 }
 

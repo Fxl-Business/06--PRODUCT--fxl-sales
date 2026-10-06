@@ -57,6 +57,14 @@ export type ContactLeadDialogProps = {
    * (a non-admin viewer, D-07.1b). Defaults to true.
    */
   showSellerPicker?: boolean;
+  /** Client cadastro options for the empresa picker. */
+  clients?: ComboboxOption[];
+  /**
+   * Create a client by name inline. Resolves the created option, or null when it
+   * could not be created. Absent means the picker still selects, but the Criar
+   * row is not offered.
+   */
+  onCreateClient?: (name: string) => Promise<ComboboxOption | null>;
   /** The dialog awaits it: resolve closes, reject keeps it open with an inline error. */
   onSubmit: (payload: SaveContactLeadPayload) => Promise<unknown> | void;
   pending?: boolean;
@@ -82,6 +90,8 @@ export function ContactLeadDialog({
   initial,
   sellers,
   showSellerPicker = true,
+  clients = [],
+  onCreateClient,
   onSubmit,
   pending = false,
   today,
@@ -103,6 +113,25 @@ export function ContactLeadDialog({
   function setField<K extends keyof ContactLeadDraft>(key: K, value: ContactLeadDraft[K]) {
     setTouched((current) => (current.has(key) ? current : new Set(current).add(key)));
     setDraft((current) => ({ ...current, [key]: value }));
+  }
+
+  function selectClient(value: string) {
+    const picked = clients.find((option) => option.value === value);
+    setField('clientId', value === '' ? null : value);
+    setField('clientName', picked?.label ?? '');
+  }
+
+  async function createClient(name: string) {
+    if (!onCreateClient) {
+      // No create permission: keep the typed name as a free-text snapshot.
+      setField('clientId', null);
+      setField('clientName', name);
+      return;
+    }
+    const created = await onCreateClient(name);
+    if (!created) return;
+    setField('clientId', created.value);
+    setField('clientName', created.label);
   }
 
   async function save() {
@@ -144,6 +173,49 @@ export function ContactLeadDialog({
               onChange={(event) => setField('contactName', event.target.value)}
               required
               value={draft.contactName}
+            />
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <span className={fieldLabelClass} id="lead-client-label">
+              {CONTACT_LEAD_COPY.clientLabel}
+            </span>
+            <div className="flex items-center gap-2">
+              <Combobox
+                aria-labelledby="lead-client-label"
+                className={formSelectClass}
+                entityGender="m"
+                entityLabel="cliente"
+                onChange={selectClient}
+                {...(onCreateClient ? { onCreate: (name) => void createClient(name) } : {})}
+                options={clients}
+                placeholder={CONTACT_LEAD_COPY.clientPlaceholder}
+                value={draft.clientId}
+                valueLabel={draft.clientName || undefined}
+              />
+              <button
+                className={secondaryButtonClass}
+                onClick={() => selectClient('')}
+                type="button"
+              >
+                {CONTACT_LEAD_COPY.clearLabel}
+              </button>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label className={fieldLabelClass} htmlFor="lead-estimated-value">
+              {CONTACT_LEAD_COPY.valueLabel}
+            </label>
+            <Input
+              className={formInputClass}
+              id="lead-estimated-value"
+              inputMode="decimal"
+              min="0"
+              onChange={(event) => setField('estimatedValue', event.target.value)}
+              step="0.01"
+              type="number"
+              value={draft.estimatedValue}
             />
           </div>
 

@@ -62,8 +62,9 @@ export type SaveLeadPayload = {
  * except `sellerPersonId`, which is OMITTED when the viewer is not offered the
  * vendedor picker: the API then defaults a create to the caller's own pessoa and
  * an edit leaves the stored vendedor untouched (D-07.1a/b).
- * There is no clientName, no products and no estimatedValueBrl: the API stores
- * client_id null, an empty snapshot and 0 itself.
+ * The leads edition DOES carry an empresa (`clientId` links a cadastro row, else
+ * the free-text `clientName` snapshot) and a `estimatedValueBrl` (integer cents).
+ * There are still no produtos in this edition.
  */
 export type ContactLeadPayload = {
   contactName: string;
@@ -72,6 +73,9 @@ export type ContactLeadPayload = {
   contactBirthDate: string | null;
   description: string | null;
   sellerPersonId?: string | null;
+  clientId?: string | null;
+  clientName?: string | null;
+  estimatedValueBrl?: number;
 };
 
 export type SaveContactLeadPayload = ContactLeadPayload & { id?: string };
