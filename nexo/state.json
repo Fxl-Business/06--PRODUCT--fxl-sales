@@ -137,5 +137,13 @@
     "decision": "skipped-autopilot",
     "decided_at": "2026-10-05",
     "note": "Owner brainstormed the WHAT in-session (edition resolved from Hub module sales.edition.leads; FXL unchanged; leads-only Kanban with contact fields; empty configurable etapas; gestor + vendedores) and then said 'Siga em autopilot'. Eight slices in four waves, executed serially. Gate 2 per slice and per wave; Gate 3 untouched."
+  },
+  "gate3_v4_3_0": {
+    "release": "v4.3.0",
+    "commit": "1ff1c83bbec31261d9851e6e3b765e57a6dbd800",
+    "flow": "ship-prod-ready",
+    "decision": "approved-cut-staging-production",
+    "decided_at": "2026-10-05",
+    "note": "Owner approved in chat ('Isso, pode seguir com o deploy') after being told the plan: cut v4.3.0 and push master -> staging -> production, then activate Construbom in the Hub via the playbook. Release-verify PASS at 1ff1c83 (unit 3209 + 91 guards, 348 integration, clean-clone web build, API image ok, migration 0027 additive). Audit: new dev-only advisories (2 critical tinypool via vitest); --prod shows 0 high/critical."
   }
 }
