@@ -64,6 +64,18 @@ export type ContactLeadDialogProps = {
   today?: string;
 };
 
+function blockedFieldOf(message: string | null): keyof ContactLeadDraft | null {
+  if (message === CONTACT_LEAD_COPY.nameRequired) return 'contactName';
+  if (
+    message === CONTACT_LEAD_COPY.birthDateInvalid ||
+    message === CONTACT_LEAD_COPY.birthDateFuture
+  ) {
+    return 'contactBirthDate';
+  }
+  if (message === CONTACT_LEAD_COPY.emailInvalid) return 'contactEmail';
+  return null;
+}
+
 export function ContactLeadDialog({
   open,
   onOpenChange,
@@ -79,13 +91,22 @@ export function ContactLeadDialog({
   const [submitting, setSubmitting] = React.useState(false);
   const [saveError, setSaveError] = React.useState<string | null>(null);
 
+  const [touched, setTouched] = React.useState<ReadonlySet<keyof ContactLeadDraft>>(new Set());
+  const [submitted, setSubmitted] = React.useState(false);
+
   const blocked = validateContactLeadDraft(draft, todayDay);
+  // The message is shown only once the field it belongs to changed, or after Salvar.
+  const blockedField = blockedFieldOf(blocked);
+  const showBlocked =
+    blocked !== null && (submitted || (blockedField !== null && touched.has(blockedField)));
 
   function setField<K extends keyof ContactLeadDraft>(key: K, value: ContactLeadDraft[K]) {
+    setTouched((current) => (current.has(key) ? current : new Set(current).add(key)));
     setDraft((current) => ({ ...current, [key]: value }));
   }
 
   async function save() {
+    setSubmitted(true);
     if (blocked !== null || submitting) return;
     setSubmitting(true);
     setSaveError(null);
@@ -201,7 +222,7 @@ export function ContactLeadDialog({
             </div>
           ) : null}
 
-          {blocked !== null ? (
+          {showBlocked ? (
             <p className={blockedNoticeClass} data-lead-blocked="true">
               {blocked}
             </p>
