@@ -64,6 +64,8 @@ const OWNED_FILES = [
   'LeadsBoard.tsx',
   'LeadsBoardContainer.tsx',
   'MoveLeadDialog.tsx',
+  'contact-lead.ts',
+  'ContactLeadDialog.tsx',
 ];
 
 /** The one file allowed to spell the conversion kind, because it owns the question. */

@@ -57,6 +57,23 @@ export type SaveLeadPayload = {
 };
 
 /**
+ * The leads-edition write body, mirroring `ContactLeadFieldsSchema` key for key.
+ * Every optional key is always SENT (null when empty) so a PATCH can clear it.
+ * There is no clientName, no products and no estimatedValueBrl: the API stores
+ * client_id null, an empty snapshot and 0 itself.
+ */
+export type ContactLeadPayload = {
+  contactName: string;
+  contactPhone: string | null;
+  contactEmail: string | null;
+  contactBirthDate: string | null;
+  description: string | null;
+  sellerPersonId: string | null;
+};
+
+export type SaveContactLeadPayload = ContactLeadPayload & { id?: string };
+
+/**
  * `toIndex` is the destination index INSIDE the destination column, 0-based, as
  * the operator sees it. The server owns the resulting `position` integers; the
  * client never sends one, because two browsers reordering the same column would
@@ -122,7 +139,7 @@ export const leadsApi = {
       token,
     }),
 
-  saveLead: ({ id, ...body }: SaveLeadPayload, token: Token) =>
+  saveLead: ({ id, ...body }: SaveLeadPayload | SaveContactLeadPayload, token: Token) =>
     apiFetch<LeadResponse>(id ? `${LEADS_PATH}/${id}` : LEADS_PATH, {
       method: id ? 'PATCH' : 'POST',
       token,

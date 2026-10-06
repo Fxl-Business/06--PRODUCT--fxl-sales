@@ -7,6 +7,7 @@ import {
   leadsApi,
   type MoveLeadPayload,
   type ReorderLeadStagesPayload,
+  type SaveContactLeadPayload,
   type SaveLeadPayload,
   type SaveLeadStagePayload,
   type SetLeadStageStatusPayload,
@@ -145,7 +146,7 @@ export function useLeadsBoard(
  */
 export function useSaveLead() {
   const { getToken } = useAccessToken();
-  return useAppMutation<LeadResponse, Error, SaveLeadPayload>({
+  return useAppMutation<LeadResponse, Error, SaveLeadPayload | SaveContactLeadPayload>({
     mutationFn: async (payload) => leadsApi.saveLead(payload, await requireToken(getToken)),
     invalidates: [queryKeys.leads.all],
   });

@@ -81,6 +81,12 @@ export type SalesOpsLead = {
    */
   estimatedValueBrl: number;
   description: string | null;
+  /** Leads edition contact data. Always on the wire, null for FXL rows. Free text, max 40. */
+  contactPhone: string | null;
+  /** Lowercased by the API. User contact data, never an identifier. */
+  contactEmail: string | null;
+  /** ISO civil day `YYYY-MM-DD`. Display only through `displayDate`, never `new Date`. */
+  contactBirthDate: string | null;
   sellerPersonId: string | null;
   /** RECONCILED: NOT NULL on the shipped wire (the plan had it nullable). */
   sellerNameSnapshot: string;

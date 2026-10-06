@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { apiFetch } from '@/lib/api-client';
 import { queryKeys } from '@/lib/query-keys';
 import { LEADS_PATH, LEAD_STAGES_PATH, leadsApi } from '../api';
+import { buildContactLeadPayload, contactDraftFromSeed } from '../contact-lead';
 
 vi.mock('@/lib/api-client', () => ({
   apiFetch: vi.fn(async () => ({})),
@@ -117,6 +118,36 @@ describe('leadsApi', () => {
       reason: 'sem verba',
       saleId: 'sale-1',
     });
+  });
+
+  it('saveLead sends the leads-edition contact body with exactly six keys', async () => {
+    const draft = {
+      ...contactDraftFromSeed(null),
+      contactName: 'Ana',
+      contactPhone: '(11) 98888-7777',
+    };
+    const keys = [
+      'contactName',
+      'contactPhone',
+      'contactEmail',
+      'contactBirthDate',
+      'description',
+      'sellerPersonId',
+    ];
+
+    await leadsApi.saveLead(buildContactLeadPayload(draft), 't');
+    await leadsApi.saveLead(buildContactLeadPayload(draft, 'L1'), 't');
+
+    const [path, init] = call(0);
+    expect(path).toBe('/api/v1/sales-ops/leads');
+    expect(init.method).toBe('POST');
+    expect(Object.keys(bodyOf(call(0)))).toEqual(keys);
+
+    const [editPath, editInit] = call(1);
+    expect(editPath).toBe('/api/v1/sales-ops/leads/L1');
+    expect(editInit.method).toBe('PATCH');
+    expect(Object.keys(bodyOf(call(1)))).toEqual(keys);
+    expect('id' in bodyOf(call(1))).toBe(false);
   });
 
   it('the leads query keys are account- and org-agnostic', () => {

@@ -25,6 +25,13 @@ export type ApiError = {
    * `isEntitlementFailure` in ./require-token.
    */
   code?: string;
+  /**
+   * The API's validation sub-reason: `reason` in a 400 `validation_error` body,
+   * for example `no_open_stage` on a lead create with no active etapa. Display
+   * copy selection only; auth classification still keys on `status`. Set only
+   * when the body sends a string, so no other error gains an `undefined` key.
+   */
+  reason?: string;
   message?: string;
   status: number;
   /**
@@ -77,6 +84,7 @@ export async function apiFetch<T>(
     };
     const retryAfterSeconds = retryAfterOf(body, res);
     if (retryAfterSeconds !== undefined) err.retryAfterSeconds = retryAfterSeconds;
+    if (typeof body.reason === 'string') err.reason = body.reason;
     throw err;
   }
 

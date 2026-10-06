@@ -14,6 +14,7 @@ import {
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { List, Plus, SquareKanban } from 'lucide-react';
+import type { LeadFieldSet } from '@fxl-sales/shared-utils/sales-edition';
 import { Combobox, type ComboboxOption } from '@/components/ui/combobox';
 import { formatMoneyBrl } from '../calculations';
 import type { MoveLeadPayload } from './api';
@@ -77,6 +78,12 @@ import {
   leadIsConverted,
   leadsInStage,
 } from './calculations';
+import {
+  CONTACT_LEAD_COPY,
+  CONTACT_LIST_HEADERS,
+  leadBirthdayLabel,
+  leadContactLine,
+} from './contact-lead';
 import { LeadCard } from './LeadCard';
 import { MoveLeadDialog } from './MoveLeadDialog';
 import type { SalesOpsLead, SalesOpsLeadStage } from './types';
@@ -128,6 +135,12 @@ export type LeadsBoardProps = {
   hasMore?: boolean;
   onLoadMore?: () => void;
   loadingMore?: boolean;
+  /** 'contact' in the leads edition. Default 'full' renders today's board. */
+  fieldSet?: LeadFieldSet;
+  /** Leads edition empty-state: true shows the gestor copy and action, false the vendedor copy. */
+  canManageStages?: boolean;
+  /** Leads edition empty-state action. Absent means no button. */
+  onOpenStagesCadastro?: () => void;
 };
 
 const ALL_SELLERS_VALUE = '';
@@ -139,6 +152,7 @@ type SortableCardProps = {
   onEdit?: (lead: SalesOpsLead) => void;
   onOpenSale?: (saleId: string) => void;
   showDaysBadge?: boolean;
+  fieldSet?: LeadFieldSet;
 };
 
 /**
@@ -152,6 +166,7 @@ function SortableLeadCard({
   onEdit,
   onOpenSale,
   showDaysBadge,
+  fieldSet,
 }: SortableCardProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: lead.id,
@@ -171,6 +186,7 @@ function SortableLeadCard({
         lookups={lookups}
         now={now}
         onEdit={onEdit}
+        fieldSet={fieldSet}
         onOpenSale={onOpenSale}
         showDaysBadge={showDaysBadge}
       />
@@ -239,6 +255,9 @@ export function LeadsBoard({
   hasMore = false,
   onLoadMore,
   loadingMore = false,
+  fieldSet = 'full',
+  canManageStages = false,
+  onOpenStagesCadastro,
 }: LeadsBoardProps) {
   /**
    * THE CARD'S VISUAL MOVE WHILE THE PROPOSTA WIZARD IS OPEN.
@@ -254,6 +273,10 @@ export function LeadsBoard({
   const [pendingConversion, setPendingConversion] = React.useState<MoveLeadPayload | null>(null);
 
   const columns = React.useMemo(() => boardStages(stages), [stages]);
+  // The leads edition shows contact data and no R$ figure anywhere; an org with
+  // no active etapa gets an empty-state instead of an empty scroller.
+  const contact = fieldSet === 'contact';
+  const noStages = contact && columns.length === 0;
 
   const [leadView, setLeadView] = React.useState<'board' | 'list'>('board');
   const [rawStageFilter, setLeadStageFilter] = React.useState<string>('');
@@ -479,6 +502,7 @@ export function LeadsBoard({
         {onCreateLead ? (
           <button
             className={`${primaryButtonClass} gap-1.5`}
+            disabled={noStages}
             onClick={onCreateLead}
             type="button"
           >
@@ -499,7 +523,26 @@ export function LeadsBoard({
         means the collision test is run against where a column USED to be, which
         reads to the operator as the board refusing a perfectly aimed drop.
       */}
-      {leadView === 'board' ? (
+      {noStages ? (
+        <div
+          className="flex min-h-[220px] flex-col items-center justify-center gap-3 rounded-[18px] border-[1.5px] border-dashed border-[#e8e8ec] p-8 text-center"
+          data-no-stages={canManageStages ? 'admin' : 'seller'}
+        >
+          <p className="text-[14px] text-[#57575f]">
+            {canManageStages ? CONTACT_LEAD_COPY.emptyStagesAdmin : CONTACT_LEAD_COPY.emptyStagesSeller}
+          </p>
+          {canManageStages && onOpenStagesCadastro ? (
+            <button
+              className={primaryButtonClass}
+              data-open-stages-cadastro
+              onClick={onOpenStagesCadastro}
+              type="button"
+            >
+              {CONTACT_LEAD_COPY.emptyStagesAdminAction}
+            </button>
+          ) : null}
+        </div>
+      ) : leadView === 'board' ? (
       <DndContext
         collisionDetection={closestCorners}
         measuring={{ droppable: { strategy: MeasuringStrategy.Always } }}
@@ -557,21 +600,25 @@ export function LeadsBoard({
                       <List aria-hidden size={15} />
                     </button>
                   </div>
-                  <div className="mt-2 flex items-baseline justify-between">
-                    <span className="sales-ops-num text-[20px] font-bold text-[#201f24]" data-stage-total>
-                      {fmtBrl0(totalByStage.get(stage.id) ?? 0)}
-                    </span>
-                    <span className="text-[11.5px] font-semibold text-[#9b9ba3]">
-                      {PERCENT_OF_TOTAL(share)}
-                    </span>
-                  </div>
-                  <div className={`mt-2 ${proportionTrackClass}`}>
-                    <div
-                      className="h-full rounded-full"
-                      data-stage-bar
-                      style={{ width: `${share}%`, backgroundColor: c?.dot }}
-                    />
-                  </div>
+                  {!contact ? (
+                    <>
+                      <div className="mt-2 flex items-baseline justify-between">
+                        <span className="sales-ops-num text-[20px] font-bold text-[#201f24]" data-stage-total>
+                          {fmtBrl0(totalByStage.get(stage.id) ?? 0)}
+                        </span>
+                        <span className="text-[11.5px] font-semibold text-[#9b9ba3]">
+                          {PERCENT_OF_TOTAL(share)}
+                        </span>
+                      </div>
+                      <div className={`mt-2 ${proportionTrackClass}`}>
+                        <div
+                          className="h-full rounded-full"
+                          data-stage-bar
+                          style={{ width: `${share}%`, backgroundColor: c?.dot }}
+                        />
+                      </div>
+                    </>
+                  ) : null}
                 </header>
 
                 <SortableContext items={movableIds} strategy={verticalListSortingStrategy}>
@@ -581,6 +628,7 @@ export function LeadsBoard({
                       if (targets.length === 0) {
                         return (
                           <LeadCard
+                            fieldSet={fieldSet}
                             key={lead.id}
                             lead={lead}
                             lookups={lookups}
@@ -593,6 +641,7 @@ export function LeadsBoard({
                       }
                       return (
                         <SortableLeadCard
+                          fieldSet={fieldSet}
                           key={lead.id}
                           lead={lead}
                           lookups={lookups}
@@ -631,7 +680,13 @@ export function LeadsBoard({
         <DragOverlay dropAnimation={null}>
           {activeLead ? (
             <div className={dragOverlayCardClass}>
-              <LeadCard lead={activeLead} lookups={lookups} now={now} showDaysBadge={false} />
+              <LeadCard
+                fieldSet={fieldSet}
+                lead={activeLead}
+                lookups={lookups}
+                now={now}
+                showDaysBadge={false}
+              />
             </div>
           ) : null}
         </DragOverlay>
@@ -647,7 +702,7 @@ export function LeadsBoard({
               type="button"
             >
               <span>{ALL_PHASES_LABEL}</span>
-              <span className="sales-ops-num">{fmtBrl0(totalGeral)}</span>
+              {!contact ? <span className="sales-ops-num">{fmtBrl0(totalGeral)}</span> : null}
               <span data-phase-count>{leads.length}</span>
             </button>
             {columns.map((stage) => {
@@ -666,9 +721,11 @@ export function LeadsBoard({
                     style={{ backgroundColor: color?.dot }}
                   />
                   <span>{stage.name}</span>
-                  <span className="sales-ops-num opacity-75">
-                    {fmtBrl0(totalByStage.get(stage.id) ?? 0)}
-                  </span>
+                  {!contact ? (
+                    <span className="sales-ops-num opacity-75">
+                      {fmtBrl0(totalByStage.get(stage.id) ?? 0)}
+                    </span>
+                  ) : null}
                   <span
                     className="rounded-full px-1.5 text-[11px] font-semibold"
                     data-phase-count
@@ -685,15 +742,26 @@ export function LeadsBoard({
             <div className="min-w-[900px]">
               <table className="w-full border-collapse text-left text-[13px]">
                 <thead className={listTheadClass}>
-                  <tr>
-                    <th className="px-4 py-2.5">{LIST_HEADERS.lead}</th>
-                    <th className="px-4 py-2.5">{LIST_HEADERS.phase}</th>
-                    <th className="px-4 py-2.5">{LIST_HEADERS.products}</th>
-                    <th className="px-4 py-2.5">{LIST_HEADERS.seller}</th>
-                    <th className="px-4 py-2.5">{LIST_HEADERS.inStage}</th>
-                    <th className="px-4 py-2.5 text-right">{LIST_HEADERS.value}</th>
-                    <th className="px-4 py-2.5 text-right">{LIST_HEADERS.actions}</th>
-                  </tr>
+                  {contact ? (
+                    <tr>
+                      <th className="px-4 py-2.5">{CONTACT_LIST_HEADERS.lead}</th>
+                      <th className="px-4 py-2.5">{CONTACT_LIST_HEADERS.phase}</th>
+                      <th className="px-4 py-2.5">{CONTACT_LIST_HEADERS.birthday}</th>
+                      <th className="px-4 py-2.5">{CONTACT_LIST_HEADERS.seller}</th>
+                      <th className="px-4 py-2.5">{CONTACT_LIST_HEADERS.inStage}</th>
+                      <th className="px-4 py-2.5 text-right">{CONTACT_LIST_HEADERS.actions}</th>
+                    </tr>
+                  ) : (
+                    <tr>
+                      <th className="px-4 py-2.5">{LIST_HEADERS.lead}</th>
+                      <th className="px-4 py-2.5">{LIST_HEADERS.phase}</th>
+                      <th className="px-4 py-2.5">{LIST_HEADERS.products}</th>
+                      <th className="px-4 py-2.5">{LIST_HEADERS.seller}</th>
+                      <th className="px-4 py-2.5">{LIST_HEADERS.inStage}</th>
+                      <th className="px-4 py-2.5 text-right">{LIST_HEADERS.value}</th>
+                      <th className="px-4 py-2.5 text-right">{LIST_HEADERS.actions}</th>
+                    </tr>
+                  )}
                 </thead>
                 <tbody>
                   {orderedLeads.map((row) => {
@@ -702,15 +770,22 @@ export function LeadsBoard({
                     const converted = leadIsConverted(row);
                     const showBadge = rowStage ? stageIsNormal(rowStage) && !converted : false;
                     const days = daysInCurrentStage(row.stageChangedAt, now);
-                    const products = leadProductLabels(row, lookups);
+                    const products = contact ? [] : leadProductLabels(row, lookups);
+                    const birthday = contact ? leadBirthdayLabel(row) : null;
                     const sellerLabel = leadSellerLabel(row, lookups);
                     return (
                       <tr className={listRowClass} data-list-row={row.id} key={row.id}>
                         <td className="px-4 py-3">
                           <div className="font-semibold text-[#201f24]">{row.contactName}</div>
-                          <div className="text-[12.5px] text-[#8b8b92]">
-                            {leadCompanyLabel(row, lookups)}
-                          </div>
+                          {contact ? (
+                            <div className="text-[12.5px] text-[#8b8b92]" data-row-contact>
+                              {leadContactLine(row)}
+                            </div>
+                          ) : (
+                            <div className="text-[12.5px] text-[#8b8b92]">
+                              {leadCompanyLabel(row, lookups)}
+                            </div>
+                          )}
                         </td>
                         <td className="px-4 py-3">
                           <span
@@ -725,9 +800,15 @@ export function LeadsBoard({
                             {rowStage?.name}
                           </span>
                         </td>
-                        <td className="px-4 py-3">
-                          {products.length > 0 ? products.join(', ') : NO_PRODUCTS_DASH}
-                        </td>
+                        {contact ? (
+                          <td className="px-4 py-3" data-row-birthday>
+                            {birthday ?? NO_PRODUCTS_DASH}
+                          </td>
+                        ) : (
+                          <td className="px-4 py-3">
+                            {products.length > 0 ? products.join(', ') : NO_PRODUCTS_DASH}
+                          </td>
+                        )}
                         <td className="px-4 py-3">
                           <span className="inline-flex items-center gap-2">
                             <span className={avatarClass}>{avatarInitials(sellerLabel)}</span>
@@ -746,11 +827,13 @@ export function LeadsBoard({
                             NO_PRODUCTS_DASH
                           )}
                         </td>
-                        <td className="px-4 py-3 text-right">
-                          <span className="sales-ops-num font-bold">
-                            {fmtBrl0(row.estimatedValueBrl)}
-                          </span>
-                        </td>
+                        {!contact ? (
+                          <td className="px-4 py-3 text-right">
+                            <span className="sales-ops-num font-bold">
+                              {fmtBrl0(row.estimatedValueBrl)}
+                            </span>
+                          </td>
+                        ) : null}
                         <td className="px-4 py-3">
                           <div className="flex items-center justify-end gap-2">
                             {converted && onOpenSale && row.saleCode && row.saleId ? (
@@ -788,7 +871,7 @@ export function LeadsBoard({
                   })}
                   {orderedLeads.length === 0 ? (
                     <tr>
-                      <td className="px-4 py-6 text-center text-[#8b8b92]" colSpan={7}>
+                      <td className="px-4 py-6 text-center text-[#8b8b92]" colSpan={contact ? 6 : 7}>
                         {EMPTY_PHASE_LIST}
                       </td>
                     </tr>
@@ -798,12 +881,14 @@ export function LeadsBoard({
             </div>
             <div className={listFooterClass}>
               <span>{scopeLeadsCount(scopeLabel, listCount)}</span>
-              <span className="flex items-center gap-2">
-                <span>{TOTAL_LABEL}</span>
-                <span className="sales-ops-num" data-list-total>
-                  {fmtBrl0(listTotalCents)}
+              {!contact ? (
+                <span className="flex items-center gap-2">
+                  <span>{TOTAL_LABEL}</span>
+                  <span className="sales-ops-num" data-list-total>
+                    {fmtBrl0(listTotalCents)}
+                  </span>
                 </span>
-              </span>
+              ) : null}
             </div>
           </div>
         </div>
