@@ -439,6 +439,86 @@ describe('sales operations leads edition: contact leads, vendedor-only pessoas, 
     ).toEqual({ ok: false, reason: 'seller_person_unmapped' });
   });
 
+  it('assigns a scoped seller own contact lead to them when no vendedor is named (D-07.1a)', async () => {
+    const orgId = newOrg('owndefault');
+    const stage = await normalStage(orgId, 'Contato');
+    const ana = await leadsVendedor(orgId, 'Ana');
+    const bruno = await leadsVendedor(orgId, 'Bruno');
+    await adminClient`
+      UPDATE sales_ops_people SET hub_account_id = 'hub_ana'
+      WHERE org_id = ${orgId} AND id = ${ana.id}`;
+
+    const absent = okLead(
+      await createContactLead(
+        db,
+        orgId,
+        contactLead({ contactName: 'Sem vendedor' }),
+        sellerScope('hub_ana'),
+      ),
+    );
+    expect(absent).toMatchObject({ sellerPersonId: ana.id, sellerNameSnapshot: 'Ana' });
+
+    const explicitNull = okLead(
+      await createContactLead(
+        db,
+        orgId,
+        contactLead({ contactName: 'Vendedor nulo', sellerPersonId: null }),
+        sellerScope('hub_ana'),
+      ),
+    );
+    expect(explicitNull.sellerPersonId).toBe(ana.id);
+
+    expect(
+      await createContactLead(
+        db,
+        orgId,
+        contactLead({ sellerPersonId: bruno.id }),
+        sellerScope('hub_ana'),
+      ),
+    ).toEqual({ ok: false, reason: 'seller_scope' });
+
+    const anaBoard = await listLeads(
+      db,
+      orgId,
+      ListLeadsQuerySchema.parse({ stageId: stage.id }),
+      sellerScope('hub_ana'),
+    );
+    if (!anaBoard.ok) throw new Error(`unexpected refusal: ${anaBoard.reason}`);
+    expect(anaBoard.leads.map((lead) => lead.contactName).sort()).toEqual([
+      'Sem vendedor',
+      'Vendedor nulo',
+    ]);
+
+    // An admin naming no vendedor still files an UNASSIGNED lead.
+    const unassigned = okLead(await createContactLead(db, orgId, contactLead(), ADMIN_SCOPE));
+    expect(unassigned).toMatchObject({ sellerPersonId: null, sellerNameSnapshot: '' });
+  });
+
+  it('FXL oracle: a full-edition seller naming no vendedor still answers seller_scope', async () => {
+    const orgId = newOrg('fxlscope');
+    await ensureLeadStagesForOrg(db, orgId);
+    const ana = await leadsVendedor(orgId, 'Ana');
+    await adminClient`
+      UPDATE sales_ops_people SET hub_account_id = 'hub_ana'
+      WHERE org_id = ${orgId} AND id = ${ana.id}`;
+
+    expect(
+      await createLead(
+        db,
+        orgId,
+        CreateLeadSchema.parse({
+          contactName: 'Contato Um',
+          clientName: 'Empresa Um',
+          estimatedValueBrl: 1000,
+        }),
+        sellerScope('hub_ana'),
+      ),
+    ).toEqual({ ok: false, reason: 'seller_scope' });
+    const [row] = await adminClient<Array<{ n: number }>>`
+      SELECT count(*)::int AS n FROM sales_ops_leads WHERE org_id = ${orgId}`;
+    expect(row!.n).toBe(0);
+  });
+
   it('seeds both system funções and makes a leads-edition pessoa exactly a vendedor', async () => {
     const orgId = newOrg('funcoes');
     const [before] = await adminClient<Array<{ n: number }>>`
