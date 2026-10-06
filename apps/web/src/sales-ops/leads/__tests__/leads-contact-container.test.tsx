@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   roles: ['admin', 'seller'] as string[],
   stages: [] as unknown[],
   leads: [] as unknown[],
+  boardError: null as unknown,
   boardProps: [] as Record<string, unknown>[],
   mutate: vi.fn(),
   mutateAsync: vi.fn(),
@@ -45,8 +46,9 @@ vi.mock('../hooks', () => ({
   useLeadStages: () => ({ isPending: false, isError: false, data: mocks.stages }),
   useLeadsBoard: () => ({
     // Pending with zero stages reproduces the real query, disabled without stage rows.
-    isPending: mocks.stages.length === 0,
-    isError: false,
+    isPending: mocks.stages.length === 0 && mocks.boardError === null,
+    isError: mocks.boardError !== null,
+    error: mocks.boardError,
     data: mocks.stages.length ? { leads: mocks.leads, hasMore: false } : undefined,
     isFetchingNextPage: false,
     fetchNextPage: vi.fn(),
@@ -143,6 +145,7 @@ beforeEach(() => {
   mocks.roles = ['admin', 'seller'];
   mocks.stages = [stageRow()];
   mocks.leads = [leadRow()];
+  mocks.boardError = null;
   mocks.boardProps = [];
   mocks.mutate.mockReset();
   mocks.mutateAsync.mockReset();
@@ -353,6 +356,31 @@ describe('LeadsBoardContainer, leads edition', () => {
     expect('sellerPersonId' in payload).toBe(false);
   });
 
+  it('a 403 seller_person_unmapped board read names the missing vendedor link', async () => {
+    mocks.roles = ['seller'];
+    mocks.boardError = { status: 403, error: 'forbidden', reason: 'seller_person_unmapped' };
+    await renderContainer();
+    expect(document.body.textContent).toContain(
+      'Seu acesso ainda não está vinculado a um vendedor. Peça ao gestor para conferir seu cadastro em Vendedores.',
+    );
+    expect(document.body.textContent).not.toContain('Não foi possível carregar o funil de leads.');
+  });
+
+  it('any other board read failure keeps the generic copy', async () => {
+    for (const error of [
+      { status: 403, error: 'forbidden', reason: 'admin_role_required' },
+      { status: 500, error: 'internal' },
+      { status: 400, reason: 'seller_person_unmapped' },
+    ]) {
+      mocks.boardError = error;
+      await act(async () => root.unmount());
+      root = createRoot(container);
+      await renderContainer();
+      expect(document.body.textContent).toContain('Não foi possível carregar o funil de leads.');
+      expect(document.body.textContent).not.toContain('vinculado a um vendedor');
+    }
+  });
+
   it('an admin keeps the vendedor picker and sends the key', async () => {
     await renderContainer();
     await clickSelector('[data-stub="create"]');
@@ -383,6 +411,13 @@ describe('LeadsBoardContainer, full edition', () => {
     await clickSelector('[data-stub="create"]');
     expect(document.getElementById('lead-company-text')).not.toBeNull();
     expect(document.getElementById('lead-birth-date')).toBeNull();
+  });
+
+  it('keeps the generic copy for a 403 seller_person_unmapped board read', async () => {
+    mocks.boardError = { status: 403, error: 'forbidden', reason: 'seller_person_unmapped' };
+    await renderContainer();
+    expect(document.body.textContent).toContain('Não foi possível carregar o funil de leads.');
+    expect(document.body.textContent).not.toContain('vinculado a um vendedor');
   });
 
   it('saves through mutate and never renders the save notice', async () => {
