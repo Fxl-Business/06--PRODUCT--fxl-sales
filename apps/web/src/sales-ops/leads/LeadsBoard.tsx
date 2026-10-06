@@ -56,8 +56,7 @@ import {
   listRowClass,
   listTableCardClass,
   listTheadClass,
-  phaseChipActiveClass,
-  phaseChipClass,
+  phaseChipClassName,
   segmentedButtonActiveClass,
   segmentedButtonClass,
   segmentedContainerClass,
@@ -696,7 +695,7 @@ export function LeadsBoard({
           <div className="flex flex-wrap gap-2">
             <button
               aria-pressed={leadStageFilter === ''}
-              className={`${phaseChipClass}${leadStageFilter === '' ? ' ' + phaseChipActiveClass : ''}`}
+              className={phaseChipClassName(leadStageFilter === '')}
               data-phase-chip=""
               onClick={() => setLeadStageFilter('')}
               type="button"
@@ -710,7 +709,7 @@ export function LeadsBoard({
               return (
                 <button
                   aria-pressed={leadStageFilter === stage.id}
-                  className={`${phaseChipClass}${leadStageFilter === stage.id ? ' ' + phaseChipActiveClass : ''}`}
+                  className={phaseChipClassName(leadStageFilter === stage.id)}
                   data-phase-chip={stage.id}
                   key={stage.id}
                   onClick={() => setLeadStageFilter(stage.id)}
