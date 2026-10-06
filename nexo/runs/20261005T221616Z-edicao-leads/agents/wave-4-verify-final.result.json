@@ -1,0 +1,1 @@
+{"agent":"wave-verify","wave":4,"status":"PASS","done":true,"unit":"auth-fake 48, shared-utils 174, api 1427, web 1560 vitest tests (227 files) + 91 node tests, 0 fail","integration":"348 passed (46 files)","lint":0,"typecheck":0,"build":"ok","findings":[]}

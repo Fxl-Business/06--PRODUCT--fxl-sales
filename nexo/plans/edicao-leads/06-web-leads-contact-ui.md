@@ -1,7 +1,7 @@
 ---
 id: 06-web-leads-contact-ui
 milestone: v4.3.0
-status: todo
+status: done
 depends_on: [04-api-leads-edition, 05-web-edition-navigation]
 files_modified:
   - apps/web/src/lib/api-client.ts

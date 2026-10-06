@@ -1,7 +1,7 @@
 ---
 id: 07-web-pessoas-vendedores
 milestone: v4.3.0
-status: todo
+status: done
 depends_on: [04-api-leads-edition, 05-web-edition-navigation]
 files_modified:
   - apps/web/src/sales-ops/people/vendedores.ts

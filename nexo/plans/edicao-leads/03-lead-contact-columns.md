@@ -1,7 +1,7 @@
 ---
 id: 03-lead-contact-columns
 milestone: v4.3.0
-status: todo
+status: done
 depends_on: []
 files_modified:
   - apps/api/drizzle/0027_lead_contact_fields.sql

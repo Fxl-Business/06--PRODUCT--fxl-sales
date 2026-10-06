@@ -1,7 +1,7 @@
 ---
 id: 08-dev-identity-and-playbook
 milestone: v4.3.0
-status: todo
+status: done
 depends_on: [01-edition-contract, 02-api-edition-gate, 03-lead-contact-columns, 05-web-edition-navigation]
 files_modified:
   - packages/auth-fake/src/index.ts

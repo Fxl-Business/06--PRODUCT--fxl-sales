@@ -1,7 +1,7 @@
 ---
 id: 01-edition-contract
 milestone: v4.3.0
-status: todo
+status: done
 depends_on: []
 files_modified:
   - packages/shared-utils/src/sales-edition.ts

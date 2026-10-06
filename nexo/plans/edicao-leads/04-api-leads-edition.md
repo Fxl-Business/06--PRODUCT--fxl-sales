@@ -1,7 +1,7 @@
 ---
 id: 04-api-leads-edition
 milestone: v4.3.0
-status: todo
+status: done
 depends_on: [02-api-edition-gate, 03-lead-contact-columns]
 files_modified:
   - apps/api/src/domains/sales-ops/leads/lead-schemas.ts

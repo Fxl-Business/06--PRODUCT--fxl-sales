@@ -1,7 +1,7 @@
 ---
 id: 05-web-edition-navigation
 milestone: v4.3.0
-status: todo
+status: done
 depends_on: [01-edition-contract]
 files_modified:
   - apps/web/src/auth/react.tsx

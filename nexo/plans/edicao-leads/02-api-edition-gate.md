@@ -1,7 +1,7 @@
 ---
 id: 02-api-edition-gate
 milestone: v4.3.0
-status: todo
+status: done
 depends_on: [01-edition-contract]
 files_modified:
   - apps/api/src/middleware/require-capability.ts

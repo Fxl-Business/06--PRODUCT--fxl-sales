@@ -11,7 +11,9 @@ Mode: autopilot (Gate 1 skipped by explicit request; Gate 2 per slice and per wa
 - [ ] Adicione cada vendedor ao workspace no Hub com o papel de produto `seller`; no primeiro acesso o e-mail liga a pessoa à conta.
 - [ ] Como FXL, faça um teste de fumaça de Propostas, Prospecção e Pessoas: devem estar iguais a antes.
 - [ ] Localmente, `make dev-fake` oferece as identidades `leads-owner` e `leads-seller`. A org local `org_fake_leads` guarda dados de teste da caminhada no navegador; rode o seed de novo para zerar.
-- [ ] O resultado do E2E no navegador da slice 07.1 será anexado aqui pelo orquestrador.
+- [x] E2E no navegador depois da 07.1 (`make dev-fake`), feito por um agente: vendedor cria lead só com Nome, sem campo Vendedor, e o lead aparece no quadro dele; email inválido mantém o diálogo aberto com os valores; "Mover para" sem erro antes de interagir; gestor vê o campo Vendedor; team-owner (FXL) com empresa, produtos e valor como antes; sem erros no console.
+- [x] O mesmo E2E achou "Informe o nome." em vermelho ao abrir o Novo lead da edição leads; corrigido na slice 07.2 (`2a13e45`), verificada e com o gate final verde (unit 3300, integração 348, lint 0, build ok).
+- [ ] O banco local tem dados de teste das caminhadas no navegador (`org_fake_leads` com 2 etapas, Ana Lima e leads; um lead "Teste E2E Alfa"). Rode o seed de desenvolvimento se quiser voltar ao estado inicial.
 
 ## Decisões tomadas sem você
 
@@ -26,6 +28,8 @@ Mode: autopilot (Gate 1 skipped by explicit request; Gate 2 per slice and per wa
 - D-07.1c: o diálogo de lead continua aberto, com os valores e um erro inline, quando o salvamento é recusado.
 - D-07.1d: o diálogo "Mover para" não mostra erro vermelho antes da primeira interação (só a exibição da recusa foi condicionada; a regra de mover não mudou).
 - D-07.1e: rótulos de acessibilidade (`aria-label`) nos controles novos.
+- D-07.2: no diálogo de lead da edição leads, cada erro só aparece depois que o campo muda (ou depois de Salvar); Salvar continua desabilitado enquanto o rascunho é inválido.
+- O orçamento de replanejamento (3 de 3) foi usado por 08.1, 07.1 e 07.2.
 - Correções visuais feitas na caminhada: linhas inativas de Vendedores, chrome completo escondido na edição leads (a pagar este mês, "Nova proposta" da sidebar, chip de mês), e o chip da fase ativa da Lista, que estava branco sobre branco na master e foi corrigido nas duas edições.
 - 08.1: o isolamento de teste da wave 3 foi corrigido com testes, sem mexer em produto (purga da org fixture antes e depois do `finance-integration`, checagem de eco do consumer limitada às próprias orgs, `afterAll` apaga as linhas de auditoria da edição leads).
 - Um admin da edição leads não vê `meus-dados`; um finder sem outra função fica em `/no-role`.

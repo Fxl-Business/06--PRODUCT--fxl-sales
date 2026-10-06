@@ -1,11 +1,11 @@
 {
-  "active_accumulated_seconds": 0,
+  "active_accumulated_seconds": 9549,
   "active_since": 1791238576,
   "counters": {
-    "agent_dispatches": 38,
+    "agent_dispatches": 41,
     "initial_slices": 8,
-    "replans": 2,
-    "total_slices": 10,
+    "replans": 3,
+    "total_slices": 11,
     "wave_recoveries": 1
   },
   "exhausted": null,
@@ -19,7 +19,7 @@
     "max_verify_attempts_per_slice": 3,
     "max_wave_recoveries": 1
   },
-  "paused": false,
+  "paused": true,
   "scoped_counters": {
     "verify_attempts": {
       "01-edition-contract": 1,
@@ -30,6 +30,7 @@
       "06-web-leads-contact-ui": 1,
       "07-web-pessoas-vendedores": 1,
       "07.1-seller-own-lead-defaults": 1,
+      "07.2-contact-dialog-no-premature-error": 1,
       "08-dev-identity-and-playbook": 1,
       "08.1-hermetic-finance-fixture-tests": 1
     }
