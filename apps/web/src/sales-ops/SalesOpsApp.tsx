@@ -154,6 +154,8 @@ import type { LeadConversionRequest } from './leads/LeadsBoard';
 import { LeadsBoardContainer } from './leads/LeadsBoardContainer';
 import { LeadStagesContainer } from './leads/LeadStagesContainer';
 import { ImportContainer } from './import/ImportContainer';
+import { VendedorDialog, VendedoresView } from './people/VendedoresView';
+import { VENDEDORES_COPY } from './people/vendedores';
 import {
   addMonthsToIsoDate,
   buildDashboardModel,
@@ -1428,7 +1430,14 @@ export function SalesOpsApp() {
     });
   }, [bootstrap.sales, bootstrap.saleItems, salesFilters]);
   const navItems = getSalesOpsNavigation(workspace, profile.roles, edition);
-  const title = titleForView(view, workspace);
+  /*
+    The leads edition renames the people cadastro to Vendedores. Overridden here
+    rather than inside `titleForView` so the full-edition map stays byte-identical.
+  */
+  const title =
+    edition === 'leads' && view === 'pessoas'
+      ? VENDEDORES_COPY.pageTitle
+      : titleForView(view, workspace);
   /**
    * The redundant `admin` check is belt and braces: `getVisibleWorkspaces` already
    * refuses the `cadastros` workspace to anyone without the role.
@@ -1704,7 +1713,9 @@ export function SalesOpsApp() {
             ? 'Novo cliente'
             : view === 'pessoas'
               ? canManagePeople
-                ? 'Nova pessoa'
+                ? edition === 'leads'
+                  ? VENDEDORES_COPY.newAction
+                  : 'Nova pessoa'
                 : null
               : view === 'funcoes'
                 ? canManageFuncoes
@@ -2258,11 +2269,34 @@ export function SalesOpsApp() {
                   />
                 ) : null}
                 {view === 'pessoas' ? (
-                  <PessoasView
-                    bootstrap={bootstrap}
-                    onArchive={changeCadastroStatus}
-                    onEdit={(person) => setModal({ kind: 'person', person })}
-                  />
+                  edition === 'leads' ? (
+                    <VendedoresView
+                      onEdit={(person) => setModal({ kind: 'person', person })}
+                      onInactivate={(person) =>
+                        changeCadastroStatus({
+                          cadastro: 'pessoa',
+                          id: person.id,
+                          name: person.displayName,
+                          status: 'inactive',
+                        })
+                      }
+                      onReactivate={(person) =>
+                        changeCadastroStatus({
+                          cadastro: 'pessoa',
+                          id: person.id,
+                          name: person.displayName,
+                          status: 'active',
+                        })
+                      }
+                      people={bootstrap.people}
+                    />
+                  ) : (
+                    <PessoasView
+                      bootstrap={bootstrap}
+                      onArchive={changeCadastroStatus}
+                      onEdit={(person) => setModal({ kind: 'person', person })}
+                    />
+                  )
                 ) : null}
                 {view === 'funcoes' ? (
                   /*
@@ -2377,16 +2411,29 @@ export function SalesOpsApp() {
         }}
         saving={saveFuncao.isPending}
       />
-      <PersonDialog
-        funcoes={persistedBootstrap.funcoes}
-        modal={personModalMatchesRoute && modal?.kind === 'person' ? modal : null}
-        onClose={() => setModal(null)}
-        onCreateFuncao={createFuncaoByName}
-        onSave={(payload) => {
-          savePerson.mutate(payload, { onSuccess: () => setModal(null) });
-        }}
-        saving={savePerson.isPending}
-      />
+      {edition === 'leads' ? (
+        <VendedorDialog
+          funcoes={persistedBootstrap.funcoes}
+          onClose={() => setModal(null)}
+          onSave={(payload) => {
+            savePerson.mutate(payload, { onSuccess: () => setModal(null) });
+          }}
+          open={personModalMatchesRoute && modal?.kind === 'person'}
+          person={modal?.kind === 'person' ? (modal.person ?? null) : null}
+          saving={savePerson.isPending}
+        />
+      ) : (
+        <PersonDialog
+          funcoes={persistedBootstrap.funcoes}
+          modal={personModalMatchesRoute && modal?.kind === 'person' ? modal : null}
+          onClose={() => setModal(null)}
+          onCreateFuncao={createFuncaoByName}
+          onSave={(payload) => {
+            savePerson.mutate(payload, { onSuccess: () => setModal(null) });
+          }}
+          saving={savePerson.isPending}
+        />
+      )}
       {bootstrapQuery.isSuccess ? (
         <SaleWizardDialog
           bootstrap={persistedBootstrap}
