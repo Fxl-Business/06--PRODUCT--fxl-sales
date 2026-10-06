@@ -2,11 +2,11 @@
   "active_accumulated_seconds": 0,
   "active_since": 1791238576,
   "counters": {
-    "agent_dispatches": 9,
+    "agent_dispatches": 38,
     "initial_slices": 8,
-    "replans": 0,
-    "total_slices": 8,
-    "wave_recoveries": 0
+    "replans": 2,
+    "total_slices": 10,
+    "wave_recoveries": 1
   },
   "exhausted": null,
   "limits": {
@@ -21,7 +21,18 @@
   },
   "paused": false,
   "scoped_counters": {
-    "verify_attempts": {}
+    "verify_attempts": {
+      "01-edition-contract": 1,
+      "02-api-edition-gate": 1,
+      "03-lead-contact-columns": 1,
+      "04-api-leads-edition": 1,
+      "05-web-edition-navigation": 1,
+      "06-web-leads-contact-ui": 1,
+      "07-web-pessoas-vendedores": 1,
+      "07.1-seller-own-lead-defaults": 1,
+      "08-dev-identity-and-playbook": 1,
+      "08.1-hermetic-finance-fixture-tests": 1
+    }
   },
   "version": 1
 }

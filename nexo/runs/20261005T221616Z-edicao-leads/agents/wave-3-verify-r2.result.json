@@ -1,0 +1,1 @@
+{"agent":"wave-verify","wave":3,"status":"PASS","done":true,"unit":"shared-utils 6 files, auth-fake 2 files, api 98 files, web 110 files, node guard 91/91; all passed (CI=true pnpm test exit 0)","integration":"46 files / 346 tests passed","lint":0,"typecheck":0,"build":"ok","security_high":7,"findings":["audit 7 high / 16 moderate / 1 low, equals baseline"]}

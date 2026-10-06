@@ -340,6 +340,8 @@ Full reference: `nexo/knowledge/reference/kanban-de-leads.md` (section Edição 
 - In the leads edition `POST/PATCH /people` force exactly `[vendedor]` (seeding the system funções in the same transaction) before `planPersonFuncoes`; a status-only PATCH leaves funções untouched.
   The Vendedores screen (`apps/web/src/sales-ops/people/VendedoresView.tsx`) lists inactive vendedores with `Reativar`, because Geral and `GET /history` are gated.
   Oracle: `vendedores-routing.test.tsx`.
+- A non-admin vendedor creating a lead in the leads edition sends no `sellerPersonId`: `createContactLead` (only) assigns the caller's own pessoa, the Vendedor picker is hidden for non-admins, and an explicit other id is still `403 seller_scope`.
+- The contact lead dialog stays open with the typed values and an inline error when a save is refused; the `Mover para` dialog shows no refusal before the operator interacts.
 - An admin in the leads edition never sees `meus-dados` (product decision); a finder-only operator stays on `/no-role`.
 
 ## Integração Sales-Finance (plano de controle)
