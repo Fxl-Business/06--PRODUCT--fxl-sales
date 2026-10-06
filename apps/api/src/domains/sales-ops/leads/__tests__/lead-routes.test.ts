@@ -137,6 +137,9 @@ describe('Sales Ops lead routes', () => {
       userId: 'verified-account',
       email: 'ana@example.test',
       isAdmin: false,
+      name: null,
+      hasSellerRole: true,
+      edition: 'full',
     });
 
     currentRoles = ['admin', 'seller', 'finder'];
@@ -149,6 +152,9 @@ describe('Sales Ops lead routes', () => {
       userId: 'verified-account',
       email: null,
       isAdmin: true,
+      name: null,
+      hasSellerRole: true,
+      edition: 'full',
     });
   });
 

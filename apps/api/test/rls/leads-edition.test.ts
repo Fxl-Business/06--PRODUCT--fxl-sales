@@ -55,6 +55,26 @@ function sellerScope(userId: string, email: string | null = null): LeadScope {
   return { userId, email, isAdmin: false };
 }
 
+/**
+ * A non-admin caller exactly as `leadScope` builds it in the leads edition:
+ * verified e-mail, verified name, the seller flag from `userRoles`.
+ */
+function leadsSellerScope(
+  userId: string,
+  email: string | null,
+  overrides: Partial<LeadScope> = {},
+): LeadScope {
+  return {
+    userId,
+    email,
+    isAdmin: false,
+    name: null,
+    hasSellerRole: true,
+    edition: 'leads',
+    ...overrides,
+  };
+}
+
 function okLead(result: WriteLeadResult): LeadView {
   if (!result.ok) throw new Error(`unexpected refusal: ${result.reason}`);
   return result.lead;
@@ -645,6 +665,226 @@ describe('sales operations leads edition: contact leads, vendedor-only pessoas, 
 
     // The same row id: the status-only PATCH never rewrote the função set.
     expect(await personFuncaoRows(orgId, dani.id)).toEqual(rowsBefore);
+  });
+
+  async function peopleRows(orgId: string) {
+    return adminClient<
+      Array<{
+        id: string;
+        display_name: string;
+        contact_email: string | null;
+        status: string;
+        hub_account_id: string | null;
+        is_seller: boolean;
+      }>
+    >`
+      SELECT id, display_name, contact_email, status, hub_account_id, is_seller
+      FROM sales_ops_people WHERE org_id = ${orgId} ORDER BY created_at, id`;
+  }
+
+  async function funcaoSlugsOfPerson(orgId: string, personId: string): Promise<string[]> {
+    const rows = await adminClient<Array<{ slug: string }>>`
+      SELECT f.slug FROM sales_ops_person_funcoes pf
+      JOIN sales_ops_funcoes f ON f.org_id = pf.org_id AND f.id = pf.funcao_id
+      WHERE pf.org_id = ${orgId} AND pf.person_id = ${personId}`;
+    return rows.map((row) => row.slug).sort();
+  }
+
+  async function boardOf(orgId: string, stageId: string, scope: LeadScope) {
+    return listLeads(db, orgId, ListLeadsQuerySchema.parse({ stageId }), scope);
+  }
+
+  describe('seller auto-provision (leads edition)', () => {
+    it('provisions the pessoa on the first request and reuses it on the second', async () => {
+      const orgId = newOrg('prov');
+      const stage = await normalStage(orgId, 'Contato');
+      const scope = leadsSellerScope('hub_joao', ' Joao@Construbom.TEST ', {
+        name: '  João Vendedor  ',
+      });
+
+      const first = await boardOf(orgId, stage.id, scope);
+      expect(first).toMatchObject({ ok: true, leads: [] });
+
+      const people = await peopleRows(orgId);
+      expect(people).toHaveLength(1);
+      expect(people[0]).toMatchObject({
+        display_name: 'João Vendedor',
+        contact_email: 'joao@construbom.test',
+        status: 'active',
+        hub_account_id: 'hub_joao',
+        is_seller: true,
+      });
+      expect(await funcaoSlugsOfPerson(orgId, people[0]!.id)).toEqual(['vendedor']);
+
+      const own = okLead(await createContactLead(db, orgId, contactLead(), scope));
+      expect(own).toMatchObject({
+        sellerPersonId: people[0]!.id,
+        sellerNameSnapshot: 'João Vendedor',
+      });
+      const second = await boardOf(orgId, stage.id, scope);
+      if (!second.ok) throw new Error(`unexpected refusal: ${second.reason}`);
+      expect(second.leads.map((lead) => lead.sellerPersonId)).toEqual([people[0]!.id]);
+      expect(await peopleRows(orgId)).toHaveLength(1);
+    });
+
+    it('names the pessoa after the e-mail local part when the token has no name', async () => {
+      const orgId = newOrg('provname');
+      const stage = await normalStage(orgId, 'Contato');
+      const result = await boardOf(
+        orgId,
+        stage.id,
+        leadsSellerScope('hub_maria', 'maria.silva@construbom.test', { name: '   ' }),
+      );
+      expect(result.ok).toBe(true);
+      const people = await peopleRows(orgId);
+      expect(people.map((person) => person.display_name)).toEqual(['maria.silva']);
+    });
+
+    it('caps a long token name at the people schema length', async () => {
+      const orgId = newOrg('provlong');
+      const stage = await normalStage(orgId, 'Contato');
+      const result = await boardOf(
+        orgId,
+        stage.id,
+        leadsSellerScope('hub_long', 'long@construbom.test', { name: 'N'.repeat(300) }),
+      );
+      expect(result.ok).toBe(true);
+      const people = await peopleRows(orgId);
+      expect(people.map((person) => person.display_name)).toEqual(['N'.repeat(120)]);
+    });
+
+    it('claims the single unbound pessoa with the e-mail instead of creating one', async () => {
+      const orgId = newOrg('provclaim');
+      const stage = await normalStage(orgId, 'Contato');
+      const carla = await leadsVendedor(orgId, 'Carla', 'carla@construbom.test');
+
+      const result = await boardOf(
+        orgId,
+        stage.id,
+        leadsSellerScope('hub_carla', 'Carla@Construbom.test', { name: 'Outro Nome' }),
+      );
+      expect(result.ok).toBe(true);
+      const people = await peopleRows(orgId);
+      expect(people).toHaveLength(1);
+      expect(people[0]).toMatchObject({
+        id: carla.id,
+        display_name: 'Carla',
+        hub_account_id: 'hub_carla',
+      });
+    });
+
+    it('still refuses two unbound pessoas sharing the e-mail and creates nothing', async () => {
+      const orgId = newOrg('provtwo');
+      const stage = await normalStage(orgId, 'Contato');
+      await leadsVendedor(orgId, 'Dani A', 'dani@construbom.test');
+      await leadsVendedor(orgId, 'Dani B', 'dani@construbom.test');
+
+      expect(
+        await boardOf(orgId, stage.id, leadsSellerScope('hub_dani', 'dani@construbom.test')),
+      ).toEqual({ ok: false, reason: 'seller_person_unmapped' });
+      const people = await peopleRows(orgId);
+      expect(people).toHaveLength(2);
+      expect(people.every((person) => person.hub_account_id === null)).toBe(true);
+    });
+
+    it('never provisions over an inactive pessoa with the e-mail', async () => {
+      const orgId = newOrg('provinactive');
+      const stage = await normalStage(orgId, 'Contato');
+      const eva = await leadsVendedor(orgId, 'Eva', 'eva@construbom.test');
+      await adminClient`
+        UPDATE sales_ops_people SET status = 'inactive'
+        WHERE org_id = ${orgId} AND id = ${eva.id}`;
+
+      expect(
+        await boardOf(orgId, stage.id, leadsSellerScope('hub_eva', 'eva@construbom.test')),
+      ).toEqual({ ok: false, reason: 'seller_person_unmapped' });
+      expect(await peopleRows(orgId)).toHaveLength(1);
+    });
+
+    it('keeps a finder-only caller unmapped and creates nothing', async () => {
+      const orgId = newOrg('provfinder');
+      const stage = await normalStage(orgId, 'Contato');
+      expect(
+        await boardOf(
+          orgId,
+          stage.id,
+          leadsSellerScope('hub_finder', 'finder@construbom.test', { hasSellerRole: false }),
+        ),
+      ).toEqual({ ok: false, reason: 'seller_person_unmapped' });
+      expect(await peopleRows(orgId)).toHaveLength(0);
+    });
+
+    it('FXL oracle: a full-edition seller with no pessoa stays unmapped and creates nothing', async () => {
+      const orgId = newOrg('provfull');
+      await ensureLeadStagesForOrg(db, orgId);
+      const [stage] = await stageIds(orgId);
+      for (const edition of ['full', undefined] as const) {
+        expect(
+          await boardOf(
+            orgId,
+            stage!,
+            leadsSellerScope('hub_full', 'full@construbom.test', { edition }),
+          ),
+        ).toEqual({ ok: false, reason: 'seller_person_unmapped' });
+      }
+      expect(await peopleRows(orgId)).toHaveLength(0);
+      const [funcoes] = await adminClient<Array<{ n: number }>>`
+        SELECT count(*)::int AS n FROM sales_ops_funcoes WHERE org_id = ${orgId}`;
+      expect(funcoes!.n).toBe(0);
+    });
+
+    it('keeps a caller without an e-mail claim unmapped and creates nothing', async () => {
+      const orgId = newOrg('provnoemail');
+      const stage = await normalStage(orgId, 'Contato');
+      expect(
+        await boardOf(
+          orgId,
+          stage.id,
+          leadsSellerScope('hub_noemail', null, { name: 'Sem Email' }),
+        ),
+      ).toEqual({ ok: false, reason: 'seller_person_unmapped' });
+      expect(await peopleRows(orgId)).toHaveLength(0);
+    });
+
+    it('seeds the system funções for an org that has none and makes the pessoa a vendedor', async () => {
+      const orgId = newOrg('provseed');
+      const stage = await normalStage(orgId, 'Contato');
+      const [before] = await adminClient<Array<{ n: number }>>`
+        SELECT count(*)::int AS n FROM sales_ops_funcoes WHERE org_id = ${orgId}`;
+      expect(before!.n).toBe(0);
+
+      const result = await boardOf(
+        orgId,
+        stage.id,
+        leadsSellerScope('hub_seed', 'seed@construbom.test'),
+      );
+      expect(result.ok).toBe(true);
+      const funcoes = await adminClient<Array<{ slug: string; is_system: boolean }>>`
+        SELECT slug, is_system FROM sales_ops_funcoes WHERE org_id = ${orgId} ORDER BY slug`;
+      expect(funcoes).toEqual([
+        { slug: 'finder', is_system: true },
+        { slug: 'vendedor', is_system: true },
+      ]);
+      const [person] = await peopleRows(orgId);
+      expect(await funcaoSlugsOfPerson(orgId, person!.id)).toEqual(['vendedor']);
+    });
+
+    it('creates exactly one pessoa when two first requests race', async () => {
+      const orgId = newOrg('provrace');
+      const stage = await normalStage(orgId, 'Contato');
+      const scope = leadsSellerScope('hub_race', 'race@construbom.test', { name: 'Race' });
+
+      const results = await Promise.all([
+        boardOf(orgId, stage.id, scope),
+        boardOf(orgId, stage.id, scope),
+        createContactLead(db, orgId, contactLead(), scope),
+      ]);
+      expect(results.map((result) => result.ok)).toEqual([true, true, true]);
+      const people = await peopleRows(orgId);
+      expect(people).toHaveLength(1);
+      expect(people[0]!.hub_account_id).toBe('hub_race');
+      expect(await funcaoSlugsOfPerson(orgId, people[0]!.id)).toEqual(['vendedor']);
+    });
   });
 
   it('FXL oracle: full-edition people and leads are unchanged', async () => {
