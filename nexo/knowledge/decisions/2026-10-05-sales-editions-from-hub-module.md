@@ -28,5 +28,6 @@ The only schema change is additive: three nullable contact columns on `sales_ops
 
 ## Alternatives considered
 
-- B: a per-org edition setting persisted in the Sales database. It would make the edition survive a Hub change (fail-closed), but adds a table, an admin surface and a second source of truth that can disagree with the Hub entitlement. Filed as a ROADMAP question rather than built.
-- C: a separate deployment or fork of the product for the Construbom. It isolates FXL completely but splits the codebase and every fix, against the "solid, configurable core" intent.
+- B: a separate route tree (`/crm/*`) for the simple product. Faster to stand up in isolation, but it duplicates the Kanban, auth and screens, so every board fix would be made twice.
+- C: granular per-org feature flags (a toggle table). Maximum flexibility, but a configurable product before a second real case exists (YAGNI); the capability set of this decision is the seam that can grow into it.
+- Activation alternatives also weighed in the brainstorm: an edition column in the Sales database set by FXL (independent of the Hub, but the Hub stops being the source of truth; the persisted-edition question is on the ROADMAP), and a new `plan`/`edition` claim in the Hub token (cleanest long term, but needs a Hub and SDK change).
