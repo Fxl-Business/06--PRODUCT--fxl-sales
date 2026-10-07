@@ -81,6 +81,8 @@ const server = {
   /** When set, the restore POST waits for it. */
   holdRestore: null as Promise<void> | null,
   listAnswer: null as Responder | null,
+  /** When true, a successful restore does NOT drop the row server side. */
+  keepRestoredRow: false,
 };
 
 function respond(status: number, body: unknown) {
@@ -106,6 +108,7 @@ beforeEach(() => {
   server.holdList = null;
   server.holdRestore = null;
   server.listAnswer = null;
+  server.keepRestoredRow = false;
   fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
     const url = new URL(input);
     const method = init?.method ?? 'GET';
@@ -125,7 +128,7 @@ beforeEach(() => {
     const restore = /^\/api\/v1\/sales-ops\/leads\/([^/]+)\/restore$/.exec(url.pathname);
     if (method === 'POST' && restore) {
       if (server.holdRestore) await server.holdRestore;
-      if (server.restoreAnswer.status === 200) {
+      if (server.restoreAnswer.status === 200 && !server.keepRestoredRow) {
         server.rows = server.rows.filter((row) => row.id !== restore[1]);
       }
       return respond(server.restoreAnswer.status, server.restoreAnswer.body);
@@ -137,6 +140,7 @@ beforeEach(() => {
 
 let container: HTMLDivElement;
 let root: Root | null = null;
+let activeClient: QueryClient;
 
 afterEach(async () => {
   if (root) await act(async () => root?.unmount());
@@ -165,6 +169,7 @@ async function renderScreen() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
+  activeClient = queryClient;
   root = createRoot(container);
   await act(async () => {
     root?.render(
@@ -315,6 +320,37 @@ describe('Leads excluídos: the screen', () => {
     expect(container.querySelector('[data-restore-success]')?.textContent).toBe(
       DELETED_LEADS_COPY.restored('Ana Souza'),
     );
+  });
+
+  it('removes the restored row from the cache itself, without any refetch', async () => {
+    server.keepRestoredRow = true;
+    await renderScreen();
+    const refetch = deferred();
+    server.holdList = refetch.promise;
+    await act(async () => restoreButtonFor('Ana Souza').click());
+    await flush();
+    // The server still lists the lead and the refetch is parked: only the
+    // on-success cache removal can have hidden the row.
+    expect(callsTo('POST', `/api/v1/sales-ops/leads/${ID_A}/restore`)).toHaveLength(1);
+    expect(rowText('Ana Souza')).toBeNull();
+    expect(rowText('Bruno Lima')).not.toBeNull();
+    refetch.resolve();
+    await flush();
+  });
+
+  it('invalidates the whole leads root, so a cached board query goes stale', async () => {
+    await renderScreen();
+    const board = ['leads', 'board', { seller: 'all' }] as const;
+    const stages = queryKeys.leads.stages();
+    activeClient.setQueryData(board, { leads: [] });
+    activeClient.setQueryData(stages, { stages: [] });
+    const spy = vi.spyOn(activeClient, 'invalidateQueries');
+    await act(async () => restoreButtonFor('Ana Souza').click());
+    await flush();
+    const keys = spy.mock.calls.map(([filters]) => JSON.stringify(filters?.queryKey));
+    expect(keys).toContain(JSON.stringify(queryKeys.leads.all));
+    expect(activeClient.getQueryState(board)?.isInvalidated).toBe(true);
+    expect(activeClient.getQueryState(stages)?.isInvalidated).toBe(true);
   });
 
   it('shows the pending state on the row and blocks a second restore while one is in flight', async () => {
