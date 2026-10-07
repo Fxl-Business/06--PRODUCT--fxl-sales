@@ -75,6 +75,7 @@ import {
   boardStages,
   daysInCurrentStage,
   leadIsConverted,
+  leadIsUnassigned,
   leadsInStage,
 } from './calculations';
 import {
@@ -83,7 +84,7 @@ import {
   leadBirthdayLabel,
   leadContactLine,
 } from './contact-lead';
-import { LeadCard } from './LeadCard';
+import { LeadCard, UnassignedLeadMarker } from './LeadCard';
 import { LeadsFunnelView } from './LeadsFunnelView';
 import { MoveLeadDialog } from './MoveLeadDialog';
 import type { SalesOpsLead, SalesOpsLeadStage } from './types';
@@ -821,10 +822,14 @@ export function LeadsBoard({
                           </td>
                         )}
                         <td className="px-4 py-3">
-                          <span className="inline-flex items-center gap-2">
-                            <span className={avatarClass}>{avatarInitials(sellerLabel)}</span>
-                            {sellerLabel}
-                          </span>
+                          {leadIsUnassigned(row) ? (
+                            <UnassignedLeadMarker />
+                          ) : (
+                            <span className="inline-flex items-center gap-2">
+                              <span className={avatarClass}>{avatarInitials(sellerLabel)}</span>
+                              {sellerLabel}
+                            </span>
+                          )}
                         </td>
                         <td className="px-4 py-3">
                           {showBadge ? (
