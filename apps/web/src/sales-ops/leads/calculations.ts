@@ -111,6 +111,20 @@ export function leadIsConverted(lead: SalesOpsLead): boolean {
   return lead.saleId !== null;
 }
 
+/**
+ * THE unassigned predicate: the lead sits in the shared pool, so any vendedor
+ * may take it by moving or editing it first (the API claims it in that same
+ * write). True exactly when no vendedor owns it AND it is not converted: a
+ * converted lead is read-only (`already_converted`) and can never be claimed,
+ * so it is not "disponível" even with no vendedor.
+ *
+ * Keyed on `sellerPersonId` alone, never on `sellerNameSnapshot`, mirroring
+ * the API's `seller_person_id IS NULL`.
+ */
+export function leadIsUnassigned(lead: SalesOpsLead): boolean {
+  return lead.sellerPersonId === null && !leadIsConverted(lead);
+}
+
 /** One funnel row: a stage with its lead count, value total (cents) and value share. */
 export type LeadFunnelRow = {
   stageId: string;

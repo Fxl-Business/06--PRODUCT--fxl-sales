@@ -55,6 +55,13 @@ export function leadSellerLabel(lead: SalesOpsLead, lookups: LabelLookups): stri
 }
 
 /**
+ * The seller-slot marker of a lead in the shared pool (`leadIsUnassigned`), on
+ * the card footer and in the Lista's Vendedor cell. A plain hyphen, never an em
+ * dash.
+ */
+export const UNASSIGNED_LEAD_LABEL = 'Sem vendedor - disponível';
+
+/**
  * One label per lead product: the catalog name when `productId` resolves,
  * otherwise the row's own snapshot - which is the whole point of the
  * snapshot-plus-null-id convention a free item is written with.

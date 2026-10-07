@@ -4,6 +4,7 @@ import { formatMoneyBrl } from '../calculations';
 import {
   CARD_TOOLTIP,
   SALE_STATUS_LABEL,
+  UNASSIGNED_LEAD_LABEL,
   leadCompanyLabel,
   leadProductLabels,
   leadSellerLabel,
@@ -21,8 +22,9 @@ import {
   dayBadgeTone,
   avatarInitials,
   readOnlyCardClass,
+  unassignedMarkerClass,
 } from './board-ui';
-import { daysInCurrentStage, leadIsConverted } from './calculations';
+import { daysInCurrentStage, leadIsConverted, leadIsUnassigned } from './calculations';
 import { CONTACT_LEAD_COPY, leadBirthdayLabel, leadContactLine } from './contact-lead';
 import type { SalesOpsLead } from './types';
 
@@ -63,6 +65,19 @@ export type LeadCardProps = {
   fieldSet?: LeadFieldSet;
 };
 
+/**
+ * The seller slot of a lead nobody owns yet (`leadIsUnassigned`). Shared by the
+ * card footer and the Lista's Vendedor cell so the two can never drift. The text
+ * IS the accessible name: nothing here is aria-hidden.
+ */
+export function UnassignedLeadMarker() {
+  return (
+    <span className={unassignedMarkerClass} data-unassigned-lead="">
+      <span className="truncate">{UNASSIGNED_LEAD_LABEL}</span>
+    </span>
+  );
+}
+
 export function LeadCard({
   lead,
   lookups,
@@ -83,6 +98,7 @@ export function LeadCard({
   const visibleProducts = productLabels.slice(0, MAX_PRODUCT_CHIPS);
   const hiddenProductCount = productLabels.length - visibleProducts.length;
   const sellerLabel = leadSellerLabel(lead, lookups);
+  const unassigned = leadIsUnassigned(lead);
   const pointerDown = React.useRef<{ x: number; y: number } | null>(null);
 
   function handlePointerDown(event: React.PointerEvent<HTMLElement>) {
@@ -212,8 +228,14 @@ export function LeadCard({
 
       <div className="mt-1 flex items-center justify-between gap-2 border-t border-[#f0f0f3] pt-2.5">
         <span className="flex min-w-0 items-center gap-2">
-          <span className={avatarClass}>{avatarInitials(sellerLabel)}</span>
-          <span className="truncate text-[12px] text-[#57575f]">{sellerLabel}</span>
+          {unassigned ? (
+            <UnassignedLeadMarker />
+          ) : (
+            <>
+              <span className={avatarClass}>{avatarInitials(sellerLabel)}</span>
+              <span className="truncate text-[12px] text-[#57575f]">{sellerLabel}</span>
+            </>
+          )}
         </span>
         {showDaysBadge && !readOnly ? (
           <span

@@ -73,9 +73,15 @@ export const dragOverlayCardClass = 'w-[276px] rotate-2 cursor-grabbing shadow-x
  */
 export const readOnlyCardClass = 'border-dashed bg-[#fbfbfc]';
 
-/** Pill geometry only. Compose with `dayBadgeTone(days)` for the colour. */
+/**
+ * Pill geometry only. Compose with `dayBadgeTone(days)` for the colour.
+ *
+ * `shrink-0 whitespace-nowrap`: a pill never shrinks or wraps. Without them a
+ * long vendedor name beside it squeezed `há 12 dias` onto two lines and grew the
+ * card footer from 35px to 49.5px (measured in Chromium on a 300px column).
+ */
 export const daysBadgeClass =
-  'inline-flex items-center rounded-full px-2 py-0.5 text-[11.5px] font-semibold';
+  'inline-flex shrink-0 items-center whitespace-nowrap rounded-full px-2 py-0.5 text-[11.5px] font-semibold';
 
 export const chipClass =
   'inline-flex items-center rounded-full bg-[#f4f4f6] px-2 py-0.5 text-[11px] font-medium text-[#57575f]';
@@ -184,6 +190,17 @@ export const segmentedButtonActiveClass = 'bg-[#201f24] text-white';
 
 export const avatarClass =
   'inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#f7e2a8] text-[10px] font-bold text-[#7a5a12]';
+
+/**
+ * The seller slot of a lead in the shared pool, in place of the avatar and name.
+ * `h-6` is `avatarClass`'s height, so an unassigned card's footer is exactly as
+ * tall as an assigned one's. The dashed border reads as an empty slot; the teal
+ * (the fourth normal-stage hue) stays clear of the grey, amber and red
+ * `dayBadgeTone` tiers it sits beside. The label goes in an inner `truncate`
+ * span, because text-overflow does not apply to a flex container's own text.
+ */
+export const unassignedMarkerClass =
+  'inline-flex h-6 min-w-0 items-center rounded-full border border-dashed border-[#9fd3cf] bg-[#eef8f7] px-2.5 text-[11px] font-semibold text-[#17706d]';
 
 export const columnHeaderCardClass =
   'rounded-[13px] bg-white px-[14px] py-3 shadow-[0_1px_2px_rgba(32,31,36,0.05)]';
