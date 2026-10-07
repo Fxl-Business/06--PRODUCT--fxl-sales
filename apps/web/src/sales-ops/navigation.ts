@@ -11,6 +11,7 @@ import {
   ListChecks,
   Search,
   Tags,
+  Trash2,
   UsersRound,
   type LucideIcon,
 } from 'lucide-react';
@@ -36,7 +37,8 @@ export type SalesOpsView =
   | 'geral'
   | 'leads'
   | 'etapas'
-  | 'importacao';
+  | 'importacao'
+  | 'leads-excluidos';
 
 export type SalesOpsNavigationItem = {
   id: SalesOpsView;
@@ -94,10 +96,12 @@ const cadastros: SalesOpsNavigationItem[] = [
   /*
     Before `geral`, which is the settings-and-history catch-all and stays last.
     `produtos` remains `[0]`, so the Cadastros landing route does not move.
-    `importacao` goes before `geral` too.
+    `importacao` goes before `geral` too, and so does `leads-excluidos` (the lead
+    lixeira), appended after it.
   */
   { id: 'etapas', label: 'Etapas do funil', icon: ListChecks },
   { id: 'importacao', label: 'Importação', icon: FileSpreadsheet },
+  { id: 'leads-excluidos', label: 'Leads excluídos', icon: Trash2 },
   { id: 'geral', label: 'Geral', icon: Cog },
 ];
 
@@ -138,6 +142,8 @@ const leadsEditionCadastros: SalesOpsNavigationItem[] = [
   { id: 'clientes', label: 'Clientes', icon: ContactRound },
   { id: 'etapas', label: 'Etapas do funil', icon: ListChecks },
   { id: 'importacao', label: 'Importação', icon: FileSpreadsheet },
+  // The lead lixeira (AC9): the gestor restores a deleted lead here. Appended.
+  { id: 'leads-excluidos', label: 'Leads excluídos', icon: Trash2 },
 ];
 
 const leadsEditionMeusDadosSeller: SalesOpsNavigationItem[] = [

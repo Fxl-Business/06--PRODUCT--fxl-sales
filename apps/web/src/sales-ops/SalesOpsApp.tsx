@@ -154,6 +154,8 @@ import type { LeadConversionItem, LeadConversionPrefill } from './leads/conversi
 import type { LeadConversionRequest } from './leads/LeadsBoard';
 import { LeadsBoardContainer } from './leads/LeadsBoardContainer';
 import { LeadStagesContainer } from './leads/LeadStagesContainer';
+import { DeletedLeadsContainer } from './leads/DeletedLeadsContainer';
+import { DELETED_LEADS_COPY } from './leads/deleted-leads';
 import { ImportContainer } from './import/ImportContainer';
 import { VendedorDialog, VendedoresView } from './people/VendedoresView';
 import { VENDEDORES_COPY } from './people/vendedores';
@@ -511,6 +513,10 @@ function titleForView(view: SalesOpsView, workspace: SalesOpsWorkspace) {
     importacao: {
       title: 'Importação',
       subtitle: 'Planilhas para o onboarding e para trazer cadastros, leads e propostas em lote',
+    },
+    'leads-excluidos': {
+      title: DELETED_LEADS_COPY.title,
+      subtitle: DELETED_LEADS_COPY.subtitle,
     },
   };
   return map[view];
@@ -1699,10 +1705,14 @@ export function SalesOpsApp() {
     draw their own primary button (`Novo lead`, `Nova etapa`). Without naming them
     the chain falls through to `'Nova proposta'`, which would render a proposta
     button over a Kanban board and open the wizard from it.
-    `importacao` has no create action at all.
+    `importacao` and `leads-excluidos` have no create action at all.
   */
   const headerAction =
-    view === 'geral' || view === 'leads' || view === 'etapas' || view === 'importacao'
+    view === 'geral' ||
+    view === 'leads' ||
+    view === 'etapas' ||
+    view === 'importacao' ||
+    view === 'leads-excluidos'
       ? null
       : view === 'produtos'
         ? productKind === 'service'
@@ -2350,6 +2360,7 @@ export function SalesOpsApp() {
                 ) : null}
                 {view === 'etapas' ? <LeadStagesContainer /> : null}
                 {view === 'importacao' ? <ImportContainer /> : null}
+                {view === 'leads-excluidos' ? <DeletedLeadsContainer /> : null}
                 {view === 'geral' ? (
                   /*
                     The history is a SIBLING of `SettingsView`, never nested inside it:

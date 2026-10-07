@@ -65,6 +65,7 @@ describe('sales operations navigation', () => {
       'funcoes',
       'etapas',
       'importacao',
+      'leads-excluidos',
       'geral',
     ]);
     expect(getSalesOpsNavigation('cadastros', team).map((item) => item.label)).toEqual([
@@ -75,6 +76,7 @@ describe('sales operations navigation', () => {
       'Funções',
       'Etapas do funil',
       'Importação',
+      'Leads excluídos',
       'Geral',
     ]);
   });
@@ -534,6 +536,17 @@ describe('sales operations navigation', () => {
     const asSeller = resolveSalesOpsRoute({ workspace: 'cadastros', view: 'importacao' }, seller);
     expect(asSeller.redirect).toBe(true);
     expect(asSeller.route.view).not.toBe('importacao');
+  });
+
+  it('resolves cadastros/leads-excluidos for an admin only', () => {
+    expect(resolveSalesOpsRoute({ workspace: 'cadastros', view: 'leads-excluidos' }, team)).toEqual({
+      route: { workspace: 'cadastros', view: 'leads-excluidos' },
+      path: '/cadastros/leads-excluidos',
+      redirect: false,
+    });
+    const asSeller = resolveSalesOpsRoute({ workspace: 'cadastros', view: 'leads-excluidos' }, seller);
+    expect(asSeller.redirect).toBe(true);
+    expect(asSeller.route.view).not.toBe('leads-excluidos');
   });
 
   it('hands the full edition the very same workspace catalogue', () => {

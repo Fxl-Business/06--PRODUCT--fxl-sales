@@ -112,6 +112,7 @@ export const queryKeys = {
     all: ['leads'] as const,
     board: (filters: LeadBoardFilters) => ['leads', 'board', filters ?? null] as const,
     stages: () => ['leads', 'stages'] as const,
+    deleted: () => ['leads', 'deleted'] as const,
   },
   finderClicks: {
     all: ['finder', 'clicks'] as const,

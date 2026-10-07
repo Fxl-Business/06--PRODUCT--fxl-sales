@@ -166,6 +166,10 @@ vi.mock('../leads/LeadStagesContainer', () => ({
   },
 }));
 
+vi.mock('../leads/DeletedLeadsContainer', () => ({
+  DeletedLeadsContainer: () => <div data-deleted-leads-container />,
+}));
+
 vi.mock('@/components/ui/dialog', () => ({
   Dialog: ({ children }: HTMLAttributes<HTMLDivElement>) => <div>{children}</div>,
   DialogContent: ({ children, ...props }: HTMLAttributes<HTMLDivElement>) => (
@@ -367,9 +371,9 @@ describe('the leads edition inside the Sales Ops shell', () => {
     expect(navLabel('Comissões')).toBeNull();
   });
 
-  it('shows Vendedores, Clientes, Etapas do funil and Importação in cadastros', async () => {
+  it('shows Vendedores, Clientes, Etapas do funil, Importação and Leads excluídos in cadastros', async () => {
     await renderRoute('/cadastros/etapas', gestor, 'leads');
-    for (const label of ['Vendedores', 'Clientes', 'Etapas do funil', 'Importação']) {
+    for (const label of ['Vendedores', 'Clientes', 'Etapas do funil', 'Importação', 'Leads excluídos']) {
       expect(navLabel(label), label).not.toBeNull();
     }
     for (const label of ['Pessoas', 'Produtos & Serviços', 'Funções', 'Geral']) {
@@ -416,5 +420,36 @@ describe('the leads edition inside the Sales Ops shell', () => {
     expect(locationPath()).toBe('/tatico/dashboard');
     await openWorkspaceMenu();
     expect(workspaceMenuLabels()).toEqual(['Tático', 'Operacional', 'Cadastros', 'Meus dados']);
+  });
+});
+
+describe('Leads excluídos inside the Sales Ops shell', () => {
+  it.each(['full', 'leads'] as const)(
+    'mounts the lixeira at cadastros/leads-excluidos for an admin in the %s edition',
+    async (edition) => {
+      await renderRoute('/cadastros/leads-excluidos', ['admin', 'seller', 'finder'], edition);
+      expect(locationPath()).toBe('/cadastros/leads-excluidos');
+      expect(container.querySelector('[data-deleted-leads-container]')).not.toBeNull();
+      expect(container.querySelector('h1')?.textContent?.trim()).toBe('Leads excluídos');
+      expect(navLabel('Leads excluídos')).not.toBeNull();
+      expect(headerText()).not.toContain('Nova proposta');
+    },
+  );
+
+  it('mounts it nowhere else', async () => {
+    for (const path of ['/cadastros/etapas', '/cadastros/pessoas', '/operacional/leads']) {
+      await renderRoute(path, ['admin']);
+      expect(container.querySelector('[data-deleted-leads-container]'), path).toBeNull();
+    }
+  });
+
+  it.each([
+    ['full', '/meus-dados/vendedores'],
+    ['leads', '/meus-dados/leads'],
+  ] as const)('a seller in the %s edition never reaches it', async (edition, landing) => {
+    await renderRoute('/cadastros/leads-excluidos', ['seller'], edition);
+    expect(locationPath()).toBe(landing);
+    expect(container.querySelector('[data-deleted-leads-container]')).toBeNull();
+    expect(navLabel('Leads excluídos')).toBeNull();
   });
 });
