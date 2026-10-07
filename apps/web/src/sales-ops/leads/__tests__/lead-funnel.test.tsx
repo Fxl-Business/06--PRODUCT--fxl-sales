@@ -135,18 +135,46 @@ describe('LeadsFunnelView', () => {
     await act(async () => root.render(node));
   }
 
-  it('renders one row per active stage with count, total, share and bar', async () => {
+  async function click(el: Element) {
+    await act(async () =>
+      el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })),
+    );
+  }
+
+  it('defaults to Faturamento: bar width tapers by the largest stage value', async () => {
     await render(<LeadsFunnelView leads={LEADS} stages={STAGES} />);
-    const rows = [...container.querySelectorAll('[data-funnel-row]')];
-    expect(rows).toHaveLength(3);
+    expect(container.querySelector('[data-leads-funnel]')?.getAttribute('data-funnel-metric')).toBe(
+      'value',
+    );
+    expect([...container.querySelectorAll('[data-funnel-row]')]).toHaveLength(3);
 
     const novo = container.querySelector(`[data-funnel-row="${NOVO_ID}"]`)!;
-    expect(novo.querySelector('[data-funnel-count]')?.textContent).toBe('2 leads');
+    // Largest value stage (300k of a 300k max) => full-width bar; share is of the sum.
+    expect((novo.querySelector('[data-funnel-bar]') as HTMLElement).style.width).toBe('100%');
     expect(novo.querySelector('[data-funnel-share]')?.textContent).toBe('50% do total');
-    expect((novo.querySelector('[data-funnel-bar]') as HTMLElement).style.width).toBe('50%');
+    expect(novo.querySelector('[data-funnel-primary]')?.textContent).toContain('3.000');
+    expect(novo.querySelector('[data-funnel-secondary]')?.textContent).toContain('2 leads');
 
     const conv = container.querySelector(`[data-funnel-row="${CONV_ID}"]`)!;
-    expect(conv.querySelector('[data-funnel-count]')?.textContent).toBe('0 leads');
+    expect((conv.querySelector('[data-funnel-bar]') as HTMLElement).style.width).toBe('0%');
+    expect(conv.querySelector('[data-funnel-share]')?.textContent).toBe('0% do total');
+  });
+
+  it('switches to Volume: bars and shares size by lead count', async () => {
+    await render(<LeadsFunnelView leads={LEADS} stages={STAGES} />);
+    await click(container.querySelector('[data-funnel-metric-option="volume"]')!);
+    expect(container.querySelector('[data-leads-funnel]')?.getAttribute('data-funnel-metric')).toBe(
+      'volume',
+    );
+
+    const novo = container.querySelector(`[data-funnel-row="${NOVO_ID}"]`)!;
+    // Max count is 2 (Novo) => full width; Qualificado has 1 => 50%.
+    expect((novo.querySelector('[data-funnel-bar]') as HTMLElement).style.width).toBe('100%');
+    expect(novo.querySelector('[data-funnel-primary]')?.textContent).toBe('2 leads');
+    expect(novo.querySelector('[data-funnel-share]')?.textContent).toBe('67% do total');
+
+    const qual = container.querySelector(`[data-funnel-row="${QUAL_ID}"]`)!;
+    expect((qual.querySelector('[data-funnel-bar]') as HTMLElement).style.width).toBe('50%');
   });
 
   it('shows the funnel grand totals in the footer', async () => {
