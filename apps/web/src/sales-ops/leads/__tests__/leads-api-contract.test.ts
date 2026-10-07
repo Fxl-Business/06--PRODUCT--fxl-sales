@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { apiFetch } from '@/lib/api-client';
 import { queryKeys } from '@/lib/query-keys';
-import { LEADS_PATH, LEAD_STAGES_PATH, leadsApi } from '../api';
+import { LEADS_PATH, LEAD_STAGES_PATH, deleteLead, leadsApi } from '../api';
 import { buildContactLeadPayload, contactDraftFromSeed } from '../contact-lead';
 
 vi.mock('@/lib/api-client', () => ({
@@ -151,6 +151,15 @@ describe('leadsApi', () => {
     expect(editInit.method).toBe('PATCH');
     expect(Object.keys(bodyOf(call(1)))).toEqual(keys);
     expect('id' in bodyOf(call(1))).toBe(false);
+  });
+
+  it('deleteLead posts the lixeira action with no body and the token it was given', async () => {
+    await deleteLead('token-1', 'L1');
+    const [path, init] = call(0);
+    expect(path).toBe(`${LEADS_PATH}/L1/delete`);
+    expect(init.method).toBe('POST');
+    expect(init.token).toBe('token-1');
+    expect(init.body).toBeUndefined();
   });
 
   it('the leads query keys are account- and org-agnostic', () => {

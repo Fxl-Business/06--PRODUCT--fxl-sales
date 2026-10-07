@@ -1,9 +1,10 @@
-import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery, useQueryClient, type QueryKey } from '@tanstack/react-query';
 import { useAccessToken } from '@/auth/react';
 import { useAppMutation } from '@/lib/app-mutation';
 import { queryKeys } from '@/lib/query-keys';
 import { requireToken } from '@/lib/require-token';
 import {
+  deleteLead,
   leadsApi,
   type MoveLeadPayload,
   type ReorderLeadStagesPayload,
@@ -17,6 +18,7 @@ import {
   flattenLeadPages,
   leadsHasMore,
   optimisticLeadMove,
+  optimisticLeadRemoval,
   reconcileLeadRow,
   type OptimisticLeadPatch,
 } from './optimistic';
@@ -192,6 +194,73 @@ export function useMoveLead(filters?: LeadBoardFilters) {
       const current = queryClient.getQueryData<LeadsInfiniteData>(boardKey);
       if (!current) return;
       queryClient.setQueryData(boardKey, reconcileLeadRow(current, response.lead));
+    },
+  });
+}
+
+/**
+ * The prefix every board cache entry shares, whatever its filters
+ * (`['leads', 'board']`). Derived from the factory, never hand-typed.
+ */
+const LEAD_BOARDS_PREFIX: QueryKey = queryKeys.leads.board(undefined).slice(0, 2);
+
+/** What `useDeleteLead` wrote, one entry per board cache entry it patched. */
+type LeadRemovalSnapshot = { boards: Array<{ key: QueryKey; previous: LeadsInfiniteData }> };
+
+function isNotFound(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as { status?: unknown }).status === 404
+  );
+}
+
+/**
+ * Moves a lead to the lixeira (`POST /leads/:id/delete`), OPTIMISTICALLY.
+ *
+ * Unlike `useMoveLead`, the patch sweeps EVERY cached board entry, whatever its
+ * filters. Removing a card can never make it appear twice, which is the hazard
+ * that keeps the move patch on one key, and a lead deleted under one vendedor
+ * filter must not survive in the unfiltered board the operator switches back to.
+ *
+ * Each patched entry is restored WHOLE from its own snapshot on error, so the
+ * revert is exact by construction. A `404` is NOT an error here: the lead is
+ * already gone (deleted elsewhere, or no longer in this viewer's scope), which
+ * is the outcome the operator asked for, so the card stays removed and the
+ * mutation resolves. Every outcome invalidates the leads root on settle.
+ */
+export function useDeleteLead() {
+  const { getToken } = useAccessToken();
+  const queryClient = useQueryClient();
+  return useAppMutation<void, Error, string, LeadRemovalSnapshot>({
+    mutationFn: async (leadId) => {
+      try {
+        await deleteLead(await requireToken(getToken), leadId);
+      } catch (error: unknown) {
+        if (isNotFound(error)) return;
+        throw error;
+      }
+    },
+    invalidates: [queryKeys.leads.all],
+    onMutate: async (leadId) => {
+      // An in-flight page fetch must not land on top of the optimistic removal.
+      await queryClient.cancelQueries({ queryKey: queryKeys.leads.all });
+      const boards: LeadRemovalSnapshot['boards'] = [];
+      for (const [key, data] of queryClient.getQueriesData<LeadsInfiniteData>({
+        queryKey: LEAD_BOARDS_PREFIX,
+      })) {
+        if (!data) continue;
+        const patch = optimisticLeadRemoval(data, leadId);
+        if (patch.next === data) continue;
+        boards.push({ key, previous: data });
+        queryClient.setQueryData(key, patch.next);
+      }
+      return { boards };
+    },
+    onError: (_error, _leadId, snapshot) => {
+      for (const { key, previous } of snapshot?.boards ?? []) {
+        queryClient.setQueryData(key, previous);
+      }
     },
   });
 }

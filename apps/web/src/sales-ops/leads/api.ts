@@ -18,8 +18,10 @@ import {
  * defaulted").
  *
  * There is NO DELETE verb here and there must never be one: a stage is archived
- * with `PATCH {status:'archived'}`, and a lead that goes nowhere ends in the
- * terminal `lost` stage.
+ * with `PATCH {status:'archived'}`, a lead that goes nowhere ends in the
+ * terminal `lost` stage, and a lead removed by mistake goes to the lixeira
+ * through the `POST /leads/:id/delete` ACTION (`deleteLead` below), a soft
+ * delete the gestor can restore.
  */
 
 type Token = string;
@@ -205,3 +207,18 @@ export const leadsApi = {
       body: JSON.stringify(payload),
     }),
 };
+
+/**
+ * Moves one lead to the lixeira: `POST /leads/:id/delete`, no body, `204` on
+ * success. A soft delete and an ACTION like `/move`, never the DELETE verb: the
+ * row stays, flagged, and the gestor restores it from `Cadastros > Leads
+ * excluídos`. Rejects with the `ApiError` of a `404` (absent, out of scope or
+ * already deleted) or a `409 lead_already_converted`; `useDeleteLead` decides
+ * what each means for the board.
+ *
+ * Token FIRST, unlike `leadsApi`, because that is the lixeira seam's fixed
+ * signature (`SEAM-CONTRACT.md`), shared with `listDeletedLeads` and `restoreLead`.
+ */
+export function deleteLead(token: Token, id: string): Promise<void> {
+  return apiFetch<void>(`${LEADS_PATH}/${id}/delete`, { method: 'POST', token });
+}

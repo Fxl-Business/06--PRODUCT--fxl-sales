@@ -59,6 +59,8 @@ vi.mock('../hooks', () => ({
     mutateAsync: mocks.mutateAsync,
     isPending: false,
   }),
+  // The delete flow has its own oracle (`lead-delete.test.tsx`); here it is inert.
+  useDeleteLead: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
 vi.mock('../LeadsBoard', async () => {

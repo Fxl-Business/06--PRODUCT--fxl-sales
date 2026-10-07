@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { Trash2 } from 'lucide-react';
 import { todayInSaoPaulo } from '@fxl-sales/shared-utils/sao-paulo-day';
 import { Combobox, type ComboboxOption } from '@/components/ui/combobox';
 import {
@@ -13,6 +14,7 @@ import { Input } from '@/components/ui/input';
 import type { SaveContactLeadPayload } from './api';
 import {
   blockedNoticeClass,
+  dangerOutlineButtonClass,
   fieldLabelClass,
   formInputClass,
   formSelectClass,
@@ -28,6 +30,7 @@ import {
   validateContactLeadDraft,
   type ContactLeadDraft,
 } from './contact-lead';
+import { LEAD_DELETE_COPY } from './delete-copy';
 
 /**
  * Create / edit a lead in the leads edition. PURELY presentational: props in,
@@ -70,6 +73,12 @@ export type ContactLeadDialogProps = {
   pending?: boolean;
   /** Injected for tests; defaults to todayInSaoPaulo() read once at mount. */
   today?: string;
+  /**
+   * Asks for this lead's delete confirmation (the container's shared
+   * `LeadDeleteDialog`). Rendered only when editing (`initial.id`); the container
+   * withholds it for a converted lead.
+   */
+  onDelete?: () => void;
 };
 
 function blockedFieldOf(message: string | null): keyof ContactLeadDraft | null {
@@ -95,6 +104,7 @@ export function ContactLeadDialog({
   onSubmit,
   pending = false,
   today,
+  onDelete,
 }: ContactLeadDialogProps) {
   const [draft, setDraft] = React.useState<ContactLeadDraft>(() => contactDraftFromSeed(initial));
   const [todayDay] = React.useState(() => today ?? todayInSaoPaulo());
@@ -307,7 +317,19 @@ export function ContactLeadDialog({
           ) : null}
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="gap-2 sm:gap-0">
+          {initial?.id && onDelete ? (
+            <button
+              className={`${dangerOutlineButtonClass} sm:mr-auto`}
+              data-delete-lead-form=""
+              disabled={submitting}
+              onClick={onDelete}
+              type="button"
+            >
+              <Trash2 aria-hidden className="h-[15px] w-[15px]" />
+              {LEAD_DELETE_COPY.formButton}
+            </button>
+          ) : null}
           <button
             className={secondaryButtonClass}
             onClick={() => onOpenChange(false)}

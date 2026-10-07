@@ -1,5 +1,12 @@
 import * as React from 'react';
+import { MoreHorizontal, Trash2 } from 'lucide-react';
 import type { LeadFieldSet } from '@fxl-sales/shared-utils/sales-edition';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { formatMoneyBrl } from '../calculations';
 import {
   CARD_TOOLTIP,
@@ -21,11 +28,15 @@ import {
   avatarClass,
   dayBadgeTone,
   avatarInitials,
+  leadMenuContentClass,
+  leadMenuDeleteItemClass,
+  leadMenuTriggerClass,
   readOnlyCardClass,
   unassignedMarkerClass,
 } from './board-ui';
 import { daysInCurrentStage, leadIsConverted, leadIsUnassigned } from './calculations';
 import { CONTACT_LEAD_COPY, leadBirthdayLabel, leadContactLine } from './contact-lead';
+import { LEAD_DELETE_COPY } from './delete-copy';
 import type { SalesOpsLead } from './types';
 
 /**
@@ -39,6 +50,11 @@ import type { SalesOpsLead } from './types';
  * the end of a drag is handled by a pointer-distance guard: a click whose
  * pointerdown-to-click movement exceeds the PointerSensor activation distance
  * is a drag, not a click.
+ *
+ * A non-converted card handed `onDelete` carries ONE control of its own: the
+ * kebab of its `Excluir` menu (lixeira), also opened by a right-click on the
+ * card. `startsOnCardMenu` keeps that menu out of both the drag and the edit
+ * paths. Its open state is the only state the card holds.
  */
 
 const MAX_PRODUCT_CHIPS = 3;
@@ -63,6 +79,12 @@ export type LeadCardProps = {
   showDaysBadge?: boolean;
   /** 'contact' in the leads edition: contact data instead of empresa, valor and produtos. */
   fieldSet?: LeadFieldSet;
+  /**
+   * Asks for this lead's delete confirmation. Present means a non-converted card
+   * renders its kebab menu (and answers a right-click with it); absent, or a
+   * converted card, renders neither.
+   */
+  onDelete?: (lead: SalesOpsLead) => void;
 };
 
 /**
@@ -78,6 +100,62 @@ export function UnassignedLeadMarker() {
   );
 }
 
+/**
+ * True for an event the card's own surface must ignore: one that started on the
+ * menu trigger, or one bubbling through React's tree from the PORTALLED menu
+ * (its target is not inside the card's DOM at all). Such an event never reaches
+ * the dnd-kit activator and never opens the editor.
+ *
+ * A guard on the card rather than `stopPropagation` on the trigger: a React
+ * `stopPropagation` also stops the NATIVE event at the root, so the document
+ * listener another open Radix menu dismisses itself with would never hear it.
+ */
+function startsOnCardMenu(event: React.SyntheticEvent<HTMLElement>): boolean {
+  const target = event.target;
+  if (!(target instanceof Node) || !event.currentTarget.contains(target)) return true;
+  return target instanceof Element && target.closest('[data-lead-menu]') !== null;
+}
+
+/**
+ * The card's one menu, `Excluir`. Opened by its kebab and, controlled through
+ * `open`, by a right-click anywhere on the card. It only ASKS: `onDelete` opens
+ * the shared `LeadDeleteDialog`, which the container owns.
+ */
+function LeadCardMenu({
+  lead,
+  open,
+  onOpenChange,
+  onDelete,
+}: {
+  lead: SalesOpsLead;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onDelete: (lead: SalesOpsLead) => void;
+}) {
+  return (
+    <DropdownMenu onOpenChange={onOpenChange} open={open}>
+      <DropdownMenuTrigger
+        aria-label={`${LEAD_DELETE_COPY.menuTrigger}: ${lead.contactName}`}
+        className={leadMenuTriggerClass}
+        data-lead-menu={lead.id}
+        title={LEAD_DELETE_COPY.menuTrigger}
+      >
+        <MoreHorizontal aria-hidden className="h-4 w-4" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className={leadMenuContentClass}>
+        <DropdownMenuItem
+          className={leadMenuDeleteItemClass}
+          data-delete-lead={lead.id}
+          onSelect={() => onDelete(lead)}
+        >
+          <Trash2 aria-hidden />
+          {LEAD_DELETE_COPY.menuLabel}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 export function LeadCard({
   lead,
   lookups,
@@ -88,6 +166,7 @@ export function LeadCard({
   isDragging = false,
   showDaysBadge = true,
   fieldSet = 'full',
+  onDelete,
 }: LeadCardProps) {
   const contact = fieldSet === 'contact';
   const birthday = contact ? leadBirthdayLabel(lead) : null;
@@ -100,8 +179,15 @@ export function LeadCard({
   const sellerLabel = leadSellerLabel(lead, lookups);
   const unassigned = leadIsUnassigned(lead);
   const pointerDown = React.useRef<{ x: number; y: number } | null>(null);
+  const [menuOpen, setMenuOpen] = React.useState(false);
+  const menu =
+    onDelete && !readOnly ? (
+      <LeadCardMenu lead={lead} onDelete={onDelete} onOpenChange={setMenuOpen} open={menuOpen} />
+    ) : null;
 
   function handlePointerDown(event: React.PointerEvent<HTMLElement>) {
+    // The menu is never a drag handle: no pointer record, no dnd-kit activation.
+    if (startsOnCardMenu(event)) return;
     pointerDown.current = { x: event.clientX, y: event.clientY };
     (dragHandleProps?.onPointerDown as ((e: React.PointerEvent<HTMLElement>) => void) | undefined)?.(
       event,
@@ -109,6 +195,8 @@ export function LeadCard({
   }
 
   function handleClick(event: React.MouseEvent<HTMLElement>) {
+    // Opening the menu, or picking from it, never opens the editor.
+    if (startsOnCardMenu(event)) return;
     const start = pointerDown.current;
     pointerDown.current = null;
     if (start) {
@@ -122,29 +210,43 @@ export function LeadCard({
     onEdit?.(lead);
   }
 
+  /**
+   * Right-click opens the SAME menu, anchored at the kebab. Only where the menu
+   * exists: a converted card keeps the browser's own context menu.
+   */
+  function handleContextMenu(event: React.MouseEvent<HTMLElement>) {
+    if (!menu) return;
+    event.preventDefault();
+    setMenuOpen(true);
+  }
+
   return (
     <article
-      className={`${cardClass} cursor-pointer${isDragging ? ` ${cardDraggingClass}` : ''}${
+      className={`group/card ${cardClass} cursor-pointer${isDragging ? ` ${cardDraggingClass}` : ''}${
         readOnly ? ` ${readOnlyCardClass}` : ''
       }`}
       data-lead-card={lead.id}
       {...(readOnly ? { 'data-read-only-card': 'true' } : {})}
       {...(dragHandleProps ?? {})}
       onClick={handleClick}
+      onContextMenu={handleContextMenu}
       onPointerDown={handlePointerDown}
       title={readOnly ? undefined : CARD_TOOLTIP}
     >
       {contact ? (
-        <div className="flex min-w-0 flex-col gap-0.5">
-          <span className="text-[14px] font-semibold text-[#201f24]">{lead.contactName}</span>
-          <span className="truncate text-[12.5px] text-[#8b8b92]" data-lead-contact>
-            {leadContactLine(lead)}
-          </span>
-          {birthday !== null ? (
-            <span className="text-[12px] text-[#8b8b92]" data-lead-birthday>
-              {`${CONTACT_LEAD_COPY.birthdayPrefix} ${birthday}`}
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <span className="text-[14px] font-semibold text-[#201f24]">{lead.contactName}</span>
+            <span className="truncate text-[12.5px] text-[#8b8b92]" data-lead-contact>
+              {leadContactLine(lead)}
             </span>
-          ) : null}
+            {birthday !== null ? (
+              <span className="text-[12px] text-[#8b8b92]" data-lead-birthday>
+                {`${CONTACT_LEAD_COPY.birthdayPrefix} ${birthday}`}
+              </span>
+            ) : null}
+          </div>
+          {menu}
         </div>
       ) : (
         <div className="flex items-start justify-between gap-2">
@@ -152,12 +254,15 @@ export function LeadCard({
             <span className="text-[14px] font-semibold text-[#201f24]">{lead.contactName}</span>
             <span className="text-[12.5px] text-[#8b8b92]">{leadCompanyLabel(lead, lookups)}</span>
           </div>
-          <span className="sales-ops-num shrink-0 text-[14px] font-bold text-[#201f24]">
-            {formatMoneyBrl(lead.estimatedValueBrl, {
-              minimumFractionDigits: 0,
-              maximumFractionDigits: 0,
-            })}
-          </span>
+          <div className="flex shrink-0 items-start gap-0.5">
+            <span className="sales-ops-num shrink-0 text-[14px] font-bold text-[#201f24]">
+              {formatMoneyBrl(lead.estimatedValueBrl, {
+                minimumFractionDigits: 0,
+                maximumFractionDigits: 0,
+              })}
+            </span>
+            {menu}
+          </div>
         </div>
       )}
 
