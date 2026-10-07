@@ -760,12 +760,15 @@ function leadIdentityConditions(orgId: string, id: string, gate: LeadScopeAllowe
  * `already_converted` refusal and the lead UPDATE carries it, so a refused write
  * never claims and a thrown one is rolled back with the transaction.
  *
- * The race guard is the `SELECT ... FOR UPDATE` that produced `current`: a
- * second vendedor reaching the same unassigned lead blocks on the row lock, and
+ * The race guard is the `SELECT ... FOR UPDATE` that produced `current`. A
+ * second vendedor's PATCH on the same unassigned lead blocks on that row lock, and
  * READ COMMITTED re-checks its WHERE against the committed row once the first
- * commits. `seller = A` matches neither `seller = B` nor `IS NULL`, so the second
- * reads no row and answers not_found. Never raise these transactions to
- * REPEATABLE READ: the loser would then fail with 40001 (a 500) instead.
+ * commits. A second MOVE already waited on the board lock (`lockLeadBoard`)
+ * before its identity read, so that read is a fresh statement that sees the
+ * committed claim. Either way `seller = A` matches neither `seller = B` nor
+ * `IS NULL`, so the second reads no row and answers not_found. Never raise these
+ * transactions to REPEATABLE READ: the loser would then fail with 40001 (a 500)
+ * instead.
  *
  * The `canClaimUnassigned` conjunct is redundant with the read predicate today
  * and kept so a future predicate change can never turn a finder into a claimant.
@@ -870,6 +873,45 @@ type InsertLeadOptions = {
   defaultSellerToCaller?: boolean;
 };
 
+/**
+ * The org's lead board lock: the ONE place the lock order of a board write is
+ * decided.
+ *
+ * Every transaction that writes a lead's `stage_id` or `position` (`moveLead`,
+ * `insertLead`) takes it right after its scope gate and BEFORE it reads or locks
+ * any lead row. Without it two writers sharing a column lock rows in opposite
+ * orders: a move locks its own card first and then the whole destination and
+ * source columns, so two vendedores dragging two cards out of one column each
+ * held their own card while waiting for the other's, and Postgres aborted one
+ * with 40P01, an HTTP 500. A create read MAX(position) with no lock at all, so
+ * two creates could share a position. One lock per org, held to the end of the
+ * writer's transaction, serializes them all. A holder may still wait on a card a
+ * concurrent PATCH has locked, but a PATCH never asks for the board, so no
+ * cycle can close.
+ *
+ * Why an advisory lock, and why per ORG:
+ *  - Locking the two stage rows instead would collide with `reorderLeadStages`,
+ *    which locks every active stage FOR UPDATE in position order, and with the
+ *    foreign-key check of every lead INSERT. A key nothing else ever takes
+ *    cannot.
+ *  - Per stage would need the source stage before the card is read, a re-check
+ *    after locking, and an out-of-order second lock whenever a concurrent move
+ *    won in between. A board is one team dragging cards by hand: per org costs
+ *    nothing measurable and leaves no order to get wrong.
+ *
+ * Transaction scoped (`_xact_`): COMMIT or ROLLBACK releases it and nothing else
+ * can, so no path leaks it. Taken inside a SAVEPOINT (the import executor runs
+ * these services on its own transaction) it passes to the parent when the
+ * savepoint is released, so an import holds the board until it commits. The two
+ * int4 keys are a namespace and the org; an org hash collision only makes two
+ * boards share one queue.
+ */
+async function lockLeadBoard(tx: Db, orgId: string): Promise<void> {
+  await tx.execute(
+    sql`SELECT pg_advisory_xact_lock(hashtext('fxl-sales:lead-board'), hashtext(${orgId}))`,
+  );
+}
+
 async function insertLead(
   db: Db,
   orgId: string,
@@ -880,6 +922,9 @@ async function insertLead(
   return withTenant(db, orgId, async (tx) => {
     const gate = await resolveLeadScopePredicate(tx, orgId, scope);
     if (!gate.ok) return { ok: false, reason: gate.reason } as const;
+
+    // Before MAX(position) below: a second create must wait for this one's row.
+    await lockLeadBoard(tx, orgId);
 
     // A seller may only file their OWN leads, and may not file an unassigned one
     // either - `null !== gate.sellerPersonId` catches that. A loud 403 rather
@@ -1100,6 +1145,8 @@ export async function moveLead(
   return withTenant(db, orgId, async (tx) => {
     const gate = await resolveLeadScopePredicate(tx, orgId, scope);
     if (!gate.ok) return { ok: false, reason: gate.reason } as const;
+    // Before the card's row lock, never after it: see lockLeadBoard.
+    await lockLeadBoard(tx, orgId);
 
     const [current] = await tx
       .select()
@@ -1185,9 +1232,12 @@ export async function moveLead(
 /**
  * Writes dense 1..N over one column, in ONE statement.
  *
- * `FOR UPDATE` over the whole column, always in (position, id) order, is what
- * makes two concurrent drags of the same column serialize at Postgres rather
- * than interleave into duplicate positions.
+ * Every caller holds the board lock (`lockLeadBoard`), and THAT is what
+ * serializes two drags: no other writer of a position can touch this column until
+ * the caller's transaction ends, so the read below already sees every committed
+ * move. The `FOR UPDATE` is no longer the guard. It stays because it is harmless:
+ * it can only wait on a card a concurrent PATCH holds, and a PATCH never asks for
+ * the board, so the wait cannot close a cycle.
  */
 async function renumberStage(
   tx: Db,
