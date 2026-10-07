@@ -36,7 +36,8 @@ const TEAM_WORKSPACES = ['tatico', 'operacional', 'cadastros'] as const;
 const URLS = [
   '/tatico/dashboard', '/operacional/vendas', '/operacional/comissoes', '/operacional/leads',
   '/cadastros/produtos', '/cadastros/pessoas', '/cadastros/vendedores', '/cadastros/etapas',
-  '/cadastros/importacao', '/cadastros/geral', '/meus-dados/vendedores', '/meus-dados/comissoes',
+  '/cadastros/importacao', '/cadastros/leads-excluidos', '/cadastros/geral',
+  '/meus-dados/vendedores', '/meus-dados/comissoes',
   '/meus-dados/leads', '/meus-dados/finders', '/meus-dados/vendas',
 ];
 const pairs = (items: { id: SalesOpsView; label: string }[]) =>
@@ -84,7 +85,7 @@ const PREFERRED_PATH_FULL: Record<ComboName, [string, string, string, string]> =
 const TEAM_NAV_FULL: Record<'tatico' | 'operacional' | 'cadastros', Array<[SalesOpsView, string]>> = {
   'tatico': [['dashboard', 'Visão geral']],
   'operacional': [['vendas', 'Propostas'], ['comissoes', 'Comissões'], ['leads', 'Prospecção']],
-  'cadastros': [['produtos', 'Produtos & Serviços'], ['areas', 'Áreas'], ['clientes', 'Clientes'], ['pessoas', 'Pessoas'], ['funcoes', 'Funções'], ['etapas', 'Etapas do funil'], ['importacao', 'Importação'], ['geral', 'Geral']],
+  'cadastros': [['produtos', 'Produtos & Serviços'], ['areas', 'Áreas'], ['clientes', 'Clientes'], ['pessoas', 'Pessoas'], ['funcoes', 'Funções'], ['etapas', 'Etapas do funil'], ['importacao', 'Importação'], ['leads-excluidos', 'Leads excluídos'], ['geral', 'Geral']],
 };
 
 const MEUS_DADOS_NAV_FULL: Record<ComboName, Array<[SalesOpsView, string]>> = {
@@ -110,6 +111,7 @@ const RESOLVE_FULL: Record<ComboName, Record<string, [string, boolean]>> = {
     '/cadastros/vendedores': ['/tatico/dashboard', true],
     '/cadastros/etapas': ['/tatico/dashboard', true],
     '/cadastros/importacao': ['/tatico/dashboard', true],
+    '/cadastros/leads-excluidos': ['/tatico/dashboard', true],
     '/cadastros/geral': ['/tatico/dashboard', true],
     '/meus-dados/vendedores': ['/tatico/dashboard', true],
     '/meus-dados/comissoes': ['/tatico/dashboard', true],
@@ -127,6 +129,7 @@ const RESOLVE_FULL: Record<ComboName, Record<string, [string, boolean]>> = {
     '/cadastros/vendedores': ['/cadastros/pessoas', true],
     '/cadastros/etapas': ['/cadastros/etapas', false],
     '/cadastros/importacao': ['/cadastros/importacao', false],
+    '/cadastros/leads-excluidos': ['/cadastros/leads-excluidos', false],
     '/cadastros/geral': ['/cadastros/geral', false],
     '/meus-dados/vendedores': ['/tatico/dashboard', true],
     '/meus-dados/comissoes': ['/tatico/dashboard', true],
@@ -144,6 +147,7 @@ const RESOLVE_FULL: Record<ComboName, Record<string, [string, boolean]>> = {
     '/cadastros/vendedores': ['/meus-dados/vendedores', true],
     '/cadastros/etapas': ['/meus-dados/vendedores', true],
     '/cadastros/importacao': ['/meus-dados/vendedores', true],
+    '/cadastros/leads-excluidos': ['/meus-dados/vendedores', true],
     '/cadastros/geral': ['/meus-dados/vendedores', true],
     '/meus-dados/vendedores': ['/meus-dados/vendedores', false],
     '/meus-dados/comissoes': ['/meus-dados/comissoes', false],
@@ -161,6 +165,7 @@ const RESOLVE_FULL: Record<ComboName, Record<string, [string, boolean]>> = {
     '/cadastros/vendedores': ['/meus-dados/finders', true],
     '/cadastros/etapas': ['/meus-dados/finders', true],
     '/cadastros/importacao': ['/meus-dados/finders', true],
+    '/cadastros/leads-excluidos': ['/meus-dados/finders', true],
     '/cadastros/geral': ['/meus-dados/finders', true],
     '/meus-dados/vendedores': ['/meus-dados/finders', true],
     '/meus-dados/comissoes': ['/meus-dados/finders', true],
@@ -178,6 +183,7 @@ const RESOLVE_FULL: Record<ComboName, Record<string, [string, boolean]>> = {
     '/cadastros/vendedores': ['/cadastros/pessoas', true],
     '/cadastros/etapas': ['/cadastros/etapas', false],
     '/cadastros/importacao': ['/cadastros/importacao', false],
+    '/cadastros/leads-excluidos': ['/cadastros/leads-excluidos', false],
     '/cadastros/geral': ['/cadastros/geral', false],
     '/meus-dados/vendedores': ['/meus-dados/vendedores', false],
     '/meus-dados/comissoes': ['/meus-dados/comissoes', false],
@@ -195,6 +201,7 @@ const RESOLVE_FULL: Record<ComboName, Record<string, [string, boolean]>> = {
     '/cadastros/vendedores': ['/cadastros/pessoas', true],
     '/cadastros/etapas': ['/cadastros/etapas', false],
     '/cadastros/importacao': ['/cadastros/importacao', false],
+    '/cadastros/leads-excluidos': ['/cadastros/leads-excluidos', false],
     '/cadastros/geral': ['/cadastros/geral', false],
     '/meus-dados/vendedores': ['/tatico/dashboard', true],
     '/meus-dados/comissoes': ['/tatico/dashboard', true],
@@ -212,6 +219,7 @@ const RESOLVE_FULL: Record<ComboName, Record<string, [string, boolean]>> = {
     '/cadastros/vendedores': ['/meus-dados/vendedores', true],
     '/cadastros/etapas': ['/meus-dados/vendedores', true],
     '/cadastros/importacao': ['/meus-dados/vendedores', true],
+    '/cadastros/leads-excluidos': ['/meus-dados/vendedores', true],
     '/cadastros/geral': ['/meus-dados/vendedores', true],
     '/meus-dados/vendedores': ['/meus-dados/vendedores', false],
     '/meus-dados/comissoes': ['/meus-dados/comissoes', false],
@@ -229,6 +237,7 @@ const RESOLVE_FULL: Record<ComboName, Record<string, [string, boolean]>> = {
     '/cadastros/vendedores': ['/cadastros/pessoas', true],
     '/cadastros/etapas': ['/cadastros/etapas', false],
     '/cadastros/importacao': ['/cadastros/importacao', false],
+    '/cadastros/leads-excluidos': ['/cadastros/leads-excluidos', false],
     '/cadastros/geral': ['/cadastros/geral', false],
     '/meus-dados/vendedores': ['/meus-dados/vendedores', false],
     '/meus-dados/comissoes': ['/meus-dados/comissoes', false],
@@ -239,14 +248,14 @@ const RESOLVE_FULL: Record<ComboName, Record<string, [string, boolean]>> = {
 };
 
 const WORKSPACE_FOR_VIEW_FULL: Record<ComboName, Partial<Record<SalesOpsView, SalesOpsWorkspace>>> = {
-  none: { dashboard: 'tatico', vendas: 'tatico', comissoes: 'tatico', leads: 'tatico', produtos: 'tatico', pessoas: 'tatico', etapas: 'tatico', vendedores: 'tatico', finders: 'tatico' },
-  admin: { dashboard: 'tatico', vendas: 'operacional', comissoes: 'operacional', leads: 'operacional', produtos: 'cadastros', pessoas: 'cadastros', etapas: 'cadastros', vendedores: 'tatico', finders: 'tatico' },
-  seller: { dashboard: 'meus-dados', vendas: 'meus-dados', comissoes: 'meus-dados', leads: 'meus-dados', produtos: 'meus-dados', pessoas: 'meus-dados', etapas: 'meus-dados', vendedores: 'meus-dados', finders: 'meus-dados' },
-  finder: { dashboard: 'meus-dados', vendas: 'meus-dados', comissoes: 'meus-dados', leads: 'meus-dados', produtos: 'meus-dados', pessoas: 'meus-dados', etapas: 'meus-dados', vendedores: 'meus-dados', finders: 'meus-dados' },
-  adminSeller: { dashboard: 'tatico', vendas: 'operacional', comissoes: 'operacional', leads: 'operacional', produtos: 'cadastros', pessoas: 'cadastros', etapas: 'cadastros', vendedores: 'meus-dados', finders: 'tatico' },
-  adminFinder: { dashboard: 'tatico', vendas: 'operacional', comissoes: 'operacional', leads: 'operacional', produtos: 'cadastros', pessoas: 'cadastros', etapas: 'cadastros', vendedores: 'tatico', finders: 'meus-dados' },
-  sellerFinder: { dashboard: 'meus-dados', vendas: 'meus-dados', comissoes: 'meus-dados', leads: 'meus-dados', produtos: 'meus-dados', pessoas: 'meus-dados', etapas: 'meus-dados', vendedores: 'meus-dados', finders: 'meus-dados' },
-  everything: { dashboard: 'tatico', vendas: 'operacional', comissoes: 'operacional', leads: 'operacional', produtos: 'cadastros', pessoas: 'cadastros', etapas: 'cadastros', vendedores: 'meus-dados', finders: 'meus-dados' },
+  none: { dashboard: 'tatico', vendas: 'tatico', comissoes: 'tatico', leads: 'tatico', produtos: 'tatico', pessoas: 'tatico', etapas: 'tatico', 'leads-excluidos': 'tatico', vendedores: 'tatico', finders: 'tatico' },
+  admin: { dashboard: 'tatico', vendas: 'operacional', comissoes: 'operacional', leads: 'operacional', produtos: 'cadastros', pessoas: 'cadastros', etapas: 'cadastros', 'leads-excluidos': 'cadastros', vendedores: 'tatico', finders: 'tatico' },
+  seller: { dashboard: 'meus-dados', vendas: 'meus-dados', comissoes: 'meus-dados', leads: 'meus-dados', produtos: 'meus-dados', pessoas: 'meus-dados', etapas: 'meus-dados', 'leads-excluidos': 'meus-dados', vendedores: 'meus-dados', finders: 'meus-dados' },
+  finder: { dashboard: 'meus-dados', vendas: 'meus-dados', comissoes: 'meus-dados', leads: 'meus-dados', produtos: 'meus-dados', pessoas: 'meus-dados', etapas: 'meus-dados', 'leads-excluidos': 'meus-dados', vendedores: 'meus-dados', finders: 'meus-dados' },
+  adminSeller: { dashboard: 'tatico', vendas: 'operacional', comissoes: 'operacional', leads: 'operacional', produtos: 'cadastros', pessoas: 'cadastros', etapas: 'cadastros', 'leads-excluidos': 'cadastros', vendedores: 'meus-dados', finders: 'tatico' },
+  adminFinder: { dashboard: 'tatico', vendas: 'operacional', comissoes: 'operacional', leads: 'operacional', produtos: 'cadastros', pessoas: 'cadastros', etapas: 'cadastros', 'leads-excluidos': 'cadastros', vendedores: 'tatico', finders: 'meus-dados' },
+  sellerFinder: { dashboard: 'meus-dados', vendas: 'meus-dados', comissoes: 'meus-dados', leads: 'meus-dados', produtos: 'meus-dados', pessoas: 'meus-dados', etapas: 'meus-dados', 'leads-excluidos': 'meus-dados', vendedores: 'meus-dados', finders: 'meus-dados' },
+  everything: { dashboard: 'tatico', vendas: 'operacional', comissoes: 'operacional', leads: 'operacional', produtos: 'cadastros', pessoas: 'cadastros', etapas: 'cadastros', 'leads-excluidos': 'cadastros', vendedores: 'meus-dados', finders: 'meus-dados' },
 };
 
 const VISIBLE_LEADS: Record<ComboName, SalesOpsWorkspace[]> = {
@@ -292,6 +301,7 @@ const TEAM_NAV_LEADS: Record<'tatico' | 'operacional' | 'cadastros', Array<[Sale
     ['clientes', 'Clientes'],
     ['etapas', 'Etapas do funil'],
     ['importacao', 'Importação'],
+    ['leads-excluidos', 'Leads excluídos'],
   ],
 };
 
@@ -318,6 +328,7 @@ const RESOLVE_LEADS: Record<ComboName, Record<string, [string, boolean]>> = {
     '/cadastros/vendedores': ['/tatico/dashboard', true],
     '/cadastros/etapas': ['/tatico/dashboard', true],
     '/cadastros/importacao': ['/tatico/dashboard', true],
+    '/cadastros/leads-excluidos': ['/tatico/dashboard', true],
     '/cadastros/geral': ['/tatico/dashboard', true],
     '/meus-dados/vendedores': ['/tatico/dashboard', true],
     '/meus-dados/comissoes': ['/tatico/dashboard', true],
@@ -335,6 +346,7 @@ const RESOLVE_LEADS: Record<ComboName, Record<string, [string, boolean]>> = {
     '/cadastros/vendedores': ['/cadastros/pessoas', true],
     '/cadastros/etapas': ['/cadastros/etapas', false],
     '/cadastros/importacao': ['/cadastros/importacao', false],
+    '/cadastros/leads-excluidos': ['/cadastros/leads-excluidos', false],
     '/cadastros/geral': ['/operacional/leads', true],
     '/meus-dados/vendedores': ['/operacional/leads', true],
     '/meus-dados/comissoes': ['/operacional/leads', true],
@@ -352,6 +364,7 @@ const RESOLVE_LEADS: Record<ComboName, Record<string, [string, boolean]>> = {
     '/cadastros/vendedores': ['/meus-dados/leads', true],
     '/cadastros/etapas': ['/meus-dados/leads', true],
     '/cadastros/importacao': ['/meus-dados/leads', true],
+    '/cadastros/leads-excluidos': ['/meus-dados/leads', true],
     '/cadastros/geral': ['/meus-dados/leads', true],
     '/meus-dados/vendedores': ['/meus-dados/leads', true],
     '/meus-dados/comissoes': ['/meus-dados/leads', true],
@@ -369,6 +382,7 @@ const RESOLVE_LEADS: Record<ComboName, Record<string, [string, boolean]>> = {
     '/cadastros/vendedores': ['/tatico/dashboard', true],
     '/cadastros/etapas': ['/tatico/dashboard', true],
     '/cadastros/importacao': ['/tatico/dashboard', true],
+    '/cadastros/leads-excluidos': ['/tatico/dashboard', true],
     '/cadastros/geral': ['/tatico/dashboard', true],
     '/meus-dados/vendedores': ['/tatico/dashboard', true],
     '/meus-dados/comissoes': ['/tatico/dashboard', true],
@@ -386,6 +400,7 @@ const RESOLVE_LEADS: Record<ComboName, Record<string, [string, boolean]>> = {
     '/cadastros/vendedores': ['/cadastros/pessoas', true],
     '/cadastros/etapas': ['/cadastros/etapas', false],
     '/cadastros/importacao': ['/cadastros/importacao', false],
+    '/cadastros/leads-excluidos': ['/cadastros/leads-excluidos', false],
     '/cadastros/geral': ['/operacional/leads', true],
     '/meus-dados/vendedores': ['/operacional/leads', true],
     '/meus-dados/comissoes': ['/operacional/leads', true],
@@ -403,6 +418,7 @@ const RESOLVE_LEADS: Record<ComboName, Record<string, [string, boolean]>> = {
     '/cadastros/vendedores': ['/cadastros/pessoas', true],
     '/cadastros/etapas': ['/cadastros/etapas', false],
     '/cadastros/importacao': ['/cadastros/importacao', false],
+    '/cadastros/leads-excluidos': ['/cadastros/leads-excluidos', false],
     '/cadastros/geral': ['/operacional/leads', true],
     '/meus-dados/vendedores': ['/operacional/leads', true],
     '/meus-dados/comissoes': ['/operacional/leads', true],
@@ -420,6 +436,7 @@ const RESOLVE_LEADS: Record<ComboName, Record<string, [string, boolean]>> = {
     '/cadastros/vendedores': ['/meus-dados/leads', true],
     '/cadastros/etapas': ['/meus-dados/leads', true],
     '/cadastros/importacao': ['/meus-dados/leads', true],
+    '/cadastros/leads-excluidos': ['/meus-dados/leads', true],
     '/cadastros/geral': ['/meus-dados/leads', true],
     '/meus-dados/vendedores': ['/meus-dados/leads', true],
     '/meus-dados/comissoes': ['/meus-dados/leads', true],
@@ -437,6 +454,7 @@ const RESOLVE_LEADS: Record<ComboName, Record<string, [string, boolean]>> = {
     '/cadastros/vendedores': ['/cadastros/pessoas', true],
     '/cadastros/etapas': ['/cadastros/etapas', false],
     '/cadastros/importacao': ['/cadastros/importacao', false],
+    '/cadastros/leads-excluidos': ['/cadastros/leads-excluidos', false],
     '/cadastros/geral': ['/operacional/leads', true],
     '/meus-dados/vendedores': ['/operacional/leads', true],
     '/meus-dados/comissoes': ['/operacional/leads', true],
@@ -447,14 +465,14 @@ const RESOLVE_LEADS: Record<ComboName, Record<string, [string, boolean]>> = {
 };
 
 const WORKSPACE_FOR_VIEW_LEADS: Record<ComboName, Partial<Record<SalesOpsView, SalesOpsWorkspace>>> = {
-  none: { dashboard: 'tatico', vendas: 'tatico', comissoes: 'tatico', leads: 'tatico', produtos: 'tatico', pessoas: 'tatico', etapas: 'tatico', vendedores: 'tatico', finders: 'tatico' },
-  admin: { dashboard: 'operacional', vendas: 'operacional', comissoes: 'operacional', leads: 'operacional', produtos: 'operacional', pessoas: 'cadastros', etapas: 'cadastros', vendedores: 'operacional', finders: 'operacional' },
-  seller: { dashboard: 'meus-dados', vendas: 'meus-dados', comissoes: 'meus-dados', leads: 'meus-dados', produtos: 'meus-dados', pessoas: 'meus-dados', etapas: 'meus-dados', vendedores: 'meus-dados', finders: 'meus-dados' },
-  finder: { dashboard: 'tatico', vendas: 'tatico', comissoes: 'tatico', leads: 'tatico', produtos: 'tatico', pessoas: 'tatico', etapas: 'tatico', vendedores: 'tatico', finders: 'tatico' },
-  adminSeller: { dashboard: 'operacional', vendas: 'operacional', comissoes: 'operacional', leads: 'operacional', produtos: 'operacional', pessoas: 'cadastros', etapas: 'cadastros', vendedores: 'operacional', finders: 'operacional' },
-  adminFinder: { dashboard: 'operacional', vendas: 'operacional', comissoes: 'operacional', leads: 'operacional', produtos: 'operacional', pessoas: 'cadastros', etapas: 'cadastros', vendedores: 'operacional', finders: 'operacional' },
-  sellerFinder: { dashboard: 'meus-dados', vendas: 'meus-dados', comissoes: 'meus-dados', leads: 'meus-dados', produtos: 'meus-dados', pessoas: 'meus-dados', etapas: 'meus-dados', vendedores: 'meus-dados', finders: 'meus-dados' },
-  everything: { dashboard: 'operacional', vendas: 'operacional', comissoes: 'operacional', leads: 'operacional', produtos: 'operacional', pessoas: 'cadastros', etapas: 'cadastros', vendedores: 'operacional', finders: 'operacional' },
+  none: { dashboard: 'tatico', vendas: 'tatico', comissoes: 'tatico', leads: 'tatico', produtos: 'tatico', pessoas: 'tatico', etapas: 'tatico', 'leads-excluidos': 'tatico', vendedores: 'tatico', finders: 'tatico' },
+  admin: { dashboard: 'operacional', vendas: 'operacional', comissoes: 'operacional', leads: 'operacional', produtos: 'operacional', pessoas: 'cadastros', etapas: 'cadastros', 'leads-excluidos': 'cadastros', vendedores: 'operacional', finders: 'operacional' },
+  seller: { dashboard: 'meus-dados', vendas: 'meus-dados', comissoes: 'meus-dados', leads: 'meus-dados', produtos: 'meus-dados', pessoas: 'meus-dados', etapas: 'meus-dados', 'leads-excluidos': 'meus-dados', vendedores: 'meus-dados', finders: 'meus-dados' },
+  finder: { dashboard: 'tatico', vendas: 'tatico', comissoes: 'tatico', leads: 'tatico', produtos: 'tatico', pessoas: 'tatico', etapas: 'tatico', 'leads-excluidos': 'tatico', vendedores: 'tatico', finders: 'tatico' },
+  adminSeller: { dashboard: 'operacional', vendas: 'operacional', comissoes: 'operacional', leads: 'operacional', produtos: 'operacional', pessoas: 'cadastros', etapas: 'cadastros', 'leads-excluidos': 'cadastros', vendedores: 'operacional', finders: 'operacional' },
+  adminFinder: { dashboard: 'operacional', vendas: 'operacional', comissoes: 'operacional', leads: 'operacional', produtos: 'operacional', pessoas: 'cadastros', etapas: 'cadastros', 'leads-excluidos': 'cadastros', vendedores: 'operacional', finders: 'operacional' },
+  sellerFinder: { dashboard: 'meus-dados', vendas: 'meus-dados', comissoes: 'meus-dados', leads: 'meus-dados', produtos: 'meus-dados', pessoas: 'meus-dados', etapas: 'meus-dados', 'leads-excluidos': 'meus-dados', vendedores: 'meus-dados', finders: 'meus-dados' },
+  everything: { dashboard: 'operacional', vendas: 'operacional', comissoes: 'operacional', leads: 'operacional', produtos: 'operacional', pessoas: 'cadastros', etapas: 'cadastros', 'leads-excluidos': 'cadastros', vendedores: 'operacional', finders: 'operacional' },
 };
 
 /** `undefined` is the call with NO edition argument; it must equal 'full' and today. */
@@ -567,6 +585,41 @@ describe('leads edition (Construbom)', () => {
   });
   it('never settles', () => {
     expect(canSettleInWorkspace('operacional', ['admin'], 'leads')).toBe(false);
+  });
+});
+
+describe('Leads excluídos (lead lixeira, AC9)', () => {
+  it.each(['full', 'leads'] as const)(
+    'is offered to the admin in cadastros in the %s edition, after Importação',
+    (edition) => {
+      const ids = getSalesOpsNavigation('cadastros', ['admin'], edition).map((item) => item.id);
+      const at = ids.indexOf('leads-excluidos');
+      expect(at).toBeGreaterThan(-1);
+      expect(ids[at - 1]).toBe('importacao');
+      expect(
+        resolveSalesOpsRoute({ workspace: 'cadastros', view: 'leads-excluidos' }, ['admin'], edition),
+      ).toEqual({
+        route: { workspace: 'cadastros', view: 'leads-excluidos' },
+        path: '/cadastros/leads-excluidos',
+        redirect: false,
+      });
+    },
+  );
+
+  it.each(['full', 'leads'] as const)('is never offered to a seller in the %s edition', (edition) => {
+    for (const workspace of WORKSPACES) {
+      const ids = getSalesOpsNavigation(workspace, ['seller'], edition).map((item) => item.id);
+      if (getVisibleWorkspaces(['seller'], edition).includes(workspace)) {
+        expect(ids).not.toContain('leads-excluidos');
+      }
+    }
+    const resolution = resolveSalesOpsRoute(
+      { workspace: 'cadastros', view: 'leads-excluidos' },
+      ['seller'],
+      edition,
+    );
+    expect(resolution.redirect).toBe(true);
+    expect(resolution.route.view).not.toBe('leads-excluidos');
   });
 });
 

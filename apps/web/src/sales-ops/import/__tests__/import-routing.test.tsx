@@ -251,14 +251,15 @@ describe('import screen inside the Sales Ops shell', () => {
     }
   });
 
-  it('lists Importação in the Cadastros sidebar right before Geral', async () => {
+  it('lists Importação in the Cadastros sidebar right before Leads excluídos, with Geral last', async () => {
     await renderRoute('/cadastros/produtos', ['admin']);
     const labels = [...container.querySelectorAll('nav button, aside button, nav a, aside a')].map(
       (el) => el.textContent?.trim() ?? '',
     );
     const index = labels.findIndex((label) => label.includes('Importação'));
     expect(index).toBeGreaterThan(-1);
-    expect(labels[index + 1]).toContain('Geral');
+    expect(labels[index + 1]).toContain('Leads excluídos');
+    expect(labels[index + 2]).toContain('Geral');
   });
 
   it('a seller cannot reach it', async () => {
