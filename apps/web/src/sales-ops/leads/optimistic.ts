@@ -18,7 +18,7 @@ export type OptimisticLeadPatch = {
   next: LeadsInfiniteData;
   /** the untouched snapshot, for onError rollback */
   previous: LeadsInfiniteData;
-  /** the id of the lead that moved */
+  /** the id of the lead that moved (or, for a removal, left the board) */
   leadId: string;
 };
 
@@ -133,6 +133,42 @@ export function optimisticLeadMove(
     },
     previous,
     leadId: payload.leadId,
+  };
+}
+
+/**
+ * The delete patch: the lead leaves every page it sits on and the rest of ITS
+ * column is re-densified with the same `densify` the move patch uses (the server
+ * closes the gap in the same transaction; the settle-time refetch brings its
+ * integers). Every other row comes out as the exact object that went in. An id
+ * no page holds hands back the identical snapshot, so the caller can tell a
+ * board that never showed the card from one it must patch.
+ */
+export function optimisticLeadRemoval(
+  previous: LeadsInfiniteData,
+  leadId: string,
+): OptimisticLeadPatch {
+  const flat = flattenLeadPages(previous);
+  const removed = flat.find((row) => row.id === leadId);
+  if (!removed) return { next: previous, previous, leadId };
+
+  const replacements = new Map<string, SalesOpsLead>();
+  densify(
+    leadsInStage(flat, removed.stageId).filter((row) => row.id !== leadId),
+    replacements,
+  );
+  return {
+    next: {
+      pages: previous.pages.map((page) => ({
+        ...page,
+        leads: page.leads
+          .filter((row) => row.id !== leadId)
+          .map((row) => replacements.get(row.id) ?? row),
+      })),
+      pageParams: previous.pageParams,
+    },
+    previous,
+    leadId,
   };
 }
 

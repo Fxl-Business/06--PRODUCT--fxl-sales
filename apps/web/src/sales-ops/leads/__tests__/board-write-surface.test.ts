@@ -66,6 +66,10 @@ const OWNED_FILES = [
   'MoveLeadDialog.tsx',
   'contact-lead.ts',
   'ContactLeadDialog.tsx',
+  // The lixeira's delete UI: the shared confirmation and its copy. Deleting a lead
+  // is a lead write, so it obeys the same bans (no transition, no second write path).
+  'delete-copy.ts',
+  'LeadDeleteDialog.tsx',
 ];
 
 /** The one file allowed to spell the conversion kind, because it owns the question. */

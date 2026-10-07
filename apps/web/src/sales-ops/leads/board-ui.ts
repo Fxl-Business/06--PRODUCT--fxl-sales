@@ -95,6 +95,39 @@ export const primaryButtonClass =
 export const secondaryButtonClass =
   'inline-flex items-center justify-center rounded-[10px] border border-[#dcdce2] bg-white px-4 py-2 text-sm font-semibold text-[#57575f] transition hover:border-[#eaa81a] hover:text-[#9c7210]';
 
+/**
+ * The destructive pair, in the `lost` stage's red (`KIND_COLORS.lost`): the solid
+ * confirm of `LeadDeleteDialog`, and the outlined `Excluir lead` that opens it
+ * from an edit form. Same 40px geometry as `primaryButtonClass`.
+ */
+export const dangerButtonClass =
+  'inline-flex items-center justify-center rounded-[10px] bg-[#c2413b] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#a5341c] disabled:cursor-not-allowed disabled:opacity-60';
+
+export const dangerOutlineButtonClass =
+  'inline-flex items-center justify-center gap-1.5 rounded-[10px] border border-[#f2d6d4] bg-white px-4 py-2 text-sm font-semibold text-[#9b2f2a] transition hover:border-[#c2413b] hover:bg-[#fcf1f0] disabled:cursor-not-allowed disabled:opacity-60';
+
+/**
+ * The card's kebab. A constant 28px slot in the card's top row, always rendered
+ * and always in the tab order, so opening or hovering it never reflows the card.
+ * Quiet by default (a light grey glyph), darker while the card is hovered and
+ * on its own focus ring, chip-backed while hovered or open. Never `opacity-0`:
+ * an invisible slot reads as a misaligned value, and a touch device has no hover
+ * to reveal it. `-mr-1.5 -mt-1` tuck the 16px glyph into the card's corner
+ * padding and centre it on the 20px first line beside it.
+ */
+export const leadMenuTriggerClass =
+  '-mr-1.5 -mt-1 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[#b4b4bb] outline-none transition-colors hover:bg-[#f2f2f4] focus-visible:ring-2 focus-visible:ring-[#eaa81a] group-hover/card:text-[#6a6a72] data-[state=open]:bg-[#f2f2f4] data-[state=open]:text-[#201f24]';
+
+/** The card menu panel; the same surface as the propostas table's row menu. */
+export const leadMenuContentClass = 'w-[180px] rounded-xl border-[#e5e5ea] bg-white p-1.5';
+
+export const leadMenuDeleteItemClass =
+  'cursor-pointer text-[13px] font-semibold text-[#9b2f2a] focus:bg-[#fcf1f0] focus:text-[#9b2f2a]';
+
+/** The Lista row's `Excluir`: `listActionButtonClass` geometry, destructive ink. */
+export const listDangerActionButtonClass =
+  'inline-flex items-center rounded-[9px] border border-[#dcdce2] bg-white px-2.5 py-1 text-[12px] font-semibold text-[#9b2f2a] transition hover:border-[#c2413b] hover:bg-[#fcf1f0] disabled:cursor-not-allowed disabled:opacity-60';
+
 export const mutedStateClass = 'text-[13px] text-[#8b8b92]';
 
 export const blockedNoticeClass = 'text-[13px] font-medium text-[#a5341c]';

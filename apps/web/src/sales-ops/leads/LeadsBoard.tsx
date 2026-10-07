@@ -52,6 +52,7 @@ import {
   dayBadgeTone,
   daysBadgeClass,
   listActionButtonClass,
+  listDangerActionButtonClass,
   listFooterClass,
   listRowClass,
   listTableCardClass,
@@ -84,6 +85,7 @@ import {
   leadBirthdayLabel,
   leadContactLine,
 } from './contact-lead';
+import { LEAD_DELETE_COPY } from './delete-copy';
 import { LeadCard, UnassignedLeadMarker } from './LeadCard';
 import { LeadsFunnelView } from './LeadsFunnelView';
 import { MoveLeadDialog } from './MoveLeadDialog';
@@ -118,6 +120,12 @@ export type LeadsBoardProps = {
   onCreateLead?: () => void;
   onEditLead?: (lead: SalesOpsLead) => void;
   /**
+   * Asks for the delete confirmation of a NON-converted lead: the card's kebab
+   * menu (and right-click) and the Lista's `Excluir` call it. The container owns
+   * the confirmation and the mutation. Absent means no delete affordance at all.
+   */
+  onDeleteLead?: (lead: SalesOpsLead) => void;
+  /**
    * Called INSTEAD of `onMoveLead` when the destination is the conversion door.
    *   resolve(saleId) -> the board then calls `onMoveLead(payload)` with it
    *   resolve(null)   -> the operator cancelled: the board does NOTHING. No
@@ -151,6 +159,7 @@ type SortableCardProps = {
   lookups: LabelLookups;
   now: Date;
   onEdit?: (lead: SalesOpsLead) => void;
+  onDelete?: (lead: SalesOpsLead) => void;
   onOpenSale?: (saleId: string) => void;
   showDaysBadge?: boolean;
   fieldSet?: LeadFieldSet;
@@ -165,6 +174,7 @@ function SortableLeadCard({
   lookups,
   now,
   onEdit,
+  onDelete,
   onOpenSale,
   showDaysBadge,
   fieldSet,
@@ -186,6 +196,7 @@ function SortableLeadCard({
         lead={lead}
         lookups={lookups}
         now={now}
+        onDelete={onDelete}
         onEdit={onEdit}
         fieldSet={fieldSet}
         onOpenSale={onOpenSale}
@@ -250,6 +261,7 @@ export function LeadsBoard({
   movePending = false,
   onCreateLead,
   onEditLead,
+  onDeleteLead,
   onRequestConversion,
   onOpenSale,
   sellerFilter,
@@ -643,6 +655,7 @@ export function LeadsBoard({
                             lead={lead}
                             lookups={lookups}
                             now={now}
+                            onDelete={onDeleteLead}
                             onEdit={onEditLead}
                             onOpenSale={onOpenSale}
                             showDaysBadge={stageIsNormal(stage) && !leadIsConverted(lead)}
@@ -656,6 +669,7 @@ export function LeadsBoard({
                           lead={lead}
                           lookups={lookups}
                           now={now}
+                          onDelete={onDeleteLead}
                           onEdit={onEditLead}
                           onOpenSale={onOpenSale}
                           showDaysBadge={stageIsNormal(stage) && !leadIsConverted(lead)}
@@ -690,11 +704,17 @@ export function LeadsBoard({
         <DragOverlay dropAnimation={null}>
           {activeLead ? (
             <div className={dragOverlayCardClass}>
+              {/*
+                `onDelete` only so the lifted copy keeps the kebab's slot and is a
+                pixel clone of the card it lifts; nothing can reach its menu
+                mid-drag.
+              */}
               <LeadCard
                 fieldSet={fieldSet}
                 lead={activeLead}
                 lookups={lookups}
                 now={now}
+                onDelete={onDeleteLead}
                 showDaysBadge={false}
               />
             </div>
@@ -880,6 +900,16 @@ export function LeadsBoard({
                             >
                               {EDIT_LABEL}
                             </button>
+                            {!converted && onDeleteLead ? (
+                              <button
+                                className={listDangerActionButtonClass}
+                                data-delete-lead={row.id}
+                                onClick={() => onDeleteLead(row)}
+                                type="button"
+                              >
+                                {LEAD_DELETE_COPY.menuLabel}
+                              </button>
+                            ) : null}
                           </div>
                         </td>
                       </tr>

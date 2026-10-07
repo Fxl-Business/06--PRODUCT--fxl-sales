@@ -9,11 +9,13 @@ import type { SalesOpsClient, SalesOpsPerson, SalesOpsProduct } from '../types';
 import type { SaveContactLeadPayload, SaveLeadPayload } from './api';
 import { buildLabelLookups } from './board-labels';
 import { mutedStateClass } from './board-ui';
+import { leadIsConverted } from './calculations';
 import { ContactLeadDialog } from './ContactLeadDialog';
 import { leadToContactSeed } from './contact-lead';
+import { LeadDeleteDialog } from './LeadDeleteDialog';
 import { LeadDialog } from './LeadDialog';
 import { LeadsBoard, type LeadConversionRequest } from './LeadsBoard';
-import { useLeadsBoard, useLeadStages, useMoveLead, useSaveLead } from './hooks';
+import { useDeleteLead, useLeadsBoard, useLeadStages, useMoveLead, useSaveLead } from './hooks';
 import type { LeadBoardFilters, SalesOpsLead } from './types';
 
 /**
@@ -145,6 +147,7 @@ export function LeadsBoardContainer({
   const boardQuery = useLeadsBoard(stages, filters);
   const moveLead = useMoveLead(filters);
   const saveLead = useSaveLead();
+  const deleteLead = useDeleteLead();
 
   const lookups = React.useMemo(
     () => buildLabelLookups({ clients, people, products }),
@@ -161,6 +164,26 @@ export function LeadsBoardContainer({
 
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [dialogSeed, setDialogSeed] = React.useState<SaveLeadPayload | null>(null);
+  /** The lead the open edit form is editing; null while creating. */
+  const [editingLead, setEditingLead] = React.useState<SalesOpsLead | null>(null);
+  /** The lead whose delete confirmation is open; null when none is. */
+  const [deleteTarget, setDeleteTarget] = React.useState<SalesOpsLead | null>(null);
+
+  /*
+    The edit form offers `Excluir lead` only for a lead that can be deleted: a
+    converted one answers 409 and gets no button at all.
+  */
+  const requestDeleteFromForm =
+    editingLead !== null && !leadIsConverted(editingLead)
+      ? () => setDeleteTarget(editingLead)
+      : undefined;
+
+  async function confirmDelete(lead: SalesOpsLead) {
+    await deleteLead.mutateAsync(lead.id);
+    // The edit dialog is modal, so a delete confirmed while it is open came from
+    // it: its lead is gone, so the form closes with the confirmation.
+    if (editingLead?.id === lead.id) setDialogOpen(false);
+  }
 
   const clientOptions = React.useMemo(
     () => clients.map((row) => ({ value: row.id, label: row.name })),
@@ -202,11 +225,14 @@ export function LeadsBoardContainer({
         onCreateLead={() => {
           setDialogSeed(null);
           setContactSeed(null);
+          setEditingLead(null);
           setDialogOpen(true);
         }}
+        onDeleteLead={setDeleteTarget}
         onEditLead={(lead) => {
           setDialogSeed(leadToSeed(lead));
           setContactSeed(leadToContactSeed(lead));
+          setEditingLead(lead);
           setDialogOpen(true);
         }}
         onLoadMore={() => {
@@ -240,6 +266,7 @@ export function LeadsBoardContainer({
           // `LeadDialog` seeds its fields at MOUNT, so the identity of what is
           // being edited has to be the identity of the component.
           key={dialogSeed?.id ?? 'novo'}
+          onDelete={requestDeleteFromForm}
           onOpenChange={setDialogOpen}
           onSubmit={(payload) => saveLead.mutate(payload)}
           open
@@ -255,6 +282,7 @@ export function LeadsBoardContainer({
           initial={contactSeed}
           key={contactSeed?.id ?? 'novo'}
           onCreateClient={onCreateClient}
+          onDelete={requestDeleteFromForm}
           onOpenChange={setDialogOpen}
           // The dialog awaits the save: it closes on success and, on a rejection
           // (400 no_open_stage included), stays open with the typed values and
@@ -264,6 +292,25 @@ export function LeadsBoardContainer({
           pending={saveLead.isPending}
           sellers={sellers}
           showSellerPicker={isAdmin}
+        />
+      ) : null}
+
+      {/*
+        The ONE delete confirmation, for the card menu, the Lista action and both
+        forms. Rendered last so it stacks above an open edit form; keyed by the
+        lead so its error never leaks to the next one. The `delete:` prefix is
+        load-bearing: the edit form beside it is keyed by the SAME lead id, and
+        two siblings sharing a key make React keep a stale edit form mounted.
+      */}
+      {deleteTarget ? (
+        <LeadDeleteDialog
+          key={`delete:${deleteTarget.id}`}
+          lead={deleteTarget}
+          onConfirm={confirmDelete}
+          onOpenChange={(next) => {
+            if (!next) setDeleteTarget(null);
+          }}
+          open
         />
       ) : null}
     </>

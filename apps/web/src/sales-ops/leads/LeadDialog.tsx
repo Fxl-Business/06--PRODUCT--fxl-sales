@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { Trash2 } from 'lucide-react';
 import { Combobox, type ComboboxOption } from '@/components/ui/combobox';
 import {
   Dialog,
@@ -13,6 +14,7 @@ import { parseCurrencyInputToCents } from '../calculations';
 import type { SaveLeadPayload, SaveLeadProductPayload } from './api';
 import {
   blockedNoticeClass,
+  dangerOutlineButtonClass,
   fieldLabelClass,
   formInputClass,
   formSelectClass,
@@ -20,6 +22,7 @@ import {
   primaryButtonClass,
   secondaryButtonClass,
 } from './board-ui';
+import { LEAD_DELETE_COPY } from './delete-copy';
 
 /**
  * Create / edit a lead. PURELY presentational: props in, one `SaveLeadPayload`
@@ -49,6 +52,12 @@ export type LeadDialogProps = {
   sellers: ComboboxOption[];
   onSubmit: (payload: SaveLeadPayload) => void;
   pending?: boolean;
+  /**
+   * Asks for this lead's delete confirmation (the container's shared
+   * `LeadDeleteDialog`). Rendered only when editing (`initial.id`); the container
+   * withholds it for a converted lead.
+   */
+  onDelete?: () => void;
 };
 
 type ProductDraft = { key: string; productId: string | null; label: string };
@@ -78,6 +87,7 @@ export function LeadDialog({
   sellers,
   onSubmit,
   pending = false,
+  onDelete,
 }: LeadDialogProps) {
   /*
     MOUNT-SCOPED, with no reset effect, for the same reason `MoveLeadDialog` is:
@@ -338,7 +348,18 @@ export function LeadDialog({
           ) : null}
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="gap-2 sm:gap-0">
+          {initial?.id && onDelete ? (
+            <button
+              className={`${dangerOutlineButtonClass} sm:mr-auto`}
+              data-delete-lead-form=""
+              onClick={onDelete}
+              type="button"
+            >
+              <Trash2 aria-hidden className="h-[15px] w-[15px]" />
+              {LEAD_DELETE_COPY.formButton}
+            </button>
+          ) : null}
           <button
             className={secondaryButtonClass}
             onClick={() => onOpenChange(false)}
