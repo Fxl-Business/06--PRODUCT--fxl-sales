@@ -159,6 +159,9 @@ const OPEN: readonly RouteCase[] = [
   r('salesOps', 'GET', '/leads/:id', `${SO}/leads/${ID}`),
   r('salesOps', 'PATCH', '/leads/:id', `${SO}/leads/${ID}`),
   r('salesOps', 'POST', '/leads/:id/move', `${SO}/leads/${ID}/move`),
+  r('salesOps', 'GET', '/leads/deleted', `${SO}/leads/deleted`),
+  r('salesOps', 'POST', '/leads/:id/delete', `${SO}/leads/${ID}/delete`),
+  r('salesOps', 'POST', '/leads/:id/restore', `${SO}/leads/${ID}/restore`),
 ];
 
 let app: Hono;

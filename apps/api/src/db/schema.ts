@@ -1051,6 +1051,19 @@ export const salesOpsLeads = pgTable(
     saleId: uuid('sale_id'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }),
+    /**
+     * The lixeira (migration 0028). A lead is deleted SOFTLY: the row stays so the
+     * gestor can restore it from Cadastros > Leads excluídos, and every lead read
+     * and write steps around it through `liveLeadCondition()` in
+     * leads/lead-service.ts. All three are NULL on a live lead.
+     * `deletedByUserId` is the Hub account id of the actor and is never projected
+     * to a client; `deletedByName` is the token display name snapshotted at the
+     * act (name, then e-mail, then NULL) because there is no Hub account
+     * directory to resolve it later.
+     */
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    deletedByUserId: text('deleted_by_user_id'),
+    deletedByName: text('deleted_by_name'),
   },
   (t) => [
     // Composite-FK target for sales_ops_lead_products.(org_id, lead_id).
@@ -1061,6 +1074,11 @@ export const salesOpsLeads = pgTable(
     uniqueIndex('sales_ops_leads_org_sale_idx')
       .on(t.orgId, t.saleId)
       .where(sql`${t.saleId} is not null`),
+    // The deleted list's keyset read (newest deleted_at first, id as tiebreaker).
+    // PARTIAL, so live leads, which are almost every row, never pay for it.
+    index('sales_ops_leads_org_deleted_idx')
+      .on(t.orgId, t.deletedAt, t.id)
+      .where(sql`${t.deletedAt} is not null`),
     // restrict everywhere: a stage, a cliente, a pessoa and a venda all carry
     // history a lead still names.
     foreignKey({
@@ -1089,6 +1107,13 @@ export const salesOpsLeads = pgTable(
     // zod rule in the service layer, for the same reason cost_split_bp's
     // Sigma === 10000 is.
     check('sales_ops_leads_estimated_value_check', sql`${t.estimatedValueBrl} >= 0`),
+    // A half-deleted row is unrepresentable: a deletion time without an actor, or
+    // an actor without a time. deleted_by_name stays outside it because a token
+    // may legitimately carry neither a name nor an e-mail.
+    check(
+      'sales_ops_leads_deleted_pair_check',
+      sql`(${t.deletedAt} is null) = (${t.deletedByUserId} is null)`,
+    ),
   ],
 );
 

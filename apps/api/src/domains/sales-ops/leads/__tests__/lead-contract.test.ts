@@ -2,7 +2,8 @@
  * The lead wire contract, and the structural claims this slice makes about its
  * own source.
  *
- * Pure: zod plus two `readFileSync` source reads. No database, no mocks, no
+ * Pure: zod, the audit action schema and `readFileSync` reads of two source
+ * files (lead-service.ts and lead-trash-service.ts). No database, no mocks, no
  * network. The source-read half is the same pattern `history-route.test.ts`
  * already uses, and it is here because these are claims no runtime assertion can
  * make - "this file never reaches for the audit writer" is a property of the
@@ -12,10 +13,12 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { AuditActionSchema, CADASTRO_LIFECYCLE_ACTIONS, CadastroEntityTypeSchema } from '../../../audit/service.js';
 import {
   CreateLeadSchema,
   LEADS_DEFAULT_LIMIT,
   LEADS_MAX_LIMIT,
+  ListDeletedLeadsQuerySchema,
   ListLeadsQuerySchema,
   MoveLeadSchema,
   UpdateLeadSchema,
@@ -23,6 +26,11 @@ import {
 
 const leadServiceSource = readFileSync(
   fileURLToPath(new URL('../lead-service.ts', import.meta.url)),
+  'utf8',
+);
+
+const leadTrashServiceSource = readFileSync(
+  fileURLToPath(new URL('../lead-trash-service.ts', import.meta.url)),
   'utf8',
 );
 
@@ -158,5 +166,48 @@ describe('lead wire contract', () => {
       /\.\.\.\(stageChanged \? \{ stageChangedAt: new Date\(\) \} : \{\}\),/,
     );
     expect(leadServiceSource).not.toMatch(/stageChangedAt: stageChanged \?/);
+  });
+  // timestamptz stores microseconds: a millisecond cursor would sit between two
+  // rows deleted in the same millisecond and skip the later one.
+  it('accepts only a microsecond deleted-list cursor on a real day', () => {
+    expect(ListDeletedLeadsQuerySchema.safeParse({}).success).toBe(true);
+    expect(ListDeletedLeadsQuerySchema.safeParse({ limit: '10' }).success).toBe(true);
+    const good = `2026-10-01T12:00:00.123456Z_${SALE_ID}`;
+    expect(ListDeletedLeadsQuerySchema.safeParse({ cursor: good }).success).toBe(true);
+    for (const cursor of [
+      `7:${SALE_ID}`,
+      `2026-10-01T12:00:00.123Z_${SALE_ID}`,
+      `2026-13-01T12:00:00.123456Z_${SALE_ID}`,
+      `2026-02-30T12:00:00.123456Z_${SALE_ID}`,
+      `2026-10-01T24:00:00.123456Z_${SALE_ID}`,
+      `${good} `,
+    ]) {
+      expect(ListDeletedLeadsQuerySchema.safeParse({ cursor }).success, cursor).toBe(false);
+    }
+    expect(ListDeletedLeadsQuerySchema.safeParse({ limit: '0' }).success).toBe(false);
+    expect(ListDeletedLeadsQuerySchema.safeParse({ limit: String(LEADS_MAX_LIMIT + 1) }).success).toBe(false);
+  });
+
+  it('spells the live predicate once, in lead-service.ts', () => {
+    expect(leadServiceSource.match(/isNull\(salesOpsLeads\.deletedAt\)/g)).toHaveLength(1);
+    expect(leadServiceSource).toMatch(/export function liveLeadCondition\(\): SQL/);
+    expect(leadServiceSource).not.toMatch(/from '\.\/lead-trash-service\.js'/);
+  });
+
+  it('keeps every audited lead act in lead-trash-service.ts', () => {
+    expect(leadTrashServiceSource.match(/writeAuditEntry\(tx,/g)).toHaveLength(2);
+    expect(leadTrashServiceSource.match(/lockLeadBoard\(tx, orgId\)/g)).toHaveLength(2);
+    expect(leadTrashServiceSource).not.toMatch(/getAdminDb/);
+    expect(leadTrashServiceSource).not.toMatch(/claimantFor/);
+    expect(leadTrashServiceSource).not.toMatch(/ensureLeadStages/);
+  });
+
+  it('adds the two lead actions without touching the cadastro lifecycle', () => {
+    expect(AuditActionSchema.safeParse('lead.deleted').success).toBe(true);
+    expect(AuditActionSchema.safeParse('lead.restored').success).toBe(true);
+    const lifecycle = CADASTRO_LIFECYCLE_ACTIONS as readonly string[];
+    expect(lifecycle).not.toContain('lead.deleted');
+    expect(lifecycle).not.toContain('lead.restored');
+    expect(CadastroEntityTypeSchema.safeParse('lead').success).toBe(false);
   });
 });

@@ -121,6 +121,32 @@ export type CreateLeadInput = z.infer<typeof CreateLeadSchema>;
 export type UpdateLeadInput = z.infer<typeof UpdateLeadSchema>;
 export type MoveLeadInput = z.infer<typeof MoveLeadSchema>;
 export type ListLeadsQuery = z.infer<typeof ListLeadsQuerySchema>;
+
+/**
+ * The deleted-list keyset cursor: `<deleted_at as UTC ISO with MICROseconds>_<id>`.
+ *
+ * Microseconds and not the milliseconds a JS Date carries, because timestamptz
+ * stores microseconds: a millisecond cursor would sit between two rows deleted
+ * in the same millisecond and silently skip the later one. The server renders
+ * it with to_char and parses it back with ::timestamptz, so it round-trips
+ * exactly. The day goes through isIsoDay so an impossible date (2026-02-30) is
+ * a 400 here and never a Postgres cast error (a 500).
+ */
+const DELETED_CURSOR_RE =
+  /^\d{4}-\d{2}-\d{2}T([01]\d|2[0-3]):[0-5]\d:[0-5]\d\.\d{6}Z_[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+export const ListDeletedLeadsQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(LEADS_MAX_LIMIT).optional(),
+  cursor: z
+    .string()
+    .regex(DELETED_CURSOR_RE)
+    .refine((value) => isIsoDay(value.slice(0, 10)), {
+      message: 'cursor day must be a real calendar day',
+    })
+    .optional(),
+});
+
+export type ListDeletedLeadsQuery = z.infer<typeof ListDeletedLeadsQuerySchema>;
 export type LeadProductInput = z.infer<typeof LeadProductSchema>;
 
 /**
