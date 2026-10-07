@@ -88,6 +88,11 @@ export async function apiFetch<T>(
     throw err;
   }
 
+  // A `204 No Content` has no body to parse: `res.json()` would reject with a
+  // SyntaxError and turn a successful write into a failure. Callers of a 204
+  // route type the result `void`.
+  if (res.status === 204) return undefined as T;
+
   return res.json() as Promise<T>;
 }
 
