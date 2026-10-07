@@ -1,5 +1,5 @@
 import type { SalesEdition } from '@fxl-sales/shared-utils/sales-edition';
-import { and, asc, eq, sql, type SQL } from 'drizzle-orm';
+import { and, asc, eq, isNull, or, sql, type SQL } from 'drizzle-orm';
 import type { getDb } from '../../../db/client.js';
 import {
   salesOpsFuncoes,
@@ -188,8 +188,21 @@ export async function resolveCallerPersonId(
 }
 
 export type LeadScopeGate =
-  | { ok: true; sellerPersonId: string | null }
+  | {
+      ok: true;
+      /** The caller's own pessoa, or null for an admin (no seller predicate at all). */
+      sellerPersonId: string | null;
+      /**
+       * Whether a non-admin caller sees, and claims on their first write, the
+       * unassigned pool (leads-sem-vendedor). True only when the caller's pessoa
+       * is an ACTIVE vendedor; always false for an admin, who never claims.
+       */
+      canClaimUnassigned: boolean;
+    }
   | { ok: false; reason: 'seller_person_unmapped' };
+
+/** The gate after its `ok` check: what the predicate and the claim are built from. */
+type LeadScopeAllowed = Extract<LeadScopeGate, { ok: true }>;
 
 /**
  * The seller predicate, resolved on the SERVER and never derived from anything
@@ -200,22 +213,41 @@ export type LeadScopeGate =
  * data leak. The discriminated union is what makes it impossible to spell,
  * because a bare `string | null` would make `null` mean both "no predicate,
  * admin" and "no predicate, could not tell".
+ *
+ * A non-admin also carries `canClaimUnassigned`, true only for an active
+ * vendedor: it widens the predicate to the unassigned pool and makes the first
+ * write a claim (see `leadSellerCondition` and `claimantFor`).
  */
 export async function resolveLeadScopePredicate(
   tx: Db,
   orgId: string,
   scope: LeadScope,
 ): Promise<LeadScopeGate> {
-  if (scope.isAdmin) return { ok: true, sellerPersonId: null };
+  if (scope.isAdmin) return { ok: true, sellerPersonId: null, canClaimUnassigned: false };
   const personId = await resolveCallerPersonId(tx, orgId, scope);
-  if (personId) return { ok: true, sellerPersonId: personId };
+  if (personId) return sellerGate(tx, orgId, personId);
   // The full edition never reaches the provisioning code: an FXL seller without
   // a pessoa is an operator cadastro gap and keeps answering unmapped.
   if (scope.edition === 'leads') {
     const provisioned = await provisionLeadsSellerPerson(tx, orgId, scope);
-    if (provisioned) return { ok: true, sellerPersonId: provisioned };
+    if (provisioned) return sellerGate(tx, orgId, provisioned);
   }
   return { ok: false, reason: 'seller_person_unmapped' };
+}
+
+/**
+ * A resolved non-admin caller. Resolving the pessoa says WHO the caller is;
+ * whether they may see the unassigned pool is a separate question with a
+ * separate answer, because a finder-only pessoa or a deactivated vendedor still
+ * reaches their own leads (exactly as before this rule) but must never pick up a
+ * lead from the pool.
+ */
+async function sellerGate(tx: Db, orgId: string, personId: string): Promise<LeadScopeGate> {
+  return {
+    ok: true,
+    sellerPersonId: personId,
+    canClaimUnassigned: (await findActiveVendedor(tx, orgId, personId)) !== null,
+  };
 }
 
 /** `sales_ops_people.display_name` is capped by `PersonSchema` at this length. */
@@ -340,17 +372,16 @@ async function boundPersonId(tx: Db, orgId: string, userId: string): Promise<str
 type ResolvedSeller = { id: string; displayName: string };
 
 /**
- * The vendedor, through `sales_ops_person_funcoes` against the `vendedor` SYSTEM
- * função. The returned display name is what gets written to
- * `seller_name_snapshot`: server-authoritative, exactly as `resolvePartyContexts`
- * makes `personNameSnapshot` server-authoritative, so a disagreeing body label
- * loses.
+ * The pessoa when it is an ACTIVE vendedor, else null. The one spelling of that
+ * rule in this file: the gate reads it to decide who sees the unassigned pool,
+ * and `resolveSellerPersonId` reads it to decide who may be written as a lead's
+ * vendedor, so the two can never disagree about who is a vendedor.
  */
-async function resolveSellerPersonId(
+async function findActiveVendedor(
   tx: Db,
   orgId: string,
-  sellerPersonId: string,
-): Promise<ResolvedSeller> {
+  personId: string,
+): Promise<ResolvedSeller | null> {
   const [seller] = await tx
     .select({ id: salesOpsPeople.id, displayName: salesOpsPeople.displayName })
     .from(salesOpsPeople)
@@ -371,13 +402,29 @@ async function resolveSellerPersonId(
     .where(
       and(
         eq(salesOpsPeople.orgId, orgId),
-        eq(salesOpsPeople.id, sellerPersonId),
+        eq(salesOpsPeople.id, personId),
         eq(salesOpsPeople.status, 'active'),
         eq(salesOpsFuncoes.slug, 'vendedor'),
         eq(salesOpsFuncoes.isSystem, true),
       ),
     )
     .limit(1);
+  return seller ?? null;
+}
+
+/**
+ * The vendedor, through `sales_ops_person_funcoes` against the `vendedor` SYSTEM
+ * função. The returned display name is what gets written to
+ * `seller_name_snapshot`: server-authoritative, exactly as `resolvePartyContexts`
+ * makes `personNameSnapshot` server-authoritative, so a disagreeing body label
+ * loses.
+ */
+async function resolveSellerPersonId(
+  tx: Db,
+  orgId: string,
+  sellerPersonId: string,
+): Promise<ResolvedSeller> {
+  const seller = await findActiveVendedor(tx, orgId, sellerPersonId);
   if (seller) return seller;
 
   // Tell the two apart, because they are two different operator mistakes: one is
@@ -591,12 +638,14 @@ export async function listLeads(
     if (!gate.ok) return { ok: false, reason: gate.reason } as const;
 
     const conditions: SQL[] = [eq(salesOpsLeads.orgId, orgId)];
-    // The `else if` is the whole seller-scoping rule in one line: for a
-    // non-admin the predicate is the caller's OWN person id and
-    // `?sellerPersonId=` is never read AT ALL. A seller who passes a colleague's
-    // id gets their own leads back - not a 403, and not the colleague's.
+    // The `else if` is the whole seller-scoping rule: for a non-admin the
+    // predicate is built from the caller's OWN person id (plus the unassigned
+    // pool for an active vendedor) and `?sellerPersonId=` is never read AT ALL.
+    // A seller who passes a colleague's id gets their own board back - not a
+    // 403, and not the colleague's. The count below and the page share this one
+    // `conditions` array, so `total` counts exactly the rows a page can return.
     if (gate.sellerPersonId) {
-      conditions.push(eq(salesOpsLeads.sellerPersonId, gate.sellerPersonId));
+      conditions.push(leadSellerCondition(gate.sellerPersonId, gate.canClaimUnassigned));
     } else if (query.sellerPersonId) {
       conditions.push(eq(salesOpsLeads.sellerPersonId, query.sellerPersonId));
     }
@@ -666,7 +715,7 @@ export async function getLead(
     const [row] = await tx
       .select({ id: salesOpsLeads.id })
       .from(salesOpsLeads)
-      .where(and(...leadIdentityConditions(orgId, id, gate.sellerPersonId)))
+      .where(and(...leadIdentityConditions(orgId, id, gate)))
       .limit(1);
     if (!row) return { ok: false, reason: 'not_found' } as const;
     return { ok: true, lead: await readLeadView(tx, orgId, id) } as const;
@@ -674,18 +723,56 @@ export async function getLead(
 }
 
 /**
- * `eq(salesOpsLeads.orgId, orgId)` is ALWAYS the first element, and the seller
- * predicate is appended only when there is one. Drizzle drops an `undefined`
- * member, so the admin case is the same expression minus one conjunct.
+ * The seller predicate for a non-admin caller, and the ONE place it is spelled.
+ *
+ * An active vendedor sees their own leads plus the unassigned pool
+ * (leads-sem-vendedor), written as the explicit disjunction
+ * `seller = me OR seller IS NULL` and never as IS NOT DISTINCT FROM. `or()`
+ * parenthesizes it, which is load-bearing: unparenthesized, the IS NULL arm
+ * would escape the org conjunct beside it and reach every org's pool. Anyone
+ * else keeps exactly their own leads.
  */
-function leadIdentityConditions(
-  orgId: string,
-  id: string,
-  sellerPersonId: string | null,
-): SQL[] {
+function leadSellerCondition(sellerPersonId: string, canClaimUnassigned: boolean): SQL {
+  const own = eq(salesOpsLeads.sellerPersonId, sellerPersonId);
+  if (!canClaimUnassigned) return own;
+  return or(own, isNull(salesOpsLeads.sellerPersonId))!;
+}
+
+/**
+ * `eq(salesOpsLeads.orgId, orgId)` is ALWAYS the first element, and the seller
+ * predicate is appended only for a non-admin. The admin case is the same
+ * expression minus one conjunct.
+ */
+function leadIdentityConditions(orgId: string, id: string, gate: LeadScopeAllowed): SQL[] {
   const conditions: SQL[] = [eq(salesOpsLeads.orgId, orgId), eq(salesOpsLeads.id, id)];
-  if (sellerPersonId) conditions.push(eq(salesOpsLeads.sellerPersonId, sellerPersonId));
+  if (gate.sellerPersonId) {
+    conditions.push(leadSellerCondition(gate.sellerPersonId, gate.canClaimUnassigned));
+  }
   return conditions;
+}
+
+/**
+ * The pessoa a write on `current` claims the lead for, or null for no claim.
+ *
+ * Only a non-admin caller who may see the pool claims (an admin never does: the
+ * lead stays in the pool, gestor decision), and only a lead that was still
+ * unassigned when its row lock was taken. Callers decide this AFTER the
+ * `already_converted` refusal and the lead UPDATE carries it, so a refused write
+ * never claims and a thrown one is rolled back with the transaction.
+ *
+ * The race guard is the `SELECT ... FOR UPDATE` that produced `current`: a
+ * second vendedor reaching the same unassigned lead blocks on the row lock, and
+ * READ COMMITTED re-checks its WHERE against the committed row once the first
+ * commits. `seller = A` matches neither `seller = B` nor `IS NULL`, so the second
+ * reads no row and answers not_found. Never raise these transactions to
+ * REPEATABLE READ: the loser would then fail with 40001 (a 500) instead.
+ *
+ * The `canClaimUnassigned` conjunct is redundant with the read predicate today
+ * and kept so a future predicate change can never turn a finder into a claimant.
+ */
+function claimantFor(gate: LeadScopeAllowed, current: LeadRow): string | null {
+  if (gate.sellerPersonId === null || !gate.canClaimUnassigned) return null;
+  return current.sellerPersonId === null ? gate.sellerPersonId : null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -918,15 +1005,31 @@ async function applyLeadUpdate(
     const [current] = await tx
       .select()
       .from(salesOpsLeads)
-      .where(and(...leadIdentityConditions(orgId, id, gate.sellerPersonId)))
+      .where(and(...leadIdentityConditions(orgId, id, gate)))
       .limit(1)
       .for('update');
     if (!current) return { ok: false, reason: 'not_found' } as const;
     // A converted card is read-only: its data now lives on the proposta.
     if (current.saleId !== null) return { ok: false, reason: 'already_converted' } as const;
 
+    const claimant = claimantFor(gate, current);
+    // Whether this UPDATE writes the seller pair at all: a claim always does,
+    // otherwise only a body that names the key.
+    const writesSeller = claimant !== null || input.sellerPersonId !== undefined;
+
     let seller: ResolvedSeller | null = null;
-    if (input.sellerPersonId !== undefined) {
+    if (claimant !== null) {
+      // On an unassigned lead the caller may leave the vendedor out, clear it or
+      // name themselves, and all three mean "mine": the web form of a pool lead
+      // carries an empty vendedor. Any other id would hand the lead to a
+      // colleague, which only a gestor may do, so it is refused before anything
+      // is written. The snapshot is the pessoa's own display name, read here.
+      const requested = input.sellerPersonId ?? null;
+      if (requested !== null && requested !== claimant) {
+        return { ok: false, reason: 'seller_scope' } as const;
+      }
+      seller = await resolveSellerPersonId(tx, orgId, claimant);
+    } else if (input.sellerPersonId !== undefined) {
       const requested = input.sellerPersonId ?? null;
       if (gate.sellerPersonId && requested !== gate.sellerPersonId) {
         return { ok: false, reason: 'seller_scope' } as const;
@@ -965,7 +1068,7 @@ async function applyLeadUpdate(
         ...(input.contactBirthDate !== undefined
           ? { contactBirthDate: input.contactBirthDate }
           : {}),
-        ...(input.sellerPersonId !== undefined
+        ...(writesSeller
           ? {
               sellerPersonId: seller?.id ?? null,
               sellerNameSnapshot: seller?.displayName ?? '',
@@ -1001,7 +1104,7 @@ export async function moveLead(
     const [current] = await tx
       .select()
       .from(salesOpsLeads)
-      .where(and(...leadIdentityConditions(orgId, id, gate.sellerPersonId)))
+      .where(and(...leadIdentityConditions(orgId, id, gate)))
       .limit(1)
       .for('update');
     if (!current) return { ok: false, reason: 'not_found' } as const;
@@ -1049,6 +1152,11 @@ export async function moveLead(
       throw new LeadInputError('sale_not_allowed');
     }
 
+    // The claim (leads-sem-vendedor), resolved after every validation above so a
+    // refused move never claims, and written by the same UPDATE as the move.
+    const claimant = claimantFor(gate, current);
+    const claimed = claimant !== null ? await resolveSellerPersonId(tx, orgId, claimant) : null;
+
     const stageChanged = destination.id !== current.stageId;
 
     await tx
@@ -1062,6 +1170,7 @@ export async function moveLead(
         ...(stageChanged ? { stageChangedAt: new Date() } : {}),
         lostReason: destination.kind === 'lost' ? (input.reason ?? null) : null,
         ...(destination.kind === 'conversion' ? { saleId: input.saleId! } : {}),
+        ...(claimed ? { sellerPersonId: claimed.id, sellerNameSnapshot: claimed.displayName } : {}),
         updatedAt: new Date(),
       })
       .where(and(eq(salesOpsLeads.orgId, orgId), eq(salesOpsLeads.id, id)));

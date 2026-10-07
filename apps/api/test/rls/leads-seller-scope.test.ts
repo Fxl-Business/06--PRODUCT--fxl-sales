@@ -851,24 +851,33 @@ describe('sales operations leads: seller scope, movement and isolation', () => {
     ).rejects.toMatchObject({ code: 'seller_not_found' });
   });
 
-  // A seller predicate written as IS NOT DISTINCT FROM would show every seller
-  // every unassigned lead.
-  it("keeps an unassigned lead out of every seller's board and on the admin's", async () => {
+  // The pool rule (leads-sem-vendedor): an unassigned lead is on EVERY active
+  // vendedor's board until one of them writes it, and on the admin's. The
+  // predicate is the explicit `seller = me OR seller IS NULL`, granted only to an
+  // active vendedor. The claim, the race and the non-vendedor cases live in
+  // leads-unassigned-claim.test.ts.
+  it("shows an unassigned lead on every vendedor's board and on the admin's", async () => {
     const orgId = newOrg('unassigned');
     const { open } = await stagesFor(orgId);
     const ana = await seedSeller(orgId, 'Ana Martins');
+    const bruno = await seedSeller(orgId, 'Bruno Lima');
     await bindHubAccount(orgId, ana.id, 'hub_ana');
+    await bindHubAccount(orgId, bruno.id, 'hub_bruno');
     await expectOk(createLead(db, orgId, leadPayload({ contactName: 'Sem dono' }), ADMIN_SCOPE));
 
-    const anaBoard = await listLeads(
-      db,
-      orgId,
-      ListLeadsQuerySchema.parse({ stageId: open.id }),
-      sellerScope('hub_ana'),
-    );
-    if (!anaBoard.ok) throw new Error(`unexpected refusal: ${anaBoard.reason}`);
-    expect(anaBoard.leads).toEqual([]);
-    expect(anaBoard.total).toBe(0);
+    for (const account of ['hub_ana', 'hub_bruno']) {
+      const board = await listLeads(
+        db,
+        orgId,
+        ListLeadsQuerySchema.parse({ stageId: open.id }),
+        sellerScope(account),
+      );
+      if (!board.ok) throw new Error(`unexpected refusal: ${board.reason}`);
+      expect(board.leads.map((lead) => [lead.contactName, lead.sellerPersonId])).toEqual([
+        ['Sem dono', null],
+      ]);
+      expect(board.total).toBe(1);
+    }
 
     const adminBoard = await listLeads(
       db,
@@ -879,7 +888,8 @@ describe('sales operations leads: seller scope, movement and isolation', () => {
     if (!adminBoard.ok) throw new Error(`unexpected refusal: ${adminBoard.reason}`);
     expect(adminBoard.leads).toHaveLength(1);
 
-    // And a seller may not file an UNASSIGNED lead either.
+    // Seeing the pool is not filing into it: the create rules did not change, and
+    // a full-edition seller may still not file an UNASSIGNED lead.
     expect(await createLead(db, orgId, leadPayload(), sellerScope('hub_ana'))).toEqual({
       ok: false,
       reason: 'seller_scope',

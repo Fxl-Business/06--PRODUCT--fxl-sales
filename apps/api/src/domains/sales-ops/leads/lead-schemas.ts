@@ -63,8 +63,9 @@ const LeadFieldsSchema = z.object({
   estimatedValueBrl: money.default(0),
   description: z.string().max(4000).nullish(),
   /**
-   * NULLABLE: a lead may sit unassigned, and an unassigned lead is then visible
-   * to admins only, which is the correct answer.
+   * NULLABLE: a lead may sit unassigned. An unassigned lead is visible to admins
+   * and to every active vendedor, and the first vendedor to write it claims it
+   * (leads-sem-vendedor, see `claimantFor` in lead-service.ts).
    */
   sellerPersonId: uuid.nullish(),
   products: z.array(LeadProductSchema).max(50).default([]),

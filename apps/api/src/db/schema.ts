@@ -1030,8 +1030,9 @@ export const salesOpsLeads = pgTable(
     estimatedValueBrl: integer('estimated_value_brl').notNull().default(0),
     description: text('description'),
     /**
-     * Nullable: a lead may sit unassigned. Server-side seller scoping therefore
-     * shows an unassigned lead to admins only, which is correct.
+     * Nullable: a lead may sit unassigned. Server-side seller scoping shows an
+     * unassigned lead to admins and to every active vendedor, and the first
+     * vendedor write claims it (lead-service.ts `claimantFor`).
      */
     sellerPersonId: uuid('seller_person_id'),
     sellerNameSnapshot: text('seller_name_snapshot').notNull().default(''),
