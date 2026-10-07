@@ -317,7 +317,15 @@ Full reference: `nexo/knowledge/reference/kanban-de-leads.md`.
 - Read-only is a property of the CONVERTED CARD (`lead.saleId !== null`), never of a column.
 - No board code may call `POST /sales/:id/transition`. `board-write-surface.test.ts` scans the `BOARD-WRITE-FENCE:START/END` regions in `SalesOpsApp.tsx`; those sentinels are load-bearing.
 - Stage moves write nothing to `audit_log`.
-- Seller scoping is server-side inside `withTenant`, never a client filter.
+- Seller scoping stays server-side inside `withTenant`, never a client filter.
+  A non-admin whose pessoa is an ACTIVE vendedor sees own leads plus unassigned ones (`seller_person_id IS NULL`) through the one predicate `leadSellerCondition`; any other non-admin keeps own leads only.
+  The first write (move or any PATCH) by such a vendedor claims an unassigned lead in the same transaction, after the `FOR UPDATE` and the `already_converted` refusal; an admin never claims.
+  The claim race loser answers `not_found`.
+  Oracle: `apps/api/test/rls/leads-unassigned-claim.test.ts`.
+- `insertLead` and `moveLead` take the per-org transaction advisory lock `lockLeadBoard` right after the scope gate and before any card row lock, the ONE lock order for board writers; `applyLeadUpdate` and reads take none.
+  Any new writer of `stage_id` or `position` must do the same.
+  Oracle: `apps/api/test/rls/leads-move-concurrency.test.ts`.
+- An open lead with no vendedor renders `Sem vendedor - disponível` (`leadIsUnassigned`, `UNASSIGNED_LEAD_LABEL`, `data-unassigned-lead`) on the card and the Lista; a converted one keeps `Sem vendedor`.
 - Routes: `operacional/leads` (team), `meus-dados/leads` (seller), `cadastros/etapas`. Nav entries are appended, never prepended, because the first entry is the landing route.
 - Lead screens live in `apps/web/src/sales-ops/leads/`, never inside `SalesOpsApp.tsx`, mounted through `LeadStagesContainer` / `LeadsBoardContainer`, and use `mutateAsync`.
 

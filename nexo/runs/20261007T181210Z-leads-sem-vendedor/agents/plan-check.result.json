@@ -1,0 +1,1 @@
+{"agent":"plan-check","slice":"wave-1","status":"PASS","report":"nexo/runs/20261007T181210Z-leads-sem-vendedor/plan-check.md","summary":"Both plans executable; AC1-AC9 covered, predicate and claim correct on every path, disjoint files, oracles real; only minor notes.","done":true,"ts":"2026-10-07T18:27:52Z"}

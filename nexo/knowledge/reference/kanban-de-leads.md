@@ -38,6 +38,7 @@ Moved verbatim from `CLAUDE.md` on 2026-09-22 so the standing context stays shor
 - Stage movement writes NOTHING to `audit_log`. The ledger is hash-chained, every audited write queues behind a global tail lock and it is never purged, while a card move is high-frequency noise; only the archive/restore lifecycle is audited, exactly as for the other cadastros.
 - Leads do NOT travel in `/bootstrap`. They have their own paginated endpoint, because `getSalesOpsSnapshot` already dumps every sale, item and payable with no pagination at all and leads are the highest-volume entity in the product. No lead value enters `getSalesOpsSummary`, the dashboard or `computeSaleFinancials`, and a test proves that creating leads moves no existing financial number.
 - Seller scoping is applied on the SERVER, inside `withTenant`, and is proven in `apps/api/test/rls/`. It is NEVER a client-side filter. `showSellerFilter` on `LeadsBoardContainer` decides only whether an ADMIN is offered the vendedor narrowing picker under `operacional/leads`; it is not a scope switch, and setting it for a seller would add a control and never a row.
+  This sentence is still true, and the scope is now wider for an active vendedor; see the section `Pool de leads sem vendedor` below.
 - Routing: `operacional/leads` is the team board, `meus-dados/leads` is a seller's own, and `cadastros/etapas` is the admin cadastro. `leads` is ONE view id serving two workspaces, exactly as `vendas` and `comissoes` already do, distinguished by `titleForView`'s `personal` flag and by `workspaceForView`'s team-first precedence. A finder gains nothing: `meusDadosFinder` is byte-unchanged, because acceptance 15 scopes personal lead visibility to `seller` alone.
   Both nav entries are APPENDED to their lists and never prepended, and `etapas` sits before `geral` rather than after it. `getDefaultSalesOpsRoute` lands on `getSalesOpsNavigation(workspace, roles)[0]`, so the first element of each list is a ROUTE: prepending `leads` would move every seller's session start off `Meu painel` and the admin's `Operacional` landing off `Propostas`. The accepted cost is that the sidebar reads `Propostas, Comissões, Prospecção` although prospecção precedes a proposta; decoupling the landing view from the first nav item is its own change with its own oracle, not a quiet array reshuffle.
 - The two lead screens live in `apps/web/src/sales-ops/leads/` and NEVER inside `SalesOpsApp.tsx`, which this feature left at 9235 lines (8946 before it). The number is here to justify the fence, not to be maintained: if it is stale, the fence still stands. That file's whole share of this feature is the mounting and the conversion WIRING and no screen body at all: the imports, two `titleForView` entries, one `useMemo` building the vendedor options, two conditional mount blocks, one `headerAction` guard, and then slice 08's `'convert'` union arm, its `convertedSales` state, `requestLeadConversion`, `saveLeadConversion`, `createdSaleIdentity`, `toSaleItemForm` and the five wizard initializers that read `leadPrefill`. The `headerAction` guard is not optional: that chain ends in a `'Nova proposta'` fallthrough, so without naming `leads` and `etapas` the shell would render a proposta button over a Kanban board and open the wizard from it.
@@ -131,3 +132,63 @@ Seller auto-provision (2026-10-06, seller-auto-provision) closed a production re
   Oracles: a direct call of the exported `provisionLeadsSellerPerson` forces the e-mail-check interleaving, an uncommitted holder row forces the `23505` one, and a 20-round fresh-org race runs it end to end.
 - Web: in the leads edition only, a board read failing with `403` and `ApiError.reason === 'seller_person_unmapped'` renders "Seu acesso ainda não está vinculado a um vendedor. Peça ao gestor para conferir seu cadastro em Vendedores." instead of the generic copy.
 - Oracles: `test/rls/leads-edition.test.ts` (describe `seller auto-provision (leads edition)`, including the concurrent-request case) and `leads/__tests__/leads-contact-container.test.tsx`.
+
+## Pool de leads sem vendedor (2026-10-07, leads-sem-vendedor)
+
+Why the pool exists.
+The Construbom imports its prospect base (114 leads) with NO vendedor on purpose and works it as a shared pool.
+Before this change a non-admin only ever saw `seller_person_id = <own pessoa>`, so an unassigned lead was invisible to every vendedor and unwritable by them.
+
+The rule.
+- A non-admin whose pessoa is an ACTIVE vendedor sees own leads plus every lead with `seller_person_id IS NULL`, through the one predicate `leadSellerCondition` (list, count, `getLead` and the identity conditions of update and move all share it, so `total` and the page agree).
+- The first write by that vendedor, a move or any PATCH (`updateLead` and `updateContactLead`), claims the lead in the same UPDATE: `seller_person_id` is the caller's pessoa and the name snapshot is read server-side from that pessoa.
+- A claim is computed after the `FOR UPDATE` and after the `already_converted` refusal, and a refused or thrown write never claims.
+- A body naming another vendedor on an unassigned lead is still `403 seller_scope`; absent, `null` or the caller's own id all claim.
+- Out of scope on purpose: an admin filter "Sem vendedor", an `audit_log` entry for a claim (stage moves write none and the claim rides the same write), and any change to create rules.
+
+Why claim on first write.
+The team asked for "whoever acts first takes it", with no separate claim button, so the claim must ride the write the vendedor already makes.
+Doing it inside the same transaction, after the row lock, is what makes "first" well defined.
+
+Why only active vendedores (AC8).
+Pool visibility is a vendedor privilege.
+A finder-only caller or a deactivated vendedor keeps today's scope exactly (own leads only, no claim), because the pool is work for people who sell, and the resolver is the `vendedor` system função, never a mirror column.
+
+Why admins never claim.
+A gestor reorganizes the board and edits on behalf of the team.
+If an admin move claimed the lead, one stray drag would make the gestor the owner of a pool lead and take it away from every vendedor.
+An admin PATCH that names a vendedor still assigns, as before.
+
+Why the race is safe.
+Two vendedores acting on one unassigned lead both block on `SELECT ... FOR UPDATE`.
+Under READ COMMITTED, when the first commits, Postgres re-evaluates the loser's WHERE against the new row version (EvalPlanQual), the `IS NULL` arm is now false, the row drops out and the loser answers `not_found`, writing nothing.
+This depends on the default isolation level: REPEATABLE READ would turn the loser into a `40001`, and `withTenant` must not raise it.
+The oracle holds a row lock, polls `pg_stat_activity` with `pg_blocking_pids` until the loser is provably blocked, releases, and then asserts the outcome, so it is deterministic and not a sleep.
+
+The deadlock found, and the lock chosen.
+While planning the claim, the planner found a pre-existing bug: two vendedores moving two cards out of the same column deadlocked with `40P01` (a 500 for the user), because `moveLead` locked its own card first and `renumberStage` then updated the other cards of the column in an order that crossed.
+Concurrent creates also computed `MAX(position) + 1` from the same snapshot and stored a DUPLICATE position (the oracle saw `Segundo 2 / Primeiro 2`).
+A shared pool of 114 leads in one column makes both likely, so it was fixed in the same run as slice 03.
+The fix is one per-org `pg_advisory_xact_lock(hashtext('fxl-sales:lead-board'), hashtext(orgId))`, `lockLeadBoard`, taken by `insertLead` and `moveLead` right after the scope gate and before any card row lock.
+One lock order for every board writer removes the cycle by construction, and the lock is transaction scoped, so it is safe behind a transaction pooler.
+`applyLeadUpdate` and reads take none, so a PATCH can never join a cycle.
+The import executor inherits the lock through its released SAVEPOINT, and an import holds the board for its whole transaction (the intended trade: before, it could deadlock with a vendedor instead of making them wait).
+Alternatives rejected:
+- Retry on `40P01`: hides a 500 behind latency and jitter, retries a half-done transaction, and never fixes the duplicate position.
+- Lock the stage rows: collides with `reorderLeadStages`, which already locks them in its own order, and creates a second cycle.
+- Per-stage advisory locks: a move touches two stages, so two locks need a canonical order, and the create still needs the column, so it buys nothing over one org lock for a few hundred cards.
+Cost: creates and moves of ONE org serialize, a few milliseconds each, and different orgs never wait on each other except on a 32-bit hash collision, which only shares a queue.
+Any future writer of `stage_id` or `position` calls `lockLeadBoard` right after its gate; a writer that touches other columns only must not.
+
+Web marker.
+An open lead with `sellerPersonId === null` shows the dashed `Sem vendedor - disponível` pill (`leadIsUnassigned`, `UNASSIGNED_LEAD_LABEL`, `data-unassigned-lead`) in the card footer and in the Lista vendedor column.
+A converted lead with no vendedor keeps the plain `Sem vendedor` line, because it is read-only and can never be claimed.
+The days badge got `shrink-0 whitespace-nowrap`, which fixed an existing wrap of `há 12 dias` under a long vendedor name.
+
+Open follow-up.
+During a long import every waiting board request holds a pooled API connection (pool max 10) and the app sets no `lock_timeout`.
+A `SET LOCAL lock_timeout` on the board lock would bound it.
+It is not built and not required for this feature.
+Also open as a copy question: `meus-dados/leads` still reads "Seus leads em negociação" although it now lists the pool.
+
+Oracles: `apps/api/test/rls/leads-unassigned-claim.test.ts`, `apps/api/test/rls/leads-seller-scope.test.ts`, `apps/api/test/rls/leads-move-concurrency.test.ts` and `apps/web/src/sales-ops/leads/__tests__/lead-unassigned-marker.test.tsx`.

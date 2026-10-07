@@ -1,0 +1,1 @@
+{"agent":"build","slice":"03-move-lock-order","status":"PASS","report":"nexo/runs/20261007T181210Z-leads-sem-vendedor/exec-03-move-lock-order.md","summary":"lockLeadBoard added; oracle red 4/5 then green 3/3, regression and lint/tsc clean, commit b6066dd","done":true,"ts":"2026-10-07T18:48:56Z"}

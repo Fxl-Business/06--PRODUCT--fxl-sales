@@ -1,0 +1,1 @@
+{"agent":"plan-check","slice":"03-move-lock-order","status":"PASS","report":"nexo/runs/20261007T181210Z-leads-sem-vendedor/plan-check-03.md","summary":"Per-org advisory board lock after gate and before any card is deadlock-free, oracle deterministic and red on old code; only nits (pool pressure during long import).","done":true,"ts":"2026-10-07T18:47:18Z"}

@@ -1,0 +1,1 @@
+{"agent":"build","slice":"01-api-claim","status":"PASS","report":"nexo/runs/20261007T181210Z-leads-sem-vendedor/exec-01-api-claim.md","summary":"API pool visibility and claim-on-write done; oracle 29/29 green, regression green, type-check and lint clean; commit 7884a82","done":true,"ts":"2026-10-07T18:31:23Z"}
