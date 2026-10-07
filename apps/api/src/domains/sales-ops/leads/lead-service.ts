@@ -15,6 +15,7 @@ import type {
   CreateContactLeadInput,
   CreateLeadInput,
   LeadProductInput,
+  LeadStageSummaryQuery,
   ListLeadsQuery,
   MoveLeadInput,
   UpdateContactLeadInput,
@@ -656,20 +657,9 @@ export async function listLeads(
     const gate = await resolveLeadScopePredicate(tx, orgId, scope);
     if (!gate.ok) return { ok: false, reason: gate.reason } as const;
 
-    const conditions: SQL[] = [eq(salesOpsLeads.orgId, orgId), liveLeadCondition()];
-    // The `else if` is the whole seller-scoping rule: for a non-admin the
-    // predicate is built from the caller's OWN person id (plus the unassigned
-    // pool for an active vendedor) and `?sellerPersonId=` is never read AT ALL.
-    // A seller who passes a colleague's id gets their own board back - not a
-    // 403, and not the colleague's. The count below and the page share this one
-    // `conditions` array, so `total` counts exactly the rows a page can return,
-    // and the live predicate is in it from the start, so a deleted card is neither
-    // a row nor part of `total`.
-    if (gate.sellerPersonId) {
-      conditions.push(leadSellerCondition(gate.sellerPersonId, gate.canClaimUnassigned));
-    } else if (query.sellerPersonId) {
-      conditions.push(eq(salesOpsLeads.sellerPersonId, query.sellerPersonId));
-    }
+    // The count below and the page share this one `conditions` array, so `total`
+    // counts exactly the rows a page can return.
+    const conditions = leadBoardConditions(orgId, gate, query.sellerPersonId);
     conditions.push(eq(salesOpsLeads.stageId, query.stageId));
 
     const [{ total }] = (await tx
@@ -712,6 +702,62 @@ export async function listLeads(
       leads: page.map((row) => toLeadView(row.lead, row.saleStatus, row.saleCode, products)),
       nextCursor: hasMore && last ? `${last.lead.position}:${last.lead.id}` : null,
       total,
+    } as const;
+  });
+}
+
+export type LeadStageTotals = { stageId: string; count: number; estimatedValueBrl: number };
+
+export type LeadStageSummaryResult =
+  | { ok: true; stages: LeadStageTotals[] }
+  | { ok: false; reason: 'seller_person_unmapped' };
+
+/**
+ * The true per-column count and value for exactly the set the board may show,
+ * in ONE grouped read: the board loads a column 50 cards at a time, so any total
+ * computed from loaded cards undercounts a long column.
+ *
+ * Same gate and same WHERE as `listLeads` (`leadBoardConditions`), minus the
+ * column: live leads only, converted and lost leads included because the board
+ * lists them. Only stages with at least one visible lead appear; a missing stage
+ * means zero. No stage join: the web keys each column by `stageId`.
+ *
+ * Money. `estimated_value_brl` is int4, NOT NULL, CHECK >= 0, so one lead is at
+ * most 2_147_483_647 cents and `sum()` over int4 is int8 in Postgres. postgres.js
+ * returns int8 as a string, hence `mapWith(Number)`. A stage total stays exact in
+ * a JS number up to 2^53 - 1, which needs more than 4_194_304 leads in one stage
+ * all at the int4 maximum; the guard below turns that unreachable case into a
+ * loud error instead of a silently rounded total.
+ */
+export async function summarizeLeadStages(
+  db: Db,
+  orgId: string,
+  query: LeadStageSummaryQuery,
+  scope: LeadScope,
+): Promise<LeadStageSummaryResult> {
+  return withTenant(db, orgId, async (tx) => {
+    const gate = await resolveLeadScopePredicate(tx, orgId, scope);
+    if (!gate.ok) return { ok: false, reason: gate.reason } as const;
+
+    const rows = await tx
+      .select({
+        stageId: salesOpsLeads.stageId,
+        count: sql<number>`count(*)::int`,
+        estimatedValueBrl: sql<string>`sum(${salesOpsLeads.estimatedValueBrl})::bigint`.mapWith(Number),
+      })
+      .from(salesOpsLeads)
+      .where(and(...leadBoardConditions(orgId, gate, query.sellerPersonId)))
+      .groupBy(salesOpsLeads.stageId)
+      .orderBy(asc(salesOpsLeads.stageId));
+
+    return {
+      ok: true,
+      stages: rows.map((row) => {
+        if (!Number.isSafeInteger(row.estimatedValueBrl)) {
+          throw new Error(`lead stage ${row.stageId} value total exceeds the exact integer range`);
+        }
+        return { stageId: row.stageId, count: row.count, estimatedValueBrl: row.estimatedValueBrl };
+      }),
     } as const;
   });
 }
@@ -774,6 +820,32 @@ export function leadIdentityConditions(orgId: string, id: string, gate: LeadScop
   ];
   if (gate.sellerPersonId) {
     conditions.push(leadSellerCondition(gate.sellerPersonId, gate.canClaimUnassigned));
+  }
+  return conditions;
+}
+
+/**
+ * The board read's WHERE minus the column: the org, live leads only, and the
+ * seller rule. `listLeads` and `summarizeLeadStages` both start from it, so a
+ * column's `total` and the summary's `count` can never be computed over two
+ * different sets.
+ *
+ * The `else if` is the whole seller-scoping rule: for a non-admin the predicate
+ * is built from the caller's OWN person id (plus the unassigned pool for an
+ * active vendedor) and the requested `sellerPersonId` is never read AT ALL. A
+ * seller who passes a colleague's id gets their own board back - not a 403, and
+ * not the colleague's. For an admin it is an optional narrowing.
+ */
+function leadBoardConditions(
+  orgId: string,
+  gate: LeadScopeAllowed,
+  requestedSellerPersonId: string | undefined,
+): SQL[] {
+  const conditions: SQL[] = [eq(salesOpsLeads.orgId, orgId), liveLeadCondition()];
+  if (gate.sellerPersonId) {
+    conditions.push(leadSellerCondition(gate.sellerPersonId, gate.canClaimUnassigned));
+  } else if (requestedSellerPersonId) {
+    conditions.push(eq(salesOpsLeads.sellerPersonId, requestedSellerPersonId));
   }
   return conditions;
 }

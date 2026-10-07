@@ -7,6 +7,7 @@ import { cadastroActor } from '../cadastro-actor.js';
 import {
   CreateContactLeadSchema,
   CreateLeadSchema,
+  LeadStageSummaryQuerySchema,
   ListDeletedLeadsQuerySchema,
   ListLeadsQuerySchema,
   MoveLeadSchema,
@@ -22,6 +23,7 @@ import {
   getLead,
   listLeads,
   moveLead,
+  summarizeLeadStages,
   updateContactLead,
   updateLead,
 } from './lead-service.js';
@@ -181,6 +183,22 @@ leadsRouter.get('/deleted', requireAdmin, async (c) => {
   if (!parsed.success) return validationResponse(c, parsed.error);
   const page = await listDeletedLeads(getDb(), c.get('orgId'), parsed.data);
   return c.json({ items: page.items, nextCursor: page.nextCursor });
+});
+
+/**
+ * The board's per-column totals. Registered BEFORE '/:id' so the param route
+ * never swallows the literal 'summary'. Every board caller reaches it (no
+ * requireAdmin); the seller scoping is the service predicate, the same one the
+ * list uses.
+ */
+leadsRouter.get('/summary', async (c) => {
+  const parsed = LeadStageSummaryQuerySchema.safeParse({
+    sellerPersonId: c.req.query('sellerPersonId'),
+  });
+  if (!parsed.success) return validationResponse(c, parsed.error);
+  const result = await summarizeLeadStages(getDb(), c.get('orgId'), parsed.data, leadScope(c));
+  if (!result.ok) return failureResponse(c, result.reason);
+  return c.json({ stages: result.stages });
 });
 
 leadsRouter.get('/:id', async (c) => {
