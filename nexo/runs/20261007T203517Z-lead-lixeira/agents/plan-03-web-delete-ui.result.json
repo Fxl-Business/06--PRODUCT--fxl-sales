@@ -1,0 +1,9 @@
+{
+  "agent": "plan",
+  "slice": "03-web-delete-ui",
+  "status": "PASS",
+  "report": "nexo/plans/lead-lixeira/03-web-delete-ui.md",
+  "summary": "Card kebab + right-click Radix menu (guarded out of drag/edit), Lista Excluir, edit-only form button, ONE container-owned LeadDeleteDialog (key delete:<id>, focus return), useDeleteLead sweeping every board entry with exact revert and 404-as-success, plus a required apiFetch 204 fix; prototyped and verified (23-test oracle, tsc, eslint, Chrome harness, 20 mutants killed) with an applicable reference patch in Appendix A",
+  "done": true,
+  "ts": "2026-10-07T21:10:05Z"
+}

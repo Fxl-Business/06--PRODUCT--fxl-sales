@@ -24,3 +24,16 @@ Moved verbatim from `CLAUDE.md` on 2026-09-22 so the standing context stays shor
   `audit_log` carries no RLS, so `eq(auditLog.actorOrgId, orgId)` is the ONLY control enforcing isolation. It is deliberately the conditions array's first literal element, the query schema declares no org key so a smuggled `?orgId=` is never read, and the history service must never import `getAdminDb`.
 - `audit_log.id` is a `bigserial` that arrives as a JS `BigInt`, which `JSON.stringify` throws on. Project `String(row.id)`. `/api/v1/admin/audit` still does not, and 500s on any non-empty ledger - see `nexo/ROADMAP.md`.
 - A restore is a NEW ledger entry, never an undo: the chain is append-only and hash-verified, so no UI may imply the history was rewritten. `Restaurar` is offered only where it can succeed - an archive event whose entity is still archived, non-optimistic and not a system função - and an already-active entity reads `Já restaurado` rather than showing a button that would 200 and do nothing.
+
+## Leads: soft delete (2026-10-07, lead-lixeira)
+
+A lead is the one record with an operator-facing DELETE that is NOT an archive and NOT a purge: a SOFT DELETE.
+Full reasoning: `kanban-de-leads.md` (section Excluir lead, lixeira e totais reais da coluna) and `nexo/knowledge/decisions/2026-10-07-lead-trash-soft-delete.md`.
+
+- A lead has no `status` column to archive into, and the human wanted it gone from the board at once, so it carries `deleted_at`, `deleted_by_user_id` and `deleted_by_name`, with a CHECK that they are set together.
+- The action is `POST /leads/:id/delete` because the router still has no DELETE verb. Nothing hard deletes a lead, and the nightly purge does not touch the trash.
+- Every lead read and write filters `liveLeadCondition()`; the identity conditions carry it, so a deleted lead is not found by get, PATCH, move or delete for anyone.
+- `lead.deleted` and `lead.restored` are hash-chained `audit_log` entries written with the SAME `tx` as the update, last, with the actor name snapshotted from the token and the contact name in the metadata. `CADASTRO_LIFECYCLE_ACTIONS` is unchanged, so lead entries do not show in `Histórico de arquivamentos`.
+- The trash list is `GET /leads/deleted`, org-scoped inside `withTenant`, keyset-paged, and never projects `deleted_by_user_id`.
+- A restore is a new ledger entry, never an undo, exactly as for the cadastros.
+- The code is `lead-trash-service.ts`, so the contract test that `lead-service.ts` writes no audit still holds.

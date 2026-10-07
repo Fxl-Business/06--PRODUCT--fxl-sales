@@ -1,0 +1,1 @@
+{"agent": "plan-check", "slice": "03+04+05", "status": "PASS", "report": "nexo/runs/20261007T203517Z-lead-lixeira/plan-check-web.md", "summary": "PASS: 03 and 04 applied and green in a throwaway copy, disjoint files, keys nest under ['leads'], 05 fits 03's real useDeleteLead; only nits", "done": true, "ts": "2026-10-07T21:18:44Z"}

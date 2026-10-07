@@ -1,0 +1,1 @@
+{"agent":"build","slice":"02-api-stage-summary","status":"PASS","report":"nexo/runs/20261007T203517Z-lead-lixeira/exec-02-api-stage-summary.md","summary":"GET /leads/summary with shared leadBoardConditions; oracle 9/9, regression green, tsc+lint clean","done":true,"ts":"2026-10-07T21:13:30Z"}

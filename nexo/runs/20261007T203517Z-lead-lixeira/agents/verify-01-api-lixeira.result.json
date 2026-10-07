@@ -1,0 +1,1 @@
+{"agent":"verify","slice":"01-api-lixeira","status":"PASS","report":"nexo/runs/20261007T203517Z-lead-lixeira/verify-01-api-lixeira.md","summary":"oracle 26/26 integ x2 + 260/260 unit · mutant red (3 fail) · regression 140/140 integ + 425/425 unit · lint 0 · tsc 0","done":true,"ts":"2026-10-07T21:09:22Z"}

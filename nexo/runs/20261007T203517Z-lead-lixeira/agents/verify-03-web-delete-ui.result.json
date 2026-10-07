@@ -1,0 +1,1 @@
+{"agent":"verify","slice":"03-web-delete-ui","status":"PASS","report":"nexo/runs/20261007T203517Z-lead-lixeira/verify-03-web-delete-ui.md","summary":"oracle 60/60 x2 · mutants red (3/3) · web 1628/1628 · lint 0 · tsc 0","done":true,"ts":"2026-10-07T21:26:05Z"}

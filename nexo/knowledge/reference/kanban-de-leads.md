@@ -193,3 +193,69 @@ It is not built and not required for this feature.
 Also open as a copy question: `meus-dados/leads` still reads "Seus leads em negociação" although it now lists the pool.
 
 Oracles: `apps/api/test/rls/leads-unassigned-claim.test.ts`, `apps/api/test/rls/leads-seller-scope.test.ts`, `apps/api/test/rls/leads-move-concurrency.test.ts` and `apps/web/src/sales-ops/leads/__tests__/lead-unassigned-marker.test.tsx`.
+
+## Excluir lead, lixeira e totais reais da coluna (2026-10-07, lead-lixeira)
+
+Full rule: `CLAUDE.md` (Kanban de leads and Arquivamento e histórico).
+Decision record: `nexo/knowledge/decisions/2026-10-07-lead-trash-soft-delete.md`.
+
+Why a soft delete.
+The human asked for a way to delete a lead from the card and from the form, with a log so the gestor can see who deleted what.
+The system never hard deletes a business record the operator can see, and a lead may be deleted by mistake, so the lead goes to a trash (`deleted_at`, `deleted_by_user_id`, `deleted_by_name`) and the gestor can restore it.
+Migration `0028_lead_soft_delete` is additive: three nullable columns, a pair CHECK and a partial index, with no backfill.
+
+Why POST and not DELETE.
+`salesOpsRouter` has no DELETE verb and must not gain one, so the action is `POST /leads/:id/delete`, answered `204`.
+Restore is `POST /leads/:id/restore` and the trash list is `GET /leads/deleted`, registered above `/:id`.
+
+Why a separate `lead-trash-service.ts`.
+Delete, restore and the deleted list write `audit_log` entries (`lead.deleted`, `lead.restored`) with the same `tx`.
+`lead-service.ts` has a contract test that it contains no audit write, so the trash code lives next door and `lead-service.ts` only gained the `liveLeadCondition()` filter on every read and write.
+`leadIdentityConditions` carries the filter too, so get, PATCH, move and delete cannot see a deleted row for any caller, an admin included.
+
+Who may do what.
+A vendedor may delete exactly the leads he can read: his own and the unassigned pool, through the same `resolveLeadScopePredicate` as the board.
+Anything outside that scope answers `404`, as a read would.
+The gestor deletes any lead.
+Only the gestor restores and reads the trash (`requireAdmin`), because a deleted lead leaves the vendedor's scope and restoring it is an administrative decision.
+A converted lead (`saleId` set) cannot be deleted: `409` with `reason: 'lead_already_converted'`, and the card has no trigger.
+
+Why delete takes `lockLeadBoard` and renumbers.
+Delete changes the live set of a column, so it is a writer of `position` and takes the per-org board lock first, like `insertLead` and `moveLead`.
+The column is renumbered densely after the delete, and `MAX(position)` on create and the renumber ignore deleted rows, so a deleted lead never leaves a gap or a duplicate.
+Restore takes the lock too and puts the lead at the end of its etapa, or of the first open etapa when its etapa was archived (`no_open_stage` when there is none, a `400` the screen turns into a link to Etapas do funil).
+
+The `...` menu.
+The card trigger is always visible in light grey, not shown on hover, because a hidden button left an empty gap and touch screens have no hover.
+A pointer-down on the trigger is excluded from the drag and the click handler ignores it, so it never opens edit.
+There is no confirmation-free path: the one `LeadDeleteDialog` is an in-app AlertDialog (never `window.confirm`), focus starts on `Cancelar`, and Escape closes only the confirmation.
+Restore asks for no confirmation because it loses nothing.
+
+The 100-loaded bug.
+After importing 114 leads the Construbom column read `100`.
+The board loads 100 leads per column page and the badge, R$ total, `% do total`, proportion bar, Lista chips/footer and both Funil shapes were computed from the LOADED cards only, so the 14 behind `Carregar mais leads` were missing from every number.
+The fix is `GET /leads/summary`, one `GROUP BY` per stage (count and `sum()::bigint` of the estimated value, exact), sharing `leadBoardConditions` with the list so the scope is identical.
+The web reads it through `useLeadStageSummary` and uses, per stage, the maximum of the summary and the loaded cards, so a card just created or moved never makes a number smaller while the summary refetches.
+While the summary loads, or if it fails, the loaded cards are used and the board shows no error.
+Move and delete patch the paired summary optimistically and invalidate it.
+The load-more label reads `Carregar mais leads (100 de 115)`.
+Oracles: `apps/api/test/rls/leads-stage-summary.test.ts` and `apps/web/src/sales-ops/leads/__tests__/lead-board-totals.test.tsx`.
+
+The 204 defect in `apiFetch`.
+`apiFetch` called `res.json()` on every success, which throws on a `204` with no body.
+The delete answers `204`, and the finder link revoke already did too, so the revoke succeeded on the server and failed in the browser.
+`apiFetch` now accepts a `204` with no body (`api-client-no-content.test.ts`).
+
+The new screen.
+`cadastros/leads-excluidos` (`DeletedLeadsView`, label `Leads excluídos`) is admin-only and appears in both editions, appended last before `Geral` in the full list and last in the leads edition.
+It lists Lead, Etapa, Vendedor, `Excluído por` (fallback `Autor não identificado`) and the São Paulo date, with keyset paging and `Restaurar`.
+It renders no id and no cursor.
+A 403 on restore is an inline banner, never `ForbiddenPanel`.
+Restore removes the row from the trash cache itself and invalidates the whole `queryKeys.leads.all`, so the board and etapas refresh.
+
+Process notes.
+The two API planners and the three web planners shared one worktree and each saw the other's uncommitted files, so the plans were checked against the integrated state by two plan-check agents and `SEAM-CONTRACT.md` stayed the single authority for names.
+Slice 04 failed its first Verify on two surviving mutants (the cache removal and the whole-root invalidation each masked the other in the fake server); the retry added a test where the server keeps the row after a 200 and a spy on `invalidateQueries`, and both mutants then died.
+The repo has no mutation tool, so every Verify ran targeted mutant probes by hand.
+
+Oracles: `apps/api/test/rls/leads-lixeira.test.ts`, `lead-soft-delete-migration.test.ts`, `leads-stage-summary.test.ts`, `lead-delete.test.tsx`, `deleted-leads-view.test.tsx`, `lead-board-totals.test.tsx`, `navigation-edition.test.ts`.

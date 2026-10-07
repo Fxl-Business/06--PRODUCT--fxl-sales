@@ -1,0 +1,1 @@
+{"agent":"build","slice":"01-api-lixeira","status":"PASS","report":"nexo/runs/20261007T203517Z-lead-lixeira/exec-01-api-lixeira.md","summary":"lixeira API: migration 0028, delete/restore/deleted routes, live filter, audit; oracles and regression green","done":true,"ts":"2026-10-07T21:07:19Z"}

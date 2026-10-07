@@ -1,0 +1,1 @@
+{"agent":"verify","slice":"04-web-lixeira-screen","status":"FAIL","report":"nexo/runs/20261007T203517Z-lead-lixeira/verify-04-web-lixeira-screen.md","summary":"oracle 6/6 files 219/219 x2 · mutants: 2 red (fallback, id in DOM), 2 survive (cache removal alone, leads.all invalidation alone) · web 1629/1629 · lint 0 · tsc 0","done":true,"ts":"2026-10-07T21:25:56Z"}
