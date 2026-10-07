@@ -33,7 +33,10 @@ import { withTenant } from './with-tenant.js';
  *  - It writes NO ledger entry, for any operation, movement included. The ledger
  *    is hash-chained, queues behind a global tail lock and is never purged; a
  *    card move is high-frequency noise. `lead-contract.test.ts` reads these
- *    bytes and fails if the writer is ever imported.
+ *    bytes and fails if the writer is ever imported. Deleting and restoring a
+ *    lead DO write one, which is exactly why they live in `lead-trash-service.ts`
+ *    and not here; this file only exports the board plumbing they share (the
+ *    lock, the renumber, the identity predicate, the view).
  *  - It never inserts a cliente and never inserts a venda. Creating a lead is
  *    not a commercial event: it consumes no proposta sequence, writes no
  *    `code_suffix` and moves no financial number. The cliente is resolved or
@@ -202,7 +205,7 @@ export type LeadScopeGate =
   | { ok: false; reason: 'seller_person_unmapped' };
 
 /** The gate after its `ok` check: what the predicate and the claim are built from. */
-type LeadScopeAllowed = Extract<LeadScopeGate, { ok: true }>;
+export type LeadScopeAllowed = Extract<LeadScopeGate, { ok: true }>;
 
 /**
  * The seller predicate, resolved on the SERVER and never derived from anything
@@ -506,6 +509,19 @@ async function replaceLeadProducts(
 // Reads
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * The ONE spelling of "this lead is live" (lead-lixeira): deleted_at IS NULL.
+ *
+ * A deleted lead is a soft delete the gestor can restore, so its row stays and
+ * every board read, count and write in this file steps around it through this
+ * helper, directly or through `leadIdentityConditions`; so does the stage
+ * summary. Only lead-trash-service.ts reads deleted rows, on purpose. A
+ * hand-written deleted_at predicate anywhere else is a second rule that drifts.
+ */
+export function liveLeadCondition(): SQL {
+  return isNull(salesOpsLeads.deletedAt);
+}
+
 type LeadRow = typeof salesOpsLeads.$inferSelect;
 
 function toIso(value: Date | string | null): string | null {
@@ -523,8 +539,11 @@ function toIso(value: Date | string | null): string | null {
  *
  * `saleStatus` is read LIVE, because the converted column mirrors the proposta's
  * own status and nothing on the board may write it.
+ *
+ * Live only. Every caller has just proven the lead live inside this transaction,
+ * or (a restore) just made it live, so a deleted row here is a bug and throws.
  */
-async function readLeadView(tx: Db, orgId: string, leadId: string): Promise<LeadView> {
+export async function readLeadView(tx: Db, orgId: string, leadId: string): Promise<LeadView> {
   const [row] = await tx
     .select({ lead: salesOpsLeads, saleStatus: salesOpsSales.status, saleCode: salesOpsSales.code })
     .from(salesOpsLeads)
@@ -532,7 +551,7 @@ async function readLeadView(tx: Db, orgId: string, leadId: string): Promise<Lead
       salesOpsSales,
       and(eq(salesOpsSales.orgId, salesOpsLeads.orgId), eq(salesOpsSales.id, salesOpsLeads.saleId)),
     )
-    .where(and(eq(salesOpsLeads.orgId, orgId), eq(salesOpsLeads.id, leadId)))
+    .where(and(eq(salesOpsLeads.orgId, orgId), eq(salesOpsLeads.id, leadId), liveLeadCondition()))
     .limit(1);
   if (!row) throw new Error(`lead ${leadId} disappeared inside its own transaction`);
   return toLeadView(
@@ -637,13 +656,15 @@ export async function listLeads(
     const gate = await resolveLeadScopePredicate(tx, orgId, scope);
     if (!gate.ok) return { ok: false, reason: gate.reason } as const;
 
-    const conditions: SQL[] = [eq(salesOpsLeads.orgId, orgId)];
+    const conditions: SQL[] = [eq(salesOpsLeads.orgId, orgId), liveLeadCondition()];
     // The `else if` is the whole seller-scoping rule: for a non-admin the
     // predicate is built from the caller's OWN person id (plus the unassigned
     // pool for an active vendedor) and `?sellerPersonId=` is never read AT ALL.
     // A seller who passes a colleague's id gets their own board back - not a
     // 403, and not the colleague's. The count below and the page share this one
-    // `conditions` array, so `total` counts exactly the rows a page can return.
+    // `conditions` array, so `total` counts exactly the rows a page can return,
+    // and the live predicate is in it from the start, so a deleted card is neither
+    // a row nor part of `total`.
     if (gate.sellerPersonId) {
       conditions.push(leadSellerCondition(gate.sellerPersonId, gate.canClaimUnassigned));
     } else if (query.sellerPersonId) {
@@ -741,10 +762,16 @@ function leadSellerCondition(sellerPersonId: string, canClaimUnassigned: boolean
 /**
  * `eq(salesOpsLeads.orgId, orgId)` is ALWAYS the first element, and the seller
  * predicate is appended only for a non-admin. The admin case is the same
- * expression minus one conjunct.
+ * expression minus one conjunct. It always carries `liveLeadCondition()`, so a
+ * deleted lead is `not_found` to every identity read (get, PATCH, move, delete)
+ * for every caller, admin included. Exported for lead-trash-service.ts.
  */
-function leadIdentityConditions(orgId: string, id: string, gate: LeadScopeAllowed): SQL[] {
-  const conditions: SQL[] = [eq(salesOpsLeads.orgId, orgId), eq(salesOpsLeads.id, id)];
+export function leadIdentityConditions(orgId: string, id: string, gate: LeadScopeAllowed): SQL[] {
+  const conditions: SQL[] = [
+    eq(salesOpsLeads.orgId, orgId),
+    eq(salesOpsLeads.id, id),
+    liveLeadCondition(),
+  ];
   if (gate.sellerPersonId) {
     conditions.push(leadSellerCondition(gate.sellerPersonId, gate.canClaimUnassigned));
   }
@@ -878,7 +905,7 @@ type InsertLeadOptions = {
  * decided.
  *
  * Every transaction that writes a lead's `stage_id` or `position` (`moveLead`,
- * `insertLead`) takes it right after its scope gate and BEFORE it reads or locks
+ * `insertLead`, and `deleteLead` / `restoreLead` in lead-trash-service.ts) takes it right after its scope gate and BEFORE it reads or locks
  * any lead row. Without it two writers sharing a column lock rows in opposite
  * orders: a move locks its own card first and then the whole destination and
  * source columns, so two vendedores dragging two cards out of one column each
@@ -906,10 +933,52 @@ type InsertLeadOptions = {
  * int4 keys are a namespace and the org; an org hash collision only makes two
  * boards share one queue.
  */
-async function lockLeadBoard(tx: Db, orgId: string): Promise<void> {
+export async function lockLeadBoard(tx: Db, orgId: string): Promise<void> {
   await tx.execute(
     sql`SELECT pg_advisory_xact_lock(hashtext('fxl-sales:lead-board'), hashtext(${orgId}))`,
   );
+}
+
+/**
+ * The first ACTIVE normal stage by board order: where a new lead lands, and
+ * where a restored lead lands when its own etapa was archived. One spelling of
+ * the rule for both. `name` is the tiebreaker, matching the stage list's own
+ * (position, name) read order. Null when the org has no open etapa (the leads
+ * edition starts with none).
+ */
+export async function firstOpenLeadStage(
+  tx: Db,
+  orgId: string,
+): Promise<{ id: string; name: string } | null> {
+  const [stage] = await tx
+    .select({ id: salesOpsLeadStages.id, name: salesOpsLeadStages.name })
+    .from(salesOpsLeadStages)
+    .where(
+      and(
+        eq(salesOpsLeadStages.orgId, orgId),
+        eq(salesOpsLeadStages.status, 'active'),
+        eq(salesOpsLeadStages.kind, 'normal'),
+      ),
+    )
+    .orderBy(asc(salesOpsLeadStages.position), asc(salesOpsLeadStages.name))
+    .limit(1);
+  return stage ?? null;
+}
+
+/**
+ * The position that appends a card at the END of a column: one past the highest
+ * LIVE position. A deleted lead keeps its stale position, and counting it would
+ * leave a gap the moment the card above it is appended. The caller holds
+ * `lockLeadBoard`, which is what makes two appends unable to share a number.
+ */
+export async function nextLeadPosition(tx: Db, orgId: string, stageId: string): Promise<number> {
+  const [{ next }] = (await tx
+    .select({ next: sql<number>`COALESCE(MAX(${salesOpsLeads.position}), 0) + 1` })
+    .from(salesOpsLeads)
+    .where(
+      and(eq(salesOpsLeads.orgId, orgId), eq(salesOpsLeads.stageId, stageId), liveLeadCondition()),
+    )) as [{ next: number }];
+  return next;
 }
 
 async function insertLead(
@@ -945,30 +1014,11 @@ async function insertLead(
       : record.clientName;
 
     // A new lead always lands in the first ACTIVE normal stage by board order.
-    // "position" is double-quoted in every hand-written SQL string because it is
-    // a reserved word in some dialects; `name` is the tiebreaker, matching the
-    // stage list's own (position, name) read order.
-    const [stage] = await tx
-      .select({ id: salesOpsLeadStages.id })
-      .from(salesOpsLeadStages)
-      .where(
-        and(
-          eq(salesOpsLeadStages.orgId, orgId),
-          eq(salesOpsLeadStages.status, 'active'),
-          eq(salesOpsLeadStages.kind, 'normal'),
-        ),
-      )
-      .orderBy(asc(salesOpsLeadStages.position), asc(salesOpsLeadStages.name))
-      .limit(1);
+    const stage = await firstOpenLeadStage(tx, orgId);
     // The edition-independent "no etapa yet" answer; the leads edition starts with zero etapas (edicao-leads AC4).
     if (!stage) throw new LeadInputError('no_open_stage');
 
-    const [{ next }] = (await tx
-      .select({ next: sql<number>`COALESCE(MAX(${salesOpsLeads.position}), 0) + 1` })
-      .from(salesOpsLeads)
-      .where(and(eq(salesOpsLeads.orgId, orgId), eq(salesOpsLeads.stageId, stage.id)))) as [
-      { next: number },
-    ];
+    const next = await nextLeadPosition(tx, orgId, stage.id);
 
     const [lead] = await tx
       .insert(salesOpsLeads)
@@ -1121,7 +1171,8 @@ async function applyLeadUpdate(
           : {}),
         updatedAt: new Date(),
       })
-      .where(and(eq(salesOpsLeads.orgId, orgId), eq(salesOpsLeads.id, id)));
+      // Live again here, not only in the identity read: belt and braces under READ COMMITTED, the row lock above already re-checked it.
+      .where(and(eq(salesOpsLeads.orgId, orgId), eq(salesOpsLeads.id, id), liveLeadCondition()));
 
     // `undefined` leaves the child rows alone; `[]` clears them. The same
     // distinction `updateProduct` draws for the produto's função costs.
@@ -1220,7 +1271,7 @@ export async function moveLead(
         ...(claimed ? { sellerPersonId: claimed.id, sellerNameSnapshot: claimed.displayName } : {}),
         updatedAt: new Date(),
       })
-      .where(and(eq(salesOpsLeads.orgId, orgId), eq(salesOpsLeads.id, id)));
+      .where(and(eq(salesOpsLeads.orgId, orgId), eq(salesOpsLeads.id, id), liveLeadCondition()));
 
     await renumberStage(tx, orgId, destination.id, { moved: id, at: input.position });
     if (stageChanged) await renumberStage(tx, orgId, current.stageId, null);
@@ -1238,8 +1289,12 @@ export async function moveLead(
  * move. The `FOR UPDATE` is no longer the guard. It stays because it is harmless:
  * it can only wait on a card a concurrent PATCH holds, and a PATCH never asks for
  * the board, so the wait cannot close a cycle.
+ *
+ * Over LIVE cards only. A deleted card keeps its stale position untouched (it is
+ * irrelevant while deleted, and a restore appends at the end), and the raw UPDATE
+ * below can only reach ids this live read returned.
  */
-async function renumberStage(
+export async function renumberStage(
   tx: Db,
   orgId: string,
   stageId: string,
@@ -1248,7 +1303,13 @@ async function renumberStage(
   const rows = await tx
     .select({ id: salesOpsLeads.id })
     .from(salesOpsLeads)
-    .where(and(eq(salesOpsLeads.orgId, orgId), eq(salesOpsLeads.stageId, stageId)))
+    .where(
+      and(
+        eq(salesOpsLeads.orgId, orgId),
+        eq(salesOpsLeads.stageId, stageId),
+        liveLeadCondition(),
+      ),
+    )
     .orderBy(asc(salesOpsLeads.position), asc(salesOpsLeads.id))
     .for('update');
 

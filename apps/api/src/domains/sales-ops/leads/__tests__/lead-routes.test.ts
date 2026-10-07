@@ -22,6 +22,13 @@ const serviceMocks = vi.hoisted(() => ({
   moveLead: vi.fn(),
 }));
 
+const trashMocks = vi.hoisted(() => ({
+  deleteLead: vi.fn(),
+  restoreLead: vi.fn(),
+  listDeletedLeads: vi.fn(),
+}));
+vi.mock('../lead-trash-service.js', () => trashMocks);
+
 vi.mock('../../../../db/client.js', () => ({
   getDb: () => mockedDb,
 }));
@@ -36,6 +43,17 @@ const { leadsRouter } = await import('../lead-routes.js');
 const LEAD_ID = '55555555-5555-4555-8555-555555555555';
 const STAGE_ID = '66666666-6666-4666-8666-666666666666';
 const SALE_ID = '77777777-7777-4777-8777-777777777777';
+
+const deletedView = {
+  id: LEAD_ID,
+  contactName: 'Ana Martins',
+  clientName: 'Empresa Um',
+  stageName: 'Novo',
+  sellerName: '',
+  estimatedValueBrl: 250000,
+  deletedAt: '2026-10-07T12:00:00.000Z',
+  deletedByName: 'Gestora',
+};
 
 const leadView = {
   id: LEAD_ID,
@@ -95,7 +113,10 @@ describe('Sales Ops lead routes', () => {
   beforeEach(() => {
     currentRoles = ['admin', 'seller', 'finder'];
     currentEmail = 'ana@example.test';
-    for (const mock of Object.values(serviceMocks)) mock.mockReset();
+    for (const mock of [...Object.values(serviceMocks), ...Object.values(trashMocks)]) mock.mockReset();
+    trashMocks.deleteLead.mockResolvedValue({ ok: true });
+    trashMocks.restoreLead.mockResolvedValue({ ok: true, lead: leadView });
+    trashMocks.listDeletedLeads.mockResolvedValue({ items: [deletedView], nextCursor: null });
     serviceMocks.listLeads.mockResolvedValue({
       ok: true,
       leads: [leadView],
@@ -253,8 +274,100 @@ describe('Sales Ops lead routes', () => {
   // No DELETE verb, on any lead path. Removal is not an operation this domain
   // has: a lead that goes nowhere ends in the terminal lost stage.
   it('exposes no DELETE verb on any lead route', async () => {
-    for (const path of ['/leads', `/leads/${LEAD_ID}`, `/leads/${LEAD_ID}/move`]) {
+    for (const path of [
+      '/leads',
+      `/leads/${LEAD_ID}`,
+      `/leads/${LEAD_ID}/move`,
+      `/leads/${LEAD_ID}/delete`,
+      `/leads/${LEAD_ID}/restore`,
+      '/leads/deleted',
+    ]) {
       expect((await app.request(path, { method: 'DELETE' })).status).toBe(404);
     }
+  });
+  it('deletes through the verified scope and actor and answers 204 with no body', async () => {
+    currentRoles = ['seller'];
+    const response = await app.request(`/leads/${LEAD_ID}/delete`, { method: 'POST' });
+    expect(response.status).toBe(204);
+    expect(await response.text()).toBe('');
+    expect(trashMocks.deleteLead).toHaveBeenCalledWith(
+      mockedDb,
+      'verified-org',
+      LEAD_ID,
+      {
+        userId: 'verified-account',
+        email: 'ana@example.test',
+        isAdmin: false,
+        name: null,
+        hasSellerRole: true,
+        edition: 'full',
+      },
+      // The fixture carries no name, so the snapshot falls back to the e-mail.
+      { userId: 'verified-account', name: 'ana@example.test' },
+    );
+  });
+
+  it('maps every delete refusal onto the existing bodies', async () => {
+    const cases = [
+      ['not_found', 404, { error: 'not_found' }],
+      ['already_converted', 409, { error: 'conflict', reason: 'lead_already_converted' }],
+      ['seller_person_unmapped', 403, { error: 'forbidden', reason: 'seller_person_unmapped' }],
+    ] as const;
+    for (const [reason, status, body] of cases) {
+      trashMocks.deleteLead.mockResolvedValueOnce({ ok: false, reason });
+      const response = await app.request(`/leads/${LEAD_ID}/delete`, { method: 'POST' });
+      expect(response.status, reason).toBe(status);
+      expect(await response.json()).toEqual(body);
+    }
+    const bad = await app.request('/leads/not-a-uuid/delete', { method: 'POST' });
+    expect(bad.status).toBe(404);
+    expect(trashMocks.deleteLead).toHaveBeenCalledTimes(3);
+  });
+
+  it('restore is admin-only and maps its outcomes', async () => {
+    currentRoles = ['seller'];
+    const denied = await app.request(`/leads/${LEAD_ID}/restore`, { method: 'POST' });
+    expect(denied.status).toBe(403);
+    expect(await denied.json()).toEqual({ error: 'forbidden', reason: 'admin_role_required' });
+    expect(trashMocks.restoreLead).not.toHaveBeenCalled();
+
+    currentRoles = ['admin', 'seller', 'finder'];
+    const ok = await app.request(`/leads/${LEAD_ID}/restore`, { method: 'POST' });
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual({ lead: leadView });
+    expect(trashMocks.restoreLead).toHaveBeenCalledWith(mockedDb, 'verified-org', LEAD_ID, {
+      userId: 'verified-account',
+      name: 'ana@example.test',
+    });
+
+    trashMocks.restoreLead.mockResolvedValueOnce({ ok: false, reason: 'not_found' });
+    expect((await app.request(`/leads/${LEAD_ID}/restore`, { method: 'POST' })).status).toBe(404);
+
+    trashMocks.restoreLead.mockRejectedValueOnce(new LeadInputError('no_open_stage'));
+    const noStage = await app.request(`/leads/${LEAD_ID}/restore`, { method: 'POST' });
+    expect(noStage.status).toBe(400);
+    expect(await noStage.json()).toEqual({ error: 'validation_error', reason: 'no_open_stage', itemIndex: -1 });
+  });
+
+  it('GET /leads/deleted is admin-only and never falls through to GET /leads/:id', async () => {
+    currentRoles = ['seller'];
+    const denied = await app.request('/leads/deleted');
+    expect(denied.status).toBe(403);
+    expect(await denied.json()).toEqual({ error: 'forbidden', reason: 'admin_role_required' });
+    expect(trashMocks.listDeletedLeads).not.toHaveBeenCalled();
+
+    currentRoles = ['admin', 'seller', 'finder'];
+    const ok = await app.request('/leads/deleted');
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual({ items: [deletedView], nextCursor: null });
+    expect(trashMocks.listDeletedLeads.mock.calls[0]![2]).toEqual({});
+
+    const cursor = `2026-10-01T12:00:00.123456Z_${LEAD_ID}`;
+    await app.request(`/leads/deleted?limit=10&cursor=${cursor}`);
+    expect(trashMocks.listDeletedLeads.mock.calls[1]![2]).toEqual({ limit: 10, cursor });
+
+    expect((await app.request('/leads/deleted?limit=201')).status).toBe(400);
+    expect((await app.request(`/leads/deleted?cursor=7:${LEAD_ID}`)).status).toBe(400);
+    expect(serviceMocks.getLead).not.toHaveBeenCalled();
   });
 });

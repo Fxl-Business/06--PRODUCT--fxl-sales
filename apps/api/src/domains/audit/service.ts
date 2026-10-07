@@ -41,6 +41,14 @@ export const AuditActionSchema = z.enum([
   // CadastroEntityTypeSchema stay unchanged, so the cadastro history panel never
   // lists it (importacao-planilha D10). entityType is 'importacao'.
   'import.completed',
+  // The lead lixeira (lead-lixeira): one entry per soft delete and one per
+  // restore, written by sales-ops/leads/lead-trash-service.ts inside the same
+  // transaction as the row write. Deliberately NOT cadastro lifecycle actions,
+  // exactly like import.completed: CADASTRO_LIFECYCLE_ACTIONS and
+  // CadastroEntityTypeSchema stay unchanged, so the cadastro history panel never
+  // lists them. entityType is 'lead'.
+  'lead.deleted',
+  'lead.restored',
 ]);
 export type AuditAction = z.infer<typeof AuditActionSchema>;
 

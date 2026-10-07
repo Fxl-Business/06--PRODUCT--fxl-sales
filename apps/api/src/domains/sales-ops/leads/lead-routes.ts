@@ -2,9 +2,12 @@ import { leadFieldSet } from '@fxl-sales/shared-utils/sales-edition';
 import { type Context, Hono } from 'hono';
 import { z } from 'zod';
 import { getDb } from '../../../db/client.js';
+import { requireAdmin } from '../../../middleware/require-admin.js';
+import { cadastroActor } from '../cadastro-actor.js';
 import {
   CreateContactLeadSchema,
   CreateLeadSchema,
+  ListDeletedLeadsQuerySchema,
   ListLeadsQuerySchema,
   MoveLeadSchema,
   UpdateContactLeadSchema,
@@ -22,6 +25,7 @@ import {
   updateContactLead,
   updateLead,
 } from './lead-service.js';
+import { type LeadActor, deleteLead, listDeletedLeads, restoreLead } from './lead-trash-service.js';
 
 /**
  * The lead entity's HTTP surface, mounted at '/leads' into salesOpsRouter.
@@ -32,8 +36,11 @@ import {
  * that these are two different routers and moves the disambiguation into the
  * consumer.
  *
- * There is NO DELETE verb here and there must never be one. A lead that goes
- * nowhere ends in the terminal `lost` stage, which is what that stage is for.
+ * There is still NO DELETE verb here and there must never be one. A lead that
+ * merely goes nowhere ends in the terminal `lost` stage, which is what that stage
+ * is for. Removing a lead by mistake or as junk is the lixeira: `POST /:id/delete`
+ * is a SOFT delete (a POST action like `/move`) that the gestor reverses with
+ * `POST /:id/restore`, both audited in lead-trash-service.ts.
  */
 export const leadsRouter = new Hono();
 
@@ -52,6 +59,17 @@ const leadIdSchema = z.string().uuid();
  * object instead, and the ENFORCEMENT is the predicate inside `withTenant`,
  * never the middleware and never the client.
  */
+/**
+ * Who deletes or restores, from the VERIFIED context only. The name is the one
+ * snapshot rule the cadastro ledger already uses (`cadastroActor`: name, then
+ * e-mail, then null, never the account id), taken here because the act is the
+ * only moment it is knowable.
+ */
+function leadActor(c: Context): LeadActor {
+  const actor = cadastroActor(c);
+  return { userId: actor.userId, name: actor.displayName };
+}
+
 function leadScope(c: Context): LeadScope {
   const claims = c.get('hubAuth')?.claims;
   const email = claims?.email;
@@ -151,6 +169,20 @@ leadsRouter.post('/', async (c) => {
   return c.json({ lead: result.lead }, 201);
 });
 
+// Static paths sit ABOVE '/:id' (this one and slice 02's '/summary'): Hono runs
+// matching handlers in registration order, and '/:id' would otherwise take
+// 'deleted' as an id and answer 404.
+// Admin only: the lixeira is the gestor's screen in both editions.
+leadsRouter.get('/deleted', requireAdmin, async (c) => {
+  const parsed = ListDeletedLeadsQuerySchema.safeParse({
+    limit: c.req.query('limit'),
+    cursor: c.req.query('cursor'),
+  });
+  if (!parsed.success) return validationResponse(c, parsed.error);
+  const page = await listDeletedLeads(getDb(), c.get('orgId'), parsed.data);
+  return c.json({ items: page.items, nextCursor: page.nextCursor });
+});
+
 leadsRouter.get('/:id', async (c) => {
   const id = leadIdSchema.safeParse(c.req.param('id'));
   if (!id.success) return c.json({ error: 'not_found' }, 404);
@@ -197,6 +229,31 @@ leadsRouter.post('/:id/move', async (c) => {
   }
   try {
     const result = await moveLead(getDb(), c.get('orgId'), id.data, parsed.data, leadScope(c));
+    if (!result.ok) return failureResponse(c, result.reason);
+    return c.json({ lead: result.lead });
+  } catch (error) {
+    if (error instanceof LeadInputError) return leadInputErrorResponse(c, error);
+    throw error;
+  }
+});
+
+// Open to every board caller: the scope gate inside the service decides which
+// leads he may delete (exactly the ones he can read). 204 with no body.
+leadsRouter.post('/:id/delete', async (c) => {
+  const id = leadIdSchema.safeParse(c.req.param('id'));
+  if (!id.success) return c.json({ error: 'not_found' }, 404);
+  const result = await deleteLead(getDb(), c.get('orgId'), id.data, leadScope(c), leadActor(c));
+  if (!result.ok) return failureResponse(c, result.reason);
+  return c.body(null, 204);
+});
+
+// Admin only (requireAdmin, the one admin mechanism): a vendedor never sees the
+// lixeira, so he can never bring a lead back either.
+leadsRouter.post('/:id/restore', requireAdmin, async (c) => {
+  const id = leadIdSchema.safeParse(c.req.param('id'));
+  if (!id.success) return c.json({ error: 'not_found' }, 404);
+  try {
+    const result = await restoreLead(getDb(), c.get('orgId'), id.data, leadActor(c));
     if (!result.ok) return failureResponse(c, result.reason);
     return c.json({ lead: result.lead });
   } catch (error) {
