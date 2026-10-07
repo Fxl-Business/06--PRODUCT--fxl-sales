@@ -117,10 +117,19 @@ export const ListLeadsQuerySchema = z.object({
   sellerPersonId: uuid.optional(),
 });
 
+/**
+ * GET /leads/summary. The list's own `sellerPersonId` parsing, PICKED and not
+ * re-spelled, so the two board reads can never disagree about what a valid
+ * narrowing is. There is no stageId: the summary covers every column in one
+ * GROUP BY.
+ */
+export const LeadStageSummaryQuerySchema = ListLeadsQuerySchema.pick({ sellerPersonId: true });
+
 export type CreateLeadInput = z.infer<typeof CreateLeadSchema>;
 export type UpdateLeadInput = z.infer<typeof UpdateLeadSchema>;
 export type MoveLeadInput = z.infer<typeof MoveLeadSchema>;
 export type ListLeadsQuery = z.infer<typeof ListLeadsQuerySchema>;
+export type LeadStageSummaryQuery = z.infer<typeof LeadStageSummaryQuerySchema>;
 
 /**
  * The deleted-list keyset cursor: `<deleted_at as UTC ISO with MICROseconds>_<id>`.

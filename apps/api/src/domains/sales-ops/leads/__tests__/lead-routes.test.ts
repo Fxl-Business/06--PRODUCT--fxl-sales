@@ -20,6 +20,7 @@ const serviceMocks = vi.hoisted(() => ({
   getLead: vi.fn(),
   updateLead: vi.fn(),
   moveLead: vi.fn(),
+  summarizeLeadStages: vi.fn(),
 }));
 
 const trashMocks = vi.hoisted(() => ({
@@ -127,6 +128,10 @@ describe('Sales Ops lead routes', () => {
     serviceMocks.getLead.mockResolvedValue({ ok: true, lead: leadView });
     serviceMocks.updateLead.mockResolvedValue({ ok: true, lead: leadView });
     serviceMocks.moveLead.mockResolvedValue({ ok: true, lead: leadView });
+    serviceMocks.summarizeLeadStages.mockResolvedValue({
+      ok: true,
+      stages: [{ stageId: STAGE_ID, count: 2, estimatedValueBrl: 350000 }],
+    });
   });
 
   it('passes the VERIFIED org and never an orgId from the body or the query', async () => {
@@ -271,6 +276,44 @@ describe('Sales Ops lead routes', () => {
     });
   });
 
+  it('serves GET /leads/summary with the verified org and the list scope, never through /:id', async () => {
+    const response = await app.request('/leads/summary?orgId=query-org-must-not-be-used');
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      stages: [{ stageId: STAGE_ID, count: 2, estimatedValueBrl: 350000 }],
+    });
+    const call = serviceMocks.summarizeLeadStages.mock.calls[0]!;
+    expect(call[1]).toBe('verified-org');
+    expect(call[2]).toEqual({});
+    expect(call[3]).toEqual({
+      userId: 'verified-account',
+      email: 'ana@example.test',
+      isAdmin: true,
+      name: null,
+      hasSellerRole: true,
+      edition: 'full',
+    });
+    expect(serviceMocks.getLead).not.toHaveBeenCalled();
+  });
+
+  it('parses sellerPersonId with the list rule and 400s a malformed one', async () => {
+    const ok = await app.request(`/leads/summary?sellerPersonId=${SALE_ID}`);
+    expect(ok.status).toBe(200);
+    expect(serviceMocks.summarizeLeadStages.mock.calls[0]![2]).toEqual({ sellerPersonId: SALE_ID });
+
+    const bad = await app.request('/leads/summary?sellerPersonId=not-a-uuid');
+    expect(bad.status).toBe(400);
+    expect((await bad.json()).error).toBe('validation_error');
+    expect(serviceMocks.summarizeLeadStages).toHaveBeenCalledTimes(1);
+  });
+
+  it('answers seller_person_unmapped on the summary exactly like the list', async () => {
+    serviceMocks.summarizeLeadStages.mockResolvedValue({ ok: false, reason: 'seller_person_unmapped' });
+    const response = await app.request('/leads/summary');
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ error: 'forbidden', reason: 'seller_person_unmapped' });
+  });
+
   // No DELETE verb, on any lead path. Removal is not an operation this domain
   // has: a lead that goes nowhere ends in the terminal lost stage.
   it('exposes no DELETE verb on any lead route', async () => {
@@ -281,6 +324,7 @@ describe('Sales Ops lead routes', () => {
       `/leads/${LEAD_ID}/delete`,
       `/leads/${LEAD_ID}/restore`,
       '/leads/deleted',
+      '/leads/summary',
     ]) {
       expect((await app.request(path, { method: 'DELETE' })).status).toBe(404);
     }
