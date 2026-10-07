@@ -172,3 +172,80 @@ export function buildLeadFunnel(
   }));
   return { rows, totalCount, totalBrl };
 }
+
+/** One row of the cumulative funnel: counts carry everything below in the progression. */
+export type CumulativeFunnelRow = {
+  stageId: string;
+  name: string;
+  kind: LeadStageKind;
+  /** Leads in this stage PLUS all progression stages below it. */
+  count: number;
+  /** Value (cents) accumulated the same way. */
+  totalBrl: number;
+};
+
+/** The lost stage reported apart from the funnel: its own leads only, never cumulative. */
+export type LostAside = {
+  stageId: string;
+  name: string;
+  count: number;
+  totalBrl: number;
+};
+
+export type CumulativeFunnel = {
+  /** Progression stages (board order, `lost` removed), top-to-bottom, cumulative. */
+  rows: CumulativeFunnelRow[];
+  /** The lost stage set apart, or null when the board has none. */
+  lost: LostAside | null;
+  topCount: number;
+  topBrl: number;
+};
+
+/**
+ * The true (cumulative) sales funnel. A lead in a given stage is assumed to have
+ * passed through every earlier stage, so each row counts its own leads plus all
+ * leads below it in the progression - the result tapers monotonically from the
+ * top, the shape a funnel is supposed to have. This is the counterpart to
+ * `buildLeadFunnel`, which shows each stage in isolation (a composition, not a
+ * funnel). The progression is the board order with the `lost` stage removed,
+ * because a lost lead has no known path - placing it in an earlier stage would
+ * invent one - so it is reported apart in `lost` and never inflates a stage it may
+ * never have reached. Pure; reuses `boardStages`, `leadsInStage` and `lostStage`
+ * so the funnel can never disagree with the board about where a lead sits.
+ */
+export function buildCumulativeFunnel(
+  leads: readonly SalesOpsLead[],
+  stages: readonly SalesOpsLeadStage[],
+): CumulativeFunnel {
+  const lost = lostStage(stages);
+  const progression = boardStages(stages).filter((stage) => stage.id !== lost?.id);
+  const rows: CumulativeFunnelRow[] = progression.map((stage) => {
+    const inStage = leadsInStage(leads, stage.id);
+    return {
+      stageId: stage.id,
+      name: stage.name,
+      kind: stage.kind,
+      count: inStage.length,
+      totalBrl: inStage.reduce((sum, row) => sum + row.estimatedValueBrl, 0),
+    };
+  });
+  // Accumulate from the bottom up: every row absorbs the one below it.
+  for (let i = rows.length - 2; i >= 0; i -= 1) {
+    rows[i]!.count += rows[i + 1]!.count;
+    rows[i]!.totalBrl += rows[i + 1]!.totalBrl;
+  }
+  const lostLeads = lost ? leadsInStage(leads, lost.id) : [];
+  return {
+    rows,
+    lost: lost
+      ? {
+          stageId: lost.id,
+          name: lost.name,
+          count: lostLeads.length,
+          totalBrl: lostLeads.reduce((sum, row) => sum + row.estimatedValueBrl, 0),
+        }
+      : null,
+    topCount: rows[0]?.count ?? 0,
+    topBrl: rows[0]?.totalBrl ?? 0,
+  };
+}
