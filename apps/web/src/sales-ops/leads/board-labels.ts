@@ -86,6 +86,9 @@ export const BOARD_VIEW_LABEL = { board: 'Quadro', list: 'Lista', funnel: 'Funil
 export const leadsCountLabel = (n: number): string => `${n} ${n === 1 ? 'lead' : 'leads'}`;
 export const FUNNEL_TOTAL_LABEL = 'Total do funil';
 export const FUNNEL_EMPTY = 'Nenhuma etapa no funil.';
+/** The funnel's metric switch: `value` sizes the bars by R$, `volume` by lead count. */
+export const FUNNEL_METRIC_LABEL = { value: 'Faturamento', volume: 'Volume' } as const;
+export type FunnelMetric = keyof typeof FUNNEL_METRIC_LABEL;
 export const ALL_PHASES_LABEL = 'Todas as fases';
 export const VIEW_IN_LIST_LABEL = 'Ver em lista';
 export const EMPTY_COLUMN_HINT = 'Arraste um lead para cá';
