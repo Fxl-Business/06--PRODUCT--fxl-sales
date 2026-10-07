@@ -89,11 +89,18 @@ export const FUNNEL_EMPTY = 'Nenhuma etapa no funil.';
 /** The funnel's metric switch: `value` sizes the bars by R$, `volume` by lead count. */
 export const FUNNEL_METRIC_LABEL = { value: 'Faturamento', volume: 'Volume' } as const;
 export type FunnelMetric = keyof typeof FUNNEL_METRIC_LABEL;
+
+export const FUNNEL_SHAPE_LABEL = { cumulative: 'Acumulado', composition: 'Composição' } as const;
+export type FunnelShape = keyof typeof FUNNEL_SHAPE_LABEL;
+
+/** Label on the aside that holds the lost stage, set apart from the cumulative funnel. */
+export const FUNNEL_LOST_ASIDE = 'Fora do funil';
 export const ALL_PHASES_LABEL = 'Todas as fases';
 export const VIEW_IN_LIST_LABEL = 'Ver em lista';
 export const EMPTY_COLUMN_HINT = 'Arraste um lead para cá';
 export const CARD_TOOLTIP = 'Clique para editar · arraste para mover';
 export const PERCENT_OF_TOTAL = (pct: number): string => `${pct}% do total`;
+export const PERCENT_OF_TOP = (pct: number): string => `${pct}% do topo`;
 export const LIST_HEADERS = {
   lead: 'Lead',
   phase: 'Fase',
