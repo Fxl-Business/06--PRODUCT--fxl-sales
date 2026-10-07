@@ -33,6 +33,7 @@ import {
   leadCompanyLabel,
   leadProductLabels,
   leadSellerLabel,
+  loadMoreLabel,
   scopeLeadsCount,
   type LabelLookups,
 } from './board-labels';
@@ -43,7 +44,7 @@ import {
   moveTargetsFor,
   stageOpensConversion,
 } from './board-move';
-import { moveLeadInList } from './optimistic';
+import { moveLeadInList, summaryWithPendingMove } from './optimistic';
 import {
   avatarClass,
   avatarInitials,
@@ -73,11 +74,15 @@ import {
   primaryButtonClass,
 } from './board-ui';
 import {
+  aggregatesFromLeads,
   boardStages,
   daysInCurrentStage,
   leadIsConverted,
   leadIsUnassigned,
   leadsInStage,
+  resolveStageAggregates,
+  stageAggregate,
+  sumStageAggregates,
 } from './calculations';
 import {
   CONTACT_LEAD_COPY,
@@ -89,7 +94,7 @@ import { LEAD_DELETE_COPY } from './delete-copy';
 import { LeadCard, UnassignedLeadMarker } from './LeadCard';
 import { LeadsFunnelView } from './LeadsFunnelView';
 import { MoveLeadDialog } from './MoveLeadDialog';
-import type { SalesOpsLead, SalesOpsLeadStage } from './types';
+import type { LeadStageSummary, SalesOpsLead, SalesOpsLeadStage } from './types';
 
 /**
  * The Kanban surface. PURELY presentational: it holds no query, no mutation and
@@ -112,6 +117,12 @@ export type LeadConversionRequest = {
 export type LeadsBoardProps = {
   stages: SalesOpsLeadStage[];
   leads: SalesOpsLead[];
+  /**
+   * The server's per-stage totals (`GET /leads/summary`) for exactly the set this
+   * board may show, loaded or not. Absent (pending, failed) means the figures
+   * fall back to `leads`. Never a reason to wait: the cards render regardless.
+   */
+  stageSummary?: LeadStageSummary;
   lookups: LabelLookups;
   now: Date;
   /** Emitted once per confirmed move. The container hands this to `useMoveLead`. */
@@ -255,6 +266,7 @@ function StageDropZone({
 export function LeadsBoard({
   stages,
   leads,
+  stageSummary,
   lookups,
   now,
   onMoveLead,
@@ -298,41 +310,6 @@ export function LeadsBoard({
   const leadStageFilter = columns.some((s) => s.id === rawStageFilter) ? rawStageFilter : '';
 
   const colors = React.useMemo(() => stageColors(columns), [columns]);
-  const totalByStage = React.useMemo(
-    () =>
-      new Map(
-        columns.map((stage) => [
-          stage.id,
-          leadsInStage(leads, stage.id).reduce((sum, row) => sum + row.estimatedValueBrl, 0),
-        ]),
-      ),
-    [columns, leads],
-  );
-  const countByStage = React.useMemo(
-    () => new Map(columns.map((stage) => [stage.id, leadsInStage(leads, stage.id).length])),
-    [columns, leads],
-  );
-  const totalGeral = React.useMemo(
-    () => [...totalByStage.values()].reduce((sum, value) => sum + value, 0),
-    [totalByStage],
-  );
-  const shareByStage = (stageId: string) =>
-    totalGeral > 0 ? Math.round(((totalByStage.get(stageId) ?? 0) / totalGeral) * 100) : 0;
-  const orderedLeads = React.useMemo(
-    () =>
-      columns
-        .filter((stage) => !leadStageFilter || stage.id === leadStageFilter)
-        .flatMap((stage) => leadsInStage(leads, stage.id)),
-    [columns, leads, leadStageFilter],
-  );
-  const listTotalCents = orderedLeads.reduce((sum, row) => sum + row.estimatedValueBrl, 0);
-  const listCount = orderedLeads.length;
-  const scopeLabel = leadStageFilter
-    ? (columns.find((s) => s.id === leadStageFilter)?.name ?? ALL_PHASES_LABEL)
-    : ALL_PHASES_LABEL;
-  const fmtBrl0 = (cents: number) =>
-    formatMoneyBrl(cents, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
-
   /*
     `moveLeadInList` is the SAME primitive the optimistic cache patch uses, so the
     preview and the real move cannot disagree about where the card lands.
@@ -344,6 +321,55 @@ export function LeadsBoard({
         : leads,
     [leads, pendingConversion],
   );
+
+  /*
+    THE per-stage figures every surface reads: the column badge, R$ total,
+    `% do total` and bar, the Lista chips and footer, the Funil and the
+    load-more total. The server summary counts every live lead in scope,
+    loaded or not; until it arrives the loaded cards answer, so a slow summary
+    shows the old numbers and never a 0. A card held in the conversion column
+    while the wizard is open shifts the summary through the same primitive the
+    optimistic move uses.
+  */
+  const displayedSummary = React.useMemo(
+    () => summaryWithPendingMove(stageSummary, leads, pendingConversion),
+    [stageSummary, leads, pendingConversion],
+  );
+  const { aggregates, fromServer } = React.useMemo(
+    () => resolveStageAggregates(displayedSummary, visibleLeads),
+    [displayedSummary, visibleLeads],
+  );
+  // Summed over the drawn columns only: a summary row for an archived stage
+  // never reaches a board total.
+  const allStages = React.useMemo(
+    () => sumStageAggregates(columns, aggregates),
+    [columns, aggregates],
+  );
+  const totalGeral = allStages.totalBrl;
+  const shareByStage = (stageId: string) =>
+    totalGeral > 0
+      ? Math.round((stageAggregate(aggregates, stageId).totalBrl / totalGeral) * 100)
+      : 0;
+  const orderedLeads = React.useMemo(
+    () =>
+      columns
+        .filter((stage) => !leadStageFilter || stage.id === leadStageFilter)
+        .flatMap((stage) => leadsInStage(leads, stage.id)),
+    [columns, leads, leadStageFilter],
+  );
+  const listScope = leadStageFilter ? stageAggregate(aggregates, leadStageFilter) : allStages;
+  const listTotalCents = listScope.totalBrl;
+  const listCount = listScope.count;
+  // How many cards are on screen, for the honest load-more label.
+  const loadedCount = React.useMemo(
+    () => sumStageAggregates(columns, aggregatesFromLeads(leads)).count,
+    [columns, leads],
+  );
+  const scopeLabel = leadStageFilter
+    ? (columns.find((s) => s.id === leadStageFilter)?.name ?? ALL_PHASES_LABEL)
+    : ALL_PHASES_LABEL;
+  const fmtBrl0 = (cents: number) =>
+    formatMoneyBrl(cents, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
   const hasConversionHandler = Boolean(onRequestConversion);
 
   /**
@@ -603,11 +629,11 @@ export function LeadsBoard({
                       {stage.name}
                     </span>
                     <span
-                      className="rounded-full px-2 py-0.5 text-[11.5px] font-bold"
+                      className="inline-flex min-w-[24px] shrink-0 justify-center whitespace-nowrap rounded-full px-2 py-0.5 text-[11.5px] font-bold tabular-nums"
                       data-stage-count
                       style={{ backgroundColor: c?.soft, color: c?.ink }}
                     >
-                      {column.length}
+                      {stageAggregate(aggregates, stage.id).count}
                     </span>
                     <button
                       aria-label={`${VIEW_IN_LIST_LABEL}: ${stage.name}`}
@@ -624,11 +650,11 @@ export function LeadsBoard({
                   </div>
                   {!contact ? (
                     <>
-                      <div className="mt-2 flex items-baseline justify-between">
+                      <div className="mt-2 flex items-baseline justify-between gap-2">
                         <span className="sales-ops-num text-[20px] font-bold text-[#201f24]" data-stage-total>
-                          {fmtBrl0(totalByStage.get(stage.id) ?? 0)}
+                          {fmtBrl0(stageAggregate(aggregates, stage.id).totalBrl)}
                         </span>
-                        <span className="text-[11.5px] font-semibold text-[#9b9ba3]">
+                        <span className="shrink-0 whitespace-nowrap text-[11.5px] font-semibold text-[#9b9ba3]">
                           {PERCENT_OF_TOTAL(share)}
                         </span>
                       </div>
@@ -722,7 +748,7 @@ export function LeadsBoard({
         </DragOverlay>
       </DndContext>
       ) : leadView === 'funnel' ? (
-        <LeadsFunnelView leads={leads} stages={stages} />
+        <LeadsFunnelView aggregates={aggregates} stages={stages} />
       ) : (
         <div className="flex flex-col gap-4" data-leads-list="true">
           <div className="flex flex-wrap gap-2">
@@ -735,7 +761,9 @@ export function LeadsBoard({
             >
               <span>{ALL_PHASES_LABEL}</span>
               {!contact ? <span className="sales-ops-num">{fmtBrl0(totalGeral)}</span> : null}
-              <span data-phase-count>{leads.length}</span>
+              <span className="tabular-nums" data-phase-count>
+                {allStages.count}
+              </span>
             </button>
             {columns.map((stage) => {
               const color = colors.get(stage.id);
@@ -755,15 +783,15 @@ export function LeadsBoard({
                   <span>{stage.name}</span>
                   {!contact ? (
                     <span className="sales-ops-num opacity-75">
-                      {fmtBrl0(totalByStage.get(stage.id) ?? 0)}
+                      {fmtBrl0(stageAggregate(aggregates, stage.id).totalBrl)}
                     </span>
                   ) : null}
                   <span
-                    className="rounded-full px-1.5 text-[11px] font-semibold"
+                    className="inline-flex min-w-[20px] justify-center rounded-full px-1.5 text-[11px] font-semibold tabular-nums"
                     data-phase-count
                     style={{ backgroundColor: color?.soft, color: color?.ink }}
                   >
-                    {countByStage.get(stage.id) ?? 0}
+                    {stageAggregate(aggregates, stage.id).count}
                   </span>
                 </button>
               );
@@ -944,11 +972,12 @@ export function LeadsBoard({
         <footer>
           <button
             className={cardButtonClass}
+            data-load-more
             disabled={loadingMore}
             onClick={onLoadMore}
             type="button"
           >
-            Carregar mais leads
+            {loadMoreLabel(loadedCount, fromServer ? allStages.count : null)}
           </button>
         </footer>
       ) : null}

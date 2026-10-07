@@ -1,10 +1,12 @@
 import { apiFetch } from '@/lib/api-client';
 import {
   LEADS_PAGE_SIZE,
+  type LeadBoardFilters,
   type LeadResponse,
   type LeadStageResponse,
   type LeadStageStatus,
   type LeadStagesReorderResponse,
+  type LeadStageSummary,
   type LeadStagesResponse,
   type LeadsPage,
 } from './types';
@@ -147,6 +149,22 @@ export const leadsApi = {
       method: 'GET',
       token,
     }),
+
+  /**
+   * The board's per-stage totals over EVERY live lead in scope, loaded or not.
+   * `sellerPersonId` rides only when the board filter has one: the API answers
+   * 400 to an empty string, exactly as on the list. A seller's scope is applied
+   * server-side from the token; the param is an admin narrowing only.
+   */
+  stageSummary: (filters: LeadBoardFilters, token: Token) => {
+    const search = new URLSearchParams();
+    if (filters?.sellerPersonId) search.set('sellerPersonId', filters.sellerPersonId);
+    const query = search.toString();
+    return apiFetch<LeadStageSummary>(`${LEADS_PATH}/summary${query ? `?${query}` : ''}`, {
+      method: 'GET',
+      token,
+    });
+  },
 
   saveLead: ({ id, ...body }: SaveLeadPayload | SaveContactLeadPayload, token: Token) =>
     apiFetch<LeadResponse>(id ? `${LEADS_PATH}/${id}` : LEADS_PATH, {

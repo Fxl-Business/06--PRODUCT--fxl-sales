@@ -1,4 +1,10 @@
-import { useInfiniteQuery, useQuery, useQueryClient, type QueryKey } from '@tanstack/react-query';
+import {
+  useInfiniteQuery,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+  type QueryKey,
+} from '@tanstack/react-query';
 import { useAccessToken } from '@/auth/react';
 import { useAppMutation } from '@/lib/app-mutation';
 import { queryKeys } from '@/lib/query-keys';
@@ -20,6 +26,8 @@ import {
   optimisticLeadMove,
   optimisticLeadRemoval,
   reconcileLeadRow,
+  summaryWithLeadMoved,
+  summaryWithLeadRemoved,
   type OptimisticLeadPatch,
 } from './optimistic';
 import type {
@@ -27,6 +35,7 @@ import type {
   LeadBoardModel,
   LeadResponse,
   LeadStageResponse,
+  LeadStageSummary,
   LeadStagesReorderResponse,
   LeadStagesResponse,
   LeadsInfiniteData,
@@ -141,6 +150,67 @@ export function useLeadsBoard(
 }
 
 /**
+ * The summary key, through the one query-key factory. The board, the move and
+ * this read are handed the SAME memoized `filters` by `LeadsBoardContainer`, so
+ * the summary entry a move patches is the one the board renders.
+ */
+export function leadStageSummaryKey(filters?: LeadBoardFilters) {
+  return queryKeys.leads.summary(filters);
+}
+
+/**
+ * The true per-stage count and value behind the board (`GET /leads/summary`),
+ * scoped server-side exactly like the list. Never gates the board: while it is
+ * pending or failed, `LeadsBoard` falls back to the loaded cards.
+ *
+ * No mutation names this key: it sits under `queryKeys.leads.all`, which every
+ * lead write invalidates (create, update, move, delete, restore, stage writes,
+ * import, conversion). `lead-board-totals.test.tsx` pins that for each one.
+ */
+export function useLeadStageSummary(filters?: LeadBoardFilters) {
+  const { getToken } = useAccessToken();
+  return useQuery({
+    queryKey: leadStageSummaryKey(filters),
+    queryFn: async () => leadsApi.stageSummary(filters, await requireToken(getToken)),
+  });
+}
+
+/** One summary cache entry as it was before an optimistic patch, for an exact revert. */
+type SummarySnapshot = { key: QueryKey; previous: LeadStageSummary };
+
+/** The filters a `queryKeys.leads.board(filters)` key was built from (`null` is none). */
+function boardFiltersOf(boardKey: QueryKey): LeadBoardFilters {
+  const segment = boardKey[2];
+  return segment && typeof segment === 'object'
+    ? (segment as { sellerPersonId?: string })
+    : undefined;
+}
+
+/**
+ * Patch the summary entry PAIRED with a board entry (same filters). No cached
+ * summary, or a patch that changes nothing, writes nothing and returns null:
+ * the same degrade-to-no-write direction as the board patch.
+ */
+function patchPairedSummary(
+  queryClient: QueryClient,
+  filters: LeadBoardFilters,
+  patch: (summary: LeadStageSummary) => LeadStageSummary,
+): SummarySnapshot | null {
+  const key = leadStageSummaryKey(filters);
+  const previous = queryClient.getQueryData<LeadStageSummary>(key);
+  if (previous === undefined) return null;
+  const next = patch(previous);
+  if (next === previous) return null;
+  queryClient.setQueryData(key, next);
+  return { key, previous };
+}
+
+/** Write every snapshot back WHOLE, so the revert is exact by construction. */
+function restoreSummaries(queryClient: QueryClient, snapshots: readonly SummarySnapshot[]): void {
+  for (const { key, previous } of snapshots) queryClient.setQueryData(key, previous);
+}
+
+/**
  * No optimistic write: the server assigns `position`, `stageChangedAt` and the
  * product rows, so the client cannot build the persisted row - and guessing a
  * `position` is how a brand-new card flickers into the middle of a column. Same
@@ -153,6 +223,8 @@ export function useSaveLead() {
     invalidates: [queryKeys.leads.all],
   });
 }
+
+type MoveLeadContext = OptimisticLeadPatch & { summaries: SummarySnapshot[] };
 
 /**
  * THE optimistic one.
@@ -168,26 +240,39 @@ export function useSaveLead() {
  * the previous snapshot carries every row's previous `stageId` AND its previous
  * `position` AND its previous `stageChangedAt`, so the revert is total by
  * construction rather than by a field list somebody has to remember to extend.
+ *
+ * The summary entry paired with the board entry is shifted in the same
+ * `onMutate` and written back whole on error; the settle invalidation re-reads
+ * both from the server.
  */
 export function useMoveLead(filters?: LeadBoardFilters) {
   const { getToken } = useAccessToken();
   const queryClient = useQueryClient();
   const boardKey = queryKeys.leads.board(filters);
-  return useAppMutation<LeadResponse, Error, MoveLeadPayload, OptimisticLeadPatch | undefined>({
+  return useAppMutation<LeadResponse, Error, MoveLeadPayload, MoveLeadContext | undefined>({
     mutationFn: async (payload) => leadsApi.moveLead(payload, await requireToken(getToken)),
     invalidates: [queryKeys.leads.all],
     onMutate: async (payload) => {
-      // An in-flight page fetch must not land on top of the optimistic write.
+      // An in-flight page or summary fetch must not land on top of the optimistic write.
       await queryClient.cancelQueries({ queryKey: queryKeys.leads.all });
       const previous = queryClient.getQueryData<LeadsInfiniteData>(boardKey);
       if (!previous) return undefined;
       const patch = optimisticLeadMove(previous, payload);
       queryClient.setQueryData(boardKey, patch.next);
-      return patch;
+      // The column totals move in the SAME tick as the card: the summary entry
+      // paired with this board entry shifts one lead from source to destination.
+      const moving = flattenLeadPages(previous).find((row) => row.id === payload.leadId);
+      const summary = moving
+        ? patchPairedSummary(queryClient, filters, (current) =>
+            summaryWithLeadMoved(current, moving, payload.toStageId),
+          )
+        : null;
+      return { ...patch, summaries: summary ? [summary] : [] };
     },
-    onError: (_error, _payload, patch) => {
-      if (!patch) return;
-      queryClient.setQueryData(boardKey, patch.previous);
+    onError: (_error, _payload, context) => {
+      if (!context) return;
+      queryClient.setQueryData(boardKey, context.previous);
+      restoreSummaries(queryClient, context.summaries);
     },
     onSuccess: (response, _payload, patch) => {
       if (!patch) return;
@@ -205,7 +290,10 @@ export function useMoveLead(filters?: LeadBoardFilters) {
 const LEAD_BOARDS_PREFIX: QueryKey = queryKeys.leads.board(undefined).slice(0, 2);
 
 /** What `useDeleteLead` wrote, one entry per board cache entry it patched. */
-type LeadRemovalSnapshot = { boards: Array<{ key: QueryKey; previous: LeadsInfiniteData }> };
+type LeadRemovalSnapshot = {
+  boards: Array<{ key: QueryKey; previous: LeadsInfiniteData }>;
+  summaries: SummarySnapshot[];
+};
 
 function isNotFound(error: unknown): boolean {
   return (
@@ -228,6 +316,9 @@ function isNotFound(error: unknown): boolean {
  * already gone (deleted elsewhere, or no longer in this viewer's scope), which
  * is the outcome the operator asked for, so the card stays removed and the
  * mutation resolves. Every outcome invalidates the leads root on settle.
+ *
+ * The summary entry paired with each board entry that held the lead loses that
+ * lead in the same `onMutate`, and is written back whole on error.
  */
 export function useDeleteLead() {
   const { getToken } = useAccessToken();
@@ -246,6 +337,7 @@ export function useDeleteLead() {
       // An in-flight page fetch must not land on top of the optimistic removal.
       await queryClient.cancelQueries({ queryKey: queryKeys.leads.all });
       const boards: LeadRemovalSnapshot['boards'] = [];
+      const summaries: SummarySnapshot[] = [];
       for (const [key, data] of queryClient.getQueriesData<LeadsInfiniteData>({
         queryKey: LEAD_BOARDS_PREFIX,
       })) {
@@ -254,13 +346,22 @@ export function useDeleteLead() {
         if (patch.next === data) continue;
         boards.push({ key, previous: data });
         queryClient.setQueryData(key, patch.next);
+        // The lead is looked up in the PREVIOUS board data: the patched one no longer holds it.
+        const row = flattenLeadPages(data).find((candidate) => candidate.id === leadId);
+        const summary = row
+          ? patchPairedSummary(queryClient, boardFiltersOf(key), (current) =>
+              summaryWithLeadRemoved(current, row),
+            )
+          : null;
+        if (summary) summaries.push(summary);
       }
-      return { boards };
+      return { boards, summaries };
     },
     onError: (_error, _leadId, snapshot) => {
       for (const { key, previous } of snapshot?.boards ?? []) {
         queryClient.setQueryData(key, previous);
       }
+      restoreSummaries(queryClient, snapshot?.summaries ?? []);
     },
   });
 }

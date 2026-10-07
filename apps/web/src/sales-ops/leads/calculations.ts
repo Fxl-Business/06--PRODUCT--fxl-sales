@@ -1,4 +1,4 @@
-import type { LeadStageKind, SalesOpsLead, SalesOpsLeadStage } from './types';
+import type { LeadStageKind, LeadStageSummary, SalesOpsLead, SalesOpsLeadStage } from './types';
 
 /**
  * Pure board derivations. Imports only types, and every question the board, the
@@ -142,27 +142,127 @@ export type LeadFunnel = {
   totalBrl: number;
 };
 
+/** One stage's lead count and estimated value (cents). */
+export type LeadStageAggregate = { count: number; totalBrl: number };
+
+/** Per-stage aggregates keyed by stage id. A stage with no entry reads zero. */
+export type LeadStageAggregates = ReadonlyMap<string, LeadStageAggregate>;
+
+const ZERO_AGGREGATE: LeadStageAggregate = Object.freeze({ count: 0, totalBrl: 0 });
+
+/** The aggregate for one stage, zero when absent. Never `undefined`. */
+export function stageAggregate(
+  aggregates: LeadStageAggregates,
+  stageId: string,
+): LeadStageAggregate {
+  return aggregates.get(stageId) ?? ZERO_AGGREGATE;
+}
+
+/**
+ * A body is a summary only when it carries a `stages` array. Anything else (a
+ * `{}` from a stubbed fetch, a proxy error page parsed as JSON) is treated as
+ * no summary, so the board falls back to its loaded cards instead of zeros.
+ */
+export function isLeadStageSummary(value: unknown): value is LeadStageSummary {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    Array.isArray((value as { stages?: unknown }).stages)
+  );
+}
+
+/** The loaded-cards fallback: count and value per stage over the cards in hand. */
+export function aggregatesFromLeads(
+  leads: readonly SalesOpsLead[],
+): Map<string, LeadStageAggregate> {
+  const map = new Map<string, LeadStageAggregate>();
+  for (const lead of leads) {
+    const current = map.get(lead.stageId);
+    map.set(lead.stageId, {
+      count: (current?.count ?? 0) + 1,
+      totalBrl: (current?.totalBrl ?? 0) + lead.estimatedValueBrl,
+    });
+  }
+  return map;
+}
+
+/** The server summary keyed by stage id; `estimatedValueBrl` becomes `totalBrl`. */
+export function aggregatesFromSummary(
+  summary: LeadStageSummary,
+): Map<string, LeadStageAggregate> {
+  return new Map(
+    summary.stages.map((row) => [
+      row.stageId,
+      { count: row.count, totalBrl: row.estimatedValueBrl },
+    ]),
+  );
+}
+
+export type ResolvedStageAggregates = {
+  aggregates: LeadStageAggregates;
+  /** True when the figures are the server's; the load-more total is shown only then. */
+  fromServer: boolean;
+};
+
+/**
+ * THE per-stage source of the board. The server summary counts every live lead
+ * in scope, loaded or not; until it has arrived (or when it failed) the loaded
+ * cards answer instead, which is exactly what the board showed before the
+ * summary existed - so a slow summary degrades to the old numbers, never to 0.
+ *
+ * Per stage the larger count wins (`max(summary, loaded)`): a valid but stale
+ * summary (a fresh create whose refetch has not landed) can never show fewer
+ * leads than the cards visibly sitting in that column. When the loaded cards
+ * win, their value total comes with them so count and value stay one reading.
+ */
+export function resolveStageAggregates(
+  summary: LeadStageSummary | undefined,
+  loadedLeads: readonly SalesOpsLead[],
+): ResolvedStageAggregates {
+  const loaded = aggregatesFromLeads(loadedLeads);
+  if (!isLeadStageSummary(summary)) return { aggregates: loaded, fromServer: false };
+  const merged = aggregatesFromSummary(summary);
+  for (const [stageId, fromCards] of loaded) {
+    const fromServer = merged.get(stageId);
+    if (!fromServer || fromCards.count > fromServer.count) merged.set(stageId, fromCards);
+  }
+  return { aggregates: merged, fromServer: true };
+}
+
+/**
+ * Count and value summed over the GIVEN stages only. The board passes its
+ * active columns, so a summary row for an archived stage never reaches a total.
+ */
+export function sumStageAggregates(
+  stages: readonly Pick<SalesOpsLeadStage, 'id'>[],
+  aggregates: LeadStageAggregates,
+): LeadStageAggregate {
+  let count = 0;
+  let totalBrl = 0;
+  for (const stage of stages) {
+    const aggregate = stageAggregate(aggregates, stage.id);
+    count += aggregate.count;
+    totalBrl += aggregate.totalBrl;
+  }
+  return { count, totalBrl };
+}
+
 /**
  * The sales funnel: volume (count) and value (cents) per active stage, in board
  * order. Shares are by VALUE, the same figure the Quadro column header shows as
  * `% do total`, so a zero-value funnel simply draws empty bars while the counts
- * still read. Pure; reuses `boardStages` and `leadsInStage` so the funnel can
- * never disagree with the board about which cards sit where.
+ * still read. Pure; reads the SAME per-stage aggregates the board header reads
+ * (`resolveStageAggregates`), so the funnel can never disagree with the column
+ * badges.
  */
 export function buildLeadFunnel(
-  leads: readonly SalesOpsLead[],
+  aggregates: LeadStageAggregates,
   stages: readonly SalesOpsLeadStage[],
 ): LeadFunnel {
   const columns = boardStages(stages);
   const base = columns.map((stage) => {
-    const inStage = leadsInStage(leads, stage.id);
-    return {
-      stageId: stage.id,
-      name: stage.name,
-      kind: stage.kind,
-      count: inStage.length,
-      totalBrl: inStage.reduce((sum, row) => sum + row.estimatedValueBrl, 0),
-    };
+    const { count, totalBrl } = stageAggregate(aggregates, stage.id);
+    return { stageId: stage.id, name: stage.name, kind: stage.kind, count, totalBrl };
   });
   const totalBrl = base.reduce((sum, row) => sum + row.totalBrl, 0);
   const totalCount = base.reduce((sum, row) => sum + row.count, 0);
@@ -210,41 +310,39 @@ export type CumulativeFunnel = {
  * funnel). The progression is the board order with the `lost` stage removed,
  * because a lost lead has no known path - placing it in an earlier stage would
  * invent one - so it is reported apart in `lost` and never inflates a stage it may
- * never have reached. Pure; reuses `boardStages`, `leadsInStage` and `lostStage`
- * so the funnel can never disagree with the board about where a lead sits.
+ * never have reached. Pure; reads the SAME per-stage aggregates the board header
+ * reads (`resolveStageAggregates`), so the funnel can never disagree with the
+ * column badges.
  */
 export function buildCumulativeFunnel(
-  leads: readonly SalesOpsLead[],
+  aggregates: LeadStageAggregates,
   stages: readonly SalesOpsLeadStage[],
 ): CumulativeFunnel {
   const lost = lostStage(stages);
   const progression = boardStages(stages).filter((stage) => stage.id !== lost?.id);
+  // FRESH row objects: the accumulation below mutates them, and it must never
+  // write into the caller's aggregate map.
   const rows: CumulativeFunnelRow[] = progression.map((stage) => {
-    const inStage = leadsInStage(leads, stage.id);
-    return {
-      stageId: stage.id,
-      name: stage.name,
-      kind: stage.kind,
-      count: inStage.length,
-      totalBrl: inStage.reduce((sum, row) => sum + row.estimatedValueBrl, 0),
-    };
+    const { count, totalBrl } = stageAggregate(aggregates, stage.id);
+    return { stageId: stage.id, name: stage.name, kind: stage.kind, count, totalBrl };
   });
   // Accumulate from the bottom up: every row absorbs the one below it.
   for (let i = rows.length - 2; i >= 0; i -= 1) {
     rows[i]!.count += rows[i + 1]!.count;
     rows[i]!.totalBrl += rows[i + 1]!.totalBrl;
   }
-  const lostLeads = lost ? leadsInStage(leads, lost.id) : [];
+  const lostAggregate = lost ? stageAggregate(aggregates, lost.id) : null;
   return {
     rows,
-    lost: lost
-      ? {
-          stageId: lost.id,
-          name: lost.name,
-          count: lostLeads.length,
-          totalBrl: lostLeads.reduce((sum, row) => sum + row.estimatedValueBrl, 0),
-        }
-      : null,
+    lost:
+      lost && lostAggregate
+        ? {
+            stageId: lost.id,
+            name: lost.name,
+            count: lostAggregate.count,
+            totalBrl: lostAggregate.totalBrl,
+          }
+        : null,
     topCount: rows[0]?.count ?? 0,
     topBrl: rows[0]?.totalBrl ?? 0,
   };

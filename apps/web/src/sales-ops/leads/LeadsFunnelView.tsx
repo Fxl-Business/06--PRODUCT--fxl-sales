@@ -20,8 +20,12 @@ import {
   segmentedContainerClass,
   stageColors,
 } from './board-ui';
-import { buildCumulativeFunnel, buildLeadFunnel } from './calculations';
-import type { SalesOpsLead, SalesOpsLeadStage } from './types';
+import {
+  buildCumulativeFunnel,
+  buildLeadFunnel,
+  type LeadStageAggregates,
+} from './calculations';
+import type { SalesOpsLeadStage } from './types';
 
 /**
  * The sales funnel, in two shapes a switch chooses between. ACUMULADO (the
@@ -33,10 +37,13 @@ import type { SalesOpsLead, SalesOpsLeadStage } from './types';
  * (`% do total`), and every stage - lost included - is an ordinary row. A second
  * switch sizes either shape by FATURAMENTO (R$) or VOLUME (lead count); the two
  * metrics are never shown mixed in one bar. The footer grand totals cover every
- * lead (lost included) and stay the same across both shapes. Purely presentational.
+ * lead (lost included) and stay the same across both shapes. Purely presentational
+ * over the board's per-stage aggregates (`resolveStageAggregates`): the server
+ * summary when it has arrived, the loaded cards until then, so the Funil always
+ * agrees with the column badges.
  */
 export type LeadsFunnelViewProps = {
-  leads: SalesOpsLead[];
+  aggregates: LeadStageAggregates;
   stages: SalesOpsLeadStage[];
 };
 
@@ -45,11 +52,11 @@ const fmtBrl0 = (cents: number) =>
 
 type FunnelLikeRow = { count: number; totalBrl: number };
 
-export function LeadsFunnelView({ leads, stages }: LeadsFunnelViewProps) {
+export function LeadsFunnelView({ aggregates, stages }: LeadsFunnelViewProps) {
   const [metric, setMetric] = React.useState<FunnelMetric>('value');
   const [shape, setShape] = React.useState<FunnelShape>('cumulative');
-  const composition = React.useMemo(() => buildLeadFunnel(leads, stages), [leads, stages]);
-  const cumulative = React.useMemo(() => buildCumulativeFunnel(leads, stages), [leads, stages]);
+  const composition = React.useMemo(() => buildLeadFunnel(aggregates, stages), [aggregates, stages]);
+  const cumulative = React.useMemo(() => buildCumulativeFunnel(aggregates, stages), [aggregates, stages]);
   // Composition rows cover every active stage (lost included), so they key every colour.
   const colors = React.useMemo(
     () => stageColors(composition.rows.map((row) => ({ id: row.stageId, kind: row.kind }))),
