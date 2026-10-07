@@ -1,6 +1,6 @@
 import type { MoveLeadPayload } from './api';
-import { leadsInStage } from './calculations';
-import type { LeadsInfiniteData, SalesOpsLead } from './types';
+import { isLeadStageSummary, leadsInStage } from './calculations';
+import type { LeadStageSummary, LeadsInfiniteData, SalesOpsLead } from './types';
 
 /**
  * Pure optimistic patches over the board's raw infinite-query snapshot.
@@ -10,7 +10,8 @@ import type { LeadsInfiniteData, SalesOpsLead } from './types';
  * `{next, previous, …}`, with the hook writing `next` in `onMutate`, writing
  * `previous` back in `onError` and reconciling the server row in `onSuccess`.
  * Same contract, different snapshot type. There is deliberately no second
- * pattern.
+ * pattern. The `summaryWith*` functions are the same contract over the
+ * `GET /leads/summary` cache entry.
  */
 
 export type OptimisticLeadPatch = {
@@ -206,4 +207,74 @@ export function reconcileLeadRow(
     pages: [{ ...first, leads: [persisted, ...first.leads] }, ...rest],
     pageParams: snapshot.pageParams,
   };
+}
+
+/** What a summary patch needs to know about one lead. */
+type SummaryLead = Pick<SalesOpsLead, 'stageId' | 'estimatedValueBrl'>;
+
+/**
+ * One stage's count and value moved by a delta, never below zero. A stage with
+ * no row is created on an increment and left alone on a decrement (a missing
+ * row already reads zero). Every untouched row is the same object that went in.
+ */
+function adjustStage(
+  summary: LeadStageSummary,
+  stageId: string,
+  countDelta: number,
+  valueDelta: number,
+): LeadStageSummary {
+  const index = summary.stages.findIndex((row) => row.stageId === stageId);
+  if (index < 0) {
+    if (countDelta <= 0) return summary;
+    return {
+      ...summary,
+      stages: [...summary.stages, { stageId, count: countDelta, estimatedValueBrl: valueDelta }],
+    };
+  }
+  const row = summary.stages[index]!;
+  const next = {
+    stageId,
+    count: Math.max(0, row.count + countDelta),
+    estimatedValueBrl: Math.max(0, row.estimatedValueBrl + valueDelta),
+  };
+  return { ...summary, stages: summary.stages.map((current, i) => (i === index ? next : current)) };
+}
+
+/**
+ * The summary twin of `moveLeadInList`: one lead's count and value leave its
+ * stage and enter `toStageId`. A reorder inside one column, and a body that is
+ * not a summary, come back as the IDENTICAL object.
+ */
+export function summaryWithLeadMoved(
+  summary: LeadStageSummary,
+  lead: SummaryLead,
+  toStageId: string,
+): LeadStageSummary {
+  if (!isLeadStageSummary(summary) || lead.stageId === toStageId) return summary;
+  const withoutLead = adjustStage(summary, lead.stageId, -1, -lead.estimatedValueBrl);
+  return adjustStage(withoutLead, toStageId, 1, lead.estimatedValueBrl);
+}
+
+/** One lead leaves its stage (a soft delete). A non-summary body is returned as is. */
+export function summaryWithLeadRemoved(
+  summary: LeadStageSummary,
+  lead: SummaryLead,
+): LeadStageSummary {
+  if (!isLeadStageSummary(summary)) return summary;
+  return adjustStage(summary, lead.stageId, -1, -lead.estimatedValueBrl);
+}
+
+/**
+ * The figures the board shows while the proposta wizard holds a dropped card in
+ * the conversion column (`pendingConversion` in `LeadsBoard`). Same primitive as
+ * the optimistic move, so the preview and the real move cannot disagree.
+ */
+export function summaryWithPendingMove(
+  summary: LeadStageSummary | undefined,
+  leads: readonly SalesOpsLead[],
+  pending: MoveLeadPayload | null,
+): LeadStageSummary | undefined {
+  if (!summary || !pending) return summary;
+  const lead = leads.find((row) => row.id === pending.leadId);
+  return lead ? summaryWithLeadMoved(summary, lead, pending.toStageId) : summary;
 }

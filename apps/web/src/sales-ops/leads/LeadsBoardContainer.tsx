@@ -15,7 +15,14 @@ import { leadToContactSeed } from './contact-lead';
 import { LeadDeleteDialog } from './LeadDeleteDialog';
 import { LeadDialog } from './LeadDialog';
 import { LeadsBoard, type LeadConversionRequest } from './LeadsBoard';
-import { useDeleteLead, useLeadsBoard, useLeadStages, useMoveLead, useSaveLead } from './hooks';
+import {
+  useDeleteLead,
+  useLeadsBoard,
+  useLeadStageSummary,
+  useLeadStages,
+  useMoveLead,
+  useSaveLead,
+} from './hooks';
 import type { LeadBoardFilters, SalesOpsLead } from './types';
 
 /**
@@ -135,9 +142,10 @@ export function LeadsBoardContainer({
   // into a query the server has already scoped.
   const sellerFilterValue = showSellerFilter ? sellerPersonId : null;
   /*
-    Memoized on the VALUE alone, and the same object reaches both hooks: the
-    mutation patches the cache entry the board reads, so a mismatch would
-    silently degrade to no optimistic write at all.
+    Memoized on the VALUE alone, and the same object reaches the board read, the
+    move and the stage summary: the move patches the board and summary entries
+    the board renders, so a mismatch would silently degrade to no optimistic
+    write at all.
   */
   const filters = React.useMemo<LeadBoardFilters>(
     () => (sellerFilterValue ? { sellerPersonId: sellerFilterValue } : undefined),
@@ -145,6 +153,7 @@ export function LeadsBoardContainer({
   );
 
   const boardQuery = useLeadsBoard(stages, filters);
+  const summaryQuery = useLeadStageSummary(filters);
   const moveLead = useMoveLead(filters);
   const saveLead = useSaveLead();
   const deleteLead = useDeleteLead();
@@ -256,6 +265,7 @@ export function LeadsBoardContainer({
               },
             }
           : {})}
+        stageSummary={summaryQuery.data}
         stages={stages}
       />
 

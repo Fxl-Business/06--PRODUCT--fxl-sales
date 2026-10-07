@@ -111,6 +111,14 @@ export const queryKeys = {
   leads: {
     all: ['leads'] as const,
     board: (filters: LeadBoardFilters) => ['leads', 'board', filters ?? null] as const,
+    /*
+      The board's per-stage totals (`GET /leads/summary`). Keyed by the SAME
+      filters value as `board(filters)`, so the optimistic move and delete patch
+      the summary entry paired with the board entry they patch. Under the
+      `['leads']` root on purpose: every lead write's `queryKeys.leads.all`
+      refreshes it with no extra key on any mutation.
+    */
+    summary: (filters: LeadBoardFilters) => ['leads', 'summary', filters ?? null] as const,
     stages: () => ['leads', 'stages'] as const,
     deleted: () => ['leads', 'deleted'] as const,
   },

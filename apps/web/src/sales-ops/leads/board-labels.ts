@@ -124,3 +124,14 @@ export const NO_PRODUCTS_DASH = '-';
 export const scopeLeadsCount = (scope: string, n: number): string =>
   `${scope} · ${n} ${n === 1 ? 'lead' : 'leads'}`;
 export const EMPTY_PHASE_LIST = 'Nenhum lead nesta fase.';
+
+export const LOAD_MORE_LABEL = 'Carregar mais leads';
+
+/**
+ * The load-more button, honest about how much of the board is on screen:
+ * `Carregar mais leads (100 de 115)` once the server total is known and larger
+ * than what is loaded; the bare label while the summary is unknown, failed, or
+ * already caught up (a stale total never reads "120 de 115").
+ */
+export const loadMoreLabel = (loaded: number, total: number | null): string =>
+  total !== null && total > loaded ? `${LOAD_MORE_LABEL} (${loaded} de ${total})` : LOAD_MORE_LABEL;

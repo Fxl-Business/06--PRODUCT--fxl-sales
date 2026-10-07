@@ -26,6 +26,10 @@ const mocks = vi.hoisted(() => ({
   leads: [] as unknown[],
   boardError: null as unknown,
   boardProps: [] as Record<string, unknown>[],
+  summary: undefined as unknown,
+  boardFilters: [] as unknown[],
+  moveFilters: [] as unknown[],
+  summaryFilters: [] as unknown[],
   mutate: vi.fn(),
   mutateAsync: vi.fn(),
 }));
@@ -44,7 +48,9 @@ vi.mock('@/auth/react', () => ({
 
 vi.mock('../hooks', () => ({
   useLeadStages: () => ({ isPending: false, isError: false, data: mocks.stages }),
-  useLeadsBoard: () => ({
+  useLeadsBoard: (_stages: unknown, filters: unknown) => {
+    mocks.boardFilters.push(filters);
+    return {
     // Pending with zero stages reproduces the real query, disabled without stage rows.
     isPending: mocks.stages.length === 0 && mocks.boardError === null,
     isError: mocks.boardError !== null,
@@ -52,8 +58,16 @@ vi.mock('../hooks', () => ({
     data: mocks.stages.length ? { leads: mocks.leads, hasMore: false } : undefined,
     isFetchingNextPage: false,
     fetchNextPage: vi.fn(),
-  }),
-  useMoveLead: () => ({ mutate: vi.fn(), isPending: false }),
+    };
+  },
+  useMoveLead: (filters: unknown) => {
+    mocks.moveFilters.push(filters);
+    return { mutate: vi.fn(), isPending: false };
+  },
+  useLeadStageSummary: (filters: unknown) => {
+    mocks.summaryFilters.push(filters);
+    return { data: mocks.summary };
+  },
   useSaveLead: () => ({
     mutate: mocks.mutate,
     mutateAsync: mocks.mutateAsync,
@@ -82,6 +96,18 @@ vi.mock('../LeadsBoard', async () => {
           'button',
           { 'data-stub': 'edit', onClick: call('onEditLead', mocks.leads[0]), type: 'button' },
           'stub-edit',
+        ),
+        ReactModule.createElement(
+          'button',
+          {
+            'data-stub': 'seller',
+            onClick: () =>
+              (
+                props.sellerFilter as { onChange?: (v: string | null) => void } | undefined
+              )?.onChange?.('p-7'),
+            type: 'button',
+          },
+          'stub-seller',
         ),
         ReactModule.createElement(
           'button',
@@ -149,6 +175,10 @@ beforeEach(() => {
   mocks.leads = [leadRow()];
   mocks.boardError = null;
   mocks.boardProps = [];
+  mocks.summary = undefined;
+  mocks.boardFilters = [];
+  mocks.moveFilters = [];
+  mocks.summaryFilters = [];
   mocks.mutate.mockReset();
   mocks.mutateAsync.mockReset();
   mocks.mutateAsync.mockResolvedValue({ lead: leadRow() });
@@ -175,7 +205,7 @@ function PathEcho() {
   return <span data-path={useLocation().pathname} />;
 }
 
-async function renderContainer() {
+async function renderContainer(options: { showSellerFilter?: boolean } = {}) {
   await act(async () => {
     root.render(
       <MemoryRouter initialEntries={['/operacional/leads']}>
@@ -190,6 +220,7 @@ async function renderContainer() {
                   people={[]}
                   products={[]}
                   sellers={[]}
+                  showSellerFilter={options.showSellerFilter}
                 />
                 <PathEcho />
               </>
@@ -240,6 +271,16 @@ describe('LeadsBoardContainer, leads edition', () => {
     expect(props.fieldSet).toBe('contact');
     expect(props.onRequestConversion).toBeUndefined();
     expect(props.onOpenSale).toBeUndefined();
+  });
+
+  it('reads the stage summary with the same filters object as the board and the move, and hands it to the board', async () => {
+    mocks.summary = { stages: [{ stageId: STAGE_ID, count: 115, estimatedValueBrl: 0 }] };
+    await renderContainer({ showSellerFilter: true });
+    expect(lastBoardProps().stageSummary).toBe(mocks.summary);
+    await clickSelector('[data-stub="seller"]');
+    expect(mocks.summaryFilters.at(-1)).toEqual({ sellerPersonId: 'p-7' });
+    expect(mocks.summaryFilters.at(-1)).toBe(mocks.boardFilters.at(-1));
+    expect(mocks.summaryFilters.at(-1)).toBe(mocks.moveFilters.at(-1));
   });
 
   it('renders the board, not the Skeleton, with zero etapas', async () => {

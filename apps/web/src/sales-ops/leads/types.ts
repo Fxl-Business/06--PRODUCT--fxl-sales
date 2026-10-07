@@ -119,8 +119,9 @@ export type SalesOpsLead = {
  * One keyset page. The same `{rows, nextCursor}` shape as
  * `CadastroHistoryResponse`, for the same reason.
  *
- * `total` IS returned by the API and is deliberately not modelled: nothing on the
- * board renders a server-side count, and a field nobody reads goes stale.
+ * `total` IS returned by the API and is deliberately not modelled: the board's
+ * counts come from ONE `GET /leads/summary` read for every column (see
+ * `LeadStageSummary`), never from N per-column page totals.
  *
  * `nextCursor` stays `string | null` because that is the WIRE shape. `useLeadsBoard`
  * carries its board-wide cursor MAP in this same slot; see the cast there.
@@ -140,6 +141,16 @@ export type LeadBoardModel = { leads: SalesOpsLead[]; hasMore: boolean };
  * sales-ops subtree. It mirrors `CommissionFilters`, duplicated the same way.
  */
 export type LeadBoardFilters = { sellerPersonId?: string } | undefined;
+
+/**
+ * One row of `GET /api/v1/sales-ops/leads/summary`: every LIVE lead the caller
+ * may see in that stage, loaded or not, scoped exactly like the list. Integer
+ * cents. A stage with no row reads zero, and a row may name an archived stage,
+ * which the board never draws.
+ */
+export type LeadStageSummaryRow = { stageId: string; count: number; estimatedValueBrl: number };
+
+export type LeadStageSummary = { stages: LeadStageSummaryRow[] };
 
 export type LeadStagesResponse = { stages: SalesOpsLeadStage[] };
 export type LeadResponse = { lead: SalesOpsLead };

@@ -160,7 +160,8 @@ export function useDeletedLeads() {
 /**
  * No optimistic write: the row leaves the list only once the server answered 200,
  * removed from every cached page in `onSuccess`. `queryKeys.leads.all` then refetches
- * the trash, the board (the lead is back in a column) and the stage list on settle.
+ * the trash, the board (the lead is back in a column), the column totals
+ * (`GET /leads/summary`) and the stage list on settle.
  */
 export function useRestoreLead() {
   const { getToken } = useAccessToken();

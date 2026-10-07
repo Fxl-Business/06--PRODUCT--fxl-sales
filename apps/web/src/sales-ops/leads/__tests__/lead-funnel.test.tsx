@@ -6,13 +6,17 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { LeadsBoard } from '../LeadsBoard';
 import { LeadsFunnelView } from '../LeadsFunnelView';
 import { buildLabelLookups } from '../board-labels';
-import { buildCumulativeFunnel, buildLeadFunnel } from '../calculations';
+import { aggregatesFromLeads, buildCumulativeFunnel, buildLeadFunnel } from '../calculations';
 import type { SalesOpsLead, SalesOpsLeadStage } from '../types';
 
 /**
  * The sales funnel: the pure `buildLeadFunnel` derivation, the presentational
  * `LeadsFunnelView`, and the third view toggle on the board. Volume and value
  * per stage, with the value share driving the proportion bar.
+ *
+ * The builders read per-stage aggregates. These cases feed them `aggregatesFromLeads`,
+ * the board's loaded-cards fallback, so every number below is also the fallback's
+ * number; the server-summary path is pinned by `lead-board-totals.test.tsx`.
  */
 
 const NOVO_ID = 'cccccccc-0000-4000-8000-000000000001';
@@ -87,7 +91,7 @@ const LEADS = [
 
 describe('buildLeadFunnel', () => {
   it('counts leads and sums value per stage, with value shares', () => {
-    const funnel = buildLeadFunnel(LEADS, STAGES);
+    const funnel = buildLeadFunnel(aggregatesFromLeads(LEADS), STAGES);
     expect(funnel.rows.map((row) => [row.name, row.count, row.totalBrl, row.share])).toEqual([
       ['Novo', 2, 300_000, 50],
       ['Qualificado', 1, 300_000, 50],
@@ -101,13 +105,22 @@ describe('buildLeadFunnel', () => {
     const withArchived = [...STAGES, stage('zzz', 'Antiga', 'normal', 0)].map((s) =>
       s.id === 'zzz' ? { ...s, status: 'archived' as const } : s,
     );
-    const funnel = buildLeadFunnel(LEADS, withArchived);
+    const funnel = buildLeadFunnel(aggregatesFromLeads(LEADS), withArchived);
     expect(funnel.rows.map((row) => row.name)).toEqual(['Novo', 'Qualificado', 'Proposta']);
+  });
+
+  it('ignores aggregates for a stage the board does not draw', () => {
+    const aggregates = aggregatesFromLeads(LEADS);
+    aggregates.set('zzz', { count: 9, totalBrl: 900_000 });
+    const funnel = buildLeadFunnel(aggregates, STAGES);
+    expect(funnel.totalCount).toBe(3);
+    expect(funnel.totalBrl).toBe(600_000);
+    expect(funnel.rows.some((row) => row.stageId === 'zzz')).toBe(false);
   });
 
   it('shares are all zero when no lead carries a value (volume still counts)', () => {
     const noValue = LEADS.map((row) => ({ ...row, estimatedValueBrl: 0 }));
-    const funnel = buildLeadFunnel(noValue, STAGES);
+    const funnel = buildLeadFunnel(aggregatesFromLeads(noValue), STAGES);
     expect(funnel.rows.every((row) => row.share === 0)).toBe(true);
     expect(funnel.totalCount).toBe(3);
     expect(funnel.totalBrl).toBe(0);
@@ -124,7 +137,7 @@ const STAGES_WITH_LOST: SalesOpsLeadStage[] = [
 
 describe('buildCumulativeFunnel', () => {
   it('accumulates a lead into every earlier stage, tapering monotonically from the top', () => {
-    const funnel = buildCumulativeFunnel(LEADS, STAGES);
+    const funnel = buildCumulativeFunnel(aggregatesFromLeads(LEADS), STAGES);
     // Novo = 2+1+0, Qualificado = 1+0, Proposta = 0.
     expect(funnel.rows.map((row) => [row.name, row.count, row.totalBrl])).toEqual([
       ['Novo', 3, 600_000],
@@ -149,7 +162,7 @@ describe('buildCumulativeFunnel', () => {
       lead('l5', CONV_ID, 80_000, { saleId: 'sale-1', saleStatus: 'won' }),
       lead('l4', LOST_ID, 500_000, { lostReason: 'Sem orçamento' }),
     ];
-    const funnel = buildCumulativeFunnel(leadsWithLost, STAGES_WITH_LOST);
+    const funnel = buildCumulativeFunnel(aggregatesFromLeads(leadsWithLost), STAGES_WITH_LOST);
     // Progression excludes Perdido; the converted lead sits in the bottom row.
     expect(funnel.rows.map((row) => [row.name, row.count, row.totalBrl])).toEqual([
       ['Novo', 4, 680_000],
@@ -171,7 +184,7 @@ describe('buildCumulativeFunnel', () => {
     const withArchived = [...STAGES, stage('zzz', 'Antiga', 'normal', 0)].map((s) =>
       s.id === 'zzz' ? { ...s, status: 'archived' as const } : s,
     );
-    const funnel = buildCumulativeFunnel(LEADS, withArchived);
+    const funnel = buildCumulativeFunnel(aggregatesFromLeads(LEADS), withArchived);
     expect(funnel.rows.map((row) => row.name)).toEqual(['Novo', 'Qualificado', 'Proposta']);
   });
 });
@@ -205,7 +218,7 @@ describe('LeadsFunnelView', () => {
   }
 
   it('defaults to the cumulative (Acumulado) shape, tapering from a full-width top', async () => {
-    await render(<LeadsFunnelView leads={LEADS} stages={STAGES} />);
+    await render(<LeadsFunnelView aggregates={aggregatesFromLeads(LEADS)} stages={STAGES} />);
     expect(container.querySelector('[data-leads-funnel]')?.getAttribute('data-funnel-shape')).toBe(
       'cumulative',
     );
@@ -228,7 +241,7 @@ describe('LeadsFunnelView', () => {
   });
 
   it('switches to the composition (Composição) shape: each stage sized by its own value', async () => {
-    await render(<LeadsFunnelView leads={LEADS} stages={STAGES} />);
+    await render(<LeadsFunnelView aggregates={aggregatesFromLeads(LEADS)} stages={STAGES} />);
     await click(container.querySelector('[data-funnel-shape-option="composition"]')!);
     expect(container.querySelector('[data-leads-funnel]')?.getAttribute('data-funnel-shape')).toBe(
       'composition',
@@ -247,7 +260,7 @@ describe('LeadsFunnelView', () => {
   });
 
   it('applies Volume to the cumulative shape: bars and shares size by cumulative lead count', async () => {
-    await render(<LeadsFunnelView leads={LEADS} stages={STAGES} />);
+    await render(<LeadsFunnelView aggregates={aggregatesFromLeads(LEADS)} stages={STAGES} />);
     await click(container.querySelector('[data-funnel-metric-option="volume"]')!);
     expect(container.querySelector('[data-leads-funnel]')?.getAttribute('data-funnel-metric')).toBe(
       'volume',
@@ -271,7 +284,7 @@ describe('LeadsFunnelView', () => {
       lead('l5', CONV_ID, 80_000, { saleId: 'sale-1', saleStatus: 'won' }),
       lead('l4', LOST_ID, 500_000, { lostReason: 'Sem orçamento' }),
     ];
-    await render(<LeadsFunnelView leads={leadsWithLost} stages={STAGES_WITH_LOST} />);
+    await render(<LeadsFunnelView aggregates={aggregatesFromLeads(leadsWithLost)} stages={STAGES_WITH_LOST} />);
 
     // Acumulado (default): Perdido is set apart, never in the taper.
     const aside = container.querySelector('[data-funnel-lost]')!;
@@ -295,7 +308,7 @@ describe('LeadsFunnelView', () => {
       lead('l5', CONV_ID, 80_000, { saleId: 'sale-1', saleStatus: 'won' }),
       lead('l4', LOST_ID, 500_000, { lostReason: 'Sem orçamento' }),
     ];
-    await render(<LeadsFunnelView leads={leadsWithLost} stages={STAGES_WITH_LOST} />);
+    await render(<LeadsFunnelView aggregates={aggregatesFromLeads(leadsWithLost)} stages={STAGES_WITH_LOST} />);
     expect(container.querySelector('[data-funnel-grand-count]')?.textContent).toBe('5 leads');
     expect(container.querySelector('[data-funnel-grand-total]')?.textContent).toContain('11.800');
 
@@ -305,13 +318,13 @@ describe('LeadsFunnelView', () => {
   });
 
   it('shows the funnel grand totals in the footer', async () => {
-    await render(<LeadsFunnelView leads={LEADS} stages={STAGES} />);
+    await render(<LeadsFunnelView aggregates={aggregatesFromLeads(LEADS)} stages={STAGES} />);
     expect(container.querySelector('[data-funnel-grand-count]')?.textContent).toBe('3 leads');
     expect(container.querySelector('[data-funnel-grand-total]')?.textContent).toContain('6.000');
   });
 
   it('shows an empty-state when there are no stages', async () => {
-    await render(<LeadsFunnelView leads={[]} stages={[]} />);
+    await render(<LeadsFunnelView aggregates={new Map()} stages={[]} />);
     expect(container.querySelector('[data-funnel-row]')).toBeNull();
     expect(container.textContent).toContain('Nenhuma etapa no funil.');
   });
