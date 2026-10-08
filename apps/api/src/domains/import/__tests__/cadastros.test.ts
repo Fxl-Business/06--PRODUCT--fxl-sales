@@ -257,14 +257,68 @@ describe('planCadastros', () => {
       const r = plan({ clientes: [{ nome: 'Loja' }] });
       expect(r.operations[0]).toMatchObject({ op: 'createClient', input: { name: 'Loja', contact: null, document: null } });
     });
-    it('warns on a same-name or same-document cliente (digits only)', () => {
-      const r = plan({ clientes: [{ nome: 'padaria pão quente', documento: '12345678000190' }, { nome: 'Outra', documento: '98.765.432/0001-10' }, { nome: 'Outra 2', documento: '98765432000110' }] }, richCatalog());
-      expect(r.issues.map((i) => [i.row, i.column, i.severity])).toEqual([
-        [2, 'Nome', 'warning'],
-        [2, 'CNPJ/CPF', 'warning'],
-        [4, 'CNPJ/CPF', 'warning'],
+    // Deliberate rewrite (D12): the old first row (same document as the cadastro) is now recognized,
+    // so the row here carries another document and stays an unrecognized same-name cliente.
+    it('warns on an unrecognized same-name cliente and on a document repeated inside the sheet (digits only)', () => {
+      const r = plan({ clientes: [{ nome: 'padaria pão quente', documento: '99.999.999/0001-99' }, { nome: 'Outra', documento: '98.765.432/0001-10' }, { nome: 'Outra 2', documento: '98765432000110' }] }, richCatalog());
+      expect(r.issues.map((i) => [i.row, i.column, i.severity, i.code])).toEqual([
+        [2, 'Nome', 'warning', 'possible_duplicate'],
+        [4, 'CNPJ/CPF', 'warning', 'possible_duplicate'],
       ]);
+      expect(r.issues[0]?.message).toBe(
+        'Já existe um cliente chamado "padaria pão quente" no cadastro; se for o mesmo, remova esta linha (um nome repetido não pode ser usado nas outras abas).',
+      );
       expect(r.counts).toEqual({ clientes: 3 });
+      expect(r.recognized).toEqual({});
+    });
+    it('recognizes an existing cliente by document or name: no operation, no issue, counted apart', () => {
+      const catalog = richCatalog();
+      catalog.clients.push({ id: IDS.clientPadaria.replace('e1', 'e2'), name: 'Mercado Sol', document: null });
+      const r = plan(
+        {
+          clientes: [
+            { nome: 'Padaria PQ', documento: '12.345.678/0001-90' },
+            { nome: 'mercado sol', documento: '11.111.111/0001-11' },
+            { nome: 'Loja Nova' },
+          ],
+        },
+        catalog,
+      );
+      expect(r.operations).toHaveLength(1);
+      expect(r.operations[0]).toMatchObject({ op: 'createClient', planKey: 'clientes:4', input: { name: 'Loja Nova' } });
+      expect(r.issues).toEqual([]);
+      expect(r.counts).toEqual({ clientes: 1 });
+      expect(r.recognized).toEqual({ clientes: 2 });
+    });
+    it('two rows recognized as the same cliente raise no in-sheet duplicate warning', () => {
+      const r = plan(
+        { clientes: [{ nome: 'Padaria Pão Quente' }, { nome: 'padaria pão quente', documento: '12345678000190' }] },
+        richCatalog(),
+      );
+      expect(r.operations).toEqual([]);
+      expect(r.issues).toEqual([]);
+      expect(r.counts).toEqual({});
+      expect(r.recognized).toEqual({ clientes: 2 });
+    });
+    it('still warns and creates when several clientes carry the row document and none has its name', () => {
+      const catalog = richCatalog();
+      catalog.clients.push({ id: IDS.clientPadaria.replace('e1', 'e3'), name: 'Padaria Filial', document: '12.345.678/0001-90' });
+      const r = plan({ clientes: [{ nome: 'Padaria Centro', documento: '12345678000190' }] }, catalog);
+      expect(r.issues).toEqual([
+        {
+          severity: 'warning',
+          sheet: 'clientes',
+          row: 2,
+          column: 'CNPJ/CPF',
+          code: 'possible_duplicate',
+          message: 'O documento "12345678000190" já é do cliente "Padaria Pão Quente" no cadastro.',
+        },
+      ]);
+      expect(r.counts).toEqual({ clientes: 1 });
+      expect(r.recognized).toEqual({});
+    });
+    it('reports no recognized key when nothing is recognized', () => {
+      expect(plan({ clientes: [{ nome: 'Loja' }] }).recognized).toEqual({});
     });
   });
 

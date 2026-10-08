@@ -127,7 +127,7 @@ importRouter.post('/commit', requireAdmin, uploadBodyLimit, async (c) => {
       if (!isPlanOk(plan)) throw new ImportPlanRejected(plan);
       return executeImportPlan(tx, orgId, plan, actor, now);
     });
-    const body: ImportCommitBody = { counts: result.counts };
+    const body: ImportCommitBody = { counts: result.counts, recognized: result.recognized };
     return c.json(body, 201);
   } catch (error) {
     if (error instanceof ImportPlanRejected) return c.json(toPreviewBody(error.plan), 422);

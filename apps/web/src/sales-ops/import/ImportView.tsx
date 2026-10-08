@@ -14,7 +14,7 @@ import { MUTATION_ERROR_COPY } from '../mutation-error-copy';
 import { IMPORT_COPY, importErrorMessage } from './import-copy';
 import { ImportCountsTable } from './ImportCountsTable';
 import { ImportIssueList } from './ImportIssueList';
-import { groupImportIssues, totalCount } from './issues';
+import { groupImportIssues, recognizedClientCount, totalCount } from './issues';
 import {
   isImportPreviewBody,
   MAX_IMPORT_UPLOAD_BYTES,
@@ -154,6 +154,8 @@ export function ImportView({ onCommit, onDownload, onPreview }: ImportViewProps)
   const hasError = error !== null || localError !== null;
   const canImport =
     preview !== null && preview.ok && totalCount(preview.counts) > 0 && file !== null;
+  const previewRecognized = preview !== null ? recognizedClientCount(preview) : 0;
+  const resultRecognized = result !== null ? recognizedClientCount(result) : 0;
 
   return (
     <div className="flex flex-col gap-[14px]" data-import-view>
@@ -184,6 +186,11 @@ export function ImportView({ onCommit, onDownload, onPreview }: ImportViewProps)
           </div>
           <div className="flex flex-col gap-4 px-[22px] py-4">
             <ImportCountsTable counts={result.counts} heading={IMPORT_COPY.countsCreated} />
+            {resultRecognized > 0 ? (
+              <p className="text-[13.5px] text-[#57575f]" data-import-recognized>
+                {IMPORT_COPY.recognizedClientsDone(resultRecognized)}
+              </p>
+            ) : null}
             <div>
               <button className={secondaryButtonClass} onClick={reset} type="button">
                 {IMPORT_COPY.another}
@@ -257,7 +264,16 @@ export function ImportView({ onCommit, onDownload, onPreview }: ImportViewProps)
 
           {preview !== null ? (
             <StepPanel step="3" title={IMPORT_COPY.step3Title}>
-              <ImportCountsTable counts={preview.counts} heading={IMPORT_COPY.countsToCreate} />
+              <ImportCountsTable
+                counts={preview.counts}
+                emptyText={previewRecognized > 0 ? IMPORT_COPY.nothingNew : undefined}
+                heading={IMPORT_COPY.countsToCreate}
+              />
+              {previewRecognized > 0 ? (
+                <p className="text-[13.5px] text-[#57575f]" data-import-recognized>
+                  {IMPORT_COPY.recognizedClients(previewRecognized)}
+                </p>
+              ) : null}
               <ImportIssueList issues={preview.issues} truncated={preview.truncated} />
               <p className="text-[13.5px] font-semibold text-[#57575f]">
                 {!preview.ok

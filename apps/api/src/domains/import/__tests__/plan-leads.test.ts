@@ -79,6 +79,26 @@ describe('planLeads', () => {
     expect(leadOp(r.operations).clientRef).toBeNull();
   });
 
+  it('links a lead to a recognized cliente with no ambiguous_client on a re-import', () => {
+    const r = plan({
+      clientes: [{ nome: 'Padaria Pão Quente', documento: '12.345.678/0001-90' }],
+      leads: [lead({ empresa: 'Padaria Pão Quente' })],
+    });
+    expect(r.issues).toEqual([]);
+    expect(leadOp(r.operations).clientRef).toEqual({ existingId: IDS.clientPadaria });
+  });
+
+  it('links a lead naming a recognized row spelled differently from the cadastro', () => {
+    const r = plan({
+      clientes: [{ nome: 'Padaria PQ', documento: '12345678000190' }],
+      leads: [lead({ empresa: 'padaria pq' })],
+    });
+    expect(r.issues).toEqual([]);
+    expect(leadOp(r.operations).clientRef).toEqual({ existingId: IDS.clientPadaria });
+    // The sheet text stays the input; createLead snapshots the stored name from clientId.
+    expect(leadOp(r.operations).input.clientName).toBe('padaria pq');
+  });
+
   it('accepts an existing vendedor and a workbook pessoa carrying Vendedor (real RefIndex)', () => {
     const r = plan({
       pessoas: [{ nome: 'Duda Nova', funcoes: ['Vendedor', 'Desenvolvedor'] }],

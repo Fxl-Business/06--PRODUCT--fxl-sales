@@ -316,6 +316,61 @@ describe('import view', () => {
     );
   });
 
+  it('tells in one line how many clientes were recognized and leaves them out of the counts', async () => {
+    await validatedWith({
+      ok: true,
+      counts: { leads: 114 },
+      recognized: { clientes: 114 },
+      issues: [],
+      truncated: false,
+    });
+    const lines = container.querySelectorAll('[data-import-recognized]');
+    expect(lines).toHaveLength(1);
+    expect(lines[0]?.textContent).toBe(IMPORT_COPY.recognizedClients(114));
+    expect(
+      [...container.querySelectorAll('[data-import-count]')].map((e) =>
+        e.getAttribute('data-import-count'),
+      ),
+    ).toEqual(['leads']);
+    const counts = container.querySelector('[data-import-counts]') as Element;
+    expect(
+      counts.compareDocumentPosition(lines[0] as Element) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(importButton().disabled).toBe(false);
+  });
+
+  it('says there is nothing new to create when every row was recognized', async () => {
+    await validatedWith({ ...okPreview({}), recognized: { clientes: 2 } });
+    expect(text()).toContain(IMPORT_COPY.nothingNew);
+    expect(text()).not.toContain(IMPORT_COPY.nothingToImport);
+    expect(container.querySelector('[data-import-recognized]')?.textContent).toBe(
+      IMPORT_COPY.recognizedClients(2),
+    );
+    expect(importButton().disabled).toBe(true);
+  });
+
+  it('renders no recognized line when nothing was recognized or the server predates the field', async () => {
+    await validatedWith(okPreview());
+    expect(container.querySelector('[data-import-recognized]')).toBeNull();
+    api.preview.mockResolvedValue({ ...okPreview(), recognized: { clientes: 0 } });
+    await click(button(IMPORT_COPY.validate));
+    expect(api.preview).toHaveBeenCalledTimes(2);
+    expect(container.querySelector('[data-import-step="3"]')).not.toBeNull();
+    expect(container.querySelector('[data-import-recognized]')).toBeNull();
+  });
+
+  it('repeats the recognized count in the past tense after the import', async () => {
+    api.commit.mockResolvedValue({ counts: { leads: 3 }, recognized: { clientes: 3 } });
+    await validatedWith({ ...okPreview({ leads: 3 }), recognized: { clientes: 3 } });
+    await click(importButton());
+    await click(container.querySelector('[data-confirm-action]') as Element);
+    const success = container.querySelector('[data-import-success]') as Element;
+    expect(success).not.toBeNull();
+    const lines = success.querySelectorAll('[data-import-recognized]');
+    expect(lines).toHaveLength(1);
+    expect(lines[0]?.textContent).toBe(IMPORT_COPY.recognizedClientsDone(3));
+  });
+
   it('Importar outra planilha resets the screen', async () => {
     api.commit.mockResolvedValue({ counts: { areas: 2 } });
     await validatedWith(okPreview());

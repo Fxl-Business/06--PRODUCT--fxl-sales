@@ -48,10 +48,16 @@ export type ImportCounts = Partial<Record<SheetKey, number | undefined>>;
 export type ImportPreviewBody = {
   ok: boolean;
   counts: ImportCounts;
+  /**
+   * Rows the server recognized as existing records and will not create (today only
+   * `clientes`). Optional on purpose: an API deployed before it answers without the
+   * key, which reads as zero.
+   */
+  recognized?: ImportCounts;
   issues: ImportIssue[];
   truncated: boolean;
 };
-export type ImportCommitBody = { counts: ImportCounts };
+export type ImportCommitBody = { counts: ImportCounts; recognized?: ImportCounts };
 
 /** D9 mirror: the server refuses above this with 413; the screen refuses before uploading. */
 export const MAX_IMPORT_UPLOAD_BYTES = 5 * 1024 * 1024;

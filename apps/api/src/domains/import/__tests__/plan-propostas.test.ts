@@ -574,6 +574,12 @@ describe('validation', () => {
     expect(planPropostas(parsed, catalog, refs)).toEqual(planPropostas(parsed, catalog, refs));
   });
 
+  it('resolves the cliente to a recognized Clientes row instead of reporting it ambiguous', () => {
+    const d = sale({ clientes: [{ nome: 'padaria pão quente' }], ...one({}) });
+    expect(d.clientRef).toEqual({ existingId: IDS.padaria });
+    expect(d.clientName).toBe('Padaria Pão Quente');
+  });
+
   it('round-trips the example workbook with zero errors', async () => {
     const parsed: ParsedWorkbook = await parseWorkbook(await buildXlsx(exampleTabs()));
     const catalog = seededCatalog();

@@ -31,6 +31,7 @@ export function planImport(parsed: ParsedWorkbook, catalog: ImportCatalog): Impo
       ...desfechos.issues,
     ]),
     counts: mergeCounts(cadastros.counts, leads.counts, propostas.counts, desfechos.counts),
+    recognized: mergeCounts(...[cadastros, leads, propostas, desfechos].map((part) => part.recognized ?? {})),
   };
 }
 
@@ -72,6 +73,7 @@ export function toPreviewBody(plan: ImportPlan): ImportPreviewBody {
   return {
     ok: isPlanOk(plan),
     counts: plan.counts,
+    recognized: plan.recognized,
     issues: plan.issues.slice(0, MAX_RETURNED_ISSUES),
     truncated: plan.issues.length > MAX_RETURNED_ISSUES,
   };

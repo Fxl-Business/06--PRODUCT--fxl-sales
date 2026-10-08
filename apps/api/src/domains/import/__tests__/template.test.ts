@@ -366,6 +366,19 @@ describe('template workbook', () => {
     });
   });
 
+  it('Leia-me says a cliente already in the cadastro is recognized, never duplicated nor changed', () => {
+    const text = buildLeiameLines(catalogFixture(), { example: false })
+      .map((l) => l.text)
+      .join('\n');
+    expect(text).toContain(
+      'Um cliente que já está no cadastro, com o mesmo CNPJ/CPF ou, sem conflito de CNPJ/CPF, com o mesmo nome, é reconhecido: a linha não cria outro cliente nem altera o existente, e as outras abas usam o cliente existente.',
+    );
+    expect(text).toContain(
+      'Pessoas parecidas com um cadastro existente, e clientes com o mesmo nome mas outro CNPJ/CPF, aparecem como aviso na conferência e não impedem a importação.',
+    );
+    expect(text).not.toContain('Clientes e pessoas parecidos com um cadastro existente');
+  });
+
   it('derives no metadata from the clock', () => {
     for (let i = 0; i < 2; i++) {
       const wb = createTemplateWorkbook(catalogFixture(), { example: false });

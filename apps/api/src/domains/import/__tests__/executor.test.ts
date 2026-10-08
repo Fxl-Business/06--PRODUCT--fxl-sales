@@ -87,7 +87,7 @@ const settle: ImportOperation = {
   settlePayables: false,
 };
 
-const plan = (operations: ImportOperation[]): ImportPlan => ({ operations, issues: [], counts: {} });
+const plan = (operations: ImportOperation[]): ImportPlan => ({ operations, issues: [], counts: {}, recognized: {} });
 
 describe('importExecutionMessage', () => {
   it('formats the tab and Excel row of a cadastro operation', () => {
@@ -245,6 +245,7 @@ describe('executeImportPlan before the database', () => {
     const bad: ImportPlan = {
       operations: [area],
       counts: {},
+      recognized: {},
       issues: [
         { severity: 'error', sheet: 'areas', row: 2, column: null, code: 'x', message: 'x' },
       ],

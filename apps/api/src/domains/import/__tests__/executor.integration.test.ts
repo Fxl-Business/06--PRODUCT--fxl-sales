@@ -292,11 +292,14 @@ const FULL_COUNTS = {
   propostas: 3,
   pagamentos: 1,
 };
+// Opaque metadata the executor reports and never acts on (D12).
+const FULL_RECOGNIZED = { clientes: 1 };
 
 const fullPlan = (s: Seeded): ImportPlan => ({
   operations: fullOperations(s),
   issues: [],
   counts: { ...FULL_COUNTS },
+  recognized: { ...FULL_RECOGNIZED },
 });
 
 afterEach(async () => {
@@ -338,6 +341,7 @@ describe('executeImportPlan', () => {
     const s = await seededOrg('full');
     const result = await run(s.orgId, fullPlan(s));
     expect(result.counts).toEqual(FULL_COUNTS);
+    expect(result.recognized).toEqual(FULL_RECOGNIZED);
 
     const admin = getAdminDb();
     const areas = await admin.select().from(salesOpsAreas).where(eq(salesOpsAreas.orgId, s.orgId));
@@ -440,7 +444,7 @@ describe('executeImportPlan', () => {
     expect(entry.action).toBe('import.completed');
     expect(entry.entityType).toBe('importacao');
     expect(entry.entityId).toMatch(/^[0-9a-f-]{36}$/);
-    expect(entry.afterJsonb).toEqual({ counts: plan.counts, actorLabel: 'Equipe FXL' });
+    expect(entry.afterJsonb).toEqual({ counts: plan.counts, recognized: plan.recognized, actorLabel: 'Equipe FXL' });
     expect(entry.beforeJsonb).toEqual({});
     expect(entry.entryHash).toHaveLength(64);
     // Last: nothing else wrote to the global chain after it for this org's run.
@@ -487,6 +491,7 @@ describe('executeImportPlan', () => {
       ],
       issues: [],
       counts: {},
+      recognized: {},
     };
     // The first product needs its função: create it first.
     plan.operations.splice(1, 0, must(ops[1]));
@@ -527,7 +532,7 @@ describe('executeImportPlan', () => {
       calls += 1;
       return calls >= 4;
     });
-    const error = await run(s.orgId, { operations: pick, issues: [], counts: {} }).catch((e: unknown) => e);
+    const error = await run(s.orgId, { operations: pick, issues: [], counts: {}, recognized: {} }).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ImportExecutionError);
     expect((error as ImportExecutionError).reason).toBe('producer_flow_live');
     expect(((error as ImportExecutionError).operation as { op: string }).op).toBe('settleReceivable');
@@ -541,7 +546,7 @@ describe('executeImportPlan', () => {
     // NOW is 2026-06-01 12:00 in Sao Paulo, so the next civil day is the future.
     const sale = must(fullOperations(s)[9]);
     if (sale.op !== 'createSale') throw new Error('expected the won createSale');
-    const plan: ImportPlan = { operations: [{ ...sale, wonOn: '2026-06-02' }], issues: [], counts: {} };
+    const plan: ImportPlan = { operations: [{ ...sale, wonOn: '2026-06-02' }], issues: [], counts: {}, recognized: {} };
     const error = await run(s.orgId, plan).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ImportExecutionError);
     expect((error as ImportExecutionError).reason).toBe('won_on_in_future');
@@ -553,7 +558,7 @@ describe('executeImportPlan', () => {
     registerProducerFlowGate((id) => id === s.orgId);
     const ops = fullOperations(s);
     const pick = [0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 12].map((i) => must(ops[i]));
-    const plan: ImportPlan = { operations: pick, issues: [], counts: { areas: 1, propostas: 1 } };
+    const plan: ImportPlan = { operations: pick, issues: [], counts: { areas: 1, propostas: 1 }, recognized: {} };
     await run(s.orgId, plan);
     const after = await snapshot(s.orgId);
     expect(after.integration_outbox).toBe(0);

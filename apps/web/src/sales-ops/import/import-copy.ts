@@ -20,6 +20,15 @@ export const IMPORT_COPY = {
   countsToCreate: 'Registros a criar',
   countsCreated: 'Registros criados',
   nothingToImport: 'A planilha não tem linhas para importar.',
+  nothingNew: 'Nenhum registro novo para criar.',
+  recognizedClients: (n: number) =>
+    n === 1
+      ? '1 cliente da aba Clientes já está no cadastro (mesmo CNPJ/CPF ou mesmo nome) e não será criado de novo nem alterado; as outras abas usam o cliente existente.'
+      : `${n} clientes da aba Clientes já estão no cadastro (mesmo CNPJ/CPF ou mesmo nome) e não serão criados de novo nem alterados; as outras abas usam os clientes existentes.`,
+  recognizedClientsDone: (n: number) =>
+    n === 1
+      ? '1 cliente da aba Clientes já estava no cadastro e foi reaproveitado, sem alteração.'
+      : `${n} clientes da aba Clientes já estavam no cadastro e foram reaproveitados, sem alteração.`,
   errorsTitle: (n: number) => (n === 1 ? '1 erro' : `${n} erros`),
   warningsTitle: (n: number) => (n === 1 ? '1 aviso' : `${n} avisos`),
   errorsBlock:

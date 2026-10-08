@@ -121,7 +121,8 @@ export function buildLeiameLines(catalog: ImportCatalog, opts: TemplateOptions):
   H('Só cria, nunca altera');
   B('A importação só cria registros novos e nunca altera nem apaga o que já existe.');
   B('Uma área, função, produto ou etapa com o mesmo nome de um cadastro existente é recusada; apague a linha, porque as outras abas já encontram o cadastro existente pelo nome.');
-  B('Clientes e pessoas parecidos com um cadastro existente aparecem como aviso na conferência e não impedem a importação.');
+  B('Um cliente que já está no cadastro, com o mesmo CNPJ/CPF ou, sem conflito de CNPJ/CPF, com o mesmo nome, é reconhecido: a linha não cria outro cliente nem altera o existente, e as outras abas usam o cliente existente.');
+  B('Pessoas parecidas com um cadastro existente, e clientes com o mesmo nome mas outro CNPJ/CPF, aparecem como aviso na conferência e não impedem a importação.');
   H('Datas, valores e percentuais');
   B('Digite as datas no formato dd/mm/aaaa, por exemplo 15/01/2026.');
   B('Nenhuma data de ganho ou de pagamento pode estar no futuro.');

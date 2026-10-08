@@ -15,10 +15,18 @@ const tableHeadClass =
   'px-4 py-3 text-[11px] font-bold uppercase tracking-[0.06em] text-[#9b9ba3]';
 const tableCellClass = 'px-4 py-3 text-[13.5px] text-[#57575f]';
 
-export function ImportCountsTable({ counts, heading }: { counts: ImportCounts; heading: string }) {
+export function ImportCountsTable({
+  counts,
+  heading,
+  emptyText = IMPORT_COPY.nothingToImport,
+}: {
+  counts: ImportCounts;
+  heading: string;
+  emptyText?: string;
+}) {
   const rows = nonZeroCounts(counts);
   if (rows.length === 0) {
-    return <p className="text-[13.5px] text-[#8b8b92]">{IMPORT_COPY.nothingToImport}</p>;
+    return <p className="text-[13.5px] text-[#8b8b92]">{emptyText}</p>;
   }
   return (
     <div className="overflow-x-auto" data-import-counts>

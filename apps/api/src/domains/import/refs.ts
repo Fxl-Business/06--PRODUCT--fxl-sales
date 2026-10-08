@@ -1,15 +1,17 @@
 /**
- * The ONE name resolver. Pure: no I/O, no clock, no env.
+ * The ONE name resolver, and the one owner of the Clientes recognition (D12). Pure: no I/O, no clock, no env.
  * Name matching uses only normalizeLabel (Amendment 6).
  */
 import { SYSTEM_FUNCAO_SLUGS, slugifyFuncao } from '../sales-ops/service.js';
 import { normalizeLabel } from './cells.js';
+import { recognizeClientRows } from './client-recognition.js';
 import { cellReader } from './parse.js';
 import { planKeyOf } from './plan/plan-helpers.js';
 import type {
   EntityRef,
   ImportCatalog,
   ParsedWorkbook,
+  RecognizedClient,
   RefIndex,
   RefKind,
   RefLookup,
@@ -29,6 +31,8 @@ export interface ImportRefIndex extends RefIndex {
   personHasFuncao(person: EntityRef, funcao: EntityRef): boolean;
   /** True only for an EXISTING função flagged isSystem (workbook funções are never system). */
   funcaoIsSystem(funcao: EntityRef): boolean;
+  /** The existing cliente a Clientes row (Excel row number) IS, or null; the one answer of recognizeClientRows (D12). */
+  recognizedClient(row: number): RecognizedClient | null;
 }
 
 export function sameRef(a: EntityRef, b: EntityRef): boolean {
@@ -205,7 +209,7 @@ export function assignProductCodes(
 // ---------------------------------------------------------------------------
 
 type ExistingRow = { id: string; name: string; active: boolean };
-type Registered = { planKey: string; label: string };
+type Registered = { ref: EntityRef; label: string };
 
 function existingRows(kind: RefKind, catalog: ImportCatalog): ExistingRow[] {
   switch (kind) {
@@ -227,6 +231,7 @@ function existingRows(kind: RefKind, catalog: ImportCatalog): ExistingRow[] {
 const KINDS: readonly RefKind[] = ['area', 'funcao', 'product', 'person', 'client', 'stage'];
 
 export function buildRefIndex(parsed: ParsedWorkbook, catalog: ImportCatalog): ImportRefIndex {
+  const clientRecognition = recognizeClientRows(parsed, catalog);
   const existing = new Map<RefKind, ExistingRow[]>();
   for (const kind of KINDS) existing.set(kind, existingRows(kind, catalog));
 
@@ -248,7 +253,11 @@ export function buildRefIndex(parsed: ParsedWorkbook, catalog: ImportCatalog): I
       const key = normalizeLabel(nome);
       if (key === '') continue;
       if (uniqueByName && (existingKeys.has(key) || byKey.has(key))) continue;
-      const entry = { planKey: planKeyOf(sheet, row.row), label: nome };
+      // A recognized Clientes row stands for its existing cliente, never for a row to create (D12).
+      const recognized = kind === 'client' ? clientRecognition.get(row.row) : undefined;
+      const entry: Registered = recognized
+        ? { ref: { existingId: recognized.existingId }, label: recognized.name }
+        : { ref: { planKey: planKeyOf(sheet, row.row) }, label: nome };
       const list = byKey.get(key);
       if (list) list.push(entry);
       else byKey.set(key, [entry]);
@@ -264,7 +273,9 @@ export function buildRefIndex(parsed: ParsedWorkbook, catalog: ImportCatalog): I
   }
   const productLabelByPlanKey = new Map<string, string>();
   for (const list of registered.get('product')?.values() ?? []) {
-    for (const entry of list) productLabelByPlanKey.set(entry.planKey, entry.label);
+    for (const entry of list) {
+      if ('planKey' in entry.ref) productLabelByPlanKey.set(entry.ref.planKey, entry.label);
+    }
   }
   for (const row of parsed.sheets.produtos.rows) {
     const nome = row.cells['nome'];
@@ -279,10 +290,18 @@ export function buildRefIndex(parsed: ParsedWorkbook, catalog: ImportCatalog): I
     workbookEntries: Registered[],
     codeNumber: number | null,
   ): RefLookup => {
-    const pool: Array<{ ref: EntityRef; label: string }> = [
+    const candidates: Array<{ ref: EntityRef; label: string }> = [
       ...activeExisting.map((r) => ({ ref: { existingId: r.id } as EntityRef, label: r.name })),
-      ...workbookEntries.map((r) => ({ ref: { planKey: r.planKey } as EntityRef, label: r.label })),
+      ...workbookEntries,
     ];
+    // One candidate per record: a recognized Clientes row and its own existing cliente are the same ref.
+    const seen = new Set<string>();
+    const pool = candidates.filter((candidate) => {
+      const key = refKey(candidate.ref);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
     const only = pool.length === 1 ? pool[0] : undefined;
     if (only) return { ok: true, ref: only.ref, label: only.label };
     const code: RefLookupFailureCode =
@@ -305,7 +324,7 @@ export function buildRefIndex(parsed: ParsedWorkbook, catalog: ImportCatalog): I
         const workbookEntries: Registered[] =
           workbookKey === undefined
             ? []
-            : [{ planKey: workbookKey, label: productLabelByPlanKey.get(workbookKey) ?? typed }];
+            : [{ ref: { planKey: workbookKey }, label: productLabelByPlanKey.get(workbookKey) ?? typed }];
         return toLookup(
           kind,
           typed,
@@ -371,6 +390,7 @@ export function buildRefIndex(parsed: ParsedWorkbook, catalog: ImportCatalog): I
     personHasFuncao,
     funcaoIsSystem: (funcao) =>
       'existingId' in funcao && catalogFuncaoById.get(funcao.existingId)?.isSystem === true,
+    recognizedClient: (row) => clientRecognition.get(row) ?? null,
     resolvePersonWithFuncao: (name, slug) => {
       const r = resolve('person', name);
       if (!r.ok) return r;

@@ -51,7 +51,7 @@ import type { EntityRef, ImportCounts, ImportOperation, ImportPlan, SheetKey } f
 import { SHEET_KEYS, getSheetDef } from './workbook-schema.js';
 
 export type ImportActor = CadastroActor;
-export type ImportExecutionResult = { counts: ImportCounts };
+export type ImportExecutionResult = { counts: ImportCounts; recognized: ImportCounts };
 
 /** Position far past any column length: moveLead clamps it, so the lead is appended. */
 export const LEAD_MOVE_TO_END = 100_000;
@@ -444,6 +444,8 @@ export async function executeImportPlan(
   }
 
   const counts: ImportCounts = { ...plan.counts };
+  // Reported, never acted on: a recognized cliente is not an operation (D12).
+  const recognized: ImportCounts = { ...plan.recognized };
   // LAST statement: the audit tail lock is held until commit.
   await writeAuditEntry(tx, {
     actorUserId: actor.userId,
@@ -452,7 +454,7 @@ export async function executeImportPlan(
     entityType: 'importacao',
     entityId: randomUUID(),
     beforeJsonb: {},
-    afterJsonb: { counts, actorLabel: actor.displayName },
+    afterJsonb: { counts, recognized, actorLabel: actor.displayName },
   });
-  return { counts };
+  return { counts, recognized };
 }
