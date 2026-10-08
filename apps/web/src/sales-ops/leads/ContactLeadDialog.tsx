@@ -210,7 +210,7 @@ export function ContactLeadDialog({
                 valueLabel={draft.clientName || undefined}
               />
               <button
-                className={secondaryButtonClass}
+                className={`${secondaryButtonClass} self-stretch`}
                 onClick={() => selectClient('')}
                 type="button"
               >

@@ -247,6 +247,19 @@ describe('LeadDialog', () => {
     expect(group.classList.contains('pt-2.5')).toBe(true);
   });
 
+  it('stretches the inline action buttons to the field height', async () => {
+    await renderDialog();
+
+    // Each sits in a `flex items-center` row beside a 44px field; `self-stretch`
+    // makes it take the row's height instead of its own padding height.
+    for (const label of ['Limpar', 'Adicionar', '+ Adicionar item livre']) {
+      expect(buttonWithText(label).classList.contains('self-stretch'), label).toBe(true);
+    }
+
+    // The footer buttons sit in no field row and keep their own height.
+    expect(buttonWithText('Cancelar').classList.contains('self-stretch')).toBe(false);
+  });
+
   it('renders exactly the sellers it is given and derives none itself', async () => {
     await renderDialog();
 
