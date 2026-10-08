@@ -119,6 +119,11 @@ export type ImportCatalog = {
 
 export type EntityRef = { existingId: string } | { planKey: string };
 
+/** A Clientes row that IS this existing cliente (D12). `name` is the STORED name, the label every lookup answers. */
+export type RecognizedClient = { existingId: string; name: string };
+/** Excel row number of the Clientes tab -> the existing cliente that row is. */
+export type ClientRecognition = ReadonlyMap<number, RecognizedClient>;
+
 export type SaleDraft = Omit<
   CreateSaleInput,
   'clientId' | 'sellerPersonId' | 'finderPersonId' | 'items' | 'professionals'
@@ -171,9 +176,21 @@ export type ImportOperationKind = ImportOperation['op'];
 
 export type ImportCounts = Partial<Record<SheetKey, number>>;
 
-export type ImportPlan = { operations: ImportOperation[]; issues: ImportIssue[]; counts: ImportCounts };
+export type ImportPlan = {
+  operations: ImportOperation[];
+  issues: ImportIssue[];
+  counts: ImportCounts;
+  /** Rows recognized as EXISTING records and therefore not created (D12: only Clientes today). */
+  recognized: ImportCounts;
+};
 
-export type SheetPlanResult = { operations: ImportOperation[]; issues: ImportIssue[]; counts: ImportCounts };
+export type SheetPlanResult = {
+  operations: ImportOperation[];
+  issues: ImportIssue[];
+  counts: ImportCounts;
+  /** Only planCadastros sets it; a key is present only above zero. */
+  recognized?: ImportCounts;
+};
 
 export type RefKind = 'area' | 'funcao' | 'product' | 'person' | 'client' | 'stage';
 export type RefLookupFailureCode = 'unknown_ref' | 'archived_ref' | 'ambiguous_ref';
@@ -185,5 +202,11 @@ export interface RefIndex {
 }
 
 /** Wire bodies of POST /preview and POST /commit (slice 07 answers them, slice 09 mirrors them). */
-export type ImportPreviewBody = { ok: boolean; counts: ImportCounts; issues: ImportIssue[]; truncated: boolean };
-export type ImportCommitBody = { counts: ImportCounts };
+export type ImportPreviewBody = {
+  ok: boolean;
+  counts: ImportCounts;
+  recognized: ImportCounts;
+  issues: ImportIssue[];
+  truncated: boolean;
+};
+export type ImportCommitBody = { counts: ImportCounts; recognized: ImportCounts };

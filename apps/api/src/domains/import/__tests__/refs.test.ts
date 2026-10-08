@@ -63,6 +63,41 @@ describe('buildRefIndex', () => {
     expect(refs.resolve('client', 'Loja')).toMatchObject({ ok: false, code: 'ambiguous_ref' });
   });
 
+  it('resolves a recognized Clientes row to the existing cliente under the sheet name and the stored name', () => {
+    const refs = buildRefIndex(workbook({ clientes: [{ nome: 'Padaria PQ', documento: '12345678000190' }] }), richCatalog());
+    const padaria = { ok: true, ref: { existingId: IDS.clientPadaria }, label: 'Padaria Pão Quente' };
+    expect(refs.resolve('client', 'padaria pq')).toEqual(padaria);
+    expect(refs.resolve('client', 'Padaria Pão Quente')).toEqual(padaria);
+  });
+
+  it('never makes a recognized row ambiguous with its own existing cliente', () => {
+    const refs = buildRefIndex(workbook({ clientes: [{ nome: 'padaria pão quente', documento: null }] }), richCatalog());
+    expect(refs.resolve('client', 'Padaria Pão Quente')).toEqual({
+      ok: true,
+      ref: { existingId: IDS.clientPadaria },
+      label: 'Padaria Pão Quente',
+    });
+  });
+
+  it('keeps an unrecognized same-name row ambiguous', () => {
+    const refs = buildRefIndex(
+      workbook({ clientes: [{ nome: 'Padaria Pão Quente', documento: '99.999.999/0001-99' }] }),
+      richCatalog(),
+    );
+    expect(refs.resolve('client', 'Padaria Pão Quente')).toMatchObject({ ok: false, code: 'ambiguous_ref' });
+  });
+
+  it('exposes the one recognition through recognizedClient', () => {
+    const refs = buildRefIndex(
+      workbook({ clientes: [{ nome: 'Padaria PQ', documento: '12345678000190' }, { nome: 'Mercado Novo' }] }),
+      richCatalog(),
+    );
+    expect(refs.recognizedClient(2)).toEqual({ existingId: IDS.clientPadaria, name: 'Padaria Pão Quente' });
+    expect(refs.recognizedClient(3)).toBeNull();
+    expect(refs.recognizedClient(99)).toBeNull();
+    expect(refs.resolve('client', 'Mercado Novo')).toMatchObject({ ok: true, ref: { planKey: 'clientes:3' } });
+  });
+
   it('lets a workbook produto win over an archived produto with the same name', () => {
     const refs = buildRefIndex(workbook({ produtos: [{ nome: 'Produto antigo', area: 'Tecnologia' }] }), richCatalog());
     expect(refs.resolve('product', 'Produto antigo')).toMatchObject({ ok: true, ref: { planKey: 'produtos:2' } });

@@ -40,7 +40,7 @@ import {
 } from '../../../db/schema.js';
 import { registerProducerFlowGate } from '../../integration/producer-gate.js';
 import { LEAD_STAGE_SEEDS } from '../../sales-ops/leads/stages-seed.js';
-import { AreaSchema, createArea } from '../../sales-ops/service.js';
+import { AreaSchema, ClientSchema, createArea, createClient } from '../../sales-ops/service.js';
 
 // The router transitively resolves the Hub contract at module scope; this file drives an
 // already-verified context, so the ambient Hub configuration is made unambiguously absent.
@@ -104,7 +104,7 @@ const ACCOUNT_ID = 'hub-account-import-7f3a';
 const seededOrgIds: string[] = [];
 let currentOrgId = '';
 
-function createTestApp() {
+function createTestApp(edition?: 'leads') {
   const app = new Hono();
   app.use('*', async (c, next) => {
     c.set('userId', ACCOUNT_ID);
@@ -112,6 +112,7 @@ function createTestApp() {
     c.set('userRole', 'admin');
     c.set('userRoles', ['admin', 'seller', 'finder']);
     c.set('hubAuth', hubAuthContext({ accountId: ACCOUNT_ID, workspaceId: currentOrgId, name: 'Equipe FXL' }));
+    if (edition) c.set('salesEdition', edition);
     await next();
   });
   app.route('/', salesOpsRouter);
@@ -131,8 +132,8 @@ function formWith(bytes: Uint8Array): FormData {
   return data;
 }
 
-function upload(path: '/import/preview' | '/import/commit', bytes: Uint8Array) {
-  return createTestApp().request(path, { method: 'POST', body: formWith(bytes) });
+function upload(path: '/import/preview' | '/import/commit', bytes: Uint8Array, edition?: 'leads') {
+  return createTestApp(edition).request(path, { method: 'POST', body: formWith(bytes) });
 }
 
 function must<T>(v: T | undefined): T {
@@ -228,6 +229,13 @@ function setCell(tab: FixtureTab, sheet: SheetKey, header: string, value: Fixtur
   if (column < 0) throw new Error(`header ${header} not found in ${sheet}`);
   const row = must(tab.rows[rowIndex]);
   row[column] = value;
+}
+
+/** One tab named from WORKBOOK_SHEETS: the header row, then each row's cells by header text (null when absent). */
+function sheetTab(sheet: SheetKey, rows: Array<Record<string, FixtureCell>>): FixtureTab {
+  const name = must(WORKBOOK_SHEETS.find((s) => s.key === sheet)).tab;
+  const headers = headerRow(sheet);
+  return { name, rows: [headers, ...rows.map((row) => headers.map((h) => row[h] ?? null))] };
 }
 
 function tabOf(tabs: FixtureTab[], sheet: SheetKey): FixtureTab {
@@ -536,6 +544,153 @@ describe('import routes (real router, real database)', () => {
     const sales = await getAdminDb().select().from(salesOpsSales).where(eq(salesOpsSales.orgId, orgId));
     expect(sales.map((s) => s.status).sort()).toEqual(['cancelled', 'lost']);
     expect(await countWhere(integrationOutbox, eq(integrationOutbox.organizationId, orgId))).toBe(0);
+  });
+
+  it('recognizes the clientes of a re-imported Clientes + Leads workbook in the leads edition and links the new leads to them without writing the cadastro', async () => {
+    const orgId = newOrg('recognize');
+    const bytes = await buildXlsx([
+      sheetTab('clientes', [
+        { Nome: 'Construtora Alfa', 'CNPJ/CPF': '11.222.333/0001-81' },
+        { Nome: 'Construtora Beta', 'CNPJ/CPF': '22.333.444/0001-92' },
+        { Nome: 'Loja Sem Documento' },
+      ]),
+      sheetTab('leads', [
+        { Contato: 'Ana Alfa', Empresa: 'Construtora Alfa' },
+        { Contato: 'Bruno Beta', Empresa: 'Construtora Beta' },
+        { Contato: 'Caio Loja', Empresa: 'Loja Sem Documento' },
+      ]),
+    ]);
+    const admin = getAdminDb();
+    const clientsOf = () =>
+      admin.select().from(salesOpsClients).where(eq(salesOpsClients.orgId, orgId)).orderBy(asc(salesOpsClients.id));
+    const leadsOf = () => admin.select().from(salesOpsLeads).where(eq(salesOpsLeads.orgId, orgId));
+
+    const first = await upload('/import/commit', bytes, 'leads');
+    expect(first.status).toBe(201);
+    expect(await first.json()).toEqual({ counts: { clientes: 3, leads: 3 }, recognized: {} });
+
+    const clientsBefore = await clientsOf();
+    expect(clientsBefore).toHaveLength(3);
+    const firstLeads = await leadsOf();
+    expect(firstLeads).toHaveLength(3);
+
+    // The reported scenario: the operator sends the first leads to the lixeira, then re-imports.
+    for (const lead of firstLeads) {
+      const deleted = await createTestApp('leads').request(`/leads/${lead.id}/delete`, { method: 'POST' });
+      expect(deleted.status).toBe(204);
+    }
+
+    const preview = await upload('/import/preview', bytes, 'leads');
+    expect(preview.status).toBe(200);
+    const previewBody = (await preview.json()) as {
+      ok: boolean;
+      counts: ImportCounts;
+      recognized: ImportCounts;
+      issues: ImportIssue[];
+    };
+    expect(previewBody.ok).toBe(true);
+    expect(previewBody.counts).toEqual({ leads: 3 });
+    expect(previewBody.recognized).toEqual({ clientes: 3 });
+    expect(previewBody.issues).toEqual([]);
+
+    const commit = await upload('/import/commit', bytes, 'leads');
+    expect(commit.status).toBe(201);
+    expect(await commit.json()).toEqual({ counts: { leads: 3 }, recognized: { clientes: 3 } });
+
+    // Create-only: no new cliente and no column of an existing one changed (updated_at included).
+    expect(await clientsOf()).toEqual(clientsBefore);
+
+    const idOf = (name: string) => must(clientsBefore.find((c) => c.name === name)).id;
+    const firstIds = new Set(firstLeads.map((l) => l.id));
+    const newLeads = (await leadsOf())
+      .filter((l) => !firstIds.has(l.id))
+      .sort((a, b) => a.contactName.localeCompare(b.contactName));
+    expect(newLeads.map((l) => [l.contactName, l.clientId, l.clientNameSnapshot])).toEqual([
+      ['Ana Alfa', idOf('Construtora Alfa'), 'Construtora Alfa'],
+      ['Bruno Beta', idOf('Construtora Beta'), 'Construtora Beta'],
+      ['Caio Loja', idOf('Loja Sem Documento'), 'Loja Sem Documento'],
+    ]);
+
+    const imports = await admin
+      .select()
+      .from(auditLog)
+      .where(and(eq(auditLog.actorOrgId, orgId), eq(auditLog.action, 'import.completed')))
+      .orderBy(asc(auditLog.id));
+    expect(imports).toHaveLength(2);
+    expect(must(imports[1]).afterJsonb).toEqual({
+      counts: { leads: 3 },
+      recognized: { clientes: 3 },
+      actorLabel: 'Equipe FXL',
+    });
+  });
+
+  it('links leads to an existing cliente recognized by document under another name, with the stored name as snapshot', async () => {
+    const orgId = newOrg('recognize-doc');
+    const existing = await createClient(
+      getDb(),
+      orgId,
+      ClientSchema.parse({ name: 'Construtora Alfa', document: '11.222.333/0001-81' }),
+    );
+    const admin = getAdminDb();
+    const clientsOf = () =>
+      admin.select().from(salesOpsClients).where(eq(salesOpsClients.orgId, orgId)).orderBy(asc(salesOpsClients.id));
+    const clientsBefore = await clientsOf();
+    expect(clientsBefore).toHaveLength(1);
+
+    const bytes = await buildXlsx([
+      sheetTab('clientes', [{ Nome: 'Alfa Construções Ltda', 'CNPJ/CPF': '11222333000181' }]),
+      sheetTab('leads', [{ Contato: 'Dora', Empresa: 'alfa construções ltda' }]),
+    ]);
+
+    const preview = await upload('/import/preview', bytes);
+    expect(preview.status).toBe(200);
+    const previewBody = (await preview.json()) as {
+      ok: boolean;
+      counts: ImportCounts;
+      recognized: ImportCounts;
+      issues: ImportIssue[];
+    };
+    expect(previewBody.ok).toBe(true);
+    expect(previewBody.counts).toEqual({ leads: 1 });
+    expect(previewBody.recognized).toEqual({ clientes: 1 });
+    expect(previewBody.issues).toEqual([]);
+
+    const commit = await upload('/import/commit', bytes);
+    expect(commit.status).toBe(201);
+    expect(await commit.json()).toEqual({ counts: { leads: 1 }, recognized: { clientes: 1 } });
+
+    expect(await clientsOf()).toEqual(clientsBefore);
+    const leads = await admin.select().from(salesOpsLeads).where(eq(salesOpsLeads.orgId, orgId));
+    expect(leads.map((l) => [l.clientId, l.clientNameSnapshot])).toEqual([[existing.id, 'Construtora Alfa']]);
+  });
+
+  it('re-plans the recognition at commit: a cliente created after the preview is recognized by the commit', async () => {
+    const orgId = newOrg('recognize-replan');
+    const bytes = await buildXlsx([
+      sheetTab('clientes', [{ Nome: 'Construtora Alfa', 'CNPJ/CPF': '11.222.333/0001-81' }]),
+      sheetTab('leads', [{ Contato: 'Dora', Empresa: 'Construtora Alfa' }]),
+    ]);
+
+    const preview = await upload('/import/preview', bytes);
+    const previewBody = (await preview.json()) as { ok: boolean; counts: ImportCounts; recognized: ImportCounts };
+    expect(previewBody.ok).toBe(true);
+    expect(previewBody.counts).toEqual({ clientes: 1, leads: 1 });
+    expect(previewBody.recognized).toEqual({});
+
+    const existing = await createClient(
+      getDb(),
+      orgId,
+      ClientSchema.parse({ name: 'Construtora Alfa', document: '11222333000181' }),
+    );
+
+    const commit = await upload('/import/commit', bytes);
+    expect(commit.status).toBe(201);
+    expect(await commit.json()).toEqual({ counts: { leads: 1 }, recognized: { clientes: 1 } });
+    const admin = getAdminDb();
+    const clients = await admin.select().from(salesOpsClients).where(eq(salesOpsClients.orgId, orgId));
+    expect(clients.map((c) => c.id)).toEqual([existing.id]);
+    const leads = await admin.select().from(salesOpsLeads).where(eq(salesOpsLeads.orgId, orgId));
+    expect(leads.map((l) => l.clientId)).toEqual([existing.id]);
   });
 
   it('refuses an oversize upload through the real router', async () => {

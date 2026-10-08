@@ -26,6 +26,7 @@ const refs: ImportRefIndex = {
   personHasFuncaoSlug: throwing,
   personHasFuncao: throwing,
   funcaoIsSystem: throwing,
+  recognizedClient: throwing,
 };
 
 const catalog = (overrides: Partial<ImportCatalog> = {}): ImportCatalog =>

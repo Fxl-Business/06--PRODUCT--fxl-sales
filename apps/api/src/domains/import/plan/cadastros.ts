@@ -14,11 +14,13 @@ import {
 } from '../../sales-ops/service.js';
 import { LeadStageSchema } from '../../sales-ops/leads/schemas.js';
 import { normalizeLabel } from '../cells.js';
+import { documentDigits } from '../client-recognition.js';
 import { cellReader } from '../parse.js';
 import { assignProductCodes, refKey, type ImportRefIndex } from '../refs.js';
 import type {
   EntityRef,
   ImportCatalog,
+  ImportCounts,
   ImportIssue,
   ImportOperation,
   ParsedWorkbook,
@@ -49,10 +51,6 @@ function hasError(issues: readonly ImportIssue[]): boolean {
 /** An operation is emitted only when neither the parser nor the planner reported an error for the row. */
 function allowed(blocked: Set<string>, sheet: SheetKey, row: number, issues: readonly ImportIssue[]): boolean {
   return !blocked.has(planKeyOf(sheet, row)) && !hasError(issues);
-}
-
-function digits(text: string | null | undefined): string {
-  return (text ?? '').replace(/\D/g, '');
 }
 
 // ---------------------------------------------------------------------------
@@ -496,17 +494,28 @@ function planPessoas(parsed: ParsedWorkbook, catalog: ImportCatalog, refs: Impor
 // Clientes
 // ---------------------------------------------------------------------------
 
-function planClientes(parsed: ParsedWorkbook, catalog: ImportCatalog, blocked: Set<string>): Part {
-  const out: Part = { operations: [], issues: [] };
+function planClientes(
+  parsed: ParsedWorkbook,
+  catalog: ImportCatalog,
+  refs: ImportRefIndex,
+  blocked: Set<string>,
+): Part & { recognizedCount: number } {
+  const out: Part & { recognizedCount: number } = { operations: [], issues: [], recognizedCount: 0 };
   const seenName = new Map<string, number>();
   const seenDoc = new Map<string, number>();
   for (const row of parsed.sheets.clientes.rows) {
     const c = cellReader('clientes', row);
     const nome = c.text('nome');
     if (nome === null) continue;
+    // Recognized (D12): the row IS an existing cliente. Create-only, so it is reused and never
+    // written: no operation, no issue, and no part in the in-sheet duplicate bookkeeping below.
+    if (refs.recognizedClient(row.row) !== null) {
+      out.recognizedCount += 1;
+      continue;
+    }
     const documento = c.text('documento');
     const key = normalizeLabel(nome);
-    const doc = digits(documento);
+    const doc = documentDigits(documento);
     const issues: ImportIssue[] = [];
     const colNome = header('clientes', 'nome');
     const colDoc = header('clientes', 'documento');
@@ -516,7 +525,7 @@ function planClientes(parsed: ParsedWorkbook, catalog: ImportCatalog, blocked: S
       issues.push(rowWarning('clientes', row.row, colNome, 'possible_duplicate', `Já existe um cliente chamado "${nome}" no cadastro; se for o mesmo, remova esta linha (um nome repetido não pode ser usado nas outras abas).`));
     }
     if (doc !== '') {
-      const sameDoc = catalog.clients.find((x) => digits(x.document) === doc);
+      const sameDoc = catalog.clients.find((x) => documentDigits(x.document) === doc);
       if (sameDoc) {
         issues.push(rowWarning('clientes', row.row, colDoc, 'possible_duplicate', `O documento "${documento}" já é do cliente "${sameDoc.name}" no cadastro.`));
       }
@@ -640,17 +649,19 @@ function sheetOf(op: ImportOperation): SheetKey | null {
 export function planCadastros(parsed: ParsedWorkbook, catalog: ImportCatalog, refs: ImportRefIndex): SheetPlanResult {
   const blocked = erroredRowKeys(parsed.issues);
   const produtos = planProdutos(parsed, catalog, refs, blocked);
+  const clientes = planClientes(parsed, catalog, refs, blocked);
   const parts: Part[] = [
     planAreas(parsed, catalog, blocked),
     planFuncoes(parsed, catalog, blocked),
     produtos,
     planPessoas(parsed, catalog, refs, blocked),
-    planClientes(parsed, catalog, blocked),
+    clientes,
     planEtapas(parsed, catalog, blocked),
   ];
   const operations = parts.flatMap((p) => p.operations);
   const issues = parts.flatMap((p) => p.issues);
   const counts = countOperations(operations, sheetOf);
   if (produtos.costCount > 0) counts.custosProduto = produtos.costCount;
-  return { operations, issues, counts };
+  const recognized: ImportCounts = clientes.recognizedCount > 0 ? { clientes: clientes.recognizedCount } : {};
+  return { operations, issues, counts, recognized };
 }

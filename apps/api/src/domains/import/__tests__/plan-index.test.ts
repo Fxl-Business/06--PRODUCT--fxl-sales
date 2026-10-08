@@ -116,6 +116,17 @@ describe('planImport', () => {
     expect(mergeCounts({}, {})).toEqual({});
   });
 
+  it("carries the planners' recognized rows onto the plan and the preview body", () => {
+    mocks.planCadastros.mockReturnValue({ ...empty(), recognized: { clientes: 3 } });
+    const plan = planImport(emptyParsedWorkbook(), catalog);
+    expect(plan.recognized).toEqual({ clientes: 3 });
+    expect(toPreviewBody(plan).recognized).toEqual({ clientes: 3 });
+  });
+
+  it('reports no recognized rows as an empty object', () => {
+    expect(planImport(emptyParsedWorkbook(), catalog).recognized).toEqual({});
+  });
+
   it('is ok only with zero errors', () => {
     expect(isPlanOk({ issues: [issue('warning', null, null)] })).toBe(true);
     expect(isPlanOk({ issues: [issue('warning', null, null), issue('error', 'areas', 2)] })).toBe(false);
@@ -136,12 +147,13 @@ describe('toPreviewBody', () => {
   const counts: ImportCounts = { areas: 4 };
   it('truncates at MAX_RETURNED_ISSUES and flags it', () => {
     const issues = [issue('error', 'areas', 2), ...Array.from({ length: MAX_RETURNED_ISSUES }, () => issue('warning', 'areas', 3))];
-    const body = toPreviewBody({ operations: [], issues, counts });
+    const body = toPreviewBody({ operations: [], issues, counts, recognized: {} });
     expect(body.issues).toHaveLength(MAX_RETURNED_ISSUES);
     expect(body.truncated).toBe(true);
     expect(body.ok).toBe(false);
     expect(body.issues[0]?.severity).toBe('error');
     expect(body.counts).toBe(counts);
+    expect(body.recognized).toEqual({});
   });
 
   it('does not flag exactly MAX_RETURNED_ISSUES and computes ok from the full list', () => {
@@ -149,6 +161,7 @@ describe('toPreviewBody', () => {
       operations: [],
       issues: Array.from({ length: MAX_RETURNED_ISSUES }, () => issue('warning', 'areas', 3)),
       counts,
+      recognized: {},
     });
     expect(exact.truncated).toBe(false);
     expect(exact.ok).toBe(true);
