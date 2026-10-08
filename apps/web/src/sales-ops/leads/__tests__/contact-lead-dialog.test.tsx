@@ -365,6 +365,25 @@ describe('ContactLeadDialog', () => {
     expect(search.getAttribute('placeholder') ?? '').not.toMatch(/criar/i);
   });
 
+  it('stretches the inline action buttons to the field height', async () => {
+    await renderDialog();
+
+    const buttonWithText = (text: string): HTMLButtonElement => {
+      const match = [...dialogNode().querySelectorAll('button')].find(
+        (node) => node.textContent?.trim() === text,
+      );
+      if (!match) throw new Error(`button not found: ${text}`);
+      return match;
+    };
+
+    // The Cliente `Limpar` sits in a `flex items-center` row beside the 44px
+    // picker; `self-stretch` makes it take the row's height.
+    expect(buttonWithText('Limpar').classList.contains('self-stretch')).toBe(true);
+
+    // The footer buttons sit in no field row and keep their own height.
+    expect(buttonWithText('Cancelar').classList.contains('self-stretch')).toBe(false);
+  });
+
   it('Escape on the open cliente picker closes only the picker', async () => {
     const { onOpenChange } = await renderDialog({ onCreateClient: vi.fn(async () => null) });
     await click(clientTrigger());

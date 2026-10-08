@@ -216,7 +216,7 @@ export function LeadDialog({
                 value={clientId}
               />
               <button
-                className={secondaryButtonClass}
+                className={`${secondaryButtonClass} self-stretch`}
                 onClick={() => setClientId(null)}
                 type="button"
               >
@@ -251,7 +251,11 @@ export function LeadDialog({
                 placeholder="Selecione o produto"
                 value={pickedProductId}
               />
-              <button className={secondaryButtonClass} onClick={addCatalogProduct} type="button">
+              <button
+                className={`${secondaryButtonClass} self-stretch`}
+                onClick={addCatalogProduct}
+                type="button"
+              >
                 Adicionar
               </button>
             </div>
@@ -273,7 +277,7 @@ export function LeadDialog({
                   value={freeProductName}
                 />
                 <button
-                  className={`${secondaryButtonClass} shrink-0 whitespace-nowrap`}
+                  className={`${secondaryButtonClass} shrink-0 self-stretch whitespace-nowrap`}
                   onClick={addFreeProduct}
                   type="button"
                 >
