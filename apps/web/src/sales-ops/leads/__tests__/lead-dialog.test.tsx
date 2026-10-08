@@ -233,6 +233,20 @@ describe('LeadDialog', () => {
     expect(onSubmit.mock.calls[0]?.[0].products).toEqual([{ productName: 'Integração X' }]);
   });
 
+  it('keeps + Adicionar item livre on one line', async () => {
+    await renderDialog();
+
+    const button = buttonWithText('+ Adicionar item livre');
+    expect(button.classList.contains('whitespace-nowrap')).toBe(true);
+    expect(button.classList.contains('shrink-0')).toBe(true);
+
+    // The Produto não cadastrado group sits the same 16px under the produtos
+    // picker row as every other field (pt-2.5 on top of the inherited gap-1.5).
+    const group = dialogNode().querySelector('label[for="lead-free-product"]')?.parentElement;
+    if (!group) throw new Error('Produto não cadastrado group not rendered');
+    expect(group.classList.contains('pt-2.5')).toBe(true);
+  });
+
   it('renders exactly the sellers it is given and derives none itself', async () => {
     await renderDialog();
 
