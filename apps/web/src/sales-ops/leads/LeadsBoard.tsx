@@ -298,8 +298,9 @@ export function LeadsBoard({
   const [pendingConversion, setPendingConversion] = React.useState<MoveLeadPayload | null>(null);
 
   const columns = React.useMemo(() => boardStages(stages), [stages]);
-  // The leads edition shows contact data and no R$ figure anywhere; an org with
-  // no active etapa gets an empty-state instead of an empty scroller.
+  // The leads edition shows contact data in the Lista and the Cliente on the
+  // card; every R$ figure renders in both editions. An org with no active etapa
+  // gets an empty-state instead of an empty scroller.
   const contact = fieldSet === 'contact';
   const noStages = contact && columns.length === 0;
 
@@ -648,25 +649,21 @@ export function LeadsBoard({
                       <List aria-hidden size={15} />
                     </button>
                   </div>
-                  {!contact ? (
-                    <>
-                      <div className="mt-2 flex items-baseline justify-between gap-2">
-                        <span className="sales-ops-num text-[20px] font-bold text-[#201f24]" data-stage-total>
-                          {fmtBrl0(stageAggregate(aggregates, stage.id).totalBrl)}
-                        </span>
-                        <span className="shrink-0 whitespace-nowrap text-[11.5px] font-semibold text-[#9b9ba3]">
-                          {PERCENT_OF_TOTAL(share)}
-                        </span>
-                      </div>
-                      <div className={`mt-2 ${proportionTrackClass}`}>
-                        <div
-                          className="h-full rounded-full"
-                          data-stage-bar
-                          style={{ width: `${share}%`, backgroundColor: c?.dot }}
-                        />
-                      </div>
-                    </>
-                  ) : null}
+                  <div className="mt-2 flex items-baseline justify-between gap-2">
+                    <span className="sales-ops-num text-[20px] font-bold text-[#201f24]" data-stage-total>
+                      {fmtBrl0(stageAggregate(aggregates, stage.id).totalBrl)}
+                    </span>
+                    <span className="shrink-0 whitespace-nowrap text-[11.5px] font-semibold text-[#9b9ba3]">
+                      {PERCENT_OF_TOTAL(share)}
+                    </span>
+                  </div>
+                  <div className={`mt-2 ${proportionTrackClass}`}>
+                    <div
+                      className="h-full rounded-full"
+                      data-stage-bar
+                      style={{ width: `${share}%`, backgroundColor: c?.dot }}
+                    />
+                  </div>
                 </header>
 
                 <SortableContext items={movableIds} strategy={verticalListSortingStrategy}>
@@ -760,7 +757,7 @@ export function LeadsBoard({
               type="button"
             >
               <span>{ALL_PHASES_LABEL}</span>
-              {!contact ? <span className="sales-ops-num">{fmtBrl0(totalGeral)}</span> : null}
+              <span className="sales-ops-num">{fmtBrl0(totalGeral)}</span>
               <span className="tabular-nums" data-phase-count>
                 {allStages.count}
               </span>
@@ -781,11 +778,9 @@ export function LeadsBoard({
                     style={{ backgroundColor: color?.dot }}
                   />
                   <span>{stage.name}</span>
-                  {!contact ? (
-                    <span className="sales-ops-num opacity-75">
-                      {fmtBrl0(stageAggregate(aggregates, stage.id).totalBrl)}
-                    </span>
-                  ) : null}
+                  <span className="sales-ops-num opacity-75">
+                    {fmtBrl0(stageAggregate(aggregates, stage.id).totalBrl)}
+                  </span>
                   <span
                     className="inline-flex min-w-[20px] justify-center rounded-full px-1.5 text-[11px] font-semibold tabular-nums"
                     data-phase-count
@@ -809,6 +804,7 @@ export function LeadsBoard({
                       <th className="px-4 py-2.5">{CONTACT_LIST_HEADERS.birthday}</th>
                       <th className="px-4 py-2.5">{CONTACT_LIST_HEADERS.seller}</th>
                       <th className="px-4 py-2.5">{CONTACT_LIST_HEADERS.inStage}</th>
+                      <th className="px-4 py-2.5 text-right">{LIST_HEADERS.value}</th>
                       <th className="px-4 py-2.5 text-right">{CONTACT_LIST_HEADERS.actions}</th>
                     </tr>
                   ) : (
@@ -891,13 +887,11 @@ export function LeadsBoard({
                             NO_PRODUCTS_DASH
                           )}
                         </td>
-                        {!contact ? (
-                          <td className="px-4 py-3 text-right">
-                            <span className="sales-ops-num font-bold">
-                              {fmtBrl0(row.estimatedValueBrl)}
-                            </span>
-                          </td>
-                        ) : null}
+                        <td className="px-4 py-3 text-right">
+                          <span className="sales-ops-num font-bold">
+                            {fmtBrl0(row.estimatedValueBrl)}
+                          </span>
+                        </td>
                         <td className="px-4 py-3">
                           <div className="flex items-center justify-end gap-2">
                             {converted && onOpenSale && row.saleCode && row.saleId ? (
@@ -945,7 +939,7 @@ export function LeadsBoard({
                   })}
                   {orderedLeads.length === 0 ? (
                     <tr>
-                      <td className="px-4 py-6 text-center text-[#8b8b92]" colSpan={contact ? 6 : 7}>
+                      <td className="px-4 py-6 text-center text-[#8b8b92]" colSpan={7}>
                         {EMPTY_PHASE_LIST}
                       </td>
                     </tr>
@@ -955,14 +949,12 @@ export function LeadsBoard({
             </div>
             <div className={listFooterClass}>
               <span>{scopeLeadsCount(scopeLabel, listCount)}</span>
-              {!contact ? (
-                <span className="flex items-center gap-2">
-                  <span>{TOTAL_LABEL}</span>
-                  <span className="sales-ops-num" data-list-total>
-                    {fmtBrl0(listTotalCents)}
-                  </span>
+              <span className="flex items-center gap-2">
+                <span>{TOTAL_LABEL}</span>
+                <span className="sales-ops-num" data-list-total>
+                  {fmtBrl0(listTotalCents)}
                 </span>
-              ) : null}
+              </span>
             </div>
           </div>
         </div>

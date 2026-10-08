@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  NO_CLIENT_LABEL,
   SALE_STATUS_LABEL,
   buildLabelLookups,
+  leadClientLabel,
   leadCompanyLabel,
   leadProductLabels,
   leadSellerLabel,
@@ -68,6 +70,38 @@ describe('leadCompanyLabel', () => {
     const bare = lead({ clientId: UNKNOWN_ID, clientNameSnapshot: '   ' });
     expect(leadCompanyLabel(bare, lookups)).toBe('Sem empresa');
     expect(leadCompanyLabel(bare, lookups)).not.toContain(UNKNOWN_ID);
+  });
+});
+
+describe('leadClientLabel', () => {
+  it('prefers the cadastro client name over the snapshot', () => {
+    const row = lead({ clientId: CLIENT_ID, clientNameSnapshot: 'Acme velho nome' });
+
+    expect(leadClientLabel(row, lookups)).toBe('Acme Indústria');
+  });
+
+  it('falls back to the snapshot, then to Sem cliente, and never to the id', () => {
+    const unresolved = lead({ clientId: UNKNOWN_ID, clientNameSnapshot: 'Beta Serviços' });
+    expect(leadClientLabel(unresolved, lookups)).toBe('Beta Serviços');
+
+    const bare = lead({ clientId: UNKNOWN_ID, clientNameSnapshot: '   ' });
+    expect(leadClientLabel(bare, lookups)).toBe('Sem cliente');
+    expect(leadClientLabel(bare, lookups)).not.toContain(UNKNOWN_ID);
+
+    expect(leadClientLabel(lead(), lookups)).toBe('Sem cliente');
+  });
+
+  it('spells the fallback Sem cliente', () => {
+    expect(NO_CLIENT_LABEL).toBe('Sem cliente');
+  });
+
+  it('agrees with leadCompanyLabel whenever a name resolves', () => {
+    const resolved = lead({ clientId: CLIENT_ID, clientNameSnapshot: 'Acme velho nome' });
+    const unresolved = lead({ clientId: UNKNOWN_ID, clientNameSnapshot: 'Beta Serviços' });
+
+    for (const row of [resolved, unresolved]) {
+      expect(leadClientLabel(row, lookups)).toBe(leadCompanyLabel(row, lookups));
+    }
   });
 });
 
