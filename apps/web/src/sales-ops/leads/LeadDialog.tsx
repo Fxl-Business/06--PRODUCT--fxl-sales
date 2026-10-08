@@ -256,7 +256,7 @@ export function LeadDialog({
               </button>
             </div>
 
-            <div className="flex flex-col gap-1.5">
+            <div className="flex flex-col gap-1.5 pt-2.5">
               <label className={fieldLabelClass} htmlFor="lead-free-product">
                 Produto não cadastrado
               </label>
@@ -272,7 +272,11 @@ export function LeadDialog({
                   onChange={(event) => setFreeProductName(event.target.value)}
                   value={freeProductName}
                 />
-                <button className={secondaryButtonClass} onClick={addFreeProduct} type="button">
+                <button
+                  className={`${secondaryButtonClass} shrink-0 whitespace-nowrap`}
+                  onClick={addFreeProduct}
+                  type="button"
+                >
                   + Adicionar item livre
                 </button>
               </div>

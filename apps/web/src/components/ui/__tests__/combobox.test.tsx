@@ -267,6 +267,25 @@ describe('Combobox', () => {
     expect(scrollArea!.contains(row(0))).toBe(true);
     expect(createRow()!.closest('.overflow-y-auto')).toBeNull();
     expect(listbox()!.contains(createRow())).toBe(true);
+    // With option rows above it, the create section keeps its own divider.
+    expect(createRow()!.parentElement!.classList.contains('border-t')).toBe(true);
+  });
+
+  it('renders a single divider above the create row when nothing matches', async () => {
+    await renderCombobox({ withCreate: true, entityLabel: 'cliente' });
+    await open();
+    await type('adsad');
+
+    expect(createRow()).not.toBeNull();
+    expect(optionRows()).toHaveLength(1);
+    // No empty scroll area between the search field and the create row, so the
+    // search field's border-b is the only line above it.
+    expect(listbox()!.querySelector('.overflow-y-auto')).toBeNull();
+    expect(createRow()!.parentElement!.classList.contains('border-t')).toBe(false);
+    // Positive control: the create section is still inside the listbox, and the
+    // search field still draws the divider.
+    expect(listbox()!.contains(createRow())).toBe(true);
+    expect(panelSearch().parentElement!.classList.contains('border-b')).toBe(true);
   });
 
   it('hands onCreate the trimmed query, not the raw input value', async () => {

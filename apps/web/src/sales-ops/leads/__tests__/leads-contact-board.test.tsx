@@ -219,10 +219,14 @@ describe('contact board, Quadro', () => {
     expect(group?.querySelector('[data-lead-menu]')).not.toBeNull();
     expect(group?.className).toContain('shrink-0');
 
-    const client = ana.querySelector<HTMLElement>('[data-lead-client]');
-    expect(client?.className).toContain('truncate');
-    expect(client?.parentElement?.className).toContain('min-w-0');
-    expect(client?.parentElement?.className).toContain('flex-1');
+    // The name shares its row with the value and the menu, and wraps instead of
+    // pushing them out.
+    const row = group?.parentElement;
+    expect(row?.classList.contains('justify-between')).toBe(true);
+    const name = row?.firstElementChild;
+    expect(name?.textContent).toBe('Ana Construbom');
+    expect(name?.classList.contains('min-w-0')).toBe(true);
+    expect(name?.classList.contains('break-words')).toBe(true);
   });
 
   it('shows the stage R$ total, % do total and the bar from the loaded cards', async () => {
@@ -484,6 +488,36 @@ describe('contact LeadCard header', () => {
     );
     expect(card.querySelector('[data-lead-client]')?.textContent).toBe('Sem cliente');
     expect(card.textContent).not.toContain(UNKNOWN_CLIENT_ID);
+  });
+
+  it('keeps the Cliente line out of the value row so a long name is never squeezed', async () => {
+    const longName = 'VILLA CONSTRUTORA E INCORPORADORA DE EMPREENDIMENTOS IMOBILIARIOS LTDA';
+    for (const [row, label] of [
+      [lead(LEAD_ANA, PRIMEIRO_ID, { clientNameSnapshot: longName }), longName],
+      [lead(LEAD_ANA, PRIMEIRO_ID, { clientNameSnapshot: '' }), 'Sem cliente'],
+    ] as const) {
+      const card = await renderCard(row);
+      const value = card.querySelector<HTMLElement>('[data-lead-value]');
+      const client = card.querySelector<HTMLElement>('[data-lead-client]');
+      if (!value || !client) throw new Error('value or Cliente line not rendered');
+
+      // A full-width row of the header, not a column beside the value and menu.
+      const valueRow = value.closest('div.justify-between');
+      expect(valueRow).not.toBeNull();
+      expect(valueRow!.contains(client)).toBe(false);
+      expect(client.parentElement).toBe(valueRow!.parentElement);
+
+      expect(client.textContent).toBe(label);
+      expect(client.classList.contains('line-clamp-2')).toBe(true);
+      expect(client.classList.contains('break-words')).toBe(true);
+      expect(client.classList.contains('truncate')).toBe(false);
+      expect(client.getAttribute('title')).toBe(label);
+
+      // The birthday stays right under the Cliente line.
+      const birthday = card.querySelector('[data-lead-birthday]');
+      expect(birthday).not.toBeNull();
+      expect(client.nextElementSibling).toBe(birthday);
+    }
   });
 
   it('shows no product chip even when the row carries products', async () => {

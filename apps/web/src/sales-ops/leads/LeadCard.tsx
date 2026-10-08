@@ -174,6 +174,7 @@ export function LeadCard({
 }: LeadCardProps) {
   const contact = fieldSet === 'contact';
   const birthday = contact ? leadBirthdayLabel(lead) : null;
+  const clientLabel = contact ? leadClientLabel(lead, lookups) : undefined;
   const readOnly = leadIsConverted(lead);
   const days = daysInCurrentStage(lead.stageChangedAt, now);
   const daysCopy = describeDaysInStage(days);
@@ -238,30 +239,40 @@ export function LeadCard({
       title={readOnly ? undefined : CARD_TOOLTIP}
     >
       {contact ? (
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <span className="text-[14px] font-semibold text-[#201f24]">{lead.contactName}</span>
-            <span className="truncate text-[12.5px] text-[#8b8b92]" data-lead-client>
-              {leadClientLabel(lead, lookups)}
+        <div className="flex flex-col gap-0.5">
+          <div className="flex items-start justify-between gap-2">
+            <span className="min-w-0 break-words text-[14px] font-semibold text-[#201f24]">
+              {lead.contactName}
             </span>
-            {birthday !== null ? (
-              <span className="text-[12px] text-[#8b8b92]" data-lead-birthday>
-                {`${CONTACT_LEAD_COPY.birthdayPrefix} ${birthday}`}
+            <div className="flex shrink-0 items-start gap-0.5">
+              <span
+                className="sales-ops-num shrink-0 text-[14px] font-bold text-[#201f24]"
+                data-lead-value
+              >
+                {formatMoneyBrl(lead.estimatedValueBrl, {
+                  minimumFractionDigits: 0,
+                  maximumFractionDigits: 0,
+                })}
               </span>
-            ) : null}
+              {menu}
+            </div>
           </div>
-          <div className="flex shrink-0 items-start gap-0.5">
-            <span
-              className="sales-ops-num shrink-0 text-[14px] font-bold text-[#201f24]"
-              data-lead-value
-            >
-              {formatMoneyBrl(lead.estimatedValueBrl, {
-                minimumFractionDigits: 0,
-                maximumFractionDigits: 0,
-              })}
+          {/*
+            A full-width row of its own, under the name row: a long client name
+            gets the whole card width instead of the column beside the value.
+          */}
+          <span
+            className="line-clamp-2 break-words text-[12.5px] text-[#8b8b92]"
+            data-lead-client
+            title={clientLabel}
+          >
+            {clientLabel}
+          </span>
+          {birthday !== null ? (
+            <span className="text-[12px] text-[#8b8b92]" data-lead-birthday>
+              {`${CONTACT_LEAD_COPY.birthdayPrefix} ${birthday}`}
             </span>
-            {menu}
-          </div>
+          ) : null}
         </div>
       ) : (
         <div className="flex items-start justify-between gap-2">
