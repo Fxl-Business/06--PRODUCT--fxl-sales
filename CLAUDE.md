@@ -111,6 +111,9 @@ Full reference: `nexo/knowledge/reference/ui-controls.md`.
 - Any inline layer inside a dialog (`Combobox` panel, `InfoHint`) MUST call `useInlineLayer(open)` from `@/components/ui/inline-layer`, or Escape closes the whole dialog. Test it inside a REAL `Dialog`.
 - Picker sizes: `formSelectClass` (44px) and `comboboxTriggerClass` (40px, `Filtros` bar only).
 - `onCreate` is wired only where an inline create yields a complete valid record (cliente, área, função, profissional). Produto opens `ProductDialog` prefilled; vendedor and finder pickers get no create row.
+  A picker's copy promises creation only where `onCreate` is wired.
+- A `Combobox` with no matching option and a create row renders ONE divider (no empty scroll area, no `border-t` on the create section); with matches the create section keeps its `border-t`.
+- An inline action button beside a form field (`Limpar`, `Adicionar`, `+ Adicionar item livre`) carries `self-stretch` so it takes the field's height; never change the shared `secondaryButtonClass` for it.
 - A wizard's primary button is `type="button"` on EVERY step and the final step saves via `onClick`. Never derive `type` from the step. happy-dom cannot catch this; the oracle is `keeps one activation behaviour on every step`.
 
 ## Sales Ops Routing
@@ -308,7 +311,9 @@ Testing:
 Full reference: `nexo/knowledge/reference/kanban-de-leads.md`.
 
 - A lead lives in `sales_ops_leads`, never in `sales_ops_sales`, and creating one consumes no proposta code. Leads never enter `/bootstrap`, summaries, the dashboard or `computeSaleFinancials`.
-- Estimated value is integer cents. Creating a lead never creates a cliente; that happens at conversion.
+- Estimated value is integer cents.
+  In the FULL edition creating a lead never creates a cliente; that happens at conversion, and the `LeadDialog` picker reads `Buscar cliente cadastrado` with no create row.
+  The leads edition creates one inline (see Edição Leads).
 - Lead produtos are a child table (nullable `product_id` plus name snapshot), not `jsonb`.
 - The vendedor is resolved via the `vendedor` system função (`hasFuncao`, `FUNCAO_SLUG_VENDEDOR`).
 - Etapas follow the funções precedent: org-scoped, `is_system`, ordered, archived never deleted. `Perdido` requires a reason, enforced in both UI and API.
@@ -343,10 +348,16 @@ Full reference: `nexo/knowledge/reference/kanban-de-leads.md` (section Edição 
 - Web: the shell reads `profile.edition`; leaf components read `useSalesEdition()`.
   Every `vi.mock('@/auth/react')` factory exports `useSalesEdition` (`auth-mock-edition-export.test.ts`).
   The sidebar payables card, the sidebar `Nova proposta` and the period chip render only when the edition has the capability (`hasCapability`); never show full-product chrome in the leads edition.
+  The lead board's R$ figures are the lead's own estimated value, not full-product chrome, and render in both editions.
+- The leads-edition board shows R$ exactly like the full edition: column header total, `% do total` and bar, the card value beside the `...` menu, the Lista chips, the footer `TOTAL` and a right-aligned `Valor estimado` column before `Ações`.
+  Its card shows Nome, then the Cliente on its own full-width row (`leadClientLabel`, fallback `Sem cliente`, `line-clamp-2` with a `title`), then the birthday, and no `telefone · email`; the Lista keeps `telefone · email` under the name.
+  The full edition keeps `leadCompanyLabel` and `Sem empresa`.
+  Oracle: `leads-contact-board.test.tsx`.
 - Leads writes use `ContactLeadFieldsSchema` (strict, `null` or `''` clears an optional) through `createContactLead` / `updateContactLead`, chosen by `leadFieldSet`; the full schemas stay byte-identical and still reject the contact keys.
   A leads-edition lead MAY carry an empresa (`clientId` resolves the snapshot, else the free-text `clientName`) and a `estimatedValueBrl`; it still stores no produtos. The contact schema rejects `products` and the move/terminal keys.
 - The leads edition grants exactly two capabilities, `clients` and `import` (`LEADS_CAPABILITIES` in `sales-edition.ts`); `clients` is its OWN capability split from `catalog`, so `/clients/*` is `requireCapability('clients')` while produtos/areas/funcoes stay `catalog` (403 in leads). Empresa and valor on a lead are carried by the contact schema, NOT by `leadFullFields`.
 - The contact dialog's empresa picker creates a client by name inline: the create seam is `SalesOpsApp`'s `createClientByName` handed to `LeadsBoardContainer` as `onCreateClient`, never a hook inside the container. A vendedor may create (POST `/clients` carries no `requireAdmin`).
+  Its trigger and search read `Buscar ou criar novo cliente` only while `onCreateClient` is wired, else `Buscar cliente cadastrado`, through `clientPickerCopy` in `apps/web/src/sales-ops/leads/client-picker-copy.ts` (oracle `client-picker-copy.test.ts`).
 - The funil (`LeadsBoard` third view `funnel`, builders take per-stage aggregates, `BOARD_VIEW_LABEL.funnel`) has TWO shapes behind a `FUNNEL_SHAPE_LABEL` toggle (`Acumulado`/`Composição`, component state, default `cumulative`), plus the `Faturamento`/`Volume` metric toggle (`FUNNEL_METRIC_LABEL`, component state) that applies to both. `Acumulado` is the pure `buildCumulativeFunnel`: a lead in a stage counts in every earlier progression stage (linear assumption, there is no stage history), so rows taper monotonically from a full-width top and the share is retention from the top (`% do topo`, label `PERCENT_OF_TOP`). The progression is board order with the `lost` stage REMOVED (a lost lead has no known path); the lost stage is reported apart in a `[data-funnel-lost]` aside, never in the taper. `Composição` is the older pure `buildLeadFunnel`: each stage sized by its own magnitude/max, share of the sum (`% do total`, `PERCENT_OF_TOTAL`), every stage - lost included - an ordinary row, no aside. Bar width is rounded to an integer percent (so in `Acumulado` the bar equals the `% do topo`). The footer grand totals always read `buildLeadFunnel` (all leads, lost included) and are identical across both shapes. The two metrics are never mixed in one bar. Oracle: `lead-funnel.test.tsx`.
 - No etapa is ever seeded in the leads edition.
   Creating a lead with no active `normal` etapa answers the existing `400` `reason: 'no_open_stage'`; the web keys on status 400 plus `ApiError.reason`.
@@ -383,7 +394,11 @@ Full reference: `nexo/knowledge/reference/importacao-por-planilha.md`.
 
 - `cadastros/importacao` is an admin-only screen; the three routes (`GET /import/template`, `POST /import/preview`, `POST /import/commit` under `/api/v1/sales-ops`) all sit behind `requireAdmin`, and the org is only `c.get('orgId')`, never anything from the file.
 - ONE definition: `apps/api/src/domains/import/workbook-schema.ts` drives the template, the parser and the planners. Never hand-type a header, tab name or column key elsewhere.
-- Create-only. An import never updates. An existing ACTIVE área, função, produto or etapa with the same name is an error (`duplicate_existing`), a reference to an archived record is an error (`archived_ref`), a same-name cliente or pessoa is only a warning (`possible_duplicate`).
+- Create-only. An import never updates. An existing ACTIVE área, função, produto or etapa with the same name is an error (`duplicate_existing`), a reference to an archived record is an error (`archived_ref`), a same-name pessoa is only a warning (`possible_duplicate`).
+- A Clientes row that IS an existing cliente is RECOGNIZED by `recognizeClientRows` (`client-recognition.ts`), computed ONCE inside `buildRefIndex` and read by `planClientes` only through `refs.recognizedClient(row)`.
+  Document digits first (several clientes with those digits narrow to the one with the row's name, never a name fallback), otherwise exactly one same-name cliente whose document agrees with every same-name row of the tab.
+  A recognized row creates nothing, writes nothing to the cliente, raises no issue, and every reference to its sheet name resolves to that cliente (lookups dedupe by `refKey`); an unrecognized same-name or same-document cliente is still created with the `possible_duplicate` warning.
+  Preview and commit carry `recognized: { clientes: N }` (also in the `import.completed` `afterJsonb`), shown as ONE line (`data-import-recognized`), never one issue per row.
 - Writes reuse the domain services (`createSale`, `createProduct`, `applyBaixaTx` and so on) inside one `withTenant` transaction. Never a raw INSERT into a business table, and never a second implementation of a rule.
 - Preview writes nothing: it plans inside a transaction that is always rolled back. Commit NEVER trusts the preview: it re-parses, re-reads the catalog inside its transaction, re-plans and executes only at zero errors, all or nothing.
 - Both routes seed the default etapas (`ensureLeadStages`) and the system funções (`ensureSystemFuncoes`) inside their transaction before `readImportCatalog`. `readImportCatalog` and the executor never seed.
@@ -392,7 +407,7 @@ Full reference: `nexo/knowledge/reference/importacao-por-planilha.md`.
 - A lead cannot be imported into the conversion etapa; one in the lost etapa needs `Motivo da perda`.
 - Limits: 5 MB upload, 5000 data rows, 500 issues returned (`truncated`). No migration; `import.completed` is an `AuditActionSchema` addition, written once, last, in the same transaction.
 - The web classifies the import errors by HTTP status only; a 403 renders inline on the screen, never `ForbiddenPanel`; a 409 shows `body.message`. The web never parses xlsx.
-- Oracles: `import-routes.integration.test.ts` (round trip of the example template, all-or-nothing, producer-live, admin gate), `executor.integration.test.ts`, `template-example.test.ts`, `workbook-schema.test.ts`, `import-view.test.tsx`, `import-copy.test.ts`.
+- Oracles: `import-routes.integration.test.ts` (round trip of the example template, all-or-nothing, producer-live, admin gate, re-import recognition), `executor.integration.test.ts`, `client-recognition.test.ts`, `template-example.test.ts`, `workbook-schema.test.ts`, `import-view.test.tsx`, `import-copy.test.ts`.
 - `exceljs` is pinned EXACTLY in `apps/api` (`exceljs-pin.test.ts`); run `pnpm install` after pulling.
 
 ## Environments

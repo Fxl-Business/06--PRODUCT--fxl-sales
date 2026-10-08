@@ -25,6 +25,22 @@ Moved verbatim from `CLAUDE.md` on 2026-09-22 so the standing context stays shor
   The `Custos padrão por função` picker inside `ProductDialog` gets no create row, because creating a função is admin-gated and belongs to `cadastros/funcoes`; its empty state points there.
   The vendedor and finder pickers get no create row, because a pessoa is invalid without a função; the função picker inside the Pessoa dialog does have one, because a função needs only a name.
   The proposta wizard's `FUNÇÃO NO PROJETO` picker has one too, for the same reason as the Pessoa dialog's; the two deliberate exclusions above are unchanged.
+- A picker's copy promises creation only where `onCreate` is wired (2026-10-08, construbom-leads-ajustes).
+  The lead dialogs' cliente picker reads `clientPickerCopy(canCreate)` from `apps/web/src/sales-ops/leads/client-picker-copy.ts` on BOTH the trigger placeholder and `searchPlaceholder` (which is also the search input's accessible name): `Buscar ou criar novo cliente` in `ContactLeadDialog` while `onCreateClient` is wired, otherwise `Buscar cliente cadastrado` (always in the full edition's `LeadDialog`).
+  One boolean drives both the create row and the copy, so they cannot disagree.
+  The `Combobox` defaults (`Selecionar...`, `Buscar...`) are unchanged and still pinned by `combobox.test.tsx`.
+  Oracles: `client-picker-copy.test.ts`, `contact-lead-dialog.test.tsx`, `lead-dialog.test.tsx` (the Escape tests find the search field by its new accessible name inside the REAL `Dialog`).
+- A `Combobox` with no matching option and a create row renders ONE divider.
+  The end-to-end pass of construbom-leads-ajustes saw two lines 8px apart above `+ Criar novo cliente "..."`: the search field's `border-b`, the empty scroll area (`p-1`) and the create section's `border-t`.
+  `listHasRows = filtered.length > 0 || !showCreate` now decides whether the scroll area renders at all, and the create section carries `border-t` only when options are listed above it.
+  With no match and no `onCreate` the empty message still renders; keyboard navigation (`createIndex`, `activeRow`, `scrollIntoView` on `panelRef`) is untouched.
+  Oracle: `combobox.test.tsx` `renders a single divider above the create row when nothing matches`, plus the `border-t` assertion in `keeps the create row visible below the filtered options when some match`.
+- An inline action button that sits on a form field's row (`Limpar` beside a cliente picker, `Adicionar` beside the produto picker, `+ Adicionar item livre` beside the free product input) carries `self-stretch`.
+  The row is `flex items-center gap-2` and `secondaryButtonClass` sizes by padding (`py-2`, 38px), so the button was 6px shorter than the 44px field; `self-stretch` takes the row's height, which is the tallest child, so it follows the field whatever its height becomes.
+  `secondaryButtonClass` itself is shared across the app and stays unchanged, and footer buttons (`Cancelar`, `Salvar`, `Excluir lead`) get nothing.
+  A button that must not wrap also carries `shrink-0 whitespace-nowrap` (`+ Adicionar item livre` wrapped to two lines, 55px tall, before).
+  The Combobox panel is `absolute`, so an open picker never grows the row the button stretches to.
+  Oracles: `stretches the inline action buttons to the field height` in `lead-dialog.test.tsx` and `contact-lead-dialog.test.tsx`, and `keeps + Adicionar item livre on one line`; happy-dom has no layout, so they assert the classes and the height was measured in Chrome (44.0 against 44.0).
 - A wizard's primary button carries `type="button"` on EVERY step, and the final step saves through `onClick`.
   Never derive that attribute from the step (`type={step < 4 ? 'button' : 'submit'}`), because the click that advances the step would then also be the click that changes the element's own activation behaviour.
   A click runs in two phases - the event dispatch, then the browser's activation behaviour for the element - and React 18 flushes a discrete event's state update synchronously, so the re-render lands BETWEEN them.

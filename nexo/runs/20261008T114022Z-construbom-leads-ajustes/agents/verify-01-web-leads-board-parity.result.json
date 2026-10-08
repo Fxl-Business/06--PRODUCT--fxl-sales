@@ -1,0 +1,1 @@
+{"agent":"verify","slice":"01-web-leads-board-parity","status":"PASS","report":"nexo/runs/20261008T114022Z-construbom-leads-ajustes/verify-01-web-leads-board-parity.md","summary":"16187da: scope 5/5 files, 0 em dash; oracle 15 files 212/212 green on 2 runs; eslint and tsc exit 0; 22/22 mutants killed; tree clean","done":true,"ts":"2026-10-08T12:23:52Z"}

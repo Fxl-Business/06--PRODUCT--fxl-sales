@@ -1,0 +1,1 @@
+{"agent":"plan-check","slice":"all","status":"PASS","report":"nexo/runs/20261008T114022Z-construbom-leads-ajustes/plan-check.md","summary":"PASS: AC1-AC12 each proven by named oracles, AC13 handed to Capture, files_modified pairwise disjoint, no decision reopened; 7 non-blocking notes","done":true,"ts":"2026-10-08T12:12:54Z"}
