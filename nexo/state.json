@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "current_milestone_id": "v4.7.0",
+  "current_milestone_id": "v4.8.0",
   "delivery": {
     "mode": "promotion",
     "trunk": "master",
