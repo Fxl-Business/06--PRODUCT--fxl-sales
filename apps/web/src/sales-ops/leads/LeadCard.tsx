@@ -12,6 +12,7 @@ import {
   CARD_TOOLTIP,
   SALE_STATUS_LABEL,
   UNASSIGNED_LEAD_LABEL,
+  leadClientLabel,
   leadCompanyLabel,
   leadProductLabels,
   leadSellerLabel,
@@ -35,7 +36,7 @@ import {
   unassignedMarkerClass,
 } from './board-ui';
 import { daysInCurrentStage, leadIsConverted, leadIsUnassigned } from './calculations';
-import { CONTACT_LEAD_COPY, leadBirthdayLabel, leadContactLine } from './contact-lead';
+import { CONTACT_LEAD_COPY, leadBirthdayLabel } from './contact-lead';
 import { LEAD_DELETE_COPY } from './delete-copy';
 import type { SalesOpsLead } from './types';
 
@@ -77,7 +78,10 @@ export type LeadCardProps = {
   isDragging?: boolean;
   /** Computed by the board (normal stage and not converted). */
   showDaysBadge?: boolean;
-  /** 'contact' in the leads edition: contact data instead of empresa, valor and produtos. */
+  /**
+   * 'contact' in the leads edition: the Cliente (`Sem cliente` when none) and the
+   * birthday under the name, the value beside the menu, and no produtos.
+   */
   fieldSet?: LeadFieldSet;
   /**
    * Asks for this lead's delete confirmation. Present means a non-converted card
@@ -237,8 +241,8 @@ export function LeadCard({
         <div className="flex items-start justify-between gap-2">
           <div className="flex min-w-0 flex-1 flex-col gap-0.5">
             <span className="text-[14px] font-semibold text-[#201f24]">{lead.contactName}</span>
-            <span className="truncate text-[12.5px] text-[#8b8b92]" data-lead-contact>
-              {leadContactLine(lead)}
+            <span className="truncate text-[12.5px] text-[#8b8b92]" data-lead-client>
+              {leadClientLabel(lead, lookups)}
             </span>
             {birthday !== null ? (
               <span className="text-[12px] text-[#8b8b92]" data-lead-birthday>
@@ -246,7 +250,18 @@ export function LeadCard({
               </span>
             ) : null}
           </div>
-          {menu}
+          <div className="flex shrink-0 items-start gap-0.5">
+            <span
+              className="sales-ops-num shrink-0 text-[14px] font-bold text-[#201f24]"
+              data-lead-value
+            >
+              {formatMoneyBrl(lead.estimatedValueBrl, {
+                minimumFractionDigits: 0,
+                maximumFractionDigits: 0,
+              })}
+            </span>
+            {menu}
+          </div>
         </div>
       ) : (
         <div className="flex items-start justify-between gap-2">

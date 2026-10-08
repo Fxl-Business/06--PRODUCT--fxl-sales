@@ -37,13 +37,32 @@ function present(value: string | null | undefined): string | undefined {
 }
 
 /**
+ * The client name a lead resolves to: the cadastro client's live name, else the
+ * free-text snapshot the API always writes, else `undefined`. Never the id.
+ */
+function resolvedClientName(lead: SalesOpsLead, lookups: LabelLookups): string | undefined {
+  const resolved = lead.clientId ? lookups.clientNameById.get(lead.clientId) : undefined;
+  return present(resolved) ?? present(lead.clientNameSnapshot);
+}
+
+/**
  * The cadastro client's name, else the free-text snapshot the API always writes,
  * else `Sem empresa`. A `clientId` the cache does not know degrades to the free
  * text - never to the id.
  */
 export function leadCompanyLabel(lead: SalesOpsLead, lookups: LabelLookups): string {
-  const resolved = lead.clientId ? lookups.clientNameById.get(lead.clientId) : undefined;
-  return present(resolved) ?? present(lead.clientNameSnapshot) ?? 'Sem empresa';
+  return resolvedClientName(lead, lookups) ?? 'Sem empresa';
+}
+
+/** The leads edition's fallback when a lead has no Cliente (the full edition says `Sem empresa`). */
+export const NO_CLIENT_LABEL = 'Sem cliente';
+
+/**
+ * The Cliente line of a leads-edition card: the same ladder as
+ * `leadCompanyLabel`, with the leads edition's own fallback. Never an id.
+ */
+export function leadClientLabel(lead: SalesOpsLead, lookups: LabelLookups): string {
+  return resolvedClientName(lead, lookups) ?? NO_CLIENT_LABEL;
 }
 
 /** The pessoa's display name, else the server's snapshot, else `Sem vendedor`. Never an id. */
