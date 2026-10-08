@@ -115,6 +115,13 @@ export const Combobox = React.forwardRef<HTMLButtonElement, ComboboxProps>(
       [options, query, onCreate],
     );
 
+    /*
+      The scroll area renders only when it has something to show: option rows,
+      or the empty message. With no match and a create row it would be an empty
+      strip between two divider lines.
+    */
+    const listHasRows = filtered.length > 0 || !showCreate;
+
     const createIndex = filtered.length;
     const navigableCount = filtered.length + (showCreate ? 1 : 0);
     const activeRow = navigableCount === 0 ? 0 : Math.min(activeIndex, navigableCount - 1);
@@ -361,17 +368,22 @@ export const Combobox = React.forwardRef<HTMLButtonElement, ComboboxProps>(
               id={listboxId}
               role="listbox"
             >
-              <div className="min-h-0 flex-1 overflow-y-auto p-1" role="presentation">
-                {groupNodes}
-                {filtered.length === 0 && !showCreate ? (
-                  <div className="px-3 py-6 text-center text-sm text-muted-foreground">
-                    {emptyMessage}
-                  </div>
-                ) : null}
-              </div>
+              {listHasRows ? (
+                <div className="min-h-0 flex-1 overflow-y-auto p-1" role="presentation">
+                  {groupNodes}
+                  {filtered.length === 0 && !showCreate ? (
+                    <div className="px-3 py-6 text-center text-sm text-muted-foreground">
+                      {emptyMessage}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
 
               {showCreate ? (
-                <div className="border-t border-border p-1" role="presentation">
+                <div
+                  className={cn('p-1', filtered.length > 0 && 'border-t border-border')}
+                  role="presentation"
+                >
                   <div
                     aria-selected={false}
                     className={cn(
