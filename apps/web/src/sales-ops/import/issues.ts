@@ -79,3 +79,9 @@ export function nonZeroCounts(
 export function totalCount(counts: ImportCounts): number {
   return nonZeroCounts(counts).reduce((sum, row) => sum + row.count, 0);
 }
+
+/** Clientes rows the server recognized as existing clientes; absent, zero or invalid reads as 0. */
+export function recognizedClientCount(body: { recognized?: ImportCounts }): number {
+  const count = body.recognized?.clientes;
+  return typeof count === 'number' && Number.isFinite(count) && count > 0 ? count : 0;
+}

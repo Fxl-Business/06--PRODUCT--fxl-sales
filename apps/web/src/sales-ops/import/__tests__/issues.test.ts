@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { groupImportIssues, issueLocation, nonZeroCounts, totalCount } from '../issues';
+import {
+  groupImportIssues,
+  issueLocation,
+  nonZeroCounts,
+  recognizedClientCount,
+  totalCount,
+} from '../issues';
 import { SHEET_KEYS, SHEET_LABELS, type ImportIssue } from '../types';
 
 const issue = (over: Partial<ImportIssue>): ImportIssue => ({
@@ -44,6 +50,15 @@ describe('import issues', () => {
       { sheet: 'propostas', label: 'Propostas', count: 2 },
     ]);
     expect(totalCount(counts)).toBe(7);
+  });
+
+  it('recognizedClientCount reads recognized.clientes and reads absent, zero or invalid as zero', () => {
+    expect(recognizedClientCount({ recognized: { clientes: 114 } })).toBe(114);
+    expect(recognizedClientCount({})).toBe(0);
+    expect(recognizedClientCount({ recognized: {} })).toBe(0);
+    expect(recognizedClientCount({ recognized: { clientes: 0 } })).toBe(0);
+    expect(recognizedClientCount({ recognized: { clientes: Number.NaN } })).toBe(0);
+    expect(recognizedClientCount({ recognized: { leads: 3 } })).toBe(0);
   });
 
   it('SHEET_LABELS names the tabs of the seam contract in order', () => {

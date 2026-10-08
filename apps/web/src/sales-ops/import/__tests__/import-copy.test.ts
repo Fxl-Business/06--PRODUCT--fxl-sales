@@ -9,6 +9,37 @@ describe('IMPORT_COPY.errorsTitle', () => {
   });
 });
 
+describe('IMPORT_COPY recognized clientes', () => {
+  it('pins the recognized clientes lines, singular and plural, before and after the import', () => {
+    expect(IMPORT_COPY.recognizedClients(1)).toBe(
+      '1 cliente da aba Clientes já está no cadastro (mesmo CNPJ/CPF ou mesmo nome) e não será criado de novo nem alterado; as outras abas usam o cliente existente.',
+    );
+    expect(IMPORT_COPY.recognizedClients(114)).toBe(
+      '114 clientes da aba Clientes já estão no cadastro (mesmo CNPJ/CPF ou mesmo nome) e não serão criados de novo nem alterados; as outras abas usam os clientes existentes.',
+    );
+    expect(IMPORT_COPY.recognizedClientsDone(1)).toBe(
+      '1 cliente da aba Clientes já estava no cadastro e foi reaproveitado, sem alteração.',
+    );
+    expect(IMPORT_COPY.recognizedClientsDone(3)).toBe(
+      '3 clientes da aba Clientes já estavam no cadastro e foram reaproveitados, sem alteração.',
+    );
+    expect(IMPORT_COPY.nothingNew).toBe('Nenhum registro novo para criar.');
+  });
+
+  it('uses no em dash in the new lines', () => {
+    const dash = String.fromCharCode(0x2014);
+    for (const line of [
+      IMPORT_COPY.recognizedClients(1),
+      IMPORT_COPY.recognizedClients(114),
+      IMPORT_COPY.recognizedClientsDone(1),
+      IMPORT_COPY.recognizedClientsDone(3),
+      IMPORT_COPY.nothingNew,
+    ]) {
+      expect(line).not.toContain(dash);
+    }
+  });
+});
+
 describe('importErrorMessage', () => {
   it('keys on status', () => {
     expect(importErrorMessage({ status: 403 })).toBe(MUTATION_ERROR_COPY.adminRequired);
