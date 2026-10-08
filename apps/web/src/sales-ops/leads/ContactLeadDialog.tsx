@@ -22,6 +22,7 @@ import {
   primaryButtonClass,
   secondaryButtonClass,
 } from './board-ui';
+import { clientPickerCopy } from './client-picker-copy';
 import {
   CONTACT_LEAD_COPY,
   buildContactLeadPayload,
@@ -119,6 +120,10 @@ export function ContactLeadDialog({
   const blockedField = blockedFieldOf(blocked);
   const showBlocked =
     blocked !== null && (submitted || (blockedField !== null && touched.has(blockedField)));
+  // One boolean drives both the create row and the copy, so the picker never
+  // promises a creation it cannot perform.
+  const canCreateClient = Boolean(onCreateClient);
+  const clientPickerText = clientPickerCopy(canCreateClient);
 
   function setField<K extends keyof ContactLeadDraft>(key: K, value: ContactLeadDraft[K]) {
     setTouched((current) => (current.has(key) ? current : new Set(current).add(key)));
@@ -197,9 +202,10 @@ export function ContactLeadDialog({
                 entityGender="m"
                 entityLabel="cliente"
                 onChange={selectClient}
-                {...(onCreateClient ? { onCreate: (name) => void createClient(name) } : {})}
+                {...(canCreateClient ? { onCreate: (name) => void createClient(name) } : {})}
                 options={clients}
-                placeholder={CONTACT_LEAD_COPY.clientPlaceholder}
+                placeholder={clientPickerText}
+                searchPlaceholder={clientPickerText}
                 value={draft.clientId}
                 valueLabel={draft.clientName || undefined}
               />

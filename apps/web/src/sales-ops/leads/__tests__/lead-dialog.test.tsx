@@ -4,6 +4,7 @@ import * as React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LeadDialog } from '../LeadDialog';
+import { CLIENT_PICKER_COPY } from '../client-picker-copy';
 
 /**
  * The lead create / edit dialog, driven through the REAL `Dialog` and the REAL
@@ -65,6 +66,15 @@ async function click(element: Element) {
   await settle();
 }
 
+async function escape(element: Element) {
+  await act(async () => {
+    element.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }),
+    );
+  });
+  await settle();
+}
+
 function dialogNode(): Element {
   const node = document.querySelector('[role="dialog"]');
   if (!node) throw new Error('dialog not rendered');
@@ -98,6 +108,12 @@ function comboboxTriggers(): HTMLButtonElement[] {
   return [...dialogNode().querySelectorAll('[role="combobox"]')].filter(
     (node): node is HTMLButtonElement => node instanceof HTMLButtonElement,
   );
+}
+
+function clientTrigger(): HTMLButtonElement {
+  const node = dialogNode().querySelector('[role="combobox"][aria-labelledby="lead-client-label"]');
+  if (!(node instanceof HTMLButtonElement)) throw new Error('cliente picker missing');
+  return node;
 }
 
 function optionRows(): HTMLElement[] {
@@ -153,6 +169,40 @@ describe('LeadDialog', () => {
     // A lead never creates a `sales_ops_clients` row; the resolve-or-create
     // happens at conversion time.
     expect(document.querySelector('[data-combobox-create]')).toBeNull();
+  });
+
+  it('the cliente picker reads Buscar cliente cadastrado on the trigger and the search field (AC6)', async () => {
+    await renderDialog();
+    expect(clientTrigger().textContent?.trim()).toBe(CLIENT_PICKER_COPY.searchOnly);
+    expect(clientTrigger().hasAttribute('data-placeholder')).toBe(true);
+
+    await click(clientTrigger());
+    const search = document.querySelector('[role="listbox"]')?.parentElement?.querySelector(
+      'input[type="text"]',
+    );
+    if (!(search instanceof HTMLInputElement)) throw new Error('search field missing');
+    expect(search.getAttribute('placeholder')).toBe(CLIENT_PICKER_COPY.searchOnly);
+    expect(search.getAttribute('aria-label')).toBe(CLIENT_PICKER_COPY.searchOnly);
+
+    // Still no create row: a full-edition lead never creates a cliente.
+    await typeInto(search, 'Empresa que não existe');
+    expect(document.querySelector('[data-combobox-create]')).toBeNull();
+  });
+
+  it('Escape on the open cliente picker closes only the picker', async () => {
+    const onOpenChange = vi.fn();
+    await renderDialog({ onOpenChange });
+    await click(clientTrigger());
+    const search = document.querySelector(`input[aria-label="${CLIENT_PICKER_COPY.searchOnly}"]`);
+    if (!(search instanceof HTMLInputElement)) throw new Error('cliente search not found by its name');
+
+    await escape(search);
+    expect(document.querySelector('[role="listbox"]')).toBeNull();
+    expect(onOpenChange).not.toHaveBeenCalled();
+
+    // Positive control: the real Radix dialog does close on a bare Escape.
+    await escape(clientTrigger());
+    expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
   it('keeps a free-text company when no cliente is picked', async () => {

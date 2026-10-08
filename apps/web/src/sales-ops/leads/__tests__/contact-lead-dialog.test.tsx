@@ -4,6 +4,7 @@ import * as React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ContactLeadDialog } from '../ContactLeadDialog';
+import { CLIENT_PICKER_COPY } from '../client-picker-copy';
 
 /**
  * The leads edition's contact dialog, driven through the REAL `Dialog` and the
@@ -332,6 +333,53 @@ describe('ContactLeadDialog', () => {
     const payload = onSubmit.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(payload.clientId).toBe(CREATED_ID);
     expect(payload.clientName).toBe('Nova Obra');
+  });
+
+  it('with inline create wired, the cliente trigger and search read Buscar ou criar novo cliente (AC5)', async () => {
+    await renderDialog({ onCreateClient: vi.fn(async () => null) });
+    expect(clientTrigger().textContent?.trim()).toBe(CLIENT_PICKER_COPY.searchOrCreate);
+    expect(clientTrigger().hasAttribute('data-placeholder')).toBe(true);
+
+    await click(clientTrigger());
+    const search = comboboxSearch();
+    expect(search.getAttribute('placeholder')).toBe(CLIENT_PICKER_COPY.searchOrCreate);
+    expect(search.getAttribute('aria-label')).toBe(CLIENT_PICKER_COPY.searchOrCreate);
+
+    // The copy keeps its promise: an unknown name offers the Criar row.
+    await typeInto(search, 'Nova Obra');
+    expect(document.querySelector('[data-combobox-create]')).not.toBeNull();
+  });
+
+  it('without onCreateClient the cliente picker never promises creation (AC5)', async () => {
+    await renderDialog();
+    expect(clientTrigger().textContent?.trim()).toBe(CLIENT_PICKER_COPY.searchOnly);
+
+    await click(clientTrigger());
+    const search = comboboxSearch();
+    expect(search.getAttribute('placeholder')).toBe(CLIENT_PICKER_COPY.searchOnly);
+    expect(search.getAttribute('aria-label')).toBe(CLIENT_PICKER_COPY.searchOnly);
+
+    await typeInto(search, 'Nova Obra');
+    expect(document.querySelector('[data-combobox-create]')).toBeNull();
+    expect(clientTrigger().textContent ?? '').not.toMatch(/criar/i);
+    expect(search.getAttribute('placeholder') ?? '').not.toMatch(/criar/i);
+  });
+
+  it('Escape on the open cliente picker closes only the picker', async () => {
+    const { onOpenChange } = await renderDialog({ onCreateClient: vi.fn(async () => null) });
+    await click(clientTrigger());
+    const search = document.querySelector(
+      `input[aria-label="${CLIENT_PICKER_COPY.searchOrCreate}"]`,
+    );
+    if (!(search instanceof HTMLInputElement)) throw new Error('cliente search not found by its name');
+
+    await escape(search);
+    expect(document.querySelector('[role="listbox"]')).toBeNull();
+    expect(onOpenChange).not.toHaveBeenCalled();
+
+    // Positive control: the real Radix dialog does close on a bare Escape.
+    await escape(clientTrigger());
+    expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
   it('clearing a field on an edit sends null and carries the id', async () => {
