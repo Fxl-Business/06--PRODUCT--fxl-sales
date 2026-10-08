@@ -22,7 +22,6 @@ export const CONTACT_LEAD_COPY = {
   sellerLabel: 'Vendedor responsável',
   sellerPlaceholder: 'Selecione o vendedor',
   clientLabel: 'Cliente',
-  clientPlaceholder: 'Selecione ou crie um cliente',
   valueLabel: 'Valor estimado (R$)',
   clearLabel: 'Limpar',
   nameRequired: 'Informe o nome.',

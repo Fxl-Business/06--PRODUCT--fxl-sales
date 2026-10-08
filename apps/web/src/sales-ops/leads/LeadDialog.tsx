@@ -22,6 +22,7 @@ import {
   primaryButtonClass,
   secondaryButtonClass,
 } from './board-ui';
+import { CLIENT_PICKER_COPY } from './client-picker-copy';
 import { LEAD_DELETE_COPY } from './delete-copy';
 
 /**
@@ -199,6 +200,7 @@ export function LeadDialog({
               No `onCreate`: a lead never creates a `sales_ops_clients` row. The
               resolve-or-create happens at conversion time, inside the proposta
               flow, where the record is complete enough to be worth persisting.
+              So the copy never promises a creation either.
             */}
             <div className="flex items-center gap-2">
               <Combobox
@@ -209,7 +211,8 @@ export function LeadDialog({
                   setCompanyText('');
                 }}
                 options={clients}
-                placeholder="Selecione o cliente"
+                placeholder={CLIENT_PICKER_COPY.searchOnly}
+                searchPlaceholder={CLIENT_PICKER_COPY.searchOnly}
                 value={clientId}
               />
               <button
