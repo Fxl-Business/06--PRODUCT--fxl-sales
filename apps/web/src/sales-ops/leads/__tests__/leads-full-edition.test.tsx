@@ -130,10 +130,14 @@ async function click(selector: string) {
 
 /**
  * dnd-kit numbers its accessibility nodes per mount (`DndDescribedBy-0`, then
- * `-1`), so two mounts differ in that counter alone. It is not markup we own.
+ * `-1`), and React's `useId` does the same (`:r0:`, then `:r1:`, the board
+ * scroller's id and the top scrollbar's `aria-controls`), so two mounts differ in
+ * those counters alone. Neither is markup we own.
  */
 function normalized(html: string): string {
-  return html.replace(/(DndDescribedBy|DndLiveRegion)-\d+/g, '$1-N');
+  return html
+    .replace(/(DndDescribedBy|DndLiveRegion)-\d+/g, '$1-N')
+    .replace(/:r[0-9a-z]+:/g, ':rN:');
 }
 
 async function boardMarkup(fieldSet: 'full' | undefined, stages = STAGES) {

@@ -3,8 +3,9 @@ import {
   DndContext,
   DragOverlay,
   MeasuringStrategy,
+  MouseSensor,
+  TouchSensor,
   useDroppable,
-  PointerSensor,
   closestCorners,
   useSensor,
   useSensors,
@@ -38,6 +39,7 @@ import {
   type LabelLookups,
 } from './board-labels';
 import {
+  DRAG_ACTIVATION,
   buildMovePayload,
   describeDaysInStage,
   dragHandsBackToDialog,
@@ -48,7 +50,11 @@ import { moveLeadInList, summaryWithPendingMove } from './optimistic';
 import {
   avatarClass,
   avatarInitials,
+  boardFillClass,
   boardScrollerClass,
+  boardTrackClass,
+  boardViewportClass,
+  columnCardsScrollClass,
   cardButtonClass,
   dayBadgeTone,
   daysBadgeClass,
@@ -91,6 +97,7 @@ import {
   leadContactLine,
 } from './contact-lead';
 import { LEAD_DELETE_COPY } from './delete-copy';
+import { BoardScrollbar } from './BoardScrollbar';
 import { LeadCard, UnassignedLeadMarker } from './LeadCard';
 import { LeadsFunnelView } from './LeadsFunnelView';
 import { MoveLeadDialog } from './MoveLeadDialog';
@@ -247,14 +254,24 @@ function StageDropZone({
   children: React.ReactNode;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: stageId });
+  /*
+    `grow shrink-0`: the zone fills the column's scroll area, so the free space
+    under the last card is a drop target too, and grows past it with the cards.
+    The outline is drawn INSIDE the zone because the scroll area clips anything
+    painted outside it.
+  */
   return (
     <div
-      className="flex min-h-[72px] flex-col gap-2 rounded-md transition-colors"
+      className="flex min-h-[72px] shrink-0 grow flex-col gap-2 rounded-md transition-colors"
       data-stage-dropzone={stageId}
       ref={setNodeRef}
       style={
         isOver
-          ? { backgroundColor: 'rgba(255,255,255,0.6)', outline: `1.5px solid ${dotColor}` }
+          ? {
+              backgroundColor: 'rgba(255,255,255,0.6)',
+              outline: `1.5px solid ${dotColor}`,
+              outlineOffset: '-1.5px',
+            }
           : undefined
       }
     >
@@ -432,11 +449,25 @@ export function LeadsBoard({
     [leads, onMoveLead, onRequestConversion, stages],
   );
 
+  /*
+    Mouse and touch apart, dnd-kit's recipe for draggables inside scrollable
+    containers (see `DRAG_ACTIVATION` and `dragHandleSurfaceClass`): a mouse drag
+    starts after 6px of travel, a finger has to press and hold so that a swipe
+    keeps scrolling the column or the board.
+  */
   const sensors = useSensors(
-    // `distance: 6` so a click on `Mover para…` is never swallowed by a drag.
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(MouseSensor, { activationConstraint: DRAG_ACTIVATION.mouse }),
+    useSensor(TouchSensor, { activationConstraint: DRAG_ACTIVATION.touch }),
     // deliberately no KeyboardSensor - see the Mover para dialog, which is the real control
   );
+
+  /*
+    The horizontal scroller, handed to the top scrollbar. Both exist only in the
+    Quadro view and mount together.
+  */
+  const boardScrollerRef = React.useRef<HTMLDivElement>(null);
+  const boardScrollerId = React.useId();
+  const fillsViewport = leadView === 'board' && !noStages;
 
   function openMoveDialog(lead: SalesOpsLead, seedStageId: string | null = null) {
     setMoveSeedStageId(seedStageId);
@@ -494,9 +525,13 @@ export function LeadsBoard({
   }
 
   return (
-    <div className="flex flex-col gap-4" data-leads-board="true">
+    <div
+      className={fillsViewport ? boardFillClass : 'flex flex-col gap-4'}
+      data-leads-board="true"
+      {...(fillsViewport ? { 'data-board-fills-viewport': 'true' } : {})}
+    >
       <header className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2.5">
           <div
             aria-label="Alternar visualização"
             className={segmentedContainerClass}
@@ -600,119 +635,137 @@ export function LeadsBoard({
         onDragStart={handleDragStart}
         sensors={sensors}
       >
-        <div className={boardScrollerClass}>
-          {columns.map((stage) => {
-            // `visibleLeads`, so a card being converted shows in its destination
-            // column while the wizard is open.
-            const column = leadsInStage(visibleLeads, stage.id);
-            const movableIds = column
-              .filter((row) => !leadIsConverted(row))
-              .map((row) => row.id);
+        <div className={boardViewportClass}>
+          {/* ABOVE the columns, where it is reachable without scrolling down. */}
+          <BoardScrollbar controlsId={boardScrollerId} scrollerRef={boardScrollerRef} />
+          <div
+            className={boardScrollerClass}
+            data-board-scroller=""
+            id={boardScrollerId}
+            ref={boardScrollerRef}
+          >
+            <div className={boardTrackClass}>
+              {columns.map((stage) => {
+                // `visibleLeads`, so a card being converted shows in its destination
+                // column while the wizard is open.
+                const column = leadsInStage(visibleLeads, stage.id);
+                const movableIds = column
+                  .filter((row) => !leadIsConverted(row))
+                  .map((row) => row.id);
 
-            const c = colors.get(stage.id);
-            const share = shareByStage(stage.id);
+                const c = colors.get(stage.id);
+                const share = shareByStage(stage.id);
 
-            return (
-              <section
-                className={columnClass}
-                style={{ backgroundColor: c?.soft, borderColor: c?.border }}
-                data-stage-column={stage.id}
-                key={stage.id}
-                {...(stageOpensConversion(stage) ? { 'data-conversion-column': 'true' } : {})}
-              >
-                <header className={columnHeaderCardClass}>
-                  <div className="flex items-center gap-2">
-                    <span
-                      className="h-[9px] w-[9px] shrink-0 rounded-full"
-                      style={{ backgroundColor: c?.dot }}
-                    />
-                    <span className="flex-1 truncate text-[13.5px] font-bold text-[#201f24]">
-                      {stage.name}
-                    </span>
-                    <span
-                      className="inline-flex min-w-[24px] shrink-0 justify-center whitespace-nowrap rounded-full px-2 py-0.5 text-[11.5px] font-bold tabular-nums"
-                      data-stage-count
-                      style={{ backgroundColor: c?.soft, color: c?.ink }}
-                    >
-                      {stageAggregate(aggregates, stage.id).count}
-                    </span>
-                    <button
-                      aria-label={`${VIEW_IN_LIST_LABEL}: ${stage.name}`}
-                      className={iconButtonClass}
-                      data-view-in-list={stage.id}
-                      onClick={() => {
-                        setLeadStageFilter(stage.id);
-                        setLeadView('list');
-                      }}
-                      type="button"
-                    >
-                      <List aria-hidden size={15} />
-                    </button>
-                  </div>
-                  <div className="mt-2 flex items-baseline justify-between gap-2">
-                    <span className="sales-ops-num text-[20px] font-bold text-[#201f24]" data-stage-total>
-                      {fmtBrl0(stageAggregate(aggregates, stage.id).totalBrl)}
-                    </span>
-                    <span className="shrink-0 whitespace-nowrap text-[11.5px] font-semibold text-[#9b9ba3]">
-                      {PERCENT_OF_TOTAL(share)}
-                    </span>
-                  </div>
-                  <div className={`mt-2 ${proportionTrackClass}`}>
-                    <div
-                      className="h-full rounded-full"
-                      data-stage-bar
-                      style={{ width: `${share}%`, backgroundColor: c?.dot }}
-                    />
-                  </div>
-                </header>
-
-                <SortableContext items={movableIds} strategy={verticalListSortingStrategy}>
-                  <StageDropZone dotColor={c?.dot ?? '#cfcfd6'} stageId={stage.id}>
-                    {column.map((lead) => {
-                      const targets = moveTargetsFor(lead, columns, hasConversionHandler);
-                      if (targets.length === 0) {
-                        return (
-                          <LeadCard
-                            fieldSet={fieldSet}
-                            key={lead.id}
-                            lead={lead}
-                            lookups={lookups}
-                            now={now}
-                            onDelete={onDeleteLead}
-                            onEdit={onEditLead}
-                            onOpenSale={onOpenSale}
-                            showDaysBadge={stageIsNormal(stage) && !leadIsConverted(lead)}
-                          />
-                        );
-                      }
-                      return (
-                        <SortableLeadCard
-                          fieldSet={fieldSet}
-                          key={lead.id}
-                          lead={lead}
-                          lookups={lookups}
-                          now={now}
-                          onDelete={onDeleteLead}
-                          onEdit={onEditLead}
-                          onOpenSale={onOpenSale}
-                          showDaysBadge={stageIsNormal(stage) && !leadIsConverted(lead)}
+                return (
+                  <section
+                    className={columnClass}
+                    style={{ backgroundColor: c?.soft, borderColor: c?.border }}
+                    data-stage-column={stage.id}
+                    key={stage.id}
+                    {...(stageOpensConversion(stage) ? { 'data-conversion-column': 'true' } : {})}
+                  >
+                    <header className={columnHeaderCardClass}>
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="h-[9px] w-[9px] shrink-0 rounded-full"
+                          style={{ backgroundColor: c?.dot }}
                         />
-                      );
-                    })}
-                    {column.length === 0 ? (
-                      <div
-                        className="flex min-h-[80px] items-center justify-center rounded-lg border-[1.5px] border-dashed p-3 text-center text-[12.5px] text-[#9b9ba3]"
-                        data-empty-column={stage.id}
-                        style={{ borderColor: c?.border }}
-                      >
-                        {EMPTY_COLUMN_HINT}
+                        <span className="flex-1 truncate text-[13.5px] font-bold text-[#201f24]">
+                          {stage.name}
+                        </span>
+                        <span
+                          className="inline-flex min-w-[24px] shrink-0 justify-center whitespace-nowrap rounded-full px-2 py-0.5 text-[11.5px] font-bold tabular-nums"
+                          data-stage-count
+                          style={{ backgroundColor: c?.soft, color: c?.ink }}
+                        >
+                          {stageAggregate(aggregates, stage.id).count}
+                        </span>
+                        <button
+                          aria-label={`${VIEW_IN_LIST_LABEL}: ${stage.name}`}
+                          className={iconButtonClass}
+                          data-view-in-list={stage.id}
+                          onClick={() => {
+                            setLeadStageFilter(stage.id);
+                            setLeadView('list');
+                          }}
+                          type="button"
+                        >
+                          <List aria-hidden size={15} />
+                        </button>
                       </div>
-                    ) : null}
-                  </StageDropZone>
-                </SortableContext>
-              </section>
-            );
-          })}
+                      <div className="mt-2 flex items-baseline justify-between gap-2">
+                        <span className="sales-ops-num text-[20px] font-bold text-[#201f24]" data-stage-total>
+                          {fmtBrl0(stageAggregate(aggregates, stage.id).totalBrl)}
+                        </span>
+                        <span className="shrink-0 whitespace-nowrap text-[11.5px] font-semibold text-[#9b9ba3]">
+                          {PERCENT_OF_TOTAL(share)}
+                        </span>
+                      </div>
+                      <div className={`mt-2 ${proportionTrackClass}`}>
+                        <div
+                          className="h-full rounded-full"
+                          data-stage-bar
+                          style={{ width: `${share}%`, backgroundColor: c?.dot }}
+                        />
+                      </div>
+                    </header>
+
+                    {/*
+                      The column's OWN scroller: the header stays put and only the
+                      cards scroll, so a long column never stretches the board or
+                      its neighbours.
+                    */}
+                    <div className={columnCardsScrollClass} data-stage-scroll={stage.id}>
+                      <SortableContext items={movableIds} strategy={verticalListSortingStrategy}>
+                        <StageDropZone dotColor={c?.dot ?? '#cfcfd6'} stageId={stage.id}>
+                          {column.map((lead) => {
+                            const targets = moveTargetsFor(lead, columns, hasConversionHandler);
+                            if (targets.length === 0) {
+                              return (
+                                <LeadCard
+                                  fieldSet={fieldSet}
+                                  key={lead.id}
+                                  lead={lead}
+                                  lookups={lookups}
+                                  now={now}
+                                  onDelete={onDeleteLead}
+                                  onEdit={onEditLead}
+                                  onOpenSale={onOpenSale}
+                                  showDaysBadge={stageIsNormal(stage) && !leadIsConverted(lead)}
+                                />
+                              );
+                            }
+                            return (
+                              <SortableLeadCard
+                                fieldSet={fieldSet}
+                                key={lead.id}
+                                lead={lead}
+                                lookups={lookups}
+                                now={now}
+                                onDelete={onDeleteLead}
+                                onEdit={onEditLead}
+                                onOpenSale={onOpenSale}
+                                showDaysBadge={stageIsNormal(stage) && !leadIsConverted(lead)}
+                              />
+                            );
+                          })}
+                          {column.length === 0 ? (
+                            <div
+                              className="flex min-h-[80px] items-center justify-center rounded-lg border-[1.5px] border-dashed p-3 text-center text-[12.5px] text-[#9b9ba3]"
+                              data-empty-column={stage.id}
+                              style={{ borderColor: c?.border }}
+                            >
+                              {EMPTY_COLUMN_HINT}
+                            </div>
+                          ) : null}
+                        </StageDropZone>
+                      </SortableContext>
+                    </div>
+                  </section>
+                );
+              })}
+            </div>
+          </div>
         </div>
 
         {/*

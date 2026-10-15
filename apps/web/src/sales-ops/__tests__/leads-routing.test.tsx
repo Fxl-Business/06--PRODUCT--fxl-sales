@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SalesEdition } from '@fxl-sales/shared-utils/sales-edition';
 import type { AppRole } from '@/auth/claims';
 import { SalesOpsApp } from '../SalesOpsApp';
+import { NARROW_VIEWPORT_QUERY } from '../narrow-viewport';
 import type { SalesOpsFuncao } from '../types';
 
 /**
@@ -451,5 +452,80 @@ describe('Leads excluídos inside the Sales Ops shell', () => {
     expect(locationPath()).toBe(landing);
     expect(container.querySelector('[data-deleted-leads-container]')).toBeNull();
     expect(navLabel('Leads excluídos')).toBeNull();
+  });
+});
+
+/*
+  The Quadro fills the height the page gives it and scrolls inside its columns.
+  That needs the page content area to be a flex column, which only the leads view
+  may be: in a flex column every other screen's overflow-clipping children would
+  become shrinkable flex items.
+*/
+describe('the page content area around the leads board', () => {
+  const contentArea = (selector: string) => container.querySelector(selector)?.parentElement;
+
+  it('is a flex column on both lead routes, so the Quadro can fill it', async () => {
+    for (const path of ['/operacional/leads', '/meus-dados/leads']) {
+      await renderRoute(path, ['admin', 'seller']);
+      const area = contentArea('[data-leads-board]');
+      expect(area?.className, path).toContain('overflow-y-auto');
+      expect(area?.className.split(' '), path).toEqual(expect.arrayContaining(['flex', 'flex-col']));
+    }
+  });
+
+  it('stays a plain block on every other screen', async () => {
+    await renderRoute('/cadastros/etapas', ['admin']);
+    const area = contentArea('[data-lead-stages]');
+    expect(area?.className).toContain('overflow-y-auto');
+    expect(area?.className.split(' ')).not.toContain('flex-col');
+  });
+});
+
+describe('the sidebar on a narrow screen', () => {
+  let narrow = false;
+  let changeListeners: Array<(event: { matches: boolean }) => void> = [];
+
+  beforeEach(() => {
+    narrow = false;
+    changeListeners = [];
+    vi.spyOn(window, 'matchMedia').mockImplementation(
+      (query: string) =>
+        ({
+          matches: query === NARROW_VIEWPORT_QUERY && narrow,
+          media: query,
+          addEventListener: (_type: string, listener: (event: { matches: boolean }) => void) => {
+            if (query === NARROW_VIEWPORT_QUERY) changeListeners.push(listener);
+          },
+          removeEventListener: () => undefined,
+        }) as unknown as MediaQueryList,
+    );
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const expandButton = () => container.querySelector('button[aria-label="Expandir menu"]');
+  const collapseButton = () => container.querySelector('button[aria-label="Recolher menu"]');
+
+  it('starts on the icon rail on a phone or an upright tablet', async () => {
+    narrow = true;
+    await renderRoute('/operacional/leads', ['admin']);
+    expect(expandButton()).not.toBeNull();
+    expect(collapseButton()).toBeNull();
+  });
+
+  it('starts expanded on a wide screen', async () => {
+    await renderRoute('/operacional/leads', ['admin']);
+    expect(collapseButton()).not.toBeNull();
+  });
+
+  it('follows the screen across the breakpoint', async () => {
+    await renderRoute('/operacional/leads', ['admin']);
+    expect(changeListeners.length).toBeGreaterThan(0);
+    await act(async () => changeListeners.forEach((listener) => listener({ matches: true })));
+    expect(expandButton()).not.toBeNull();
+    await act(async () => changeListeners.forEach((listener) => listener({ matches: false })));
+    expect(collapseButton()).not.toBeNull();
   });
 });

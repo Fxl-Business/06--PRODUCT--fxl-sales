@@ -16,6 +16,21 @@ import type { SalesOpsLead, SalesOpsLeadStage } from './types';
  */
 
 /**
+ * When a press on a card becomes a drag. One definition for the board's sensors
+ * and for `LeadCard`'s click-versus-drag guard.
+ *
+ *  - mouse: 6px of travel, so a click (open the card) is never swallowed by a drag.
+ *  - touch: a 250ms press-and-hold, released if the finger travels 5px first.
+ *    Every column scrolls its own cards, so a SWIPE must stay a scroll (the card
+ *    surface allows panning, see `dragHandleSurfaceClass`); only a deliberate
+ *    hold lifts the card.
+ */
+export const DRAG_ACTIVATION = {
+  mouse: { distance: 6 },
+  touch: { delay: 250, tolerance: 5 },
+} as const;
+
+/**
  * The one place this slice asks "is this the conversion door?".
  *
  * It is the mirror of `stageRequiresReason`, and it exists for the same reason:

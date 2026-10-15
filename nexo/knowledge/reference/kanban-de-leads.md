@@ -49,7 +49,7 @@ Moved verbatim from `CLAUDE.md` on 2026-09-22 so the standing context stays shor
 
 A partir do handoff de design em `.demo/design_handoff_prospeccao/`, o quadro ganhou valor por fase, alternância Quadro/Lista e um card compacto. Quatro slices seriais, web-only, sem tocar `@dnd-kit`, `board-move.ts`, `MoveLeadDialog.tsx` nem `SalesOpsApp.tsx` (os sentinelas `BOARD-WRITE-FENCE` seguem intactos).
 
-- SUPERSEDE do princípio "o elemento do card é deliberadamente NÃO um botão / o `Mover para` não fica dentro do drag handle" (que vivia no comentário de cabeçalho de `LeadCard.tsx`). No redesign o card É clicável para editar: o `<article>` continua sem `role` e não é `<button>`, mas tem `onClick` que chama `onEdit`. O risco de "editar ao fim de um arraste" (a classe de bug do parágrafo `type="button"` em `ui-controls.md`) é resolvido por um GUARD POR LIMIAR DE PONTEIRO: `LeadCard` grava a posição no `pointerdown` (compondo, não descartando, o `onPointerDown` do dnd-kit) e, no `click`, aborta se o ponteiro moveu > 6px (o mesmo `activationConstraint.distance` do `PointerSensor`). O oráculo `leads-board-keyboard.test.tsx` prova isso: um pointerdown em (0,0) seguido de click em (20,20) NÃO chama `onEditLead`, e falharia se o guard fosse removido.
+- SUPERSEDE do princípio "o elemento do card é deliberadamente NÃO um botão / o `Mover para` não fica dentro do drag handle" (que vivia no comentário de cabeçalho de `LeadCard.tsx`). No redesign o card É clicável para editar: o `<article>` continua sem `role` e não é `<button>`, mas tem `onClick` que chama `onEdit`. O risco de "editar ao fim de um arraste" (a classe de bug do parágrafo `type="button"` em `ui-controls.md`) é resolvido por um GUARD POR LIMIAR DE PONTEIRO: `LeadCard` grava a posição no `pointerdown` (compondo, não descartando, o `onPointerDown` do dnd-kit) e, no `click`, aborta se o ponteiro moveu > 6px (o mesmo `DRAG_ACTIVATION.mouse.distance` do `MouseSensor`, em `board-move.ts`; até 2026-10-15 era o `PointerSensor`, ver a seção do Quadro com altura fixa). O oráculo `leads-board-keyboard.test.tsx` prova isso: um pointerdown em (0,0) seguido de click em (20,20) NÃO chama `onEditLead`, e falharia se o guard fosse removido.
 - Os botões `Mover para…`/`Editar` saíram do card. O controle de mover sem arraste agora é o botão `Mover` da Lista (que chama o mesmo `openMoveDialog` → `MoveLeadDialog`, ainda o único emissor de `MoveLeadPayload`) e o drag-para-`Perdido` (que ainda devolve ao diálogo pela regra do motivo obrigatório). `data-move-trigger="<id>"` e `data-edit-lead="<id>"` migraram do card para as linhas da Lista; por isso `lead-conversion.test.tsx` e `leads-board-keyboard.test.tsx` passaram a abrir o diálogo entrando primeiro no modo Lista. O card convertido continua sem `data-move-trigger` (oráculo preservado).
 - Cor por etapa: `stageColors(stages)` em `board-ui.ts` devolve `Map<stageId, {dot,soft,border,ink}>`. A paleta `normal` cicla por ORDEM das etapas (ciclo `% 4`), e `conversion`/`lost` têm cor fixa. É resolvido por OBJECT-LOOKUP `KIND_COLORS[stage.kind]` (só as chaves `conversion` e `lost`; `normal` cai no `else`), nunca por `kind === '...'`, porque `board-ui.ts` é arquivo escaneado pelo `board-write-surface.test.ts` (regex `/kind\s*===\s*['"](normal|lost)['"]/` e `'converted'` proibidos). `stageIsNormal(stage)` é `!KIND_COLORS[stage.kind]`, usado por `LeadsBoard.tsx` (também escaneado) para gatear o selo de dias sem comparar kind inline.
 - Valor por fase: `LeadsBoard.tsx` deriva `totalByStage`/`countByStage`/`shareByStage` a partir do `leads` recebido (já escopado por vendedor no servidor - NUNCA refiltra). O cabeçalho da coluna no Quadro mostra total em R$ sem decimais (`formatMoneyBrl(c,{minimumFractionDigits:0,maximumFractionDigits:0})`, classe `sales-ops-num`), `% do total` e uma barra de proporção com `width = share%`. A Lista tem chips de fase com total por fase + rodapé com o TOTAL do escopo.
@@ -297,3 +297,55 @@ Dialog polish found in the browser.
 The end-to-end pass measured three pre-existing defects and fixed them in the same run: the `Combobox` double divider above the create row (see `ui-controls.md`), `+ Adicionar item livre` wrapping to two lines (now `shrink-0 whitespace-nowrap`) with `Produto não cadastrado` 6px under the produtos row (now `pt-2.5`, the same 16px rhythm as every other field), and the inline `Limpar` / `Adicionar` buttons 6px shorter than the field beside them (now `self-stretch`).
 
 Oracles: `leads-contact-board.test.tsx` (R$ in the column header, card and Lista, the Cliente row, and the full-edition guards), `board-labels.test.ts` (`leadClientLabel`), `client-picker-copy.test.ts` (the two approved literals, pinned only there), `contact-lead-dialog.test.tsx` and `lead-dialog.test.tsx` (copy on trigger and search, create row present or absent, Escape on the cliente search closes only the picker inside the REAL `Dialog`, `self-stretch` on the inline buttons).
+
+## Quadro com altura fixa, rolagem por coluna e barra no topo (2026-10-15, fix/kanban-scroll)
+
+Full rules: `CLAUDE.md` (Kanban de leads).
+
+The request.
+The Quadro must not grow vertically without limit: a fixed height that fills the available viewport, and each column with its OWN vertical scroll, so a long column never stretches the others.
+The horizontal scrollbar must be visible at the TOP of the board, above the columns, so the operator scrolls sideways without scrolling down or using shift+wheel.
+It must work on desktop, iPad and phones (touch).
+
+What was measured before the change (Chromium, leads-owner, 31 cards in `Primeiro contato`).
+At 1440x900 the board was 4144px tall and every column was stretched to 4069px, the height of the longest one; the only horizontal scrollbar sat under all of it.
+At 390px the shell was not responsive at all: the expanded 244px sidebar left the page about 70px wide.
+
+The layout chain.
+The page content area in `SalesOpsApp.tsx` (`overflow-y-auto`) becomes a flex column ONLY for `view === 'leads'`; in a flex column every other screen's overflow-clipping children would become shrinkable flex items.
+In the Quadro view the board root is `boardFillClass` (`flex-1`, `min-h-[440px]`, marked `data-board-fills-viewport`); the Lista and the Funil keep the old natural-height root and scroll as a page.
+Below the header, `boardViewportClass` stacks the top scrollbar and the scroller; the scroller (`data-board-scroller`, `overflow-x-auto overflow-y-hidden`) holds one `w-max` track (`boardTrackClass`) whose stretched columns are exactly as tall as the board.
+Each column keeps its header card fixed and scrolls its cards in `[data-stage-scroll]` (`columnCardsScrollClass`); the drop zone inside is `grow shrink-0`, so the free space under the last card is still a drop target, and its drag-over outline is drawn inside (`outlineOffset: -1.5px`) because the scroll area clips anything outside.
+`min-h-[440px]` is the floor for a phone held sideways: below it the page content area scrolls instead of the board collapsing.
+
+The column scrollbar.
+A 6px scrollbar drawn in the column's 12px right padding: `-mr-[9px]` reaches into the padding, `[scrollbar-gutter:stable]` reserves the 6px whether or not the column overflows, and `pr-[3px]` puts the cards' right edge back exactly under the header card's.
+Touch screens draw overlay scrollbars that reserve nothing, so on `(pointer: coarse)` the trick is dropped and the cards keep the header's width there too.
+
+The top scrollbar.
+`BoardScrollbar.tsx` is a hand-drawn control (`role="scrollbar"`, `aria-controls` = the scroller's `useId`), not a mirrored native strip: a native scrollbar is an invisible overlay on iPad and phones and a 10px target for a finger.
+The board scroller's native scrollbar is hidden (`[scrollbar-width:none]` plus the WebKit pseudo-element); wheel, trackpad and touch panning still scroll it natively.
+The scroller is the ONLY source of truth: a thumb drag, a press on the track (which centres the thumb under the pointer and keeps dragging) or a key (arrows one 316px column, PageUp/PageDown, Home/End) only writes `scrollLeft`, and the thumb is painted from the scroller's `scroll` event, rAF-coalesced, through its style and outside React.
+A ResizeObserver on the scroller, its `w-max` track and the bar's own track repaints when the window, the sidebar or the column set changes.
+The bar always keeps its height and is only made `invisible` (with `aria-hidden` and `tabIndex=-1`) while every column fits, so nothing jumps by its height on load or when a resize crosses the overflow point.
+The scroller arrives as a REF and the first paint rides the same rAF as every later one; that is what the React Compiler lint rules require (no `setState` in an effect body, no mutation of a prop).
+
+Touch: a swipe scrolls, a hold drags.
+`touch-none` on the card (the `PointerSensor` requirement recorded in the drag-drop memory) also meant a finger on a card could never scroll anything, and once every column scrolls its own cards a column of cards could not be scrolled by touch at all.
+The board now runs dnd-kit's documented recipe for draggables inside scrollable containers: `MouseSensor` (6px) plus `TouchSensor` with a 250ms press-and-hold and 5px tolerance (`DRAG_ACTIVATION` in `board-move.ts`), and `touch-manipulation` on the card (`dragHandleSurfaceClass`).
+Once lifted, the `TouchSensor` cancels the `touchmove`s itself, so the old "let go mid-drag" failure cannot return.
+`LeadCard` forwards `onMouseDown` and `onTouchStart` (and `onPointerDown`) only through the `startsOnCardMenu` guard, so the kebab is never a drag handle, and a `contextmenu` (Android fires one on a long press) never opens the menu while the card is being dragged.
+dnd-kit's autoscroll scrolls the scrollable ancestors of the node under the pointer, so a long target column scrolls by itself while a card is held near its edge.
+The `DragOverlay` card is `w-full`: dnd-kit sizes the overlay to the lifted card, whose width depends on the column's.
+
+Phones and tablets.
+`narrow-viewport.ts` (`(max-width: 1023px)`) starts the sidebar on its icon rail and follows the breakpoint when it is crossed (a tablet rotated); the toggle stays the operator's in between.
+At 820px (iPad upright) the expanded sidebar left room for a column and a half; on the rail the header fits one row and two columns show.
+Below `md` the shell paddings shrink (`p-1.5`, content `px-3 py-4`), the `Quadro / Lista / Funil` buttons drop their icons below `sm`, and a column is `max-w-[calc(100cqw-28px)]` against the scroller (an inline-size container), so a whole column fits with a sliver of the next one; a browser without container units ignores the declaration and keeps 300px.
+NOT done: on a phone, expanding the sidebar still pushes the page instead of overlaying it.
+
+Verified in Chromium (Playwright) at 1440x900, 820x1180 and 390x844: the board stays inside the viewport with no page scroll, a wheel over a column scrolls only that column, the thumb drag, track press and keyboard scroll the board, a CDP touch swipe on a card scrolls the column (vertical) or the board (horizontal) without lifting it, a touch drag on the bar scrolls the board, a tap opens the editor, and a 400ms press-and-hold moves a card to another column and persists.
+
+Oracles: `leads-board-scroll.test.tsx` (fill root only in the Quadro, a scroller per column under a fixed header, the bar before the columns with `aria-controls`, invisible-not-hidden while everything fits, thumb size and sync, thumb drag by any pointer, track press, keys, and through dnd-kit's REAL sensors: a short mouse drag lifts, a press on the kebab never lifts, a 20px swipe never lifts, a hold lifts), `leads-board-dropzones.test.tsx` (`touch-manipulation`, never `touch-none`), `leads-routing.test.tsx` (the flex-column content area on both lead routes and nowhere else, the rail on a narrow screen and across the breakpoint).
+Each was proven non-vacuous by mutation: touch `distance` instead of a hold, a zero delay, `PointerSensor` only, the kebab guard bypassed, the bar moved below the columns, an inert thumb, no first paint, no flex column, a flex column everywhere, no auto-collapse.
+A gesture oracle must use LITERAL coordinates: the first swipe test computed its movement from `DRAG_ACTIVATION.touch.tolerance`, which went `NaN` (no movement at all) under the very mutation it had to catch.

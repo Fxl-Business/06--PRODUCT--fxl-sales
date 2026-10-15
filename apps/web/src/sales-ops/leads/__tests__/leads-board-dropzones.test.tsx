@@ -162,13 +162,16 @@ describe('the board drop surface', () => {
 
 describe('the drag gesture contract', () => {
   /**
-   * These pin the two dnd-kit requirements the board shipped without, both of
-   * which the operator felt as the card "letting go" mid-drag rather than as
-   * anything a test was asserting.
+   * These pin the dnd-kit requirements the board shipped without, which the
+   * operator felt as the card "letting go" mid-drag rather than as anything a
+   * test was asserting. The sensors themselves are exercised gesture by gesture
+   * in `leads-board-scroll.test.tsx`.
    */
-  it('gives every draggable card touch-action none, so the browser cannot claim the gesture', async () => {
-    // Without this the browser reads a drag on a horizontally scrollable board
-    // as a pan, takes the pointer and fires pointercancel; dnd-kit then aborts.
+  it('lets a finger on a card pan the column or the board (touch-manipulation, never touch-none)', async () => {
+    // `touch-none` was the PointerSensor's requirement. With every column now
+    // scrolling its own cards it also meant a column of cards could not be
+    // scrolled by touch at all; the delayed TouchSensor takes the hold, and a
+    // swipe stays the browser's pan.
     await act(async () => {
       root.render(
         <LeadsBoard
@@ -182,8 +185,11 @@ describe('the drag gesture contract', () => {
     });
 
     const card = container.querySelector('[data-lead-card]');
-    const surface = card?.closest('.touch-none');
-    expect(surface, 'the sortable node must carry touch-none').not.toBeNull();
+    expect(
+      card?.closest('.touch-manipulation'),
+      'the sortable node must allow panning',
+    ).not.toBeNull();
+    expect(card?.closest('.touch-none'), 'touch-none would freeze the column under a finger').toBeNull();
   });
 
   it('renders the dragged card in an overlay outside the scrolling board', async () => {

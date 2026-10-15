@@ -31,10 +31,79 @@ export const formTextareaClass =
 export const fieldLabelClass =
   'text-[11px] font-bold uppercase tracking-[0.06em] text-[#9b9ba3]';
 
-export const boardScrollerClass = 'flex gap-4 overflow-x-auto pb-4';
+/**
+ * THE QUADRO NEVER GROWS WITH ITS CARDS.
+ *
+ * In the Quadro view the board root is a flex item that FILLS the height the page
+ * content area gives it (the content area turns into a flex column for the leads
+ * view), so the columns get a fixed height and each scrolls its own cards. Before
+ * this a 31-card column stretched the board to 4144px on a 900px screen and every
+ * other column with it, and the horizontal scrollbar sat under the tallest one.
+ *
+ * `min-h-[440px]`: on a short viewport (a phone held sideways) the board stops
+ * shrinking at a usable size and the page content area scrolls instead.
+ */
+export const boardFillClass = 'flex min-h-[440px] flex-1 flex-col gap-4';
 
+/** The top scrollbar plus the scroller, which takes every remaining pixel. */
+export const boardViewportClass = 'flex min-h-0 flex-1 flex-col gap-2';
+
+/**
+ * The horizontal scroller. Its native scrollbar is hidden because the board's own
+ * `BoardScrollbar` sits ABOVE the columns, where the operator can reach it without
+ * scrolling down; wheel, trackpad and touch panning still scroll it natively.
+ * `[scrollbar-width:none]` hides it in Firefox and Chromium, the pseudo-element in
+ * Safari. The inline-size container lets a column size itself against the
+ * board's width (`cqw`) on a phone.
+ */
+export const boardScrollerClass =
+  'flex min-h-0 flex-1 overflow-x-auto overflow-y-hidden [container-type:inline-size] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden';
+
+/**
+ * Every column, side by side, at their own width. `w-max` makes this element's
+ * width the board's scroll width, so one ResizeObserver on it tells the top
+ * scrollbar when a column appears or leaves.
+ */
+export const boardTrackClass = 'flex w-max shrink-0 gap-4';
+
+/**
+ * A column is as tall as the board (stretched by the track) and never taller.
+ * `max-w-[calc(100cqw-28px)]` narrows it on a phone so a whole column fits with
+ * a sliver of the next one showing; a browser without container units ignores
+ * the declaration and keeps the 300px.
+ */
 export const columnClass =
-  'flex w-[300px] shrink-0 flex-col gap-3 rounded-[18px] border border-[#e8e8ec] bg-[#fbfbfc] p-3';
+  'flex min-h-0 w-[300px] max-w-[calc(100cqw-28px)] shrink-0 flex-col gap-3 rounded-[18px] border border-[#e8e8ec] bg-[#fbfbfc] p-3';
+
+/**
+ * The column's OWN vertical scroller, under its header. A 6px scrollbar drawn in
+ * the column's right padding: `-mr-[9px]` reaches into the 12px padding,
+ * `[scrollbar-gutter:stable]` keeps its 6px reserved whether or not the column
+ * overflows, and `pr-[3px]` puts the cards' right edge back exactly under the
+ * header card's. `-ml-1 pl-1` gives a card's focus ring room on the left.
+ * Touch screens draw overlay scrollbars that reserve nothing, so on a coarse
+ * pointer the trick is dropped and the cards keep the header's width there too.
+ */
+export const columnCardsScrollClass =
+  'flex min-h-0 flex-1 flex-col overflow-y-auto -ml-1 -mr-[9px] pl-1 pr-[3px] [scrollbar-gutter:stable] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:border-0 [@media(pointer:coarse)]:mx-0 [@media(pointer:coarse)]:px-0 [@media(pointer:coarse)]:[scrollbar-gutter:auto]';
+
+/**
+ * The board's horizontal scrollbar, rendered ABOVE the columns. It is a real
+ * control rather than a mirrored native strip because a native scrollbar is an
+ * invisible overlay on iPad and phones and a 10px target for a finger.
+ * `BoardScrollbar` adds `invisible` (never `hidden`) while every column fits, so
+ * its height stays reserved. `touch-none` so dragging it with a finger never
+ * pans the page.
+ */
+export const boardScrollbarClass =
+  'group/scrollbar relative h-5 shrink-0 cursor-pointer touch-none select-none rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[#eaa81a] [@media(pointer:coarse)]:h-7';
+
+export const boardScrollbarTrackClass =
+  'absolute inset-x-0 top-1/2 h-2 -translate-y-1/2 rounded-full bg-[#ececf0] [@media(pointer:coarse)]:h-2.5';
+
+/** Width and position are written straight to its style by `BoardScrollbar`. */
+export const boardScrollbarThumbClass =
+  'absolute inset-y-0 left-0 rounded-full bg-[#d2d2d8] transition-colors group-hover/scrollbar:bg-[#b4b4bb] group-data-[dragging=true]/scrollbar:bg-[#9b9ba3]';
 
 export const columnHeaderClass =
   'flex items-center justify-between gap-2 text-[12px] font-bold uppercase tracking-[0.06em] text-[#6a6a72]';
@@ -50,21 +119,28 @@ export const cardClass =
 export const cardDraggingClass = 'opacity-40';
 
 /**
- * REQUIRED on anything that starts a pointer drag, and the reason the board felt
- * like it kept "letting go" mid-gesture.
+ * The draggable card's surface. `touch-manipulation`, NOT `touch-none`.
  *
- * Without `touch-action: none` the browser owns the gesture first: on a
- * horizontally scrollable board it reads the same movement as a pan, takes over,
- * and fires `pointercancel`. dnd-kit then aborts the drag, correctly, because
- * the pointer stream it was promised ended. The board's own `overflow-x-auto`
- * scroller made this the normal case rather than an edge case.
+ * The board once ran dnd-kit's `PointerSensor`, which REQUIRES `touch-action:
+ * none`: without it the browser read a drag as a pan and fired `pointercancel`,
+ * and the card "let go" mid-gesture. But `touch-none` also meant a finger on a
+ * card could never scroll anything, and once every column scrolls its own cards
+ * a column made of cards could not be scrolled on an iPad or a phone at all.
  *
- * dnd-kit documents this as a requirement of `PointerSensor`, not a nicety.
+ * The board now runs the `MouseSensor` (touch-action is irrelevant to a mouse)
+ * and a `TouchSensor` with a press-and-hold delay (`DRAG_ACTIVATION` in
+ * `board-move.ts`), dnd-kit's documented recipe for draggables inside scrollable
+ * containers: a swipe pans the column or the board natively, a hold lifts the
+ * card, and once lifted the sensor cancels the `touchmove`s itself.
  */
-export const dragHandleSurfaceClass = 'touch-none select-none';
+export const dragHandleSurfaceClass = 'touch-manipulation select-none';
 
-/** The card riding the cursor. Elevated so it reads as lifted off the board. */
-export const dragOverlayCardClass = 'w-[276px] rotate-2 cursor-grabbing shadow-xl';
+/**
+ * The card riding the cursor. Elevated so it reads as lifted off the board.
+ * `w-full`: dnd-kit sizes the overlay to the lifted card, whose width depends on
+ * the column's (narrower on a phone).
+ */
+export const dragOverlayCardClass = 'w-full rotate-2 cursor-grabbing shadow-xl';
 
 /**
  * Read-only is a property of the CARD (`leadIsConverted`) and never of a column,
@@ -216,8 +292,12 @@ export function avatarInitials(name: string): string {
 export const segmentedContainerClass =
   'inline-flex items-center gap-1 rounded-[11px] bg-[#f2f2f4] p-1';
 
+/**
+ * On a phone the label alone, slightly tighter, so `Quadro / Lista / Funil` fits
+ * beside nothing on a 375px screen; the icon returns from `sm` up.
+ */
 export const segmentedButtonClass =
-  'inline-flex items-center gap-1.5 rounded-[8px] px-[13px] py-2 text-[13px] font-bold text-[#6a6a72] transition-colors';
+  'inline-flex items-center gap-1.5 rounded-[8px] px-2.5 py-2 text-[13px] font-bold text-[#6a6a72] transition-colors sm:px-[13px] [&>svg]:hidden sm:[&>svg]:block';
 
 export const segmentedButtonActiveClass = 'bg-[#201f24] text-white';
 

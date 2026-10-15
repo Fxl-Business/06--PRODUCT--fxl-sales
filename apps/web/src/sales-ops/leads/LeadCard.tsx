@@ -18,7 +18,7 @@ import {
   leadSellerLabel,
   type LabelLookups,
 } from './board-labels';
-import { describeDaysInStage } from './board-move';
+import { DRAG_ACTIVATION, describeDaysInStage } from './board-move';
 import {
   cardClass,
   cardDraggingClass,
@@ -49,8 +49,8 @@ import type { SalesOpsLead } from './types';
  * is not activatable" principle was superseded deliberately). The element is
  * still not a `<button>` and carries no `role`. The hazard of an edit firing at
  * the end of a drag is handled by a pointer-distance guard: a click whose
- * pointerdown-to-click movement exceeds the PointerSensor activation distance
- * is a drag, not a click.
+ * pointerdown-to-click movement exceeds the mouse activation distance
+ * (`DRAG_ACTIVATION.mouse`) is a drag, not a click.
  *
  * A non-converted card handed `onDelete` carries ONE control of its own: the
  * kebab of its `Excluir` menu (lixeira), also opened by a right-click on the
@@ -59,7 +59,6 @@ import type { SalesOpsLead } from './types';
  */
 
 const MAX_PRODUCT_CHIPS = 3;
-const ACTIVATION_DISTANCE = 6; // same as the board's PointerSensor
 
 export type LeadCardProps = {
   lead: SalesOpsLead;
@@ -184,6 +183,17 @@ export function LeadCard({
   const sellerLabel = leadSellerLabel(lead, lookups);
   const unassigned = leadIsUnassigned(lead);
   const pointerDown = React.useRef<{ x: number; y: number } | null>(null);
+  /*
+    The dnd-kit activators are whichever handlers the board's sensors registered
+    (`onMouseDown` and `onTouchStart` today). Each one is forwarded only through
+    the menu guard below, never spread straight onto the card.
+  */
+  const {
+    onPointerDown: activateOnPointer,
+    onMouseDown: activateOnMouse,
+    onTouchStart: activateOnTouch,
+    ...dragAttributes
+  } = dragHandleProps ?? {};
   const [menuOpen, setMenuOpen] = React.useState(false);
   const menu =
     onDelete && !readOnly ? (
@@ -194,9 +204,17 @@ export function LeadCard({
     // The menu is never a drag handle: no pointer record, no dnd-kit activation.
     if (startsOnCardMenu(event)) return;
     pointerDown.current = { x: event.clientX, y: event.clientY };
-    (dragHandleProps?.onPointerDown as ((e: React.PointerEvent<HTMLElement>) => void) | undefined)?.(
-      event,
-    );
+    activateOnPointer?.(event);
+  }
+
+  function handleMouseDown(event: React.MouseEvent<HTMLElement>) {
+    if (startsOnCardMenu(event)) return;
+    activateOnMouse?.(event);
+  }
+
+  function handleTouchStart(event: React.TouchEvent<HTMLElement>) {
+    if (startsOnCardMenu(event)) return;
+    activateOnTouch?.(event);
   }
 
   function handleClick(event: React.MouseEvent<HTMLElement>) {
@@ -206,7 +224,7 @@ export function LeadCard({
     pointerDown.current = null;
     if (start) {
       const moved = Math.hypot(event.clientX - start.x, event.clientY - start.y);
-      if (moved > ACTIVATION_DISTANCE) return; // a drag, not a click
+      if (moved > DRAG_ACTIVATION.mouse.distance) return; // a drag, not a click
     }
     if (readOnly) {
       if (lead.saleId && onOpenSale) onOpenSale(lead.saleId);
@@ -222,6 +240,9 @@ export function LeadCard({
   function handleContextMenu(event: React.MouseEvent<HTMLElement>) {
     if (!menu) return;
     event.preventDefault();
+    // A touch screen fires `contextmenu` on a long press, which is also how a
+    // card is lifted: a card being dragged never opens its menu.
+    if (isDragging) return;
     setMenuOpen(true);
   }
 
@@ -232,10 +253,12 @@ export function LeadCard({
       }`}
       data-lead-card={lead.id}
       {...(readOnly ? { 'data-read-only-card': 'true' } : {})}
-      {...(dragHandleProps ?? {})}
+      {...dragAttributes}
       onClick={handleClick}
       onContextMenu={handleContextMenu}
+      onMouseDown={handleMouseDown}
       onPointerDown={handlePointerDown}
+      onTouchStart={handleTouchStart}
       title={readOnly ? undefined : CARD_TOOLTIP}
     >
       {contact ? (

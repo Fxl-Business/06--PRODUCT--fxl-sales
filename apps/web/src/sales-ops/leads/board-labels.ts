@@ -124,6 +124,8 @@ export const FUNNEL_LOST_ASIDE = 'Fora do funil';
 export const ALL_PHASES_LABEL = 'Todas as fases';
 export const VIEW_IN_LIST_LABEL = 'Ver em lista';
 export const EMPTY_COLUMN_HINT = 'Arraste um lead para cá';
+/** Accessible name of the Quadro's horizontal scrollbar above the columns. */
+export const BOARD_SCROLLBAR_LABEL = 'Rolar as etapas para os lados';
 export const CARD_TOOLTIP = 'Clique para editar · arraste para mover';
 export const PERCENT_OF_TOTAL = (pct: number): string => `${pct}% do total`;
 export const PERCENT_OF_TOP = (pct: number): string => `${pct}% do topo`;

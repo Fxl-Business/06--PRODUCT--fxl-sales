@@ -153,6 +153,7 @@ import { buildLeadConversionPrefill, findClientByName } from './leads/conversion
 import type { LeadConversionItem, LeadConversionPrefill } from './leads/conversion';
 import type { LeadConversionRequest } from './leads/LeadsBoard';
 import { LeadsBoardContainer } from './leads/LeadsBoardContainer';
+import { isNarrowViewport, subscribeNarrowViewport } from './narrow-viewport';
 import { LeadStagesContainer } from './leads/LeadStagesContainer';
 import { DeletedLeadsContainer } from './leads/DeletedLeadsContainer';
 import { DELETED_LEADS_COPY } from './leads/deleted-leads';
@@ -1308,7 +1309,11 @@ export function SalesOpsApp() {
   const cancelContract = useCancelSalesOpsContract();
   const saveSettings = useSaveSalesOpsSettings();
   const setCadastroStatus = useSetSalesOpsCadastroStatus();
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  // A phone or an upright tablet starts on the icon rail (`narrow-viewport.ts`);
+  // crossing the breakpoint (a tablet rotated) follows it. The toggle stays the
+  // operator's in between.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(isNarrowViewport);
+  useEffect(() => subscribeNarrowViewport(setSidebarCollapsed), []);
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -1790,7 +1795,7 @@ export function SalesOpsApp() {
   }
 
   return (
-    <div className="sales-ops flex h-screen w-full gap-0 bg-[#e8e8eb] p-[10px] text-[#201f24]">
+    <div className="sales-ops flex h-screen w-full gap-0 bg-[#e8e8eb] p-1.5 text-[#201f24] md:p-[10px]">
       <aside
         className={`flex flex-none flex-col overflow-hidden rounded-[20px] bg-[#18181b] px-4 py-[22px] transition-all duration-200 ${sidebarCollapsed ? 'w-[76px]' : 'w-[244px]'}`}
       >
@@ -2064,8 +2069,8 @@ export function SalesOpsApp() {
         </div>
       </aside>
 
-      <main className="flex min-w-0 flex-1 flex-col overflow-hidden pl-[10px]">
-        <header className="flex flex-none items-center gap-4 rounded-t-2xl border border-[#e5e5ea] bg-[#f3f3f5] px-[22px] py-[15px]">
+      <main className="flex min-w-0 flex-1 flex-col overflow-hidden pl-1.5 md:pl-[10px]">
+        <header className="flex flex-none items-center gap-4 rounded-t-2xl border border-[#e5e5ea] bg-[#f3f3f5] px-4 py-3 md:px-[22px] md:py-[15px]">
           <div className="min-w-0">
             <h1 className="sales-ops-num text-[23px] font-bold tracking-normal text-[#201f24]">
               {title.title}
@@ -2169,7 +2174,17 @@ export function SalesOpsApp() {
             </div>
           ) : null}
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-[22px] py-5">
+          {/*
+            The leads view is a flex column so the Quadro can FILL the height left
+            here and scroll inside its columns (`boardFillClass`). Only that view:
+            in a flex column every other screen's overflow-clipping children would
+            become shrinkable flex items.
+          */}
+          <div
+            className={`min-h-0 flex-1 overflow-y-auto px-3 py-4 md:px-[22px] md:py-5${
+              view === 'leads' ? ' flex flex-col' : ''
+            }`}
+          >
             <MutationErrorBanner
               error={mutationFailure?.view === view ? mutationFailure.error : null}
               lines={

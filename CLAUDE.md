@@ -336,6 +336,10 @@ Full reference: `nexo/knowledge/reference/kanban-de-leads.md`.
 - An open lead with no vendedor renders `Sem vendedor - disponível` (`leadIsUnassigned`, `UNASSIGNED_LEAD_LABEL`, `data-unassigned-lead`) on the card and the Lista; a converted one keeps `Sem vendedor`.
 - Routes: `operacional/leads` (team), `meus-dados/leads` (seller), `cadastros/etapas`. Nav entries are appended, never prepended, because the first entry is the landing route.
 - Lead screens live in `apps/web/src/sales-ops/leads/`, never inside `SalesOpsApp.tsx`, mounted through `LeadStagesContainer` / `LeadsBoardContainer`, and use `mutateAsync`.
+- The Quadro FILLS the page content area (a flex column only for `view === 'leads'`) and never grows with its cards: each column scrolls its own cards in `[data-stage-scroll]` under a fixed header, the board scroller hides its native scrollbar, and `BoardScrollbar` sits ABOVE the columns, the scroller its only source of truth, keeping its height while `invisible`.
+  Drag is `MouseSensor` plus a press-and-hold `TouchSensor` (`DRAG_ACTIVATION` in `board-move.ts`) with `touch-manipulation` on the card, never `PointerSensor` plus `touch-none`: a swipe scrolls, a hold drags.
+  Below `lg` the sidebar starts on its icon rail (`narrow-viewport.ts`).
+  Oracle: `leads-board-scroll.test.tsx`.
 
 ## Edição Leads
 
