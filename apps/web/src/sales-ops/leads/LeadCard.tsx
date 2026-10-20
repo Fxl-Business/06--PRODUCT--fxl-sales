@@ -52,10 +52,8 @@ import type { SalesOpsLead } from './types';
  * pointerdown-to-click movement exceeds the mouse activation distance
  * (`DRAG_ACTIVATION.mouse`) is a drag, not a click.
  *
- * A non-converted card handed `onDelete` carries ONE control of its own: the
- * kebab of its `Excluir` menu (lixeira), also opened by a right-click on the
- * card. `startsOnCardMenu` keeps that menu out of both the drag and the edit
- * paths. Its open state is the only state the card holds.
+ * A non-converted card can expose `Mover` and the `Excluir` menu.
+ * `startsOnCardControl` keeps both controls out of drag and edit paths.
  */
 
 const MAX_PRODUCT_CHIPS = 3;
@@ -88,6 +86,7 @@ export type LeadCardProps = {
    * converted card, renders neither.
    */
   onDelete?: (lead: SalesOpsLead) => void;
+  onMove?: (lead: SalesOpsLead) => void;
 };
 
 /**
@@ -105,7 +104,7 @@ export function UnassignedLeadMarker() {
 
 /**
  * True for an event the card's own surface must ignore: one that started on the
- * menu trigger, or one bubbling through React's tree from the PORTALLED menu
+ * menu or move trigger, or one bubbling through React's tree from the PORTALLED menu
  * (its target is not inside the card's DOM at all). Such an event never reaches
  * the dnd-kit activator and never opens the editor.
  *
@@ -113,10 +112,10 @@ export function UnassignedLeadMarker() {
  * `stopPropagation` also stops the NATIVE event at the root, so the document
  * listener another open Radix menu dismisses itself with would never hear it.
  */
-function startsOnCardMenu(event: React.SyntheticEvent<HTMLElement>): boolean {
+function startsOnCardControl(event: React.SyntheticEvent<HTMLElement>): boolean {
   const target = event.target;
   if (!(target instanceof Node) || !event.currentTarget.contains(target)) return true;
-  return target instanceof Element && target.closest('[data-lead-menu]') !== null;
+  return target instanceof Element && target.closest('[data-lead-menu], [data-card-move]') !== null;
 }
 
 /**
@@ -170,6 +169,7 @@ export function LeadCard({
   showDaysBadge = true,
   fieldSet = 'full',
   onDelete,
+  onMove,
 }: LeadCardProps) {
   const contact = fieldSet === 'contact';
   const birthday = contact ? leadBirthdayLabel(lead) : null;
@@ -202,24 +202,24 @@ export function LeadCard({
 
   function handlePointerDown(event: React.PointerEvent<HTMLElement>) {
     // The menu is never a drag handle: no pointer record, no dnd-kit activation.
-    if (startsOnCardMenu(event)) return;
+    if (startsOnCardControl(event)) return;
     pointerDown.current = { x: event.clientX, y: event.clientY };
     activateOnPointer?.(event);
   }
 
   function handleMouseDown(event: React.MouseEvent<HTMLElement>) {
-    if (startsOnCardMenu(event)) return;
+    if (startsOnCardControl(event)) return;
     activateOnMouse?.(event);
   }
 
   function handleTouchStart(event: React.TouchEvent<HTMLElement>) {
-    if (startsOnCardMenu(event)) return;
+    if (startsOnCardControl(event)) return;
     activateOnTouch?.(event);
   }
 
   function handleClick(event: React.MouseEvent<HTMLElement>) {
     // Opening the menu, or picking from it, never opens the editor.
-    if (startsOnCardMenu(event)) return;
+    if (startsOnCardControl(event)) return;
     const start = pointerDown.current;
     pointerDown.current = null;
     if (start) {
@@ -391,6 +391,18 @@ export function LeadCard({
             </>
           )}
         </span>
+        <span className="flex items-center gap-2">
+        {onMove && !readOnly ? (
+          <button
+            aria-label={`Mover ${lead.contactName}`}
+            className="rounded-md px-2 py-1 text-[12px] font-semibold text-[#5750a4] hover:bg-[#f1efff] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#6b5bd1]"
+            data-card-move={lead.id}
+            onClick={(event) => { event.stopPropagation(); onMove(lead); }}
+            type="button"
+          >
+            Mover
+          </button>
+        ) : null}
         {showDaysBadge && !readOnly ? (
           <span
             aria-label={`${daysCopy} nesta etapa`}
@@ -400,6 +412,7 @@ export function LeadCard({
             {daysCopy}
           </span>
         ) : null}
+        </span>
       </div>
     </article>
   );

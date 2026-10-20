@@ -98,6 +98,7 @@ import {
 } from './contact-lead';
 import { LEAD_DELETE_COPY } from './delete-copy';
 import { BoardScrollbar } from './BoardScrollbar';
+import { matchesBoardSearch } from './board-search';
 import { LeadCard, UnassignedLeadMarker } from './LeadCard';
 import { LeadsFunnelView } from './LeadsFunnelView';
 import { MoveLeadDialog } from './MoveLeadDialog';
@@ -181,6 +182,7 @@ type SortableCardProps = {
   now: Date;
   onEdit?: (lead: SalesOpsLead) => void;
   onDelete?: (lead: SalesOpsLead) => void;
+  onMove?: (lead: SalesOpsLead) => void;
   onOpenSale?: (saleId: string) => void;
   showDaysBadge?: boolean;
   fieldSet?: LeadFieldSet;
@@ -196,6 +198,7 @@ function SortableLeadCard({
   now,
   onEdit,
   onDelete,
+  onMove,
   onOpenSale,
   showDaysBadge,
   fieldSet,
@@ -218,6 +221,7 @@ function SortableLeadCard({
         lookups={lookups}
         now={now}
         onDelete={onDelete}
+        onMove={onMove}
         onEdit={onEdit}
         fieldSet={fieldSet}
         onOpenSale={onOpenSale}
@@ -319,6 +323,7 @@ export function LeadsBoard({
    * while its proposta is being filled in.
    */
   const [pendingConversion, setPendingConversion] = React.useState<MoveLeadPayload | null>(null);
+  const [boardSearch, setBoardSearch] = React.useState('');
 
   const columns = React.useMemo(() => boardStages(stages), [stages]);
   // The leads edition shows contact data in the Lista and the Cliente on the
@@ -345,6 +350,10 @@ export function LeadsBoard({
         ? moveLeadInList(leads, pendingConversion, new Date().toISOString())
         : leads,
     [leads, pendingConversion],
+  );
+  const searchedLeads = React.useMemo(
+    () => visibleLeads.filter((lead) => matchesBoardSearch(lead, lookups, boardSearch)),
+    [visibleLeads, lookups, boardSearch],
   );
 
   /*
@@ -589,6 +598,16 @@ export function LeadsBoard({
               />
             </div>
           ) : null}
+          {leadView === 'board' ? (
+            <input
+              aria-label="Buscar leads"
+              className="h-9 w-[220px] rounded-lg border border-[#e8e8ec] bg-white px-3 text-[13px] text-[#201f24] outline-none focus-visible:ring-2 focus-visible:ring-[#6b5bd1]"
+              onChange={(event) => setBoardSearch(event.target.value)}
+              placeholder="Buscar leads carregados"
+              type="search"
+              value={boardSearch}
+            />
+          ) : null}
         </div>
         {onCreateLead ? (
           <button
@@ -602,12 +621,7 @@ export function LeadsBoard({
         ) : null}
       </header>
 
-      {/*
-        The board does NOT filter its own `leads` array. Scoping is server-applied
-        inside `withTenant` and the vendedor narrowing rides the board query's
-        filters, so a client-side filter would be a second, weaker answer to a
-        question the server already answered.
-      */}
+      {/* Server and seller scope remain authoritative. Search narrows only loaded cards. */}
       {/*
         `measuring` on `Always`: columns change height as cards enter and leave,
         and dnd-kit's default caches droppable rects on drag start. A stale rect
@@ -655,7 +669,8 @@ export function LeadsBoard({
               {columns.map((stage) => {
                 // `visibleLeads`, so a card being converted shows in its destination
                 // column while the wizard is open.
-                const column = leadsInStage(visibleLeads, stage.id);
+                const column = leadsInStage(searchedLeads, stage.id);
+                const loadedColumnCount = leadsInStage(visibleLeads, stage.id).length;
                 const movableIds = column
                   .filter((row) => !leadIsConverted(row))
                   .map((row) => row.id);
@@ -753,6 +768,7 @@ export function LeadsBoard({
                                 lookups={lookups}
                                 now={now}
                                 onDelete={onDeleteLead}
+                                onMove={() => openMoveDialog(lead)}
                                 onEdit={onEditLead}
                                 onOpenSale={onOpenSale}
                                 showDaysBadge={stageIsNormal(stage) && !leadIsConverted(lead)}
@@ -762,10 +778,14 @@ export function LeadsBoard({
                           {column.length === 0 ? (
                             <div
                               className="flex min-h-[80px] items-center justify-center rounded-lg border-[1.5px] border-dashed p-3 text-center text-[12.5px] text-[#9b9ba3]"
-                              data-empty-column={stage.id}
+                              {...(boardSearch.trim() && loadedColumnCount > 0
+                                ? { 'data-search-empty': stage.id }
+                                : { 'data-empty-column': stage.id })}
                               style={{ borderColor: c?.border }}
                             >
-                              {EMPTY_COLUMN_HINT}
+                              {boardSearch.trim() && loadedColumnCount > 0
+                                ? 'Nenhum lead encontrado nesta etapa.'
+                                : EMPTY_COLUMN_HINT}
                             </div>
                           ) : null}
                         </StageDropZone>

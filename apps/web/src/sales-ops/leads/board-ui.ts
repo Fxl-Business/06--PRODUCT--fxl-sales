@@ -40,10 +40,9 @@ export const fieldLabelClass =
  * this a 31-card column stretched the board to 4144px on a 900px screen and every
  * other column with it, and the horizontal scrollbar sat under the tallest one.
  *
- * `min-h-[440px]`: on a short viewport (a phone held sideways) the board stops
- * shrinking at a usable size and the page content area scrolls instead.
+ * `min-h-0` lets the routed page bound the board even on a short viewport.
  */
-export const boardFillClass = 'flex min-h-[440px] flex-1 flex-col gap-4';
+export const boardFillClass = 'flex min-h-0 flex-1 flex-col gap-4';
 
 /** The top scrollbar plus the scroller, which takes every remaining pixel. */
 export const boardViewportClass = 'flex min-h-0 flex-1 flex-col gap-2';

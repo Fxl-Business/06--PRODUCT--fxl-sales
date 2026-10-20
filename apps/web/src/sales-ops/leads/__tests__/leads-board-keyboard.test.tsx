@@ -277,6 +277,28 @@ describe('LeadsBoard, driven by the keyboard Mover para dialog alone', () => {
     });
   });
 
+  it('opens Mover from a card without editing or lifting, then emits one move', async () => {
+    const onEditLead = vi.fn();
+    const { onMoveLead } = await renderBoard([lead(LEAD_A, 'Ana', NOVO_ID)], { onEditLead });
+    const trigger = required(`[data-lead-card="${LEAD_A}"] [data-card-move="${LEAD_A}"]`);
+    expect(trigger.getAttribute('aria-label')).toContain('Ana');
+    await act(async () => {
+      trigger.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+      document.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 40 }));
+    });
+    expect(document.querySelectorAll(`[data-lead-card="${LEAD_A}"]`)).toHaveLength(1);
+    await click(trigger);
+    expect(onEditLead).not.toHaveBeenCalled();
+    await pick(0, 'Negociação');
+    await confirmMove();
+    expect(onMoveLead).toHaveBeenCalledExactlyOnceWith({
+      leadId: LEAD_A,
+      toStageId: NEGOCIACAO_ID,
+      toIndex: 0,
+      reason: null,
+    });
+  });
+
   it('reorders a card inside its own column through the same dialog', async () => {
     const { onMoveLead } = await renderBoard([
       lead(LEAD_A, 'Ana', NOVO_ID, { position: 1 }),
@@ -581,7 +603,7 @@ describe('a move into the conversion stage goes STRAIGHT to the wizard', () => {
     await renderBoard([lead(LEAD_A, 'Ana', NOVO_ID)], { onEditLead });
 
     const card = required(`[data-lead-card="${LEAD_A}"]`);
-    expect(card.querySelector('[data-move-trigger]')).toBeNull();
+    expect(card.querySelector('[data-card-move]')).not.toBeNull();
     expect(card.querySelector('[data-edit-lead]')).toBeNull();
     await click(card, { clientX: 0, clientY: 0 });
 
