@@ -6,8 +6,9 @@ import type { ComboboxOption } from '@/components/ui/combobox';
 import { Skeleton } from '@/components/ui/skeleton';
 import { buildLeadStagePath, buildSalesOpsPath, type SalesOpsWorkspace } from '../navigation';
 import type { SalesOpsClient, SalesOpsPerson, SalesOpsProduct } from '../types';
-import type { SaveContactLeadPayload, SaveLeadPayload } from './api';
+import type { MoveLeadPayload, SaveContactLeadPayload, SaveLeadPayload } from './api';
 import { buildLabelLookups } from './board-labels';
+import { stageOpensConversion } from './board-move';
 import { mutedStateClass } from './board-ui';
 import { boardStages, leadIsConverted } from './calculations';
 import { ContactLeadDialog } from './ContactLeadDialog';
@@ -15,6 +16,7 @@ import { leadToContactSeed } from './contact-lead';
 import { LeadDeleteDialog } from './LeadDeleteDialog';
 import { LeadDialog } from './LeadDialog';
 import { LeadsBoard, type LeadConversionRequest } from './LeadsBoard';
+import { RestoreUndoNotice, UndoNotice } from './UndoNotice';
 import {
   useDeleteLead,
   useLeadsBoard,
@@ -163,6 +165,79 @@ export function LeadsBoardContainer({
   const moveLead = useMoveLead(filters);
   const saveLead = useSaveLead();
   const deleteLead = useDeleteLead();
+  const [undoNotice, setUndoNotice] = React.useState<{
+    id: number;
+    label: string;
+    undo?: () => Promise<unknown>;
+    restoreLeadId?: string;
+  } | null>(null);
+  const [undoError, setUndoError] = React.useState<string | null>(null);
+  const [undoBusy, setUndoBusy] = React.useState(false);
+  const undoSequence = React.useRef(0);
+  const undoInFlight = React.useRef(false);
+
+  React.useEffect(() => {
+    if (!undoNotice) return;
+    const timer = window.setTimeout(() => setUndoNotice((current) =>
+      current?.id === undoNotice.id ? null : current,
+    ), 5000);
+    return () => window.clearTimeout(timer);
+  }, [undoNotice]);
+
+  function publishUndo(label: string, undo: () => Promise<unknown>) {
+    setUndoError(null);
+    setUndoNotice({ id: ++undoSequence.current, label, undo });
+  }
+
+  function publishDeleteUndo(leadId: string) {
+    setUndoError(null);
+    setUndoNotice({ id: ++undoSequence.current, label: 'Lead excluído', restoreLeadId: leadId });
+  }
+
+  async function runUndo(restore?: () => Promise<unknown>) {
+    if (!undoNotice || undoInFlight.current) return;
+    undoInFlight.current = true;
+    setUndoBusy(true);
+    const active = undoNotice;
+    const action = restore ?? active.undo;
+    if (!action) return;
+    try {
+      await action();
+      setUndoNotice((current) => current?.id === active.id ? null : current);
+      setUndoError(null);
+    } catch {
+      setUndoError('Não foi possível desfazer. Tente novamente.');
+    } finally {
+      undoInFlight.current = false;
+      setUndoBusy(false);
+    }
+  }
+
+  async function moveWithUndo(payload: MoveLeadPayload) {
+    const rows = boardQuery.data?.leads ?? [];
+    const previous = rows.find((row) => row.id === payload.leadId);
+    const sourceColumn = previous
+      ? rows.filter((row) => row.stageId === previous.stageId).sort((a, b) => a.position - b.position)
+      : [];
+    const sourceIndex = sourceColumn.findIndex((row) => row.id === payload.leadId);
+    await moveLead.mutateAsync(payload);
+    if (!previous || sourceIndex < 0 || payload.saleId ||
+      stageOpensConversion(stages.find((stage) => stage.id === payload.toStageId))) return;
+    publishUndo('Lead movido', () => moveLead.mutateAsync({
+      leadId: payload.leadId,
+      toStageId: previous.stageId,
+      toIndex: sourceIndex,
+      ...(previous.lostReason ? { reason: previous.lostReason } : {}),
+    }));
+  }
+
+  async function saveWithUndo(payload: SaveLeadPayload | SaveContactLeadPayload) {
+    const previous = editingLead?.id === payload.id ? editingLead : null;
+    await saveLead.mutateAsync(payload);
+    if (previous) publishUndo('Lead editado', () => saveLead.mutateAsync(
+      fieldSet === 'contact' ? leadToContactSeed(previous) : leadToSeed(previous),
+    ));
+  }
 
   const lookups = React.useMemo(
     () => buildLabelLookups({ clients, people, products }),
@@ -195,6 +270,7 @@ export function LeadsBoardContainer({
 
   async function confirmDelete(lead: SalesOpsLead) {
     await deleteLead.mutateAsync(lead.id);
+    publishDeleteUndo(lead.id);
     // The edit dialog is modal, so a delete confirmed while it is open came from
     // it: its lead is gone, so the form closes with the confirmation.
     if (editingLead?.id === lead.id) setDialogOpen(false);
@@ -260,7 +336,7 @@ export function LeadsBoardContainer({
         onLoadMore={() => {
           void boardQuery.fetchNextPage();
         }}
-        onMoveLead={(payload) => moveLead.mutate(payload)}
+        onMoveLead={(payload) => { void moveWithUndo(payload).catch(() => undefined); }}
         // The leads edition has no proposta, so the board is never handed the
         // conversion door, even if a conversion-kind etapa somehow exists:
         // `moveTargetsFor` then excludes it and `emitMove` returns early.
@@ -291,7 +367,7 @@ export function LeadsBoardContainer({
           key={dialogSeed?.id ?? 'novo'}
           onDelete={requestDeleteFromForm}
           onOpenChange={setDialogOpen}
-          onSubmit={(payload) => saveLead.mutate(payload)}
+          onSubmit={saveWithUndo}
           open
           pending={saveLead.isPending}
           products={productOptions}
@@ -310,7 +386,7 @@ export function LeadsBoardContainer({
           // The dialog awaits the save: it closes on success and, on a rejection
           // (400 no_open_stage included), stays open with the typed values and
           // the mapped error inline (D-07.1c).
-          onSubmit={(payload) => saveLead.mutateAsync(payload)}
+          onSubmit={saveWithUndo}
           open
           pending={saveLead.isPending}
           sellers={sellers}
@@ -336,6 +412,10 @@ export function LeadsBoardContainer({
           open
         />
       ) : null}
+      {undoNotice?.restoreLeadId ? (
+        <RestoreUndoNotice leadId={undoNotice.restoreLeadId} busy={undoBusy} onUndo={(restore) => { void runUndo(restore); }} />
+      ) : undoNotice ? <UndoNotice label={undoNotice.label} busy={undoBusy} onUndo={() => { void runUndo(); }} /> : null}
+      {undoError ? <p className="fixed bottom-20 right-6 z-50 rounded-lg border bg-background px-4 py-3 text-destructive shadow-lg" role="alert">{undoError}</p> : null}
     </>
   );
 }

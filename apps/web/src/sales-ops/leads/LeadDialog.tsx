@@ -51,7 +51,7 @@ export type LeadDialogProps = {
    * deprecated `is_seller` mirror must never be read.
    */
   sellers: ComboboxOption[];
-  onSubmit: (payload: SaveLeadPayload) => void;
+  onSubmit: (payload: SaveLeadPayload) => Promise<unknown> | void;
   pending?: boolean;
   /**
    * Asks for this lead's delete confirmation (the container's shared
@@ -115,6 +115,8 @@ export function LeadDialog({
   const [sellerPersonId, setSellerPersonId] = React.useState<string | null>(
     initial?.sellerPersonId ?? null,
   );
+  const [saveError, setSaveError] = React.useState<string | null>(null);
+  const [submitting, setSubmitting] = React.useState(false);
 
   const clientLabel = clients.find((option) => option.value === clientId)?.label ?? '';
   const resolvedCompanyName = clientId ? clientLabel : companyText.trim();
@@ -151,12 +153,15 @@ export function LeadDialog({
     setFreeProductName('');
   }
 
-  function save() {
-    if (blocked !== null) return;
+  async function save() {
+    if (blocked !== null || submitting) return;
     const payloadProducts: SaveLeadProductPayload[] = rows.map((row) =>
       row.productId ? { productId: row.productId } : { productName: row.label },
     );
-    onSubmit({
+    setSubmitting(true);
+    setSaveError(null);
+    try {
+      await onSubmit({
       ...(initial?.id ? { id: initial.id } : {}),
       contactName: contactName.trim(),
       clientId,
@@ -165,7 +170,12 @@ export function LeadDialog({
       description: description.trim() === '' ? null : description.trim(),
       sellerPersonId,
       products: payloadProducts,
-    });
+      });
+    } catch {
+      setSaveError('Não foi possível salvar o lead. Tente novamente.');
+      setSubmitting(false);
+      return;
+    }
     onOpenChange(false);
   }
 
@@ -371,6 +381,7 @@ export function LeadDialog({
               {LEAD_DELETE_COPY.formButton}
             </button>
           ) : null}
+          {saveError ? <p className={blockedNoticeClass} role="alert">{saveError}</p> : null}
           <button
             className={secondaryButtonClass}
             onClick={() => onOpenChange(false)}
@@ -381,7 +392,7 @@ export function LeadDialog({
           <button
             className={primaryButtonClass}
             data-lead-save="true"
-            disabled={blocked !== null || pending}
+            disabled={blocked !== null || pending || submitting}
             onClick={save}
             type="button"
           >
