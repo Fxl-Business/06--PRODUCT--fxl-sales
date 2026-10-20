@@ -390,14 +390,14 @@ describe('proposta deep link', () => {
   });
 
   it('opens the proposta from a converted lead card and returns to the board on close', async () => {
-    await renderHistory(['/operacional/leads'], team);
+    await renderHistory(['/operacional/funil'], team);
 
     await click(buttonIn(container, 'Abrir a proposta P-003'));
     expect(pathname()).toBe(`/operacional/vendas/${SALE_ID}`);
     expect(bodyText()).toContain('Proposta P-003');
 
     await click(buttonIn(document.body, 'Fechar'));
-    expect(pathname()).toBe('/operacional/leads');
+    expect(pathname()).toBe('/operacional/funil');
     expect(bodyText()).not.toContain('Proposta P-003');
   });
 });

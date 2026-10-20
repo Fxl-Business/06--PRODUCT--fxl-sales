@@ -160,6 +160,10 @@ vi.mock('../leads/LeadsBoardContainer', () => ({
   },
 }));
 
+vi.mock('../leads/hooks', () => ({
+  useLeadStages: () => ({ data: [], isPending: false, isError: false }),
+}));
+
 vi.mock('../leads/LeadStagesContainer', () => ({
   LeadStagesContainer: (props: Record<string, unknown>) => {
     containerProps.stages(props);
@@ -254,11 +258,11 @@ function headerText(): string {
 }
 
 describe('lead screens inside the Sales Ops shell', () => {
-  it('mounts the leads board at operacional/leads with the seller filter offered', async () => {
-    await renderRoute('/operacional/leads', ['admin']);
+  it('mounts the leads board at operacional/funil with the seller filter offered', async () => {
+    await renderRoute('/operacional/funil', ['admin']);
 
     expect(container.querySelector('[data-leads-board]')).not.toBeNull();
-    expect(container.querySelector('h1')?.textContent?.trim()).toBe('Prospecção');
+    expect(container.querySelector('h1')?.textContent?.trim()).toBe('Funil');
     expect(boardProps().showSellerFilter).toBe(true);
     // Active AND carrying `vendedor`. The finder-only and the archived vendedor
     // fixtures are the two rows a wrong derivation lets through.
@@ -267,11 +271,11 @@ describe('lead screens inside the Sales Ops shell', () => {
     ]);
   });
 
-  it('mounts the same board at meus-dados/leads without the seller filter', async () => {
-    await renderRoute('/meus-dados/leads', ['seller']);
+  it('mounts the same board at meus-dados/funil without the seller filter', async () => {
+    await renderRoute('/meus-dados/funil', ['seller']);
 
     expect(container.querySelector('[data-leads-board]')).not.toBeNull();
-    expect(container.querySelector('h1')?.textContent?.trim()).toBe('Minha prospecção');
+    expect(container.querySelector('h1')?.textContent?.trim()).toBe('Funil');
     // The scope is the SERVER's. This boolean only decides whether an admin is
     // offered the narrowing picker; a constant `true` would hand a seller a
     // vendedor control over a board the server has already narrowed.
@@ -294,7 +298,7 @@ describe('lead screens inside the Sales Ops shell', () => {
   });
 
   it('offers no proposta header action on either lead screen', async () => {
-    await renderRoute('/operacional/leads', ['admin']);
+    await renderRoute('/operacional/funil', ['admin']);
     expect(headerText()).not.toContain('Nova proposta');
     expect(headerText()).not.toContain('Novo produto');
     expect(headerText()).not.toContain('Nova área');
@@ -337,16 +341,16 @@ function workspaceMenuLabels(): string[] {
 describe('the leads edition inside the Sales Ops shell', () => {
   const gestor: AppRole[] = ['admin', 'seller', 'finder'];
 
-  it('lands a leads-edition gestor on operacional/leads', async () => {
+  it('lands a leads-edition gestor on operacional/funil', async () => {
     await renderRoute('/', gestor, 'leads');
-    expect(locationPath()).toBe('/operacional/leads');
+    expect(locationPath()).toBe('/operacional/funil');
     expect(container.querySelector('[data-leads-board]')).not.toBeNull();
-    expect(container.querySelector('h1')?.textContent?.trim()).toBe('Prospecção');
+    expect(container.querySelector('h1')?.textContent?.trim()).toBe('Funil');
   });
 
   it('redirects operacional/vendas to the gestor default', async () => {
     await renderRoute('/operacional/vendas', gestor, 'leads');
-    expect(locationPath()).toBe('/operacional/leads');
+    expect(locationPath()).toBe('/operacional/funil');
     expect(headerText()).not.toContain('Nova proposta');
   });
 
@@ -357,16 +361,16 @@ describe('the leads edition inside the Sales Ops shell', () => {
       '/cadastros/produtos',
       '/cadastros/funcoes',
       '/cadastros/geral',
-      '/meus-dados/leads',
+      '/meus-dados/funil',
       '/meus-dados/vendedores',
     ]) {
       await renderRoute(path, gestor, 'leads');
-      expect(locationPath(), path).toBe('/operacional/leads');
+      expect(locationPath(), path).toBe('/operacional/funil');
     }
   });
 
   it('shows the gestor only Prospecção in operacional', async () => {
-    await renderRoute('/operacional/leads', gestor, 'leads');
+    await renderRoute('/operacional/funil', gestor, 'leads');
     expect(navLabel('Prospecção')).not.toBeNull();
     expect(navLabel('Propostas')).toBeNull();
     expect(navLabel('Comissões')).toBeNull();
@@ -384,7 +388,7 @@ describe('the leads edition inside the Sales Ops shell', () => {
   });
 
   it('offers only Operacional and Cadastros under Trocar painel', async () => {
-    await renderRoute('/operacional/leads', gestor, 'leads');
+    await renderRoute('/operacional/funil', gestor, 'leads');
     await openWorkspaceMenu();
     expect(workspaceMenuLabels()).toEqual(['Operacional', 'Cadastros']);
 
@@ -402,15 +406,15 @@ describe('the leads edition inside the Sales Ops shell', () => {
     expect(locationPath()).toBe('/cadastros/pessoas');
   });
 
-  it('lands a leads-edition vendedor on meus-dados/leads only', async () => {
+  it('lands a leads-edition vendedor on meus-dados/funil only', async () => {
     await renderRoute('/', ['seller'], 'leads');
-    expect(locationPath()).toBe('/meus-dados/leads');
+    expect(locationPath()).toBe('/meus-dados/funil');
     expect(boardProps().showSellerFilter).toBe(false);
     expect(navLabel('Meu painel')).toBeNull();
     expect(navLabel('Comissões')).toBeNull();
 
     await renderRoute('/meus-dados/vendedores', ['seller'], 'leads');
-    expect(locationPath()).toBe('/meus-dados/leads');
+    expect(locationPath()).toBe('/meus-dados/funil');
   });
 
   it('full edition control: the same gestor lands on tatico/dashboard', async () => {
@@ -438,7 +442,7 @@ describe('Leads excluídos inside the Sales Ops shell', () => {
   );
 
   it('mounts it nowhere else', async () => {
-    for (const path of ['/cadastros/etapas', '/cadastros/pessoas', '/operacional/leads']) {
+    for (const path of ['/cadastros/etapas', '/cadastros/pessoas', '/operacional/funil']) {
       await renderRoute(path, ['admin']);
       expect(container.querySelector('[data-deleted-leads-container]'), path).toBeNull();
     }
@@ -446,7 +450,7 @@ describe('Leads excluídos inside the Sales Ops shell', () => {
 
   it.each([
     ['full', '/meus-dados/vendedores'],
-    ['leads', '/meus-dados/leads'],
+    ['leads', '/meus-dados/funil'],
   ] as const)('a seller in the %s edition never reaches it', async (edition, landing) => {
     await renderRoute('/cadastros/leads-excluidos', ['seller'], edition);
     expect(locationPath()).toBe(landing);
@@ -465,7 +469,7 @@ describe('the page content area around the leads board', () => {
   const contentArea = (selector: string) => container.querySelector(selector)?.parentElement;
 
   it('is a flex column on both lead routes, so the Quadro can fill it', async () => {
-    for (const path of ['/operacional/leads', '/meus-dados/leads']) {
+    for (const path of ['/operacional/funil', '/meus-dados/funil']) {
       await renderRoute(path, ['admin', 'seller']);
       const area = contentArea('[data-leads-board]');
       expect(area?.className, path).toContain('overflow-y-auto');
@@ -510,18 +514,18 @@ describe('the sidebar on a narrow screen', () => {
 
   it('starts on the icon rail on a phone or an upright tablet', async () => {
     narrow = true;
-    await renderRoute('/operacional/leads', ['admin']);
+    await renderRoute('/operacional/funil', ['admin']);
     expect(expandButton()).not.toBeNull();
     expect(collapseButton()).toBeNull();
   });
 
   it('starts expanded on a wide screen', async () => {
-    await renderRoute('/operacional/leads', ['admin']);
+    await renderRoute('/operacional/funil', ['admin']);
     expect(collapseButton()).not.toBeNull();
   });
 
   it('follows the screen across the breakpoint', async () => {
-    await renderRoute('/operacional/leads', ['admin']);
+    await renderRoute('/operacional/funil', ['admin']);
     expect(changeListeners.length).toBeGreaterThan(0);
     await act(async () => changeListeners.forEach((listener) => listener({ matches: true })));
     expect(expandButton()).not.toBeNull();

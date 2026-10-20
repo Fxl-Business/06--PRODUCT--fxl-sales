@@ -4,12 +4,12 @@ import { type LeadFieldSet, leadFieldSet } from '@fxl-sales/shared-utils/sales-e
 import { useAuthProfile, useSalesEdition } from '@/auth/react';
 import type { ComboboxOption } from '@/components/ui/combobox';
 import { Skeleton } from '@/components/ui/skeleton';
-import { buildSalesOpsPath } from '../navigation';
+import { buildLeadStagePath, buildSalesOpsPath, type SalesOpsWorkspace } from '../navigation';
 import type { SalesOpsClient, SalesOpsPerson, SalesOpsProduct } from '../types';
 import type { SaveContactLeadPayload, SaveLeadPayload } from './api';
 import { buildLabelLookups } from './board-labels';
 import { mutedStateClass } from './board-ui';
-import { leadIsConverted } from './calculations';
+import { boardStages, leadIsConverted } from './calculations';
 import { ContactLeadDialog } from './ContactLeadDialog';
 import { leadToContactSeed } from './contact-lead';
 import { LeadDeleteDialog } from './LeadDeleteDialog';
@@ -61,6 +61,9 @@ function boardLoadErrorCopy(error: unknown, fieldSet: LeadFieldSet): string {
 }
 
 export type LeadsBoardContainerProps = {
+  routedMode?: 'board' | 'stage';
+  selectedStageId?: string;
+  workspace?: SalesOpsWorkspace;
   clients: SalesOpsClient[];
   people: SalesOpsPerson[];
   products: SalesOpsProduct[];
@@ -111,6 +114,9 @@ function leadToSeed(lead: SalesOpsLead): SaveLeadPayload {
 }
 
 export function LeadsBoardContainer({
+  routedMode,
+  selectedStageId,
+  workspace,
   clients,
   people,
   products,
@@ -218,11 +224,18 @@ export function LeadsBoardContainer({
     return <p className={mutedStateClass}>{copy}</p>;
   }
 
+  if (routedMode === 'stage' && !boardStages(stages).some((stage) => stage.id === selectedStageId)) {
+    return <p className={mutedStateClass}>Esta etapa não está disponível.</p>;
+  }
+
   // One clock per render, handed down, so no presentational component reads it.
 
   return (
     <>
       <LeadsBoard
+        routedMode={routedMode}
+        selectedStageId={selectedStageId}
+        onOpenStage={workspace ? (stageId) => navigate(buildLeadStagePath(workspace, stageId)) : undefined}
         canManageStages={canManageStages}
         fieldSet={fieldSet}
         hasMore={boardQuery.data?.hasMore ?? false}

@@ -153,6 +153,7 @@ import { buildLeadConversionPrefill, findClientByName } from './leads/conversion
 import type { LeadConversionItem, LeadConversionPrefill } from './leads/conversion';
 import type { LeadConversionRequest } from './leads/LeadsBoard';
 import { LeadsBoardContainer } from './leads/LeadsBoardContainer';
+import { LeadSidebarNavigation } from './leads/LeadSidebarNavigation';
 import { isNarrowViewport, subscribeNarrowViewport } from './narrow-viewport';
 import { LeadStagesContainer } from './leads/LeadStagesContainer';
 import { DeletedLeadsContainer } from './leads/DeletedLeadsContainer';
@@ -506,6 +507,10 @@ function titleForView(view: SalesOpsView, workspace: SalesOpsWorkspace) {
       subtitle: personal
         ? 'Seus leads em negociação, por etapa, com o tempo parado em cada uma'
         : 'Leads em negociação por etapa, com vendedor responsável e tempo parado',
+    },
+    funil: {
+      title: 'Funil',
+      subtitle: 'Todos os leads de prospecção por etapa',
     },
     etapas: {
       title: 'Etapas do funil',
@@ -1715,6 +1720,7 @@ export function SalesOpsApp() {
   const headerAction =
     view === 'geral' ||
     view === 'leads' ||
+    view === 'funil' ||
     view === 'etapas' ||
     view === 'importacao' ||
     view === 'leads-excluidos'
@@ -1941,6 +1947,15 @@ export function SalesOpsApp() {
           }`}
         >
           {navItems.map((item) => {
+            if (item.id === 'leads') {
+              return <LeadSidebarNavigation
+                activeStageId={view === 'leads' ? resolution.route.stageId : undefined}
+                collapsed={sidebarCollapsed}
+                key={item.id}
+                onExpand={() => setSidebarCollapsed(false)}
+                workspace={workspace}
+              />;
+            }
             const Icon = item.icon;
             const active = view === item.id;
             const openPayablesCount = bootstrap.payables.filter((payable) => payable.status === 'open').length;
@@ -2182,7 +2197,7 @@ export function SalesOpsApp() {
           */}
           <div
             className={`min-h-0 flex-1 overflow-y-auto px-3 py-4 md:px-[22px] md:py-5${
-              view === 'leads' ? ' flex flex-col' : ''
+              view === 'funil' ? ' flex flex-col' : ''
             }`}
           >
             <MutationErrorBanner
@@ -2347,7 +2362,7 @@ export function SalesOpsApp() {
                     onEdit={(funcao) => setModal({ kind: 'funcao', funcao })}
                   />
                 ) : null}
-                {view === 'leads' ? (
+                {(view === 'leads' || view === 'funil') ? (
                   /*
                     ONE component for both routes. The difference between the team
                     board and a seller's board is NOT this boolean - the scope is
@@ -2360,6 +2375,9 @@ export function SalesOpsApp() {
                     picker on another page.
                   */
                   <LeadsBoardContainer
+                    routedMode={view === 'funil' ? 'board' : 'stage'}
+                    selectedStageId={resolution.route.stageId}
+                    workspace={workspace}
                     clients={persistedBootstrap.clients}
                     onCreateClient={async (name) => {
                       const client = await createClientByName(name);

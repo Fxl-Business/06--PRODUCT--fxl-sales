@@ -36,6 +36,7 @@ export type SalesOpsView =
   | 'funcoes'
   | 'geral'
   | 'leads'
+  | 'funil'
   | 'etapas'
   | 'importacao'
   | 'leads-excluidos';
@@ -58,6 +59,8 @@ export type SalesOpsRoute = Readonly<{
   view: SalesOpsView;
   /** The open proposta. Only ever present on the `vendas` view. */
   saleId?: string;
+  /** The selected lead stage. Only present on the `leads` view. */
+  stageId?: string;
 }>;
 
 export type SalesOpsRouteParams = Readonly<{
@@ -85,6 +88,7 @@ const operational: SalesOpsNavigationItem[] = [
     rewrites where every `Trocar painel` click arrives.
   */
   { id: 'leads', label: 'Prospecção', icon: LayoutGrid },
+  { id: 'funil', label: 'Funil', icon: LayoutGrid },
 ];
 
 const cadastros: SalesOpsNavigationItem[] = [
@@ -114,6 +118,7 @@ const meusDadosSeller: SalesOpsNavigationItem[] = [
     is deliberately byte-unchanged.
   */
   { id: 'leads', label: 'Minha prospecção', icon: LayoutGrid },
+  { id: 'funil', label: 'Funil', icon: LayoutGrid },
 ];
 
 const meusDadosFinder: SalesOpsNavigationItem[] = [
@@ -125,10 +130,12 @@ const meusDadosFinder: SalesOpsNavigationItem[] = [
   THE LEADS EDITION (Construbom). Three short lists, never a filter over the full ones:
   a filter would make every full-edition label and order depend on the leads rules, and
   the full edition must stay byte-identical (oracle: navigation-edition.test.ts).
-  `[0]` is still the landing route of each workspace.
+  Prospecção is first in the sidebar; `getDefaultSalesOpsRoute` lands on Funil
+  because the group itself has no stage to display.
 */
 const leadsEditionOperational: SalesOpsNavigationItem[] = [
   { id: 'leads', label: 'Prospecção', icon: LayoutGrid },
+  { id: 'funil', label: 'Funil', icon: LayoutGrid },
 ];
 
 /**
@@ -147,7 +154,8 @@ const leadsEditionCadastros: SalesOpsNavigationItem[] = [
 ];
 
 const leadsEditionMeusDadosSeller: SalesOpsNavigationItem[] = [
-  { id: 'leads', label: 'Minha prospecção', icon: LayoutGrid },
+  { id: 'leads', label: 'Prospecção', icon: LayoutGrid },
+  { id: 'funil', label: 'Funil', icon: LayoutGrid },
 ];
 
 export const salesOpsWorkspaces: Array<{
@@ -253,7 +261,16 @@ export function getSalesOpsNavigation(
 
 export function buildSalesOpsPath(route: SalesOpsRoute): string {
   const base = `/${route.workspace}/${route.view}`;
-  return route.saleId === undefined ? base : `${base}/${encodeURIComponent(route.saleId)}`;
+  const segment = route.view === 'leads' ? route.stageId : route.saleId;
+  return segment === undefined ? base : `${base}/${encodeURIComponent(segment)}`;
+}
+
+export function buildLeadStagePath(workspace: SalesOpsWorkspace, stageId: string): string {
+  return buildSalesOpsPath({ workspace, view: 'leads', stageId });
+}
+
+export function buildLeadFunnelPath(workspace: SalesOpsWorkspace): string {
+  return buildSalesOpsPath({ workspace, view: 'funil' });
 }
 
 /** The Finance `deepLinkPath` (audit 11.4): the team proposta detail. */
@@ -268,14 +285,23 @@ export function getDefaultSalesOpsRoute(
 ): SalesOpsRoute {
   const visible = getVisibleWorkspaces(roles, edition);
 
+  // Prospecção leads the sidebar, while Funil remains the landing page because
+  // a bare leads URL has no stage to show and redirects there.
+  const landingView = (target: SalesOpsWorkspace) => {
+    const items = getSalesOpsNavigation(target, roles, edition);
+    return items[0]?.id === 'leads' && items.some((item) => item.id === 'funil')
+      ? 'funil'
+      : items[0]?.id;
+  };
+
   if (preferredWorkspace && visible.includes(preferredWorkspace)) {
-    const preferredView = getSalesOpsNavigation(preferredWorkspace, roles, edition)[0]?.id;
+    const preferredView = landingView(preferredWorkspace);
     if (preferredView) return { workspace: preferredWorkspace, view: preferredView };
   }
 
   const workspace = visible[0];
   if (workspace) {
-    const view = getSalesOpsNavigation(workspace, roles, edition)[0]?.id;
+    const view = landingView(workspace);
     if (view) return { workspace, view };
   }
 
@@ -317,11 +343,16 @@ export function resolveSalesOpsRoute(
     : undefined;
 
   if (workspace && view) {
+    if (view === 'leads' && !params.saleId) {
+      const route: SalesOpsRoute = { workspace, view: 'funil' };
+      return { route, path: buildSalesOpsPath(route), redirect: true };
+    }
     // The proposta id is honoured on the `vendas` view only. Never write the key
     // as `saleId: undefined`: a present-but-undefined key trips `toStrictEqual`.
     const saleId = view === 'vendas' && params.saleId ? params.saleId : undefined;
-    const route: SalesOpsRoute = saleId === undefined ? { workspace, view } : { workspace, view, saleId };
-    const droppedSaleId = params.saleId !== undefined && saleId === undefined;
+    const stageId = view === 'leads' && params.saleId ? params.saleId : undefined;
+    const route: SalesOpsRoute = saleId !== undefined ? { workspace, view, saleId } : stageId !== undefined ? { workspace, view, stageId } : { workspace, view };
+    const droppedSaleId = params.saleId !== undefined && saleId === undefined && stageId === undefined;
     // An aliased view or a dropped id differs from what the URL asked for, which is
     // exactly when the caller must rewrite the address bar. A canonical route stays `false`.
     return {

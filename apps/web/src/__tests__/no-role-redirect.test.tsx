@@ -442,10 +442,10 @@ describe('the /no-role redirect cannot ping-pong with the SalesOpsApp redirect',
 
 describe('the leads edition shares one predicate between NoRoleGuard and SalesOpsApp', () => {
   it.each([
-    [['admin', 'seller', 'finder'] as AppRole[], '/operacional/leads'],
-    [['admin'] as AppRole[], '/operacional/leads'],
-    [['seller'] as AppRole[], '/meus-dados/leads'],
-    [['seller', 'finder'] as AppRole[], '/meus-dados/leads'],
+    [['admin', 'seller', 'finder'] as AppRole[], '/operacional/funil'],
+    [['admin'] as AppRole[], '/operacional/funil'],
+    [['seller'] as AppRole[], '/meus-dados/funil'],
+    [['seller', 'finder'] as AppRole[], '/meus-dados/funil'],
   ])('sends a leads-edition %j operator from /no-role to %s in exactly two navigations', async (roles, destination) => {
     profileEdition = 'leads';
     profileRoles = roles;
