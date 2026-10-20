@@ -144,21 +144,28 @@ export function deleteLead(
   });
 }
 
-/** Admin-only at the route; the service takes no scope. */
+/** Admins restore any org lead; others restore only their own deletion. */
 export function restoreLead(
   db: Db,
   orgId: string,
   id: string,
+  isAdmin: boolean,
   actor: LeadActor,
 ): Promise<RestoreLeadResult> {
   return withTenant(db, orgId, async (tx) => {
+    const restoreConditions = and(
+      eq(salesOpsLeads.orgId, orgId),
+      eq(salesOpsLeads.id, id),
+      deletedLeadCondition(),
+      ...(isAdmin ? [] : [eq(salesOpsLeads.deletedByUserId, actor.userId)]),
+    );
     // A restore writes stage_id and position: same lock order as every board writer.
     await lockLeadBoard(tx, orgId);
 
     const [current] = await tx
       .select()
       .from(salesOpsLeads)
-      .where(and(eq(salesOpsLeads.orgId, orgId), eq(salesOpsLeads.id, id), deletedLeadCondition()))
+      .where(restoreConditions)
       .limit(1)
       .for('update');
     // A live, unknown or other-org id: there is nothing to restore.
@@ -198,7 +205,7 @@ export function restoreLead(
         ...(stageChanged ? { stageChangedAt: new Date(), lostReason: null } : {}),
         updatedAt: new Date(),
       })
-      .where(and(eq(salesOpsLeads.orgId, orgId), eq(salesOpsLeads.id, id), deletedLeadCondition()));
+      .where(restoreConditions);
     // Appended at the end; the renumber keeps the column dense even if it was not.
     await renumberStage(tx, orgId, target.id, null);
 

@@ -465,7 +465,7 @@ describe('sales operations leads: the lixeira', () => {
     expect(c.position).toBe(2);
 
     const restorer: LeadActor = { userId: 'hub_admin_2', name: 'Outra Gestora' };
-    const result = await restoreLead(db, w.orgId, a.id, restorer);
+    const result = await restoreLead(db, w.orgId, a.id, true, restorer);
     if (!result.ok) throw new Error('restore refused');
     const restored = result.lead;
     expect(restored.stageId).toBe(w.open.id);
@@ -496,8 +496,8 @@ describe('sales operations leads: the lixeira', () => {
     expect(second.prev_hash).toBe(entries[0]!.entry_hash);
     for (const entry of entries) expectEntryHashValid(entry);
 
-    expect(await restoreLead(db, w.orgId, a.id, restorer)).toEqual(NOT_FOUND);
-    expect(await restoreLead(db, w.orgId, randomUUID(), restorer)).toEqual(NOT_FOUND);
+    expect(await restoreLead(db, w.orgId, a.id, true, restorer)).toEqual(NOT_FOUND);
+    expect(await restoreLead(db, w.orgId, randomUUID(), true, restorer)).toEqual(NOT_FOUND);
 
     // A lost card keeps its reason through a delete and a restore.
     okLead(
@@ -510,7 +510,7 @@ describe('sales operations leads: the lixeira', () => {
       ),
     );
     expect(await deleteLead(db, w.orgId, b.id, ADMIN_SCOPE, ADMIN_ACTOR)).toEqual({ ok: true });
-    const back = await restoreLead(db, w.orgId, b.id, restorer);
+    const back = await restoreLead(db, w.orgId, b.id, true, restorer);
     if (!back.ok) throw new Error('restore refused');
     expect(back.lead.stageId).toBe(w.lost.id);
     expect(back.lead.lostReason).toBe('sem verba');
@@ -520,9 +520,33 @@ describe('sales operations leads: the lixeira', () => {
     const w = await fullWorld('probe-restore');
     const lead = await fullLead(w.orgId, 'Sentinela restore');
     expect(await deleteLead(db, w.orgId, lead.id, ADMIN_SCOPE, ADMIN_ACTOR)).toEqual({ ok: true });
-    await withProbe(lead.id, () => expectProbeRejection(restoreLead(db, w.orgId, lead.id, ADMIN_ACTOR)));
+    await withProbe(lead.id, () => expectProbeRejection(restoreLead(db, w.orgId, lead.id, true, ADMIN_ACTOR)));
     expect((await rowOf(lead.id)).deleted_at).not.toBeNull();
     expect(await auditFor(lead.id)).toHaveLength(1);
+  });
+
+  it('a seller restores only a lead they deleted in their own organization', async () => {
+    const w = await fullWorld('seller-restore');
+    const own = await fullLead(w.orgId, 'Ana own', w.ana.id);
+    const adminDeleted = await fullLead(w.orgId, 'Admin deleted', w.ana.id);
+    const otherOrg = await fullWorld('seller-restore-other');
+    const foreign = await fullLead(otherOrg.orgId, 'Foreign', otherOrg.ana.id);
+    const anaActor: LeadActor = { userId: 'hub_ana', name: 'Ana Martins' };
+    const brunoActor: LeadActor = { userId: 'hub_bruno', name: 'Bruno' };
+
+    expect(await deleteLead(db, w.orgId, own.id, sellerScope('hub_ana'), anaActor)).toEqual({ ok: true });
+    expect(await deleteLead(db, w.orgId, adminDeleted.id, ADMIN_SCOPE, ADMIN_ACTOR)).toEqual({ ok: true });
+    expect(await deleteLead(db, otherOrg.orgId, foreign.id, ADMIN_SCOPE, ADMIN_ACTOR)).toEqual({ ok: true });
+
+    expect(await restoreLead(db, w.orgId, own.id, false, brunoActor)).toEqual(NOT_FOUND);
+    expect(await restoreLead(db, w.orgId, adminDeleted.id, false, anaActor)).toEqual(NOT_FOUND);
+    expect(await restoreLead(db, w.orgId, foreign.id, false, anaActor)).toEqual(NOT_FOUND);
+    expect(await restoreLead(db, w.orgId, randomUUID(), false, anaActor)).toEqual(NOT_FOUND);
+    expect(await restoreLead(db, w.orgId, own.id, false, anaActor)).toMatchObject({ ok: true });
+    expect(await restoreLead(db, w.orgId, own.id, false, anaActor)).toEqual(NOT_FOUND);
+    expect((await auditFor(own.id)).map((entry) => entry.action)).toEqual(['lead.deleted', 'lead.restored']);
+    expect(await restoreLead(db, w.orgId, adminDeleted.id, true, ADMIN_ACTOR)).toMatchObject({ ok: true });
+    expect(await restoreLead(db, otherOrg.orgId, foreign.id, true, ADMIN_ACTOR)).toMatchObject({ ok: true });
   });
 
   it('a lead whose etapa was archived restores into the first open etapa; with none the answer is no_open_stage', async () => {
@@ -538,7 +562,7 @@ describe('sales operations leads: the lixeira', () => {
     const archived = await updateLeadStage(db, w.orgId, w.second.id, { status: 'archived' });
     expect(archived).toMatchObject({ status: 'archived' });
 
-    const result = await restoreLead(db, w.orgId, lead.id, ADMIN_ACTOR);
+    const result = await restoreLead(db, w.orgId, lead.id, true, ADMIN_ACTOR);
     if (!result.ok) throw new Error('restore refused');
     expect(result.lead.stageId).toBe(w.open.id);
     expect(result.lead.position).toBe(2);
@@ -567,8 +591,8 @@ describe('sales operations leads: the lixeira', () => {
     ).toEqual({ ok: true });
     await updateLeadStage(db, org2, unico.id, { status: 'archived' });
 
-    await expect(restoreLead(db, org2, contact.id, ADMIN_ACTOR)).rejects.toBeInstanceOf(LeadInputError);
-    await expect(restoreLead(db, org2, contact.id, ADMIN_ACTOR)).rejects.toMatchObject({ code: 'no_open_stage' });
+    await expect(restoreLead(db, org2, contact.id, true, ADMIN_ACTOR)).rejects.toBeInstanceOf(LeadInputError);
+    await expect(restoreLead(db, org2, contact.id, true, ADMIN_ACTOR)).rejects.toMatchObject({ code: 'no_open_stage' });
     expect((await rowOf(contact.id)).deleted_at).not.toBeNull();
     expect(await auditFor(contact.id)).toHaveLength(1);
     const stageCount = await adminClient<{ n: number }[]>`
@@ -658,12 +682,12 @@ describe('sales operations leads: the lixeira', () => {
     expect((await listDeletedLeads(db, w.orgId, {})).items.map((item) => item.id)).not.toContain(lb.id);
 
     expect(await deleteLead(db, wb.orgId, live.id, ADMIN_SCOPE, ADMIN_ACTOR)).toEqual(NOT_FOUND);
-    expect(await restoreLead(db, wb.orgId, l1.id, ADMIN_ACTOR)).toEqual(NOT_FOUND);
+    expect(await restoreLead(db, wb.orgId, l1.id, true, ADMIN_ACTOR)).toEqual(NOT_FOUND);
     expect((await rowOf(live.id)).deleted_at).toBeNull();
     expect((await rowOf(l1.id)).deleted_at).not.toBeNull();
   });
 
-  it('the real router: a vendedor deletes with 204, the lixeira answers him 403, the admin lists and restores', async () => {
+  it('the real router: a vendedor deletes and restores, the lixeira stays admin-only', async () => {
     const w = await fullWorld('router');
     const lead = await fullLead(w.orgId, 'Rota', w.ana.id);
 
@@ -692,9 +716,6 @@ describe('sales operations leads: the lixeira', () => {
     expect((await ana.request(`/leads/${lead.id}`)).status).toBe(404);
 
     const forbidden = { error: 'forbidden', reason: 'admin_role_required' };
-    const noRestore = await ana.request(`/leads/${lead.id}/restore`, { method: 'POST' });
-    expect(noRestore.status).toBe(403);
-    expect(await noRestore.json()).toEqual(forbidden);
     const noList = await ana.request('/leads/deleted');
     expect(noList.status).toBe(403);
     expect(await noList.json()).toEqual(forbidden);
@@ -709,11 +730,12 @@ describe('sales operations leads: the lixeira', () => {
     expect(body.items[0]!.deletedByName).toBe('Ana Martins');
     expect(body.nextCursor).toBeNull();
 
-    const restored = await admin.request(`/leads/${lead.id}/restore`, { method: 'POST' });
+    const restored = await ana.request(`/leads/${lead.id}/restore`, { method: 'POST' });
     expect(restored.status).toBe(200);
     const restoredBody = (await restored.json()) as { lead: { id: string; sellerPersonId: string | null } };
     expect(restoredBody.lead.id).toBe(lead.id);
     expect(restoredBody.lead.sellerPersonId).toBe(w.ana.id);
     expect((await ana.request(`/leads/${lead.id}`)).status).toBe(200);
+    expect((await admin.request(`/leads/${lead.id}/restore`, { method: 'POST' })).status).toBe(404);
   });
 });

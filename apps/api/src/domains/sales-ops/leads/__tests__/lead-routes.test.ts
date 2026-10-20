@@ -368,18 +368,20 @@ describe('Sales Ops lead routes', () => {
     expect(trashMocks.deleteLead).toHaveBeenCalledTimes(3);
   });
 
-  it('restore is admin-only and maps its outcomes', async () => {
+  it('restore passes verified actor and privilege for sellers and admins and maps its outcomes', async () => {
     currentRoles = ['seller'];
-    const denied = await app.request(`/leads/${LEAD_ID}/restore`, { method: 'POST' });
-    expect(denied.status).toBe(403);
-    expect(await denied.json()).toEqual({ error: 'forbidden', reason: 'admin_role_required' });
-    expect(trashMocks.restoreLead).not.toHaveBeenCalled();
+    const seller = await app.request(`/leads/${LEAD_ID}/restore`, { method: 'POST' });
+    expect(seller.status).toBe(200);
+    expect(trashMocks.restoreLead).toHaveBeenCalledWith(mockedDb, 'verified-org', LEAD_ID, false, {
+      userId: 'verified-account',
+      name: 'ana@example.test',
+    });
 
     currentRoles = ['admin', 'seller', 'finder'];
     const ok = await app.request(`/leads/${LEAD_ID}/restore`, { method: 'POST' });
     expect(ok.status).toBe(200);
     expect(await ok.json()).toEqual({ lead: leadView });
-    expect(trashMocks.restoreLead).toHaveBeenCalledWith(mockedDb, 'verified-org', LEAD_ID, {
+    expect(trashMocks.restoreLead).toHaveBeenCalledWith(mockedDb, 'verified-org', LEAD_ID, true, {
       userId: 'verified-account',
       name: 'ana@example.test',
     });
