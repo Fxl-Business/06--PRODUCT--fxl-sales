@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-cd "$(dirname "$0")/../../.."
+pnpm install --frozen-lockfile --offline
 pnpm run type-check
 pnpm run lint
-CI=true pnpm test
+NODE_ENV=test CI=true pnpm test
