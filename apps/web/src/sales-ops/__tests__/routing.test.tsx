@@ -16,6 +16,10 @@ import type { AppRole } from '@/auth/claims';
 import { SalesOpsApp } from '../SalesOpsApp';
 import type { SalesOpsFuncao } from '../types';
 
+vi.mock('../leads/hooks', () => ({
+  useLeadStages: () => ({ data: [], isPending: false, isError: false }),
+}));
+
 /**
  * Funções replace the three removed `is_seller` / `is_finder` / `is_collaborator`
  * mirrors on a pessoa. `vendedor` and `finder` are the two predefined system funções.

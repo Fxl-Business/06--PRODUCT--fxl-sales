@@ -275,7 +275,7 @@ describe('a converted card names its proposta', () => {
       );
     });
     const card = container.querySelector('[data-lead-card="l1"]');
-    expect(card?.querySelector('[data-move-trigger]')).toBeNull();
+    expect(card?.querySelector('[data-card-move]')).not.toBeNull();
     await act(async () => {
       card?.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 0, clientY: 0 }));
     });
