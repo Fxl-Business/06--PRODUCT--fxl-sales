@@ -40,6 +40,16 @@ import type { LeadBoardFilters, SalesOpsLead } from './types';
 const BOARD_LOAD_FAILED = 'Não foi possível carregar o funil de leads.';
 const SELLER_PERSON_UNMAPPED =
   'Seu acesso ainda não está vinculado a um vendedor. Peça ao gestor para conferir seu cadastro em Vendedores.';
+const UNDO_CONFLICT = 'Este lead foi alterado por outra pessoa. Atualize o funil antes de desfazer.';
+
+class UndoConflictError extends Error {}
+
+function sameLeadSnapshot(current: SalesOpsLead | undefined, expected: SalesOpsLead): boolean {
+  // The response to the forward write is the expected server state. A fresh
+  // board read must still match it before a compensating write can be offered.
+  // Comparing the whole wire row also detects changes outside this edition.
+  return current !== undefined && JSON.stringify(current) === JSON.stringify(expected);
+}
 
 /**
  * The board read failure copy. Only the leads edition names the one refusal an
@@ -177,12 +187,12 @@ export function LeadsBoardContainer({
   const undoInFlight = React.useRef(false);
 
   React.useEffect(() => {
-    if (!undoNotice) return;
+    if (!undoNotice || undoBusy || undoError) return;
     const timer = window.setTimeout(() => setUndoNotice((current) =>
       current?.id === undoNotice.id ? null : current,
     ), 5000);
     return () => window.clearTimeout(timer);
-  }, [undoNotice]);
+  }, [undoNotice, undoBusy, undoError]);
 
   function publishUndo(label: string, undo: () => Promise<unknown>) {
     setUndoError(null);
@@ -196,20 +206,30 @@ export function LeadsBoardContainer({
 
   async function runUndo(restore?: () => Promise<unknown>) {
     if (!undoNotice || undoInFlight.current) return;
-    undoInFlight.current = true;
-    setUndoBusy(true);
     const active = undoNotice;
     const action = restore ?? active.undo;
     if (!action) return;
+    undoInFlight.current = true;
+    setUndoBusy(true);
+    setUndoError(null);
     try {
       await action();
       setUndoNotice((current) => current?.id === active.id ? null : current);
       setUndoError(null);
-    } catch {
-      setUndoError('Não foi possível desfazer. Tente novamente.');
+    } catch (error) {
+      setUndoError(error instanceof UndoConflictError
+        ? UNDO_CONFLICT
+        : 'Não foi possível desfazer. Tente novamente.');
     } finally {
       undoInFlight.current = false;
       setUndoBusy(false);
+    }
+  }
+
+  async function requireUnchangedLead(expected: SalesOpsLead) {
+    const fresh = await boardQuery.refetch({ throwOnError: true });
+    if (!sameLeadSnapshot(fresh.data?.leads.find((row) => row.id === expected.id), expected)) {
+      throw new UndoConflictError(UNDO_CONFLICT);
     }
   }
 
@@ -220,23 +240,29 @@ export function LeadsBoardContainer({
       ? rows.filter((row) => row.stageId === previous.stageId).sort((a, b) => a.position - b.position)
       : [];
     const sourceIndex = sourceColumn.findIndex((row) => row.id === payload.leadId);
-    await moveLead.mutateAsync(payload);
+    const result = await moveLead.mutateAsync(payload);
     if (!previous || sourceIndex < 0 || payload.saleId ||
       stageOpensConversion(stages.find((stage) => stage.id === payload.toStageId))) return;
-    publishUndo('Lead movido', () => moveLead.mutateAsync({
-      leadId: payload.leadId,
-      toStageId: previous.stageId,
-      toIndex: sourceIndex,
-      ...(previous.lostReason ? { reason: previous.lostReason } : {}),
-    }));
+    publishUndo('Lead movido', async () => {
+      await requireUnchangedLead(result.lead);
+      return moveLead.mutateAsync({
+        leadId: payload.leadId,
+        toStageId: previous.stageId,
+        toIndex: sourceIndex,
+        ...(previous.lostReason ? { reason: previous.lostReason } : {}),
+      });
+    });
   }
 
   async function saveWithUndo(payload: SaveLeadPayload | SaveContactLeadPayload) {
     const previous = editingLead?.id === payload.id ? editingLead : null;
-    await saveLead.mutateAsync(payload);
-    if (previous) publishUndo('Lead editado', () => saveLead.mutateAsync(
-      fieldSet === 'contact' ? leadToContactSeed(previous) : leadToSeed(previous),
-    ));
+    const result = await saveLead.mutateAsync(payload);
+    if (previous) publishUndo('Lead editado', async () => {
+      await requireUnchangedLead(result.lead);
+      return saveLead.mutateAsync(
+        fieldSet === 'contact' ? leadToContactSeed(previous) : leadToSeed(previous),
+      );
+    });
   }
 
   const lookups = React.useMemo(

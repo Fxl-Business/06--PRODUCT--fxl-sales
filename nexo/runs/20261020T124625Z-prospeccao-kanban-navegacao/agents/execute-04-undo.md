@@ -34,3 +34,17 @@ The total code and test change remains below 600 lines.
 
 - A visual browser capture is owned by the integrated run and is not a slice gate.
 - The oracle drives the shared `emitMove` path through Mover; it does not simulate pointer drag in happy-dom.
+
+## Correction after Verify attempt 1
+
+- The notice timer now stops while an inverse request is pending and remains stopped after a failure, so `Tente novamente` has an available action.
+- Move and edit undo capture the forward server response, refetch the board, and refuse the inverse if the current lead differs.
+- A detected conflict displays `Este lead foi alterado por outra pessoa. Atualize o funil antes de desfazer.` and sends no inverse write.
+- The oracle now covers a delayed rejection with retry, stale move and edit conflicts, a nonzero source index, a changed product list, server summary counts and totals, and timer cleanup on unmount.
+- Final focused oracle: 15 tests passed.
+- Final affected suite: 36 files and 428 tests passed.
+- Final web typecheck, lint, and `git diff --check` passed.
+
+The API has no atomic compare-and-swap field for lead move or edit.
+A change arriving between the fresh read and the inverse write can still race; the client cannot eliminate that residual window without a conditional server mutation.
+The guard detects changes present at the read and never reports those as successfully undone.
