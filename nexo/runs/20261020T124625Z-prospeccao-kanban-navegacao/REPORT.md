@@ -1,61 +1,24 @@
-# Capture: Prospecção, navegação e kanban
+# Relatório: prospeccao-kanban-navegacao
 
-Run `20261020T124625Z-prospeccao-kanban-navegacao`, token `shqaxyab`, marco `v4.8.0`.
-Esta captura registra o trabalho verificado no branch do run antes da entrada no trunk.
-O pedido proíbe push, deploy e promoção para staging ou production.
+## Status da solicitação
+pass · Quatro fatias implementadas e verificadas; typecheck, lint e testes passaram nas ondas. Custo: 23 despachos de agentes Codex; 4 fatias e 4 ondas. Sem push ou deploy.
+Pedido: Projeto: FXL Sales (futuro FXL Vendas). Fluxo Nexo. Sem push e sem deploy. Objetivo: melhorar a navegação e a usabilidade do kanban e das etapas de Prospecção. Na sidebar, Prospecção vira o item principal e se expande como um menu com cada etapa do funil. Clicar numa etapa abre essa etapa no modo lista. Remover a mini navbar Lista/Kanban de dentro do conteúdo. O Funil (kanban completo) vira uma página própria na sidebar. Header das colunas fixo ao rolar. Rolagem independente por coluna, sem scroll geral da página. Busca dentro do kanban por nome do lead, empresa e contato, filtrando os cards em tempo real. Botão Mover no card para trocar a etapa sem arrastar. Depois de mover, editar ou excluir, mostrar um aviso com Desfazer por alguns segundos. Typecheck, lint e testes devem passar, com prints de cada tela em .nexo/tmp/.
 
 ## Entregue
+- 01-navigation  8baac04  Prospecção abre as etapas ativas em listas pela sidebar; Funil tem rota própria e o seletor interno foi removido.
+- 02-board  fe5e761  Kanban com cabeçalhos fixos, rolagem por coluna, busca instantânea nos cards carregados e botão Mover, mantendo arrastar.
+- 03-restore-permission  8a8d32a  Vendedor pode restaurar somente lead próprio excluído na sua organização, permitindo o Desfazer da exclusão com a política de acesso preservada.
+- 04-undo  5dfb620  Mover, editar e excluir exibem aviso temporário com Desfazer persistido; conflitos detectáveis impedem sobrescrever mudanças posteriores.
 
-- A sidebar mostra Prospecção como grupo expansível, com cada etapa ativa na ordem do servidor e URL estável pelo ID.
-  A etapa abre sua lista filtrada, inclusive no espaço do vendedor.
-  Funil é uma página própria com o kanban completo, e os seletores internos Lista/Quadro/Funil foram removidos da navegação roteada.
-  URLs antigas de leads redirecionam para Funil; uma etapa arquivada ou removida mostra indisponibilidade.
-- O Funil usa altura delimitada, cabeçalhos separados da área rolável e rolagem vertical por coluna.
-  A busca filtra imediatamente os cards já carregados por nome, empresa, telefone e email, sem alterar totais e paginação do servidor.
-  Cada card elegível oferece Mover pelo diálogo existente; o gesto de arrastar continua no corpo do card.
-- Um vendedor pode restaurar apenas um lead que ele próprio excluiu na mesma organização.
-  O administrador mantém a restauração de leads da organização, e a listagem de excluídos continua restrita a administradores.
-  A API responde com o mesmo resultado de não encontrado para IDs sem acesso, ativos, desconhecidos ou de outra organização.
-- Movimentos comuns, edições de leads existentes e exclusões bem-sucedidas mostram Desfazer por cerca de cinco segundos.
-  A ação inversa usa as mutações persistidas existentes e atualiza cards e totais.
-  Conversões e criações não oferecem Desfazer.
-  Se a ação inversa falhar, o aviso permanece disponível para nova tentativa.
-  Antes de desfazer movimento ou edição, o cliente lê novamente o lead e recusa a inversão quando detecta uma alteração posterior.
+## Não feito e por quê
+- nada a registrar.
 
-## Verificação
+## Decisões tomadas sem você
+- A busca do Funil filtra os cards carregados e mantém os totais e a paginação do servidor. (nexo/runs/20261020T124625Z-prospeccao-kanban-navegacao/REPORT.md) (escolhido: a; alternativas: b) Criar busca paginada no servidor)
+- O restauro recoloca o lead no fim de uma etapa válida, sem prometer a posição anterior. (nexo/runs/20261020T124625Z-prospeccao-kanban-navegacao/REPORT.md) (escolhido: a; alternativas: b) Persistir e restaurar a posição anterior)
+- O Desfazer de edição ou movimento lê o lead antes da inversão para detectar mudanças posteriores; uma corrida entre leitura e escrita ainda requer precondição atômica na API. (nexo/runs/20261020T124625Z-prospeccao-kanban-navegacao/REPORT.md) (escolhido: a; alternativas: b) Acrescentar versão e mutação condicional na API)
+- As capturas locais mostram até dois cards por etapa; a rolagem de coluna longa foi verificada por testes automatizados. (nexo/runs/20261020T124625Z-prospeccao-kanban-navegacao/REPORT.md) (escolhido: a; alternativas: b) Bloquear a entrega até popular uma coluna longa)
+- A entrega permanece no master local, sem push, deploy ou promoção. (nexo/runs/20261020T124625Z-prospeccao-kanban-navegacao/REPORT.md) (escolhido: a; alternativas: b) Publicar em remoto ou ambiente)
 
-- O primeiro Verify da navegação falhou porque o oráculo montava apenas a sidebar e não detectava um filtro de etapa sempre verdadeiro.
-  O plano foi reconciliado com a migração das rotas, o oráculo passou a montar o board roteado e a mutação artificial do filtro passou a falhar dois testes.
-  Verify 01, tentativa 2: 13 testes do oráculo, 276 testes afetados, typecheck, lint e `git diff --check` passaram.
-- Verify 02: 39 testes do oráculo e 1.773 testes web completos passaram, além de typecheck e lint.
-  Mutações artificiais da busca e do botão Mover fizeram os respectivos testes falharem.
-- A implementação de restauração encontrou inicialmente o PostgreSQL local indisponível.
-  Após a disponibilidade do banco, Verify 03 passou com 17 testes de rota, 11 testes RLS reais, 53 testes unitários de leads, typecheck e lint da API.
-- O primeiro Verify de Desfazer falhou por dois riscos: o prazo podia expirar durante uma inversão lenta, e uma inversão podia sobrescrever uma alteração posterior sem detectá-la.
-  Ambos foram corrigidos e testados.
-  Verify 04, tentativa 2: 15 testes do oráculo, 428 testes afetados, typecheck e lint passaram.
-  Os testes detectaram mutações artificiais que removiam a leitura de conflito ou reintroduziam a expiração durante a inversão.
-- Os quatro Verify de onda independente passaram.
-  Na última onda, o build dos pacotes, typecheck web, lint web, 133 arquivos e 1.789 testes web, revisão de segurança e `git diff --check` passaram.
-  Na onda da API, 100 arquivos e 1.482 testes unitários, mais 11 testes RLS, passaram.
-  Avisos existentes de React `act(...)` e React Router apareceram sem falha de teste.
-
-## Capturas visuais
-
-O manifesto está em `.nexo/tmp/20261020T124625Z-prospeccao-kanban-navegacao/manifest.json` na raiz do projeto.
-Foram capturadas as listas de Novo, Em negociação, Proposta e Perdido, uma imagem por ID de etapa, e `funil-search.png` com a busca `Aurora`.
-Os cinco arquivos PNG constam no mesmo diretório do manifesto.
-
-## Decisões e Revisão
-
-- A busca atua sobre os cards carregados e já sujeitos aos filtros de organização e vendedor.
-  Totais e indicação de carregamento continuam representando o conjunto do servidor.
-- O restauro após exclusão mantém o comportamento do serviço: volta à etapa válida ou à etapa aberta de fallback e entra na posição final.
-  Não promete a posição exata anterior.
-- A prevenção de conflito no Desfazer de movimento e edição usa uma leitura atual antes da escrita inversa.
-  Ainda existe uma janela de corrida entre essa leitura e a escrita, pois a API não oferece pré-condição atômica por versão de linha.
-  Uma inversão poderia sobrescrever uma mudança feita nessa janela.
-  Uma correção completa exigiria mutação condicional no servidor.
-- Revisão visual: o conjunto local tem no máximo dois cards visíveis por etapa.
-  As imagens não demonstram a rolagem de uma coluna longa; a estrutura e o contrato de scroll foram cobertos pelos testes automatizados.
-- Não houve push, deploy ou promoção como parte deste run.
+## Perguntas
+- nada a registrar.
