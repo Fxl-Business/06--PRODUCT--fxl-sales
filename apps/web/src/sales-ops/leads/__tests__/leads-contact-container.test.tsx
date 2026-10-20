@@ -466,15 +466,16 @@ describe('LeadsBoardContainer, full edition', () => {
     expect(document.body.textContent).not.toContain('vinculado a um vendedor');
   });
 
-  it('saves through mutate and never renders the save notice', async () => {
+  it('awaits a full-edition create and offers no edit undo', async () => {
     await renderContainer();
     await clickSelector('[data-stub="create"]');
     await typeInto('lead-contact-name', 'Ana');
     await typeInto('lead-company-text', 'Acme');
     await clickSelector('[data-lead-save]');
 
-    expect(mocks.mutate).toHaveBeenCalledTimes(1);
-    expect(mocks.mutateAsync).not.toHaveBeenCalled();
+    expect(mocks.mutateAsync).toHaveBeenCalledTimes(1);
+    expect(mocks.mutate).not.toHaveBeenCalled();
     expect(document.querySelector('[data-lead-save-error]')).toBeNull();
+    expect(document.querySelector('[data-undo-notice]')).toBeNull();
   });
 });
