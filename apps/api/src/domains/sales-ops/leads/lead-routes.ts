@@ -41,7 +41,7 @@ import { type LeadActor, deleteLead, listDeletedLeads, restoreLead } from './lea
  * There is still NO DELETE verb here and there must never be one. A lead that
  * merely goes nowhere ends in the terminal `lost` stage, which is what that stage
  * is for. Removing a lead by mistake or as junk is the lixeira: `POST /:id/delete`
- * is a SOFT delete (a POST action like `/move`) that the gestor reverses with
+ * is a SOFT delete (a POST action like `/move`) that its actor or a gestor reverses with
  * `POST /:id/restore`, both audited in lead-trash-service.ts.
  */
 export const leadsRouter = new Hono();
@@ -265,13 +265,13 @@ leadsRouter.post('/:id/delete', async (c) => {
   return c.body(null, 204);
 });
 
-// Admin only (requireAdmin, the one admin mechanism): a vendedor never sees the
-// lixeira, so he can never bring a lead back either.
-leadsRouter.post('/:id/restore', requireAdmin, async (c) => {
+// The actor may undo their own deletion; an admin may restore any org lead.
+// The lixeira list above remains admin-only.
+leadsRouter.post('/:id/restore', async (c) => {
   const id = leadIdSchema.safeParse(c.req.param('id'));
   if (!id.success) return c.json({ error: 'not_found' }, 404);
   try {
-    const result = await restoreLead(getDb(), c.get('orgId'), id.data, leadActor(c));
+    const result = await restoreLead(getDb(), c.get('orgId'), id.data, leadScope(c).isAdmin, leadActor(c));
     if (!result.ok) return failureResponse(c, result.reason);
     return c.json({ lead: result.lead });
   } catch (error) {
