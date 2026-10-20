@@ -130,11 +130,12 @@ const meusDadosFinder: SalesOpsNavigationItem[] = [
   THE LEADS EDITION (Construbom). Three short lists, never a filter over the full ones:
   a filter would make every full-edition label and order depend on the leads rules, and
   the full edition must stay byte-identical (oracle: navigation-edition.test.ts).
-  `[0]` is still the landing route of each workspace.
+  Prospecção is first in the sidebar; `getDefaultSalesOpsRoute` lands on Funil
+  because the group itself has no stage to display.
 */
 const leadsEditionOperational: SalesOpsNavigationItem[] = [
-  { id: 'funil', label: 'Funil', icon: LayoutGrid },
   { id: 'leads', label: 'Prospecção', icon: LayoutGrid },
+  { id: 'funil', label: 'Funil', icon: LayoutGrid },
 ];
 
 /**
@@ -153,8 +154,8 @@ const leadsEditionCadastros: SalesOpsNavigationItem[] = [
 ];
 
 const leadsEditionMeusDadosSeller: SalesOpsNavigationItem[] = [
-  { id: 'funil', label: 'Funil', icon: LayoutGrid },
   { id: 'leads', label: 'Prospecção', icon: LayoutGrid },
+  { id: 'funil', label: 'Funil', icon: LayoutGrid },
 ];
 
 export const salesOpsWorkspaces: Array<{
@@ -284,14 +285,23 @@ export function getDefaultSalesOpsRoute(
 ): SalesOpsRoute {
   const visible = getVisibleWorkspaces(roles, edition);
 
+  // Prospecção leads the sidebar, while Funil remains the landing page because
+  // a bare leads URL has no stage to show and redirects there.
+  const landingView = (target: SalesOpsWorkspace) => {
+    const items = getSalesOpsNavigation(target, roles, edition);
+    return items[0]?.id === 'leads' && items.some((item) => item.id === 'funil')
+      ? 'funil'
+      : items[0]?.id;
+  };
+
   if (preferredWorkspace && visible.includes(preferredWorkspace)) {
-    const preferredView = getSalesOpsNavigation(preferredWorkspace, roles, edition)[0]?.id;
+    const preferredView = landingView(preferredWorkspace);
     if (preferredView) return { workspace: preferredWorkspace, view: preferredView };
   }
 
   const workspace = visible[0];
   if (workspace) {
-    const view = getSalesOpsNavigation(workspace, roles, edition)[0]?.id;
+    const view = landingView(workspace);
     if (view) return { workspace, view };
   }
 

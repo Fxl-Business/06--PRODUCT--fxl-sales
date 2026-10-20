@@ -295,7 +295,7 @@ const PREFERRED_PATH_LEADS: Record<ComboName, [string, string, string, string]> 
 /** Role-independent team workspaces: the role set is ignored for these three. */
 const TEAM_NAV_LEADS: Record<'tatico' | 'operacional' | 'cadastros', Array<[SalesOpsView, string]>> = {
   'tatico': [],
-  'operacional': [['funil', 'Funil'], ['leads', 'Prospecção']],
+  'operacional': [['leads', 'Prospecção'], ['funil', 'Funil']],
   'cadastros': [
     ['pessoas', 'Vendedores'],
     ['clientes', 'Clientes'],
@@ -308,12 +308,12 @@ const TEAM_NAV_LEADS: Record<'tatico' | 'operacional' | 'cadastros', Array<[Sale
 const MEUS_DADOS_NAV_LEADS: Record<ComboName, Array<[SalesOpsView, string]>> = {
   none: [],
   admin: [],
-  seller: [['funil', 'Funil'], ['leads', 'Prospecção']],
+  seller: [['leads', 'Prospecção'], ['funil', 'Funil']],
   finder: [],
-  adminSeller: [['funil', 'Funil'], ['leads', 'Prospecção']],
+  adminSeller: [['leads', 'Prospecção'], ['funil', 'Funil']],
   adminFinder: [],
-  sellerFinder: [['funil', 'Funil'], ['leads', 'Prospecção']],
-  everything: [['funil', 'Funil'], ['leads', 'Prospecção']],
+  sellerFinder: [['leads', 'Prospecção'], ['funil', 'Funil']],
+  everything: [['leads', 'Prospecção'], ['funil', 'Funil']],
 };
 
 /** url -> [resolved path, redirect]. */

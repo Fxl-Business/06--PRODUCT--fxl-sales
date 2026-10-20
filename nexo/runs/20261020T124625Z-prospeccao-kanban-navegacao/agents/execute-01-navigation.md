@@ -29,3 +29,15 @@ Verdict: PASS, ready for independent Nexo Verify.
 - The first attempt used `pnpm test -- path`, which passed a literal separator to Vitest and ran the full suite under production React; subsequent targeted and full runs used `pnpm exec vitest run` with `NODE_ENV=test`.
 - The plan's approximate seven-file ceiling became thirteen code and test files because existing literal route oracles needed updates for the new URLs and removed selector.
 - Revisão: no visual capture was made in this slice; the unattended request states visual checks are not a delivery gate.
+
+## Verify attempt 1 correction
+
+- The amended slice plan reconciles the thirteen application files required by the canonical route migration.
+- The named oracle now mounts the real routed `LeadsBoardContainer` and `LeadsBoard` with two-stage lead fixtures.
+- It checks admin and seller stage rows, Funil columns, hidden in-content selectors, archived stage URLs, finder denial, sidebar stage navigation, and focusable stage controls.
+- The leads edition now places Prospecção before Funil in both workspaces while continuing to land on Funil.
+- The focused oracle passed with 13 tests.
+- The affected suite passed with 195 tests across five files.
+- A temporary always-true stage-filter mutation caused two named-oracle failures and was restored before final checks.
+- Lint, type-check, and `git diff --check` passed after restoration.
+- The independent Verify attempt 1 FAIL report is retained as evidence for the next verifier.

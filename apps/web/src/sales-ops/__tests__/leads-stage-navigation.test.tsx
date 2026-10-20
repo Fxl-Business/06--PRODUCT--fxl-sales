@@ -1,23 +1,60 @@
 // @vitest-environment happy-dom
 import * as React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { MemoryRouter, useLocation } from 'react-router-dom';
+import { MemoryRouter, Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LeadSidebarNavigation } from '../leads/LeadSidebarNavigation';
-import { buildLeadFunnelPath, buildLeadStagePath, resolveSalesOpsRoute } from '../navigation';
+import { LeadsBoardContainer } from '../leads/LeadsBoardContainer';
+import { buildLeadFunnelPath, buildLeadStagePath, getSalesOpsNavigation, resolveSalesOpsRoute } from '../navigation';
+import type { SalesOpsLead, SalesOpsLeadStage } from '../leads/types';
 
 const query = vi.hoisted(() => ({
-  data: [] as Array<{ id: string; name: string; status: string; position: number }>,
+  data: [] as SalesOpsLeadStage[],
+  leads: [] as SalesOpsLead[],
   isPending: false,
   isError: false,
 }));
-vi.mock('../leads/hooks', () => ({ useLeadStages: () => query }));
+const mutation = { isPending: false, mutate: vi.fn(), mutateAsync: vi.fn() };
+vi.mock('../leads/hooks', () => ({
+  useLeadStages: () => query,
+  useLeadsBoard: () => ({ data: { leads: query.leads, hasMore: false }, isPending: false, isError: false, isFetchingNextPage: false, fetchNextPage: vi.fn() }),
+  useLeadStageSummary: () => ({ data: undefined }),
+  useMoveLead: () => mutation,
+  useSaveLead: () => mutation,
+  useDeleteLead: () => mutation,
+}));
+let roles: Array<'admin' | 'seller' | 'finder'> = ['admin'];
+vi.mock('@/auth/react', () => ({
+  useAuthProfile: () => ({ roles }),
+  useSalesEdition: () => 'full',
+}));
 
 const act = (React as typeof React & { act: typeof import('react-dom/test-utils').act }).act;
 let container: HTMLDivElement;
 let root: Root | null;
 function LocationProbe() {
   return <output data-path>{useLocation().pathname}</output>;
+}
+function RoutedLeads() {
+  const params = useParams();
+  const resolution = resolveSalesOpsRoute(params, roles);
+  if (resolution.redirect) return <Navigate replace to={resolution.path} />;
+  const { route } = resolution;
+  if (route.view !== 'leads' && route.view !== 'funil') return <div data-other-view />;
+  return <>
+    <LeadSidebarNavigation activeStageId={route.stageId} collapsed={false} onExpand={vi.fn()} workspace={route.workspace} />
+    <LeadsBoardContainer clients={[]} people={[]} products={[]} routedMode={route.view === 'funil' ? 'board' : 'stage'} selectedStageId={route.stageId} sellers={[]} showSellerFilter={route.workspace === 'operacional'} workspace={route.workspace} />
+  </>;
+}
+async function renderRouted(path: string, nextRoles: typeof roles) {
+  roles = nextRoles;
+  root = createRoot(container);
+  await act(async () => root?.render(
+    <MemoryRouter future={{ v7_relativeSplatPath: true, v7_startTransition: true }} initialEntries={[path]}>
+      <Routes><Route element={<RoutedLeads />} path="/:workspace/:view/:saleId?" /></Routes>
+      <LocationProbe />
+    </MemoryRouter>,
+  ));
 }
 async function renderSidebar(activeStageId?: string, collapsed = false) {
   root = createRoot(container);
@@ -35,12 +72,18 @@ beforeEach(() => {
   container = document.createElement('div');
   document.body.append(container);
   root = null;
-  query.data = [
-    { id: 'lost', name: 'Perdido', status: 'active', position: 3 },
-    { id: 'draft', name: 'Contato', status: 'active', position: 1 },
-    { id: 'archived', name: 'Antigo', status: 'inactive', position: 0 },
-    { id: 'won', name: 'Convertido', status: 'active', position: 2 },
-  ];
+  const stage = (id: string, name: string, status: SalesOpsLeadStage['status'], position: number): SalesOpsLeadStage => ({
+    id, name, status, position, kind: 'normal', isSystem: false, archivedAt: status === 'archived' ? '2026-09-01T00:00:00.000Z' : null,
+    orgId: 'org-1', createdAt: '2026-09-01T00:00:00.000Z', updatedAt: null,
+  });
+  query.data = [stage('lost', 'Perdido', 'active', 3), stage('draft', 'Contato', 'active', 1), stage('archived', 'Antigo', 'archived', 0), stage('won', 'Convertido', 'active', 2)];
+  const lead = (id: string, stageId: string): SalesOpsLead => ({
+    id, stageId, position: 1, contactName: `Contato ${id}`, clientId: null, clientNameSnapshot: 'Acme', estimatedValueBrl: 100_000,
+    description: null, contactPhone: null, contactEmail: null, contactBirthDate: null, sellerPersonId: null,
+    sellerNameSnapshot: 'Marina', lostReason: null, stageChangedAt: '2026-09-15T00:00:00.000Z', saleId: null,
+    saleStatus: null, saleCode: null, products: [], createdAt: '2026-09-01T00:00:00.000Z', updatedAt: null,
+  });
+  query.leads = [lead('a', 'draft'), lead('b', 'lost')];
   query.isPending = false;
   query.isError = false;
 });
@@ -57,6 +100,8 @@ describe('routed lead stages', () => {
     expect(resolveSalesOpsRoute({ workspace: 'meus-dados', view: 'leads', saleId: 'stage-2' }, ['seller']).route).toEqual({ workspace: 'meus-dados', view: 'leads', stageId: 'stage-2' });
     expect(resolveSalesOpsRoute({ workspace: 'meus-dados', view: 'funil' }, ['finder']).route.view).not.toBe('funil');
     expect(resolveSalesOpsRoute({ workspace: 'operacional', view: 'vendas', saleId: 'sale-1' }, ['admin']).route.saleId).toBe('sale-1');
+    expect(getSalesOpsNavigation('operacional', ['admin']).map((item) => item.id)).toEqual(['vendas', 'comissoes', 'leads', 'funil']);
+    expect(getSalesOpsNavigation('operacional', ['admin'], 'leads').map((item) => item.id)).toEqual(['leads', 'funil']);
   });
 
   it('keeps the active group open, orders active stages, and follows a stage click', async () => {
@@ -86,5 +131,48 @@ describe('routed lead stages', () => {
     expect(container.querySelector('[data-lead-stage-navigation]')?.textContent).toMatch(
       state === 'loading' ? /Carregando/ : state === 'error' ? /Não foi possível/ : /Nenhuma etapa/,
     );
+  });
+
+  it.each([['operacional', ['admin']], ['meus-dados', ['seller']]] as const)('filters real list rows for %s and keeps Funil as the board', async (workspace, nextRoles) => {
+    if (workspace === 'meus-dados') query.leads = query.leads.filter((lead) => lead.id === 'a');
+    await renderRouted(`/${workspace}/leads/draft`, [...nextRoles]);
+    expect(container.querySelector('[data-leads-list]')).not.toBeNull();
+    expect([...container.querySelectorAll('[data-list-row]')].map((row) => row.getAttribute('data-list-row'))).toEqual(['a']);
+    expect(container.querySelector('[data-view-toggle]')).toBeNull();
+    expect(container.querySelector('[data-phase-chip]')).toBeNull();
+    expect(group().getAttribute('aria-expanded')).toBe('true');
+    if (workspace === 'meus-dados') expect(container.querySelector('[aria-label="Vendedor"]')).toBeNull();
+  });
+
+  it('opens all active stage columns in Funil', async () => {
+    await renderRouted('/operacional/funil', ['admin']);
+    expect([...container.querySelectorAll('[data-stage-column]')].map((column) => column.getAttribute('data-stage-column'))).toEqual(['draft', 'won', 'lost']);
+    expect(container.querySelector('[data-lead-card="a"]')).not.toBeNull();
+    expect(container.querySelector('[data-lead-card="b"]')).not.toBeNull();
+    expect(container.querySelector('[data-view-toggle]')).toBeNull();
+  });
+
+  it('opens a stage list from the Funil sidebar through a focusable button', async () => {
+    await renderRouted('/operacional/funil', ['admin']);
+    await act(async () => group().click());
+    const lost = stageLinks().find((link) => link.textContent === 'Perdido');
+    expect(lost).toBeDefined();
+    lost?.focus();
+    expect(document.activeElement).toBe(lost);
+    await act(async () => lost?.click());
+    expect(container.querySelector('[data-path]')?.textContent).toBe('/operacional/leads/lost');
+    expect([...container.querySelectorAll('[data-list-row]')].map((row) => row.getAttribute('data-list-row'))).toEqual(['b']);
+  });
+
+  it('does not show all leads when the stage is archived', async () => {
+    await renderRouted('/operacional/leads/archived', ['admin']);
+    expect(container.textContent).toContain('Esta etapa não está disponível.');
+    expect(container.querySelector('[data-list-row]')).toBeNull();
+  });
+
+  it.each(['/meus-dados/leads/draft', '/meus-dados/funil'])('denies finder access to %s', async (path) => {
+    await renderRouted(path, ['finder']);
+    expect(container.querySelector('[data-path]')?.textContent).toBe('/meus-dados/finders');
+    expect(container.querySelector('[data-leads-board]')).toBeNull();
   });
 });
