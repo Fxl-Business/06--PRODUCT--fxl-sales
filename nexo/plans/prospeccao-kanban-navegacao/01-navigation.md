@@ -4,13 +4,19 @@ milestone: v4.8.0
 status: todo
 depends_on: []
 files_modified:
-  - apps/web/src/sales-ops/navigation.ts
+  - apps/web/src/__tests__/no-role-redirect.test.tsx
   - apps/web/src/sales-ops/SalesOpsApp.tsx
-  - apps/web/src/sales-ops/leads/LeadSidebarNavigation.tsx
-  - apps/web/src/sales-ops/leads/LeadsBoardContainer.tsx
-  - apps/web/src/sales-ops/leads/LeadsBoard.tsx
-  - apps/web/src/sales-ops/__tests__/leads-stage-navigation.test.tsx
   - apps/web/src/sales-ops/__tests__/leads-routing.test.tsx
+  - apps/web/src/sales-ops/__tests__/leads-stage-navigation.test.tsx
+  - apps/web/src/sales-ops/__tests__/navigation-edition.test.ts
+  - apps/web/src/sales-ops/__tests__/navigation.test.ts
+  - apps/web/src/sales-ops/__tests__/routing.test.tsx
+  - apps/web/src/sales-ops/__tests__/sale-deep-link.test.tsx
+  - apps/web/src/sales-ops/leads/LeadSidebarNavigation.tsx
+  - apps/web/src/sales-ops/leads/LeadsBoard.tsx
+  - apps/web/src/sales-ops/leads/LeadsBoardContainer.tsx
+  - apps/web/src/sales-ops/leads/__tests__/lead-conversion.test.tsx
+  - apps/web/src/sales-ops/navigation.ts
 acceptance: "The expanded sidebar shows Prospecção with every active stage in server order, and a separate Funil entry. Each stage has a direct URL that opens only its list rows; Funil opens the complete Kanban. No Lista/Quadro/Funil selector appears inside the app content. Existing proposal detail routes, workspace permissions, seller scoping, lead writes, and archived-stage handling remain correct."
 oracle: apps/web/src/sales-ops/__tests__/leads-stage-navigation.test.tsx
 ---
@@ -19,7 +25,7 @@ oracle: apps/web/src/sales-ops/__tests__/leads-stage-navigation.test.tsx
 
 ## Scope and decisions
 
-- Keep this slice within seven files and approximately 450 changed lines.
+- The original seven-file, approximately 450-line estimate is amended after Verify attempt 1: canonical URL changes require updates to thirteen existing or new application files, including route fixtures. The measured first implementation is 435 insertions and 173 deletions across application and run evidence; the small size overrun is accepted for one cohesive route migration. No unrelated feature scope is added.
 - `Prospecção` is an expandable sidebar group in either visible leads workspace.
 - `Funil` is a sibling sidebar destination and means the complete Kanban, not the old analytical chart view.
 - The active stages are the same `boardStages(stages)` set and ordering used by the board, including active conversion and lost stages.
@@ -87,3 +93,10 @@ Do not push, deploy, or promote branches.
 Slice 02 may extend `LeadsBoard.tsx` and `LeadsBoardContainer.tsx` for search and move controls after this slice is integrated.
 Slice 04 may extend the same files for undo.
 Keep these slices sequential at that seam.
+
+## Verify attempt 1 correction
+
+The initial named oracle mounted only the sidebar, so an always-true board stage filter survived it.
+The next implementation must add a routed or container test that renders leads in two stages and fails when the stage filter is disabled.
+It must also cover unavailable stage URLs, selector absence, seller scope, finder denial, and keyboard activation.
+The independent verifier repeats the mutation probe before merge.
