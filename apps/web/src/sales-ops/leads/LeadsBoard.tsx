@@ -122,6 +122,9 @@ export type LeadConversionRequest = {
 };
 
 export type LeadsBoardProps = {
+  routedMode?: 'board' | 'stage';
+  selectedStageId?: string;
+  onOpenStage?: (stageId: string) => void;
   stages: SalesOpsLeadStage[];
   leads: SalesOpsLead[];
   /**
@@ -281,6 +284,9 @@ function StageDropZone({
 }
 
 export function LeadsBoard({
+  routedMode,
+  selectedStageId,
+  onOpenStage,
   stages,
   leads,
   stageSummary,
@@ -321,11 +327,12 @@ export function LeadsBoard({
   const contact = fieldSet === 'contact';
   const noStages = contact && columns.length === 0;
 
-  const [leadView, setLeadView] = React.useState<'board' | 'list' | 'funnel'>('board');
+  const [localLeadView, setLeadView] = React.useState<'board' | 'list' | 'funnel'>('board');
+  const leadView = routedMode === 'stage' ? 'list' : routedMode === 'board' ? 'board' : localLeadView;
   const [rawStageFilter, setLeadStageFilter] = React.useState<string>('');
   // An archived stage drops out of `columns`; the filter then reads as "all"
   // (derived, so no effect-driven reset is needed).
-  const leadStageFilter = columns.some((s) => s.id === rawStageFilter) ? rawStageFilter : '';
+  const leadStageFilter = routedMode === 'stage' ? (selectedStageId ?? '') : columns.some((s) => s.id === rawStageFilter) ? rawStageFilter : '';
 
   const colors = React.useMemo(() => stageColors(columns), [columns]);
   /*
@@ -532,7 +539,7 @@ export function LeadsBoard({
     >
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2.5">
-          <div
+          {!routedMode && <div
             aria-label="Alternar visualização"
             className={segmentedContainerClass}
             data-view-toggle="true"
@@ -565,7 +572,7 @@ export function LeadsBoard({
             >
               <Filter aria-hidden size={15} /> {BOARD_VIEW_LABEL.funnel}
             </button>
-          </div>
+          </div>}
           {sellerFilter ? (
             <div className="w-[220px]">
               <Combobox
@@ -685,8 +692,11 @@ export function LeadsBoard({
                           className={iconButtonClass}
                           data-view-in-list={stage.id}
                           onClick={() => {
-                            setLeadStageFilter(stage.id);
-                            setLeadView('list');
+                            if (routedMode) onOpenStage?.(stage.id);
+                            else {
+                              setLeadStageFilter(stage.id);
+                              setLeadView('list');
+                            }
                           }}
                           type="button"
                         >
@@ -801,7 +811,7 @@ export function LeadsBoard({
         <LeadsFunnelView aggregates={aggregates} stages={stages} />
       ) : (
         <div className="flex flex-col gap-4" data-leads-list="true">
-          <div className="flex flex-wrap gap-2">
+          {!routedMode && <div className="flex flex-wrap gap-2">
             <button
               aria-pressed={leadStageFilter === ''}
               className={phaseChipClassName(leadStageFilter === '')}
@@ -844,7 +854,7 @@ export function LeadsBoard({
                 </button>
               );
             })}
-          </div>
+          </div>}
 
           <div className={listTableCardClass}>
             <div className="min-w-[900px]">

@@ -399,10 +399,10 @@ async function renderApp() {
       <QueryClientProvider client={queryClient}>
         <MemoryRouter
           future={{ v7_relativeSplatPath: true, v7_startTransition: true }}
-          initialEntries={['/operacional/leads']}
+          initialEntries={['/operacional/funil']}
         >
           <Routes>
-            <Route element={<SalesOpsApp />} path="/:workspace/:view" />
+            <Route element={<SalesOpsApp />} path="/:workspace/:view/:saleId?" />
           </Routes>
         </MemoryRouter>
       </QueryClientProvider>,
@@ -451,7 +451,7 @@ function moveRequests(): Write[] {
 
 /** Opens the `Mover para` dialog and drives it to the conversion column. */
 async function moveIntoConversionColumn() {
-  await click(required('[data-view-option="list"]'));
+  await click(required(`[data-view-in-list="${STAGE_NOVO}"]`));
   await click(required(`[data-move-trigger="${LEAD_ID}"]`));
   const trigger = container.querySelector('[aria-labelledby="move-lead-stage-label"]');
   if (!trigger) throw new Error('destination picker not found');
@@ -463,7 +463,7 @@ async function moveIntoConversionColumn() {
   await click(row);
   await click(required('[data-move-confirm]'));
   // Back to Quadro, where the tests assert the card's column.
-  await click(required('[data-view-option="board"]'));
+  await click(required('aside button[aria-label="Funil"]'));
 }
 
 /**

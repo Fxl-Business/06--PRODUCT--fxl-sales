@@ -51,11 +51,13 @@ describe('sales operations navigation', () => {
       'vendas',
       'comissoes',
       'leads',
+      'funil',
     ]);
     expect(getSalesOpsNavigation('operacional', team).map((item) => item.label)).toEqual([
       'Propostas',
       'Comissões',
       'Prospecção',
+      'Funil',
     ]);
     expect(getSalesOpsNavigation('cadastros', team).map((item) => item.id)).toEqual([
       'produtos',
@@ -86,11 +88,13 @@ describe('sales operations navigation', () => {
       'vendedores',
       'comissoes',
       'leads',
+      'funil',
     ]);
     expect(getSalesOpsNavigation('meus-dados', seller).map((item) => item.label)).toEqual([
       'Meu painel',
       'Comissões',
       'Minha prospecção',
+      'Funil',
     ]);
     expect(getSalesOpsNavigation('meus-dados', finder).map((item) => item.id)).toEqual([
       'finders',
@@ -104,6 +108,7 @@ describe('sales operations navigation', () => {
       'vendedores',
       'comissoes',
       'leads',
+      'funil',
       'finders',
       'vendas',
     ]);
@@ -374,14 +379,14 @@ describe('sales operations navigation', () => {
 
   it('routes the three lead screens and scopes each to its workspace', () => {
     expect(resolveSalesOpsRoute({ workspace: 'operacional', view: 'leads' }, team)).toEqual({
-      route: { workspace: 'operacional', view: 'leads' },
-      path: '/operacional/leads',
-      redirect: false,
+      route: { workspace: 'operacional', view: 'funil' },
+      path: '/operacional/funil',
+      redirect: true,
     });
     expect(resolveSalesOpsRoute({ workspace: 'meus-dados', view: 'leads' }, seller)).toEqual({
-      route: { workspace: 'meus-dados', view: 'leads' },
-      path: '/meus-dados/leads',
-      redirect: false,
+      route: { workspace: 'meus-dados', view: 'funil' },
+      path: '/meus-dados/funil',
+      redirect: true,
     });
     expect(resolveSalesOpsRoute({ workspace: 'cadastros', view: 'etapas' }, team)).toEqual({
       route: { workspace: 'cadastros', view: 'etapas' },
@@ -390,14 +395,14 @@ describe('sales operations navigation', () => {
     });
     // An operator holding everything reaches both boards.
     expect(resolveSalesOpsRoute({ workspace: 'operacional', view: 'leads' }, everything)).toEqual({
-      route: { workspace: 'operacional', view: 'leads' },
-      path: '/operacional/leads',
-      redirect: false,
+      route: { workspace: 'operacional', view: 'funil' },
+      path: '/operacional/funil',
+      redirect: true,
     });
     expect(resolveSalesOpsRoute({ workspace: 'meus-dados', view: 'leads' }, everything)).toEqual({
-      route: { workspace: 'meus-dados', view: 'leads' },
-      path: '/meus-dados/leads',
-      redirect: false,
+      route: { workspace: 'meus-dados', view: 'funil' },
+      path: '/meus-dados/funil',
+      redirect: true,
     });
 
     // The team board is admin-only through workspace visibility alone. No second

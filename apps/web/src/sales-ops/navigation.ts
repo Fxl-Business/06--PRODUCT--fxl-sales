@@ -36,6 +36,7 @@ export type SalesOpsView =
   | 'funcoes'
   | 'geral'
   | 'leads'
+  | 'funil'
   | 'etapas'
   | 'importacao'
   | 'leads-excluidos';
@@ -58,6 +59,8 @@ export type SalesOpsRoute = Readonly<{
   view: SalesOpsView;
   /** The open proposta. Only ever present on the `vendas` view. */
   saleId?: string;
+  /** The selected lead stage. Only present on the `leads` view. */
+  stageId?: string;
 }>;
 
 export type SalesOpsRouteParams = Readonly<{
@@ -85,6 +88,7 @@ const operational: SalesOpsNavigationItem[] = [
     rewrites where every `Trocar painel` click arrives.
   */
   { id: 'leads', label: 'Prospecção', icon: LayoutGrid },
+  { id: 'funil', label: 'Funil', icon: LayoutGrid },
 ];
 
 const cadastros: SalesOpsNavigationItem[] = [
@@ -114,6 +118,7 @@ const meusDadosSeller: SalesOpsNavigationItem[] = [
     is deliberately byte-unchanged.
   */
   { id: 'leads', label: 'Minha prospecção', icon: LayoutGrid },
+  { id: 'funil', label: 'Funil', icon: LayoutGrid },
 ];
 
 const meusDadosFinder: SalesOpsNavigationItem[] = [
@@ -128,6 +133,7 @@ const meusDadosFinder: SalesOpsNavigationItem[] = [
   `[0]` is still the landing route of each workspace.
 */
 const leadsEditionOperational: SalesOpsNavigationItem[] = [
+  { id: 'funil', label: 'Funil', icon: LayoutGrid },
   { id: 'leads', label: 'Prospecção', icon: LayoutGrid },
 ];
 
@@ -147,7 +153,8 @@ const leadsEditionCadastros: SalesOpsNavigationItem[] = [
 ];
 
 const leadsEditionMeusDadosSeller: SalesOpsNavigationItem[] = [
-  { id: 'leads', label: 'Minha prospecção', icon: LayoutGrid },
+  { id: 'funil', label: 'Funil', icon: LayoutGrid },
+  { id: 'leads', label: 'Prospecção', icon: LayoutGrid },
 ];
 
 export const salesOpsWorkspaces: Array<{
@@ -253,7 +260,16 @@ export function getSalesOpsNavigation(
 
 export function buildSalesOpsPath(route: SalesOpsRoute): string {
   const base = `/${route.workspace}/${route.view}`;
-  return route.saleId === undefined ? base : `${base}/${encodeURIComponent(route.saleId)}`;
+  const segment = route.view === 'leads' ? route.stageId : route.saleId;
+  return segment === undefined ? base : `${base}/${encodeURIComponent(segment)}`;
+}
+
+export function buildLeadStagePath(workspace: SalesOpsWorkspace, stageId: string): string {
+  return buildSalesOpsPath({ workspace, view: 'leads', stageId });
+}
+
+export function buildLeadFunnelPath(workspace: SalesOpsWorkspace): string {
+  return buildSalesOpsPath({ workspace, view: 'funil' });
 }
 
 /** The Finance `deepLinkPath` (audit 11.4): the team proposta detail. */
@@ -317,11 +333,16 @@ export function resolveSalesOpsRoute(
     : undefined;
 
   if (workspace && view) {
+    if (view === 'leads' && !params.saleId) {
+      const route: SalesOpsRoute = { workspace, view: 'funil' };
+      return { route, path: buildSalesOpsPath(route), redirect: true };
+    }
     // The proposta id is honoured on the `vendas` view only. Never write the key
     // as `saleId: undefined`: a present-but-undefined key trips `toStrictEqual`.
     const saleId = view === 'vendas' && params.saleId ? params.saleId : undefined;
-    const route: SalesOpsRoute = saleId === undefined ? { workspace, view } : { workspace, view, saleId };
-    const droppedSaleId = params.saleId !== undefined && saleId === undefined;
+    const stageId = view === 'leads' && params.saleId ? params.saleId : undefined;
+    const route: SalesOpsRoute = saleId !== undefined ? { workspace, view, saleId } : stageId !== undefined ? { workspace, view, stageId } : { workspace, view };
+    const droppedSaleId = params.saleId !== undefined && saleId === undefined && stageId === undefined;
     // An aliased view or a dropped id differs from what the URL asked for, which is
     // exactly when the caller must rewrite the address bar. A canonical route stays `false`.
     return {
