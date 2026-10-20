@@ -8,6 +8,7 @@ files_modified:
   - apps/web/src/sales-ops/leads/LeadDialog.tsx
   - apps/web/src/sales-ops/leads/UndoNotice.tsx
   - apps/web/src/sales-ops/leads/__tests__/lead-undo.test.tsx
+  - apps/web/src/sales-ops/leads/__tests__/leads-contact-container.test.tsx
 acceptance: "After a successful reversible board move, existing lead edit, or soft delete, a notice offers Desfazer for about five seconds. Desfazer performs the inverse persisted mutation and refreshes cards and totals. A conversion move that creates a sale never offers Desfazer. Failed forward writes show no notice; failed inverse writes show an error without claiming restoration."
 oracle: "apps/web/src/sales-ops/leads/__tests__/lead-undo.test.tsx"
 ---
@@ -17,7 +18,7 @@ oracle: "apps/web/src/sales-ops/leads/__tests__/lead-undo.test.tsx"
 ## Scope and prerequisite
 
 Build after `03-restore-permission`, so a seller can use the existing `useRestoreLead()` hook to reverse their own delete.
-This is the web interaction only, four changed files and below 600 changed lines.
+This is the web interaction only, five changed files and below 600 changed lines. The fifth file is the existing contact-container oracle: the awaited save mutation changes its obsolete `mutate()` expectation while preserving that creation offers no edit undo.
 If implementation grows beyond eight changed files or 600 changed lines, request a finite Nexo replan.
 The feature level visual captures belong under `.nexo/tmp/`; visual access is not an automated delivery gate.
 
