@@ -398,6 +398,7 @@ The free-text company path of the old dialogs is intentionally gone, because the
 - Clicar no card ou na linha da Lista abre o RESUMO do lead, nunca o formulário: o card chama `onOpen` e a Lista chama `onOpenLead` (botão `Abrir`, `data-open-lead`), e o `SalesOpsApp` monta `LeadSummaryContainer` na rota `operacional|meus-dados/leads/:leadId`.
 - A edição do lead mora no resumo (`Editar`): o `LeadForm` do board é só de criação, e o `Lead editado` desfazer usa `leadToWriteSeed` com o `requireUnchangedLead` do resumo (um refetch que tem de bater com a resposta da escrita).
 - `Excluir` no resumo confirma pelo `LeadDeleteDialog` e navega para o funil; a restauração fica em `Cadastros > Leads excluídos`, porque a notificação de desfazer morre com a página.
+- Open product question: a delete from the summary navigates to the funil without an undo notice, unlike the board, and the lead is restorable from `Cadastros > Leads excluídos`.
 - O desfazer compartilhado (`use-undo-notice.ts`, `UndoLayer.tsx`, `undo-conflict.ts`) é o único lugar do aviso de cinco segundos.
 - Oracles: `summary-format.test.ts`, `lead-summary.test.tsx`, `lead-summary-container.test.tsx`, `leads-contact-container.test.tsx` (a card click navigates to the summary), `lead-delete.test.tsx` (a plain click on the card body opens the summary).
 - `Avançar` (slice 09d) lists ONLY the `nextStages` of `GET /leads/:id/summary`, the destinations the API allows from the stage; it never offers the rest of the pipeline.
