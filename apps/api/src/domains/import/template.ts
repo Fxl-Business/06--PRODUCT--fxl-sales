@@ -88,7 +88,7 @@ export function buildLeiameLines(catalog: ImportCatalog, opts: TemplateOptions):
   const H = (text: string) => lines.push({ kind: 'heading', text });
   const B = (text: string) => lines.push({ kind: 'body', text });
 
-  T('Modelo de importação do FXL Sales');
+  T('Modelo de importação do FXL Vendas');
   if (opts.example) {
     B('Esta é a planilha de exemplo: as linhas preenchidas contam uma história completa e podem ser importadas numa organização nova para testar.');
   }
@@ -96,7 +96,7 @@ export function buildLeiameLines(catalog: ImportCatalog, opts: TemplateOptions):
     B('Esta organização está conectada ao FXL Finance, então propostas Ganhas e pagamentos serão recusados na conferência.');
   }
   H('Para que serve');
-  B('Esta planilha importa cadastros, leads e propostas para a organização ativa no FXL Sales.');
+  B('Esta planilha importa cadastros, leads e propostas para a organização ativa no FXL Vendas.');
   B('Use-a no onboarding para trazer tudo de uma vez ou depois para acrescentar só alguns registros, por exemplo mais algumas propostas.');
   H('Como preencher');
   B('Preencha só as abas que precisar e deixe as outras vazias.');
@@ -117,7 +117,7 @@ export function buildLeiameLines(catalog: ImportCatalog, opts: TemplateOptions):
   B('Na proposta completa, deixe Produto em branco na aba Propostas e descreva a proposta nas abas Itens da proposta, Profissionais da proposta e Parcelas.');
   B('Quando uma proposta tem linhas na aba Parcelas, a soma das parcelas precisa ser igual ao total dos itens.');
   B('Uma proposta Ganha precisa da Data de ganho, e as parcelas já pagas vão na aba Pagamentos.');
-  B('Propostas Perdidas ou Canceladas entram no FXL Sales já com essa situação.');
+  B('Propostas Perdidas ou Canceladas entram no FXL Vendas já com essa situação.');
   H('Só cria, nunca altera');
   B('A importação só cria registros novos e nunca altera nem apaga o que já existe.');
   B('Uma área, função, produto ou etapa com o mesmo nome de um cadastro existente é recusada; apague a linha, porque as outras abas já encontram o cadastro existente pelo nome.');
@@ -130,7 +130,7 @@ export function buildLeiameLines(catalog: ImportCatalog, opts: TemplateOptions):
   B('Digite percentuais como 10 ou 12,5%.');
   B('Na coluna Parcela da aba Pagamentos, use rótulos como 1/3 para parcelas e M2/12 para mensalidades.');
   H('Limites desta versão');
-  B('Pagamentos só podem ser registrados para parcelas e mensalidades, então outros custos pagos de uma vez devem ser baixados no FXL Sales depois da importação.');
+  B('Pagamentos só podem ser registrados para parcelas e mensalidades, então outros custos pagos de uma vez devem ser baixados no FXL Vendas depois da importação.');
   B('A coluna Repasses pagos também dá baixa nas comissões e custos ligados à parcela, no mesmo dia do pagamento.');
   B('Se a organização estiver conectada ao FXL Finance, propostas Ganhas e pagamentos não podem ser importados, porque esse histórico não chegaria ao Finance; cadastros, leads e propostas em Rascunho, Aberta, Perdida ou Cancelada continuam permitidos.');
   B(`Uma importação aceita até ${String(MAX_TOTAL_ROWS)} linhas preenchidas e um arquivo de até ${String(MAX_UPLOAD_BYTES / 1024 / 1024)} MB.`);
@@ -512,7 +512,7 @@ export function buildExampleDataset(today: string): ExampleDataset {
 
 export function createTemplateWorkbook(catalog: ImportCatalog, opts: TemplateOptions): ExcelJS.Workbook {
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'FXL Sales';
+  wb.creator = 'FXL Vendas';
   const stamp = new Date(`${catalog.today}T12:00:00.000Z`);
   wb.created = stamp;
   wb.modified = stamp;

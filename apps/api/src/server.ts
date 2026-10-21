@@ -150,7 +150,7 @@ app.route('/api/v1/finder', finderRouter);
 
 app.get('/', (c) =>
   c.json({
-    name: 'Fxl Sales API',
+    name: 'FXL Vendas API',
     docs: '/health for liveness, add domain routes under apps/api/src/domains/',
   }),
 );
