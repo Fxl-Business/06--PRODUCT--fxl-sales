@@ -12,6 +12,7 @@ import { importRouter } from '../import/routes.js';
 import { cadastroActor } from './cadastro-actor.js';
 import { leadsRouter } from './leads/lead-routes.js';
 import { leadStagesRouter } from './leads/stage-routes.js';
+import { ensureLeadStagesForOrg } from './leads/stages-seed.js';
 import {
   AreaSchema,
   CancelContractSchema,
@@ -91,7 +92,10 @@ salesOpsRouter.use('/import/*', requireCapability('import'));
 salesOpsRouter.use('/history/*', requireCapability('history'));
 
 salesOpsRouter.get('/bootstrap', async (c) => {
-  const snapshot = await getSalesOpsSnapshot(getDb(), c.get('orgId'));
+  const orgId = c.get('orgId');
+  // ECV bug: an org created after migration 0022 has no etapas until something seeds them.
+  await ensureLeadStagesForOrg(getDb(), orgId);
+  const snapshot = await getSalesOpsSnapshot(getDb(), orgId);
   return c.json(snapshot);
 });
 

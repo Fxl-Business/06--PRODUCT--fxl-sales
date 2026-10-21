@@ -1,6 +1,7 @@
 import { and, asc, eq, max, ne } from 'drizzle-orm';
 import type { getDb } from '../../../db/client.js';
 import { salesOpsLeadStages } from '../../../db/schema.js';
+import { ensureLeadStages } from './stages-seed.js';
 import { withTenant } from './with-tenant.js';
 import type { LeadStageInput } from './schemas.js';
 
@@ -75,15 +76,12 @@ async function findLeadStageClash(
  *
  * `name` is the tiebreaker so the order is total even before the first reorder,
  * when the seed may have written equal positions.
+ *
+ * Seeds the default pipeline when the org has no stage row at all (ECV bug); see
+ * ensureLeadStages.
  */
 export function listLeadStages(db: Db, orgId: string): Promise<LeadStageRow[]> {
-  return withTenant(db, orgId, (tx) =>
-    tx
-      .select()
-      .from(salesOpsLeadStages)
-      .where(eq(salesOpsLeadStages.orgId, orgId))
-      .orderBy(asc(salesOpsLeadStages.position), asc(salesOpsLeadStages.name)),
-  );
+  return withTenant(db, orgId, (tx) => ensureLeadStages(tx, orgId));
 }
 
 export function createLeadStage(
