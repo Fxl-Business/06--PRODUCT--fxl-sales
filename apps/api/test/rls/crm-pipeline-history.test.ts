@@ -434,6 +434,40 @@ describe('seller scope and RLS isolation on the new routes', () => {
   });
 });
 
+describe('the follow-up owner completes their own task', () => {
+  it('the owner of a follow-up on another seller lead completes it; a seller with no access to the lead answers 404', async () => {
+    const w = await world('followup-owner');
+    const db = getDb();
+    const ana = await createPerson(db, w.orgId, PersonSchema.parse({ displayName: 'Ana', isSeller: true }));
+    const bruno = await createPerson(db, w.orgId, PersonSchema.parse({ displayName: 'Bruno', isSeller: true }));
+    const carla = await createPerson(db, w.orgId, PersonSchema.parse({ displayName: 'Carla', isSeller: true }));
+    if (typeof ana === 'string' || typeof bruno === 'string' || typeof carla === 'string') throw new Error('person');
+    await sql`UPDATE sales_ops_people SET hub_account_id = 'hub_ana_f' WHERE id = ${ana.id}`;
+    await sql`UPDATE sales_ops_people SET hub_account_id = 'hub_bruno_f' WHERE id = ${bruno.id}`;
+    await sql`UPDATE sales_ops_people SET hub_account_id = 'hub_carla_f' WHERE id = ${carla.id}`;
+    const anaWho: Who = { userId: 'hub_ana_f', role: 'seller', name: 'Ana' };
+    const brunoWho: Who = { userId: 'hub_bruno_f', role: 'seller', name: 'Bruno' };
+    const carlaWho: Who = { userId: 'hub_carla_f', role: 'seller', name: 'Carla' };
+    const anasLead = await w.create({ sellerPersonId: ana.id });
+    const assigned = await call(appFor(w.orgId, anaWho), 'POST', `/leads/${anasLead.id}/followups`, {
+      nextStep: 'Retornar ao cliente',
+      dueOn: '2026-10-22',
+      ownerPersonId: bruno.id,
+    });
+    expect(assigned.status, JSON.stringify(assigned.json)).toBe(201);
+    const followupId = assigned.json.followup.id as string;
+
+    const listed = await call(appFor(w.orgId, brunoWho), 'GET', '/followups?scope=mine&status=open');
+    expect(listed.json.followups.map((f: { id: string }) => f.id)).toContain(followupId);
+
+    const denied = await call(appFor(w.orgId, carlaWho), 'POST', `/followups/${followupId}/done`, {});
+    expect(denied.status).toBe(404);
+    const done = await call(appFor(w.orgId, brunoWho), 'POST', `/followups/${followupId}/done`, {});
+    expect(done.status, JSON.stringify(done.json)).toBe(200);
+    expect(done.json.followup.doneAt).not.toBeNull();
+  });
+});
+
 describe('period and dynamic filters', () => {
   it('filters on created_at by Sao Paulo civil days: 02:30Z on D+1 is day D, 03:00Z is D+1', async () => {
     const w = await world('period');
