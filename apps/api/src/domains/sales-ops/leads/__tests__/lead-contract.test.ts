@@ -164,7 +164,7 @@ describe('lead wire contract', () => {
   // key AT ALL, never a conditional VALUE.
   it('writes stageChangedAt by key omission and never as a conditional value', () => {
     expect(leadServiceSource).toMatch(
-      /\.\.\.\(stageChanged \? \{ stageChangedAt: new Date\(\) \} : \{\}\),/,
+      /\.\.\.\(stageChanged \? \{ stageChangedAt: sql`now\(\)` \} : \{\}\),/,
     );
     expect(leadServiceSource).not.toMatch(/stageChangedAt: stageChanged \?/);
   });
