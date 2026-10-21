@@ -1485,3 +1485,412 @@ export const integrationCursor = pgTable(
     }),
   ],
 );
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CRM unificado (migration 0029). New tables only: sales_ops_leads,
+// sales_ops_lead_products and sales_ops_lead_stages above stay byte-intact until
+// the phase 2 cutover. Every FK that crosses a tenant boundary is COMPOSITE on
+// (org_id, <fk>) and restrict, except the child rows noted below.
+// Closed sets (type, exit_kind, status) carry a CHECK. Open-ended sets (behavior,
+// field kind, reference target, module key, event kind, source) are plain text
+// validated by zod, because the additive migration guard forbids DROP CONSTRAINT.
+// ─────────────────────────────────────────────────────────────────────────────
+export const salesOpsPipelines = pgTable(
+  'sales_ops_pipelines',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: text('org_id').notNull(),
+    name: text('name').notNull(),
+    /** Stable machine key of a seeded pipeline ('crm-padrao'); NULL for org-created ones. */
+    systemKey: text('system_key'),
+    position: integer('position').notNull().default(0),
+    isDefault: boolean('is_default').notNull().default(false),
+    status: text('status').notNull().default('active'), // 'active' | 'archived'
+    archivedAt: timestamp('archived_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex('sales_ops_pipelines_org_id_id_idx').on(t.orgId, t.id),
+    uniqueIndex('sales_ops_pipelines_org_name_idx').on(t.orgId, t.name),
+    uniqueIndex('sales_ops_pipelines_org_system_key_idx')
+      .on(t.orgId, t.systemKey)
+      .where(sql`${t.systemKey} is not null`),
+    uniqueIndex('sales_ops_pipelines_org_default_idx')
+      .on(t.orgId)
+      .where(sql`${t.isDefault}`),
+    check('sales_ops_pipelines_status_check', sql`${t.status} in ('active', 'archived')`),
+  ],
+);
+
+export const salesOpsPipelineStages = pgTable(
+  'sales_ops_pipeline_stages',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: text('org_id').notNull(),
+    pipelineId: uuid('pipeline_id').notNull(),
+    name: text('name').notNull(),
+    position: integer('position').notNull().default(0),
+    type: text('type').notNull().default('normal'), // 'normal' | 'orcamento' | 'saida'
+    /** Open-ended: 'none' | 'opens_orcamentos' today. Validated by zod, no CHECK. */
+    behavior: text('behavior').notNull().default('none'),
+    exitKind: text('exit_kind'), // 'ganho' | 'perdido' | 'pausado'; only when type = 'saida'
+    requiresReason: boolean('requires_reason').notNull().default(false),
+    status: text('status').notNull().default('active'),
+    archivedAt: timestamp('archived_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex('sales_ops_pipeline_stages_org_id_id_idx').on(t.orgId, t.id),
+    uniqueIndex('sales_ops_pipeline_stages_org_pipeline_id_idx').on(t.orgId, t.pipelineId, t.id),
+    uniqueIndex('sales_ops_pipeline_stages_org_pipeline_name_idx').on(t.orgId, t.pipelineId, t.name),
+    index('sales_ops_pipeline_stages_org_pipeline_position_idx').on(t.orgId, t.pipelineId, t.position),
+    foreignKey({
+      columns: [t.orgId, t.pipelineId],
+      foreignColumns: [salesOpsPipelines.orgId, salesOpsPipelines.id],
+      name: 'sales_ops_pipeline_stages_org_pipeline_fk',
+    }).onDelete('restrict'),
+    check('sales_ops_pipeline_stages_type_check', sql`${t.type} in ('normal', 'orcamento', 'saida')`),
+    check('sales_ops_pipeline_stages_exit_kind_check', sql`${t.exitKind} in ('ganho', 'perdido', 'pausado')`),
+    check('sales_ops_pipeline_stages_exit_pair_check', sql`(${t.type} = 'saida') = (${t.exitKind} is not null)`),
+    check('sales_ops_pipeline_stages_reason_check', sql`not ${t.requiresReason} or ${t.exitKind} = 'perdido'`),
+    check('sales_ops_pipeline_stages_status_check', sql`${t.status} in ('active', 'archived')`),
+  ],
+);
+
+export const salesOpsPipelineTransitions = pgTable(
+  'sales_ops_pipeline_transitions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: text('org_id').notNull(),
+    pipelineId: uuid('pipeline_id').notNull(),
+    fromStageId: uuid('from_stage_id').notNull(),
+    toStageId: uuid('to_stage_id').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex('sales_ops_pipeline_transitions_org_from_to_idx').on(t.orgId, t.fromStageId, t.toStageId),
+    index('sales_ops_pipeline_transitions_org_pipeline_idx').on(t.orgId, t.pipelineId),
+    // Both ends carry pipeline_id in the composite key: a transition can never cross pipelines.
+    foreignKey({
+      columns: [t.orgId, t.pipelineId, t.fromStageId],
+      foreignColumns: [salesOpsPipelineStages.orgId, salesOpsPipelineStages.pipelineId, salesOpsPipelineStages.id],
+      name: 'sales_ops_pipeline_transitions_org_from_fk',
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [t.orgId, t.pipelineId, t.toStageId],
+      foreignColumns: [salesOpsPipelineStages.orgId, salesOpsPipelineStages.pipelineId, salesOpsPipelineStages.id],
+      name: 'sales_ops_pipeline_transitions_org_to_fk',
+    }).onDelete('restrict'),
+    check('sales_ops_pipeline_transitions_distinct_check', sql`${t.fromStageId} <> ${t.toStageId}`),
+  ],
+);
+
+export const salesOpsFieldDefinitions = pgTable(
+  'sales_ops_field_definitions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: text('org_id').notNull(),
+    key: text('key').notNull(),
+    label: text('label').notNull(),
+    /** Open-ended: 'text' | 'number' | 'money' | 'date' | 'options' | 'reference'. */
+    kind: text('kind').notNull().default('text'),
+    /** Open-ended: 'cliente' | 'contato' | 'produto' | 'servico' | 'venda'; only when kind = 'reference'. */
+    referenceTarget: text('reference_target'),
+    /** More than one value per lead (Produto, Serviço). */
+    multiple: boolean('multiple').notNull().default(false),
+    /** [{ key, label }] for kind = 'options'; NULL otherwise. */
+    options: jsonb('options'),
+    filterable: boolean('filterable').notNull().default(false),
+    isSystem: boolean('is_system').notNull().default(false),
+    removable: boolean('removable').notNull().default(true),
+    /** Lead column that stores the value of a system field ('client_id' for Cliente); NULL = value rows. */
+    backingColumn: text('backing_column'),
+    position: integer('position').notNull().default(0),
+    status: text('status').notNull().default('active'),
+    archivedAt: timestamp('archived_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex('sales_ops_field_definitions_org_id_id_idx').on(t.orgId, t.id),
+    uniqueIndex('sales_ops_field_definitions_org_key_idx').on(t.orgId, t.key),
+    index('sales_ops_field_definitions_org_position_idx').on(t.orgId, t.position),
+    check('sales_ops_field_definitions_status_check', sql`${t.status} in ('active', 'archived')`),
+    check('sales_ops_field_definitions_removable_check', sql`${t.removable} or ${t.isSystem}`),
+    check(
+      'sales_ops_field_definitions_reference_check',
+      sql`(${t.kind} = 'reference') = (${t.referenceTarget} is not null)`,
+    ),
+  ],
+);
+
+export const salesOpsCrmLeads = pgTable(
+  'sales_ops_crm_leads',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: text('org_id').notNull(),
+    contactName: text('contact_name').notNull(),
+    contactPhone: text('contact_phone'),
+    contactEmail: text('contact_email'),
+    pipelineId: uuid('pipeline_id').notNull(),
+    stageId: uuid('stage_id').notNull(),
+    position: integer('position').notNull().default(0),
+    stageChangedAt: timestamp('stage_changed_at', { withTimezone: true }).defaultNow().notNull(),
+    sellerPersonId: uuid('seller_person_id'),
+    sellerNameSnapshot: text('seller_name_snapshot').notNull().default(''),
+    /** Backs the Cliente system field (field_definitions.backing_column = 'client_id'). */
+    clientId: uuid('client_id'),
+    clientNameSnapshot: text('client_name_snapshot').notNull().default(''),
+    /** Integer cents. A real column because the board sums it in SQL. */
+    estimatedValueBrl: integer('estimated_value_brl').notNull().default(0),
+    lostReason: text('lost_reason'),
+    saleId: uuid('sale_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    deletedByUserId: text('deleted_by_user_id'),
+    deletedByName: text('deleted_by_name'),
+  },
+  (t) => [
+    uniqueIndex('sales_ops_crm_leads_org_id_id_idx').on(t.orgId, t.id),
+    index('sales_ops_crm_leads_org_stage_position_idx').on(t.orgId, t.stageId, t.position),
+    index('sales_ops_crm_leads_org_pipeline_idx').on(t.orgId, t.pipelineId),
+    index('sales_ops_crm_leads_org_seller_idx').on(t.orgId, t.sellerPersonId),
+    index('sales_ops_crm_leads_org_created_idx').on(t.orgId, t.createdAt),
+    // At most ONE lead per proposta in the org, deleted leads included (same rule as sales_ops_leads_org_sale_idx).
+    uniqueIndex('sales_ops_crm_leads_org_sale_idx')
+      .on(t.orgId, t.saleId)
+      .where(sql`${t.saleId} is not null`),
+    index('sales_ops_crm_leads_org_deleted_idx')
+      .on(t.orgId, t.deletedAt, t.id)
+      .where(sql`${t.deletedAt} is not null`),
+    foreignKey({
+      columns: [t.orgId, t.pipelineId],
+      foreignColumns: [salesOpsPipelines.orgId, salesOpsPipelines.id],
+      name: 'sales_ops_crm_leads_org_pipeline_fk',
+    }).onDelete('restrict'),
+    // The stage must belong to the lead's own pipeline.
+    foreignKey({
+      columns: [t.orgId, t.pipelineId, t.stageId],
+      foreignColumns: [salesOpsPipelineStages.orgId, salesOpsPipelineStages.pipelineId, salesOpsPipelineStages.id],
+      name: 'sales_ops_crm_leads_org_stage_fk',
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [t.orgId, t.clientId],
+      foreignColumns: [salesOpsClients.orgId, salesOpsClients.id],
+      name: 'sales_ops_crm_leads_org_client_fk',
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [t.orgId, t.sellerPersonId],
+      foreignColumns: [salesOpsPeople.orgId, salesOpsPeople.id],
+      name: 'sales_ops_crm_leads_org_seller_fk',
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [t.orgId, t.saleId],
+      foreignColumns: [salesOpsSales.orgId, salesOpsSales.id],
+      name: 'sales_ops_crm_leads_org_sale_fk',
+    }).onDelete('restrict'),
+    check('sales_ops_crm_leads_estimated_value_check', sql`${t.estimatedValueBrl} >= 0`),
+    check(
+      'sales_ops_crm_leads_deleted_pair_check',
+      sql`(${t.deletedAt} is null) = (${t.deletedByUserId} is null)`,
+    ),
+  ],
+);
+
+/**
+ * Typed dynamic values, one row per value (EAV with typed columns). Exactly one
+ * value slot is set. A free Produto (no catalog row) uses value_text plus
+ * ref_name_snapshot; a catalog Produto/Serviço uses value_product_id plus the
+ * snapshot; a Contato reference is value_text (no Contato entity yet).
+ * Cascade from the lead is the sales_ops_lead_products precedent: a value row
+ * has no independent identity and nothing references it.
+ */
+export const salesOpsCrmLeadFieldValues = pgTable(
+  'sales_ops_crm_lead_field_values',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: text('org_id').notNull(),
+    leadId: uuid('lead_id').notNull(),
+    fieldId: uuid('field_id').notNull(),
+    /** 0 for a single-valued field; 0..n for a multiple one. */
+    position: integer('position').notNull().default(0),
+    valueText: text('value_text'),
+    valueNumber: numeric('value_number', { precision: 20, scale: 6 }),
+    valueCents: bigint('value_cents', { mode: 'number' }),
+    valueDate: date('value_date', { mode: 'string' }),
+    valueOption: text('value_option'),
+    valueClientId: uuid('value_client_id'),
+    valueProductId: uuid('value_product_id'),
+    valueSaleId: uuid('value_sale_id'),
+    refNameSnapshot: text('ref_name_snapshot'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex('sales_ops_crm_lead_field_values_slot_idx').on(t.orgId, t.leadId, t.fieldId, t.position),
+    index('sales_ops_crm_lead_field_values_org_lead_idx').on(t.orgId, t.leadId),
+    index('sales_ops_crm_lead_field_values_text_idx').on(t.orgId, t.fieldId, t.valueText).where(sql`${t.valueText} is not null`),
+    index('sales_ops_crm_lead_field_values_number_idx').on(t.orgId, t.fieldId, t.valueNumber).where(sql`${t.valueNumber} is not null`),
+    index('sales_ops_crm_lead_field_values_cents_idx').on(t.orgId, t.fieldId, t.valueCents).where(sql`${t.valueCents} is not null`),
+    index('sales_ops_crm_lead_field_values_date_idx').on(t.orgId, t.fieldId, t.valueDate).where(sql`${t.valueDate} is not null`),
+    index('sales_ops_crm_lead_field_values_option_idx').on(t.orgId, t.fieldId, t.valueOption).where(sql`${t.valueOption} is not null`),
+    index('sales_ops_crm_lead_field_values_client_idx').on(t.orgId, t.valueClientId).where(sql`${t.valueClientId} is not null`),
+    index('sales_ops_crm_lead_field_values_product_idx').on(t.orgId, t.valueProductId).where(sql`${t.valueProductId} is not null`),
+    index('sales_ops_crm_lead_field_values_sale_idx').on(t.orgId, t.valueSaleId).where(sql`${t.valueSaleId} is not null`),
+    foreignKey({
+      columns: [t.orgId, t.leadId],
+      foreignColumns: [salesOpsCrmLeads.orgId, salesOpsCrmLeads.id],
+      name: 'sales_ops_crm_lead_field_values_org_lead_fk',
+    }).onDelete('cascade'),
+    foreignKey({
+      columns: [t.orgId, t.fieldId],
+      foreignColumns: [salesOpsFieldDefinitions.orgId, salesOpsFieldDefinitions.id],
+      name: 'sales_ops_crm_lead_field_values_org_field_fk',
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [t.orgId, t.valueClientId],
+      foreignColumns: [salesOpsClients.orgId, salesOpsClients.id],
+      name: 'sales_ops_crm_lead_field_values_org_client_fk',
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [t.orgId, t.valueProductId],
+      foreignColumns: [salesOpsProducts.orgId, salesOpsProducts.id],
+      name: 'sales_ops_crm_lead_field_values_org_product_fk',
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [t.orgId, t.valueSaleId],
+      foreignColumns: [salesOpsSales.orgId, salesOpsSales.id],
+      name: 'sales_ops_crm_lead_field_values_org_sale_fk',
+    }).onDelete('restrict'),
+    check(
+      'sales_ops_crm_lead_field_values_one_slot_check',
+      sql`num_nonnulls(${t.valueText}, ${t.valueNumber}, ${t.valueCents}, ${t.valueDate}, ${t.valueOption}, ${t.valueClientId}, ${t.valueProductId}, ${t.valueSaleId}) = 1`,
+    ),
+    check('sales_ops_crm_lead_field_values_position_check', sql`${t.position} >= 0`),
+  ],
+);
+
+/** Server-written stage history. from_stage_id NULL is the lead's initial entry (at most one per lead). */
+export const salesOpsCrmLeadEvents = pgTable(
+  'sales_ops_crm_lead_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: text('org_id').notNull(),
+    leadId: uuid('lead_id').notNull(),
+    /** Open-ended; 'stage_changed' today. */
+    kind: text('kind').notNull().default('stage_changed'),
+    fromStageId: uuid('from_stage_id'),
+    toStageId: uuid('to_stage_id'),
+    reason: text('reason'),
+    actorUserId: text('actor_user_id'),
+    actorNameSnapshot: text('actor_name_snapshot'),
+    occurredAt: timestamp('occurred_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex('sales_ops_crm_lead_events_org_id_id_idx').on(t.orgId, t.id),
+    index('sales_ops_crm_lead_events_org_lead_idx').on(t.orgId, t.leadId, t.occurredAt, t.id),
+    uniqueIndex('sales_ops_crm_lead_events_first_entry_idx')
+      .on(t.orgId, t.leadId)
+      .where(sql`${t.fromStageId} is null and ${t.kind} = 'stage_changed'`),
+    foreignKey({
+      columns: [t.orgId, t.leadId],
+      foreignColumns: [salesOpsCrmLeads.orgId, salesOpsCrmLeads.id],
+      name: 'sales_ops_crm_lead_events_org_lead_fk',
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [t.orgId, t.fromStageId],
+      foreignColumns: [salesOpsPipelineStages.orgId, salesOpsPipelineStages.id],
+      name: 'sales_ops_crm_lead_events_org_from_fk',
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [t.orgId, t.toStageId],
+      foreignColumns: [salesOpsPipelineStages.orgId, salesOpsPipelineStages.id],
+      name: 'sales_ops_crm_lead_events_org_to_fk',
+    }).onDelete('restrict'),
+  ],
+);
+
+export const salesOpsCrmLeadNotes = pgTable(
+  'sales_ops_crm_lead_notes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: text('org_id').notNull(),
+    leadId: uuid('lead_id').notNull(),
+    /** Optional link to the stage event the note was written with. */
+    eventId: uuid('event_id'),
+    body: text('body').notNull(),
+    authorUserId: text('author_user_id'),
+    authorNameSnapshot: text('author_name_snapshot'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index('sales_ops_crm_lead_notes_org_lead_idx').on(t.orgId, t.leadId, t.createdAt),
+    foreignKey({
+      columns: [t.orgId, t.leadId],
+      foreignColumns: [salesOpsCrmLeads.orgId, salesOpsCrmLeads.id],
+      name: 'sales_ops_crm_lead_notes_org_lead_fk',
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [t.orgId, t.eventId],
+      foreignColumns: [salesOpsCrmLeadEvents.orgId, salesOpsCrmLeadEvents.id],
+      name: 'sales_ops_crm_lead_notes_org_event_fk',
+    }).onDelete('restrict'),
+    check('sales_ops_crm_lead_notes_body_check', sql`length(btrim(${t.body})) > 0`),
+  ],
+);
+
+export const salesOpsCrmLeadFollowups = pgTable(
+  'sales_ops_crm_lead_followups',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: text('org_id').notNull(),
+    leadId: uuid('lead_id').notNull(),
+    nextStep: text('next_step').notNull(),
+    /** Civil day (string mode), never a JS Date. A follow-up always has a date. */
+    dueOn: date('due_on', { mode: 'string' }).notNull(),
+    ownerPersonId: uuid('owner_person_id'),
+    ownerNameSnapshot: text('owner_name_snapshot'),
+    doneAt: timestamp('done_at', { withTimezone: true }),
+    createdByUserId: text('created_by_user_id'),
+    createdByName: text('created_by_name'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }),
+  },
+  (t) => [
+    index('sales_ops_crm_lead_followups_org_lead_idx').on(t.orgId, t.leadId),
+    index('sales_ops_crm_lead_followups_org_open_due_idx')
+      .on(t.orgId, t.dueOn)
+      .where(sql`${t.doneAt} is null`),
+    foreignKey({
+      columns: [t.orgId, t.leadId],
+      foreignColumns: [salesOpsCrmLeads.orgId, salesOpsCrmLeads.id],
+      name: 'sales_ops_crm_lead_followups_org_lead_fk',
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [t.orgId, t.ownerPersonId],
+      foreignColumns: [salesOpsPeople.orgId, salesOpsPeople.id],
+      name: 'sales_ops_crm_lead_followups_org_owner_fk',
+    }).onDelete('restrict'),
+    check('sales_ops_crm_lead_followups_step_check', sql`length(btrim(${t.nextStep})) > 0`),
+  ],
+);
+
+/** Per-org module flags. Phase 3 reads them; 1b only creates the table. */
+export const salesOpsOrgModules = pgTable(
+  'sales_ops_org_modules',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: text('org_id').notNull(),
+    /** Open-ended: orcamentos, comissoes, financeiro, finders, catalogo, importacao, clientes. */
+    moduleKey: text('module_key').notNull(),
+    enabled: boolean('enabled').notNull().default(false),
+    /** Open-ended: 'default' | 'token_backfill' | 'admin'. */
+    source: text('source').notNull().default('default'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }),
+  },
+  (t) => [uniqueIndex('sales_ops_org_modules_org_key_idx').on(t.orgId, t.moduleKey)],
+);
