@@ -1,0 +1,48 @@
+{
+  "verdict": "APPROVED",
+  "round": 2,
+  "findings": [
+    {
+      "id": "R1-01",
+      "severity": "minor",
+      "kind": "objective",
+      "file": "apps/api/src/domains/sales-ops/leads/__tests__/default-pipeline-parity.test.ts",
+      "line": 96,
+      "claim": "O loop ainda verifica apenas a existência de linhas no HEAD revisado.",
+      "evidence": "HEAD 6863cd1 mantém somente rows.length > 0. A correção com expectRowsMatchPipeline existe em 58c001f, mas não integra HEAD nem o patch fornecido. A paridade atual de 0022 continua coberta separadamente.",
+      "suggestion": "Integrar a correção já existente na branch feat/6q75vnog-03.1-wave1-minors."
+    },
+    {
+      "id": "R1-02",
+      "severity": "minor",
+      "kind": "objective",
+      "file": "CLAUDE.md",
+      "line": 370,
+      "claim": "A documentação ainda omite a importação entre os callers permitidos do seed.",
+      "evidence": "HEAD mantém “Nothing else on a request path seeds”, embora import/routes.ts chame ensureLeadStages. A correção de 28bd26b existe somente na branch de ajustes.",
+      "suggestion": "Integrar a correção documental já existente."
+    }
+  ],
+  "checks": [
+    {
+      "command": "git diff --check 744309c...HEAD -- . ':(exclude)nexo/runs'",
+      "exit": 0,
+      "summary": "Sem erros de whitespace. Nenhum novo blocker ou major identificado."
+    },
+    {
+      "command": "git diff --name-only 6620a8f...HEAD -- . ':(exclude)nexo/runs'",
+      "exit": 0,
+      "summary": "Desde a revisão anterior, HEAD adicionou apenas o plano 03.1-wave1-minors.md. Confirmado também que o patch fornecido é idêntico ao diff do HEAD 6863cd1."
+    },
+    {
+      "command": "git merge-base --is-ancestor 9a88702 HEAD",
+      "exit": 1,
+      "summary": "As correções não estão integradas ao HEAD. Inspeção de 6863cd1..9a88702 confirma que resolvem os achados e adicionam o guard dos filenames."
+    },
+    {
+      "command": "Gate 2 fornecido pelo orquestrador: slices 01-03 e 03.1",
+      "exit": 0,
+      "summary": "Resultados PASS considerados sem reexecutar testes ou lint. Os resultados de 03.1 correspondem a alterações ausentes do HEAD revisado."
+    }
+  ]
+}
