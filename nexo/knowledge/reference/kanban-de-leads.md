@@ -428,3 +428,4 @@ The free-text company path of the old dialogs is intentionally gone, because the
 - `POST /followups/:id/done` is allowed to whoever can access the lead under the seller scope, to an admin, and to the follow-up's own owner pessoa; anyone else gets 404.
 - The board publishes `Desfazer` for a stage move only when the graph allows the reverse edge (a move to `Perdido` has none).
 - An edit undo of a lead with no contact omits `contactPhone`/`contactEmail`, like the edit itself.
+- An edit that gives a contactless lead its first contact offers no undo, because the inverse cannot clear the only contact.
