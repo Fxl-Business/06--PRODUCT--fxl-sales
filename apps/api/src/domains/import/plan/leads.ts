@@ -188,7 +188,7 @@ export function planLeads(parsed: ParsedWorkbook, catalog: ImportCatalog, refs: 
               row.row,
               header(SHEET, 'etapa'),
               'conversion_stage',
-              `A etapa "${etapa}" é a de conversão; um lead só chega nela quando vira proposta dentro do Sales. Escolha outra etapa.`,
+              `A etapa "${etapa}" é a de conversão; um lead só chega nela quando vira proposta dentro do FXL Vendas. Escolha outra etapa.`,
             ),
           );
         } else stageRef = l.ref;

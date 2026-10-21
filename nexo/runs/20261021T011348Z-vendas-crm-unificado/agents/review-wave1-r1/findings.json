@@ -1,0 +1,48 @@
+{
+  "verdict": "APPROVED",
+  "round": 1,
+  "findings": [
+    {
+      "id": "R1-01",
+      "severity": "minor",
+      "kind": "objective",
+      "file": "apps/api/src/domains/sales-ops/leads/__tests__/default-pipeline-parity.test.ts",
+      "line": 96,
+      "claim": "O loop de comparações registradas não compara o seed ao funil.",
+      "evidence": "A única asserção é rows.length > 0, apesar do nome do teste e do SLICE-05-HOOK prometerem paridade. A migração 0022 está coberta pelos testes anteriores; novas entradas não terão essa proteção automaticamente.",
+      "suggestion": "Comparar os campos normalizados de cada entrada com a constante, ou remover a promessa de comparação automática."
+    },
+    {
+      "id": "R1-02",
+      "severity": "minor",
+      "kind": "objective",
+      "file": "CLAUDE.md",
+      "line": 370,
+      "claim": "A regra de callers do seed omite a importação existente.",
+      "evidence": "“Nothing else on a request path seeds” contradiz apps/api/src/domains/import/routes.ts:52, que chama ensureLeadStages. O novo stages-seed-callers.test.ts permite explicitamente esse caller.",
+      "suggestion": "Registrar a importação como caller permitido junto com GET /lead-stages e bootstrap."
+    }
+  ],
+  "checks": [
+    {
+      "command": "git diff --check 744309c...HEAD -- . ':(exclude)nexo/runs'",
+      "exit": 0,
+      "summary": "Sem erros de whitespace; diff revisado contra pedido e planos 01-03."
+    },
+    {
+      "command": "rg -n 'FXL Sales|Fxl Sales' apps/web/src apps/api/src -g '!*.test.*' -g '!*.bak*'",
+      "exit": 0,
+      "summary": "Cinco ocorrências restantes, todas em comentários."
+    },
+    {
+      "command": "git diff --name-only 744309c...HEAD -- apps/api/drizzle",
+      "exit": 0,
+      "summary": "Nenhuma migração alterada."
+    },
+    {
+      "command": "Gate 2 fornecido pelo orquestrador: slices 01-03",
+      "exit": 0,
+      "summary": "Oracles, testes afetados, lint e type-check reportados PASS. Resultados utilizados sem reexecutar testes ou lint; revisão somente de leitura."
+    }
+  ]
+}

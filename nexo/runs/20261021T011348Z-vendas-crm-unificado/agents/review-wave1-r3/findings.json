@@ -1,0 +1,27 @@
+{
+  "verdict": "APPROVED",
+  "round": 3,
+  "findings": [],
+  "checks": [
+    {
+      "command": "git merge-base --is-ancestor 9a88702 HEAD",
+      "exit": 0,
+      "summary": "Correções integradas ao HEAD eb1a1c6. R1-01 e R1-02 resolvidos; guard dos filenames presente."
+    },
+    {
+      "command": "git diff --exit-code 9a88702 HEAD -- . ':(exclude)nexo/runs'",
+      "exit": 0,
+      "summary": "Conteúdo idêntico às correções já revisadas. Patch fornecido também corresponde ao diff completo de HEAD, com 1454 linhas."
+    },
+    {
+      "command": "git diff --check 744309c...HEAD -- . ':(exclude)nexo/runs'",
+      "exit": 0,
+      "summary": "Sem erros de whitespace. Nenhum achado pendente na wave."
+    },
+    {
+      "command": "Gate 2 fornecido pelo orquestrador: slices 01-03 e 03.1",
+      "exit": 0,
+      "summary": "Resultados PASS considerados; correções com parity+callers 6/6 e brand 21/21. Testes e lint não reexecutados, conforme instrução."
+    }
+  ]
+}

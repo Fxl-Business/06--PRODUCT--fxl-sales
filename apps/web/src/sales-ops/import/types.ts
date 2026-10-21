@@ -63,8 +63,8 @@ export type ImportCommitBody = { counts: ImportCounts; recognized?: ImportCounts
 export const MAX_IMPORT_UPLOAD_BYTES = 5 * 1024 * 1024;
 export const MAX_RETURNED_ISSUES = 500;
 
-export const IMPORT_TEMPLATE_FILENAME = 'fxl-sales-importacao.xlsx';
-export const IMPORT_EXAMPLE_FILENAME = 'fxl-sales-importacao-exemplo.xlsx';
+export const IMPORT_TEMPLATE_FILENAME = 'fxl-vendas-importacao.xlsx';
+export const IMPORT_EXAMPLE_FILENAME = 'fxl-vendas-importacao-exemplo.xlsx';
 export const XLSX_ACCEPT =
   '.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
