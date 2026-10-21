@@ -15,6 +15,11 @@ const query = vi.hoisted(() => ({
   isError: false,
 }));
 const mutation = { isPending: false, mutate: vi.fn(), mutateAsync: vi.fn() };
+vi.mock('../leads/crm-hooks', () => ({
+  // The container reads the org's field definitions before it mounts the form; none is needed here.
+  useFieldDefinitions: () => ({ isPending: false, data: [] }),
+  usePipelines: () => ({ isPending: false, data: [] }),
+}));
 vi.mock('../leads/hooks', () => ({
   useLeadStages: () => query,
   useLeadsBoard: () => ({ data: { leads: query.leads, hasMore: false }, isPending: false, isError: false, isFetchingNextPage: false, fetchNextPage: vi.fn() }),

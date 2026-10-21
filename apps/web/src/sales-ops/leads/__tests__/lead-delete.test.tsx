@@ -6,9 +6,8 @@ import { createRoot, type Root } from 'react-dom/client';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { queryKeys } from '@/lib/query-keys';
-import { ContactLeadDialog } from '../ContactLeadDialog';
 import { LeadCard } from '../LeadCard';
-import { LeadDialog } from '../LeadDialog';
+import { LeadForm } from '../LeadForm';
 import { LeadsBoardContainer } from '../LeadsBoardContainer';
 import { buildLabelLookups } from '../board-labels';
 import { MUTATION_ERROR_COPY } from '../../mutation-error-copy';
@@ -634,40 +633,31 @@ describe('deleting from the edit form', () => {
     });
   }
 
-  it('both forms render Excluir lead in edit mode only, even when handed onDelete', async () => {
+  it('the one LeadForm renders Excluir lead in edit mode only, even when handed onDelete', async () => {
     const onDelete = vi.fn();
     const forms = (initialId: string | undefined) => [
-      <LeadDialog
+      <LeadForm
         clients={[]}
-        initial={initialId ? { id: initialId, contactName: 'Ana Souza', clientName: 'Acme' } : null}
-        key="full"
+        definitions={[]}
+        initial={
+          initialId
+            ? ({
+                id: initialId,
+                contactName: 'Ana Souza',
+                contactPhone: '11999990000',
+                contactEmail: null,
+                clientNameSnapshot: 'Acme',
+                fields: [],
+              } as unknown as SalesOpsLead)
+            : null
+        }
+        key="form"
         onDelete={onDelete}
         onOpenChange={vi.fn()}
         onSubmit={vi.fn()}
         open
         products={[]}
         sellers={[]}
-      />,
-      <ContactLeadDialog
-        initial={
-          initialId
-            ? {
-                id: initialId,
-                contactName: 'Ana Souza',
-                contactPhone: null,
-                contactEmail: null,
-                contactBirthDate: null,
-                description: null,
-              }
-            : null
-        }
-        key="contact"
-        onDelete={onDelete}
-        onOpenChange={vi.fn()}
-        onSubmit={vi.fn()}
-        open
-        sellers={[]}
-        today="2026-10-07"
       />,
     ];
 
@@ -682,7 +672,7 @@ describe('deleting from the edit form', () => {
       await settle(1);
       await click(required('[data-delete-lead-form]'));
     }
-    expect(onDelete).toHaveBeenCalledTimes(2);
+    expect(onDelete).toHaveBeenCalledTimes(1);
   });
 
   it('a converted lead opened from the Lista gets no Excluir lead', async () => {

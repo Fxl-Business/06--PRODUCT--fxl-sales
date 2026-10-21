@@ -22,6 +22,8 @@ type ConversionFilters = { source?: string; finderId?: string } | undefined;
  * `CommissionFilters` duplicates its consumers' shape here.
  */
 type LeadBoardFilters = { sellerPersonId?: string } | undefined;
+/** Declared locally for the same reason as `LeadBoardFilters`: the follow-ups list filters. */
+type FollowupFilters = { scope: 'mine' | 'team'; status: 'open' | 'done' | 'all'; from?: string; to?: string };
 
 export const queryKeys = {
   salesOps: {
@@ -121,6 +123,10 @@ export const queryKeys = {
     summary: (filters: LeadBoardFilters) => ['leads', 'summary', filters ?? null] as const,
     stages: () => ['leads', 'stages'] as const,
     deleted: () => ['leads', 'deleted'] as const,
+    pipelines: () => ['leads', 'pipelines'] as const,
+    fieldDefinitions: () => ['leads', 'field-definitions'] as const,
+    detail: (leadId: string) => ['leads', 'detail', leadId] as const,
+    followups: (filters: FollowupFilters) => ['leads', 'followups', filters] as const,
   },
   finderClicks: {
     all: ['finder', 'clicks'] as const,

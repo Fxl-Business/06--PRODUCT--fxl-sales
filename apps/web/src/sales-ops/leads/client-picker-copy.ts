@@ -1,12 +1,11 @@
 /**
- * The cliente picker's copy in both lead dialogs: the trigger placeholder AND the
+ * The cliente picker's copy in the one LeadForm: the trigger placeholder AND the
  * search field (the `Combobox` `searchPlaceholder`, which is also the search
- * input's accessible name). Pure and React-free.
+ * input's accessible name).
  *
  * The copy promises creation only where the picker really offers the create row:
- * the leads edition's `ContactLeadDialog` while `onCreateClient` is wired. The
- * full edition's `LeadDialog` never creates a cliente (that happens at
- * conversion, inside the proposta flow), so it always reads `searchOnly`.
+ * the LeadForm's empresa picker while `onCreateClient` is wired (both editions).
+ * Without it the picker only searches, so it reads `searchOnly`. Pure and React-free.
  */
 
 export const CLIENT_PICKER_COPY = {

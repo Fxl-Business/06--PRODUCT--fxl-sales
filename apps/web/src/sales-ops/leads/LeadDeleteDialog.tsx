@@ -16,7 +16,7 @@ import type { SalesOpsLead } from './types';
  * THE one confirmation for deleting a lead, shared by the card menu, the Lista
  * action and both edit forms. PURELY presentational: it names the lead and
  * awaits `onConfirm`. Resolve closes it; a rejection keeps it open with the
- * mapped error inline, exactly like `ContactLeadDialog`'s save.
+ * mapped error inline, exactly like the LeadForm save.
  *
  * The confirm button is a plain button and NOT `AlertDialogAction`, because the
  * Radix action closes the dialog on click, before the answer is known.

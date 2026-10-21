@@ -1,4 +1,5 @@
 import type { SalesOpsStatus } from '../types';
+import type { LeadFieldValue, PipelineExitKind, PipelineStageType } from './crm-types';
 
 /**
  * The lead pipeline's WIRE types, reconciled against the shipped slice 03 API
@@ -47,6 +48,12 @@ export type SalesOpsLeadStage = {
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string | null;
+  /** Additive wire fields of the phase 2 API; optional so pre-cutover fixtures still compile. */
+  pipelineId?: string;
+  type?: PipelineStageType;
+  behavior?: string;
+  exitKind?: PipelineExitKind | null;
+  requiresReason?: boolean;
 };
 
 /**
@@ -113,6 +120,11 @@ export type SalesOpsLead = {
   products: SalesOpsLeadProduct[];
   createdAt: string;
   updatedAt: string | null;
+  /** Additive wire fields of the phase 2 API; optional so pre-cutover fixtures still compile. */
+  pipelineId?: string;
+  stageType?: PipelineStageType;
+  stageExitKind?: PipelineExitKind | null;
+  fields?: LeadFieldValue[];
 };
 
 /**
