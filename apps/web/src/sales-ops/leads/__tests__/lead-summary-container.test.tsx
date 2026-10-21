@@ -228,6 +228,30 @@ describe('LeadSummaryContainer', () => {
     expect(inverse.fields.some((entry) => entry.fieldId === 'f-cli')).toBe(false);
   });
 
+  it('the undo of an edit to a contactless legacy lead sends no contact keys', async () => {
+    mocks.summary = summaryOf(lead({ contactPhone: null, contactEmail: null }));
+    await renderAt([`/operacional/leads/${LEAD_ID}`]);
+    await click('[data-summary-edit]');
+    mocks.mutateAsync.mockImplementation(async () => {
+      const updated = lead({ contactName: 'Ana Nova', contactPhone: null, contactEmail: null });
+      mocks.summary = summaryOf(updated);
+      return { lead: updated };
+    });
+    setInput('lead-contact-name', 'Ana Nova');
+    await click('[data-lead-save]');
+    expect(mocks.mutateAsync.mock.calls[0]?.[0]).not.toHaveProperty('contactPhone');
+
+    mocks.mutateAsync.mockClear();
+    mocks.mutateAsync.mockResolvedValue({ lead: lead({ contactPhone: null, contactEmail: null }) });
+    await click('[data-undo-action]');
+
+    expect(mocks.mutateAsync).toHaveBeenCalledTimes(1);
+    const inverse = mocks.mutateAsync.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(inverse).toMatchObject({ id: LEAD_ID, contactName: 'Ana' });
+    expect(inverse).not.toHaveProperty('contactPhone');
+    expect(inverse).not.toHaveProperty('contactEmail');
+  });
+
   it('refuses the undo when the lead changed since the edit, with no second write', async () => {
     await renderAt([`/operacional/leads/${LEAD_ID}`]);
     await click('[data-summary-edit]');

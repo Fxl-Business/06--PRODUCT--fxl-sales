@@ -240,16 +240,20 @@ export function buildLeadWritePayload(
  * The full previous state as a write body, used by the edit undo. The Cliente is
  * carried ONLY by `clientId`/`clientName`: the API refuses `clientId` together with a
  * Cliente entry of `fields` (400 field_invalid), so that entry is dropped here.
+ *
+ * A legacy lead that never had a contact has both contact keys null. They are omitted
+ * exactly as the normal edit omits them (`buildLeadWritePayload` with `contactOptional`),
+ * because the API refuses a PATCH that carries both contact keys empty (400 contact_required).
  */
 export function leadToWriteSeed(lead: SalesOpsLead, clearFieldIds: readonly string[] = []): LeadWritePayload {
   const kept: LeadFieldWrite[] = (lead.fields ?? [])
     .filter((f) => f.key !== CLIENTE_FIELD_KEY)
     .map((f) => ({ fieldId: f.fieldId, value: f.value }));
+  const contactless = !lead.contactPhone && !lead.contactEmail;
   return {
     id: lead.id,
     contactName: lead.contactName,
-    contactPhone: lead.contactPhone,
-    contactEmail: lead.contactEmail,
+    ...(contactless ? {} : { contactPhone: lead.contactPhone, contactEmail: lead.contactEmail }),
     clientId: lead.clientId,
     clientName: lead.clientNameSnapshot || null,
     estimatedValueBrl: lead.estimatedValueBrl,
