@@ -1,15 +1,20 @@
 import { useQuery } from '@tanstack/react-query';
 import { useAccessToken } from '@/auth/react';
+import { useAppMutation } from '@/lib/app-mutation';
 import { queryKeys } from '@/lib/query-keys';
 import { requireToken } from '@/lib/require-token';
 import { crmApi } from './crm-api';
 import type {
+  AddLeadFollowupPayload,
+  AddLeadNotePayload,
+  AdvanceLeadPayload,
   CrmPipeline,
   FieldDefinition,
   FieldDefinitionsResponse,
   LeadSummaryResponse,
   PipelinesResponse,
 } from './crm-types';
+import type { LeadResponse } from './types';
 
 /*
  * The READ hooks of the CRM layer. The mutation hooks join this file in 09c and 09d
@@ -51,5 +56,43 @@ export function useLeadSummary(leadId: string) {
   return useQuery({
     queryKey: queryKeys.leads.detail(leadId),
     queryFn: async (): Promise<LeadSummaryResponse> => crmApi.getLeadSummary(leadId, await requireToken(getToken)),
+  });
+}
+
+/*
+ * The CRM writes. Each refreshes the whole `['leads']` root, so the summary, the
+ * board and the follow-ups list re-read the server. No optimistic write: the server
+ * owns the next stage, the position and the follow-up rows.
+ */
+export function useAdvanceLead() {
+  const { getToken } = useAccessToken();
+  return useAppMutation<LeadResponse, Error, AdvanceLeadPayload>({
+    mutationFn: async (payload) => crmApi.advanceLead(payload, await requireToken(getToken)),
+    invalidates: [queryKeys.leads.all],
+  });
+}
+
+export function useAddLeadNote() {
+  const { getToken } = useAccessToken();
+  return useAppMutation<unknown, Error, AddLeadNotePayload>({
+    mutationFn: async (payload) => crmApi.addLeadNote(payload, await requireToken(getToken)),
+    invalidates: [queryKeys.leads.all],
+  });
+}
+
+export function useAddLeadFollowup() {
+  const { getToken } = useAccessToken();
+  return useAppMutation<unknown, Error, AddLeadFollowupPayload>({
+    mutationFn: async (payload) => crmApi.addLeadFollowup(payload, await requireToken(getToken)),
+    invalidates: [queryKeys.leads.all],
+  });
+}
+
+/** The variable is the follow-up id. */
+export function useMarkFollowupDone() {
+  const { getToken } = useAccessToken();
+  return useAppMutation<unknown, Error, string>({
+    mutationFn: async (followupId) => crmApi.markFollowupDone(followupId, await requireToken(getToken)),
+    invalidates: [queryKeys.leads.all],
   });
 }

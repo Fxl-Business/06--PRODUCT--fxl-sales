@@ -400,3 +400,8 @@ The free-text company path of the old dialogs is intentionally gone, because the
 - `Excluir` no resumo confirma pelo `LeadDeleteDialog` e navega para o funil; a restauração fica em `Cadastros > Leads excluídos`, porque a notificação de desfazer morre com a página.
 - O desfazer compartilhado (`use-undo-notice.ts`, `UndoLayer.tsx`, `undo-conflict.ts`) é o único lugar do aviso de cinco segundos.
 - Oracles: `summary-format.test.ts`, `lead-summary.test.tsx`, `lead-summary-container.test.tsx`, `leads-contact-container.test.tsx` (a card click navigates to the summary), `lead-delete.test.tsx` (a plain click on the card body opens the summary).
+- `Avançar` (slice 09d) lists ONLY the `nextStages` of `GET /leads/:id/summary`, the destinations the API allows from the stage; it never offers the rest of the pipeline.
+- The follow-up is required for a `normal` or `orcamento` destination that does not open the proposta, and not for an exit (`saida`); a destination that opens the proposta goes through the board's conversion door (`onRequestConversion`), the same as a drag, and the lead moves only after the proposta exists.
+- The advance rules are pure in `advance.ts` (`advanceNeeds`, `validateAdvance`, `buildAdvancePayload`, `advanceErrorCopy`); the dialog and the API must agree on them.
+- The note and the follow-up composers (`SummaryComposers.tsx`) write through `useAddLeadNote` and `useAddLeadFollowup`; `Concluir` calls `useMarkFollowupDone`, and every one of them refreshes the whole `['leads']` root.
+- Oracles: `advance.test.ts`, `advance-dialog.test.tsx`, `lead-summary-container.test.tsx`.

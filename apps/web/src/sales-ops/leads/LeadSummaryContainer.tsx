@@ -7,15 +7,27 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { buildSalesOpsPath, type SalesOpsWorkspace } from '../navigation';
 import type { SalesOpsClient, SalesOpsProduct } from '../types';
 import type { LeadWritePayload } from './api';
-import { useSaveLead, useDeleteLead } from './hooks';
-import { useFieldDefinitions, useLeadSummary } from './crm-hooks';
+import { AdvanceDialog } from './AdvanceDialog';
+import { useSaveLead, useDeleteLead, useMoveLead } from './hooks';
+import {
+  useAddLeadFollowup,
+  useAddLeadNote,
+  useAdvanceLead,
+  useFieldDefinitions,
+  useLeadSummary,
+  useMarkFollowupDone,
+  usePipelines,
+} from './crm-hooks';
 import { leadIsConverted } from './calculations';
+import { pickPipeline, stageOpensOrcamentos } from './crm-pipeline';
 import { mutedStateClass, secondaryButtonClass } from './board-ui';
 import { LeadDeleteDialog } from './LeadDeleteDialog';
 import { LeadForm } from './LeadForm';
 import { CLIENTE_FIELD_KEY, leadToWriteSeed } from './lead-form';
+import type { LeadConversionRequest } from './LeadsBoard';
 import { LeadSummary } from './LeadSummary';
 import { isLeadSummaryOpenedInApp } from './lead-summary-nav';
+import { FollowupComposer, NoteComposer } from './SummaryComposers';
 import { UndoLayer } from './UndoLayer';
 import { UNDO_CONFLICT, UndoConflictError } from './undo-conflict';
 import { useUndoNotice } from './use-undo-notice';
@@ -37,6 +49,8 @@ export type LeadSummaryContainerProps = {
   sellers: ComboboxOption[];
   onCreateClient?: (name: string) => Promise<ComboboxOption | null>;
   onOpenSale?: (saleId: string) => void;
+  /** The conversion door of the board, reused: a conversion destination opens the proposta wizard. */
+  onRequestConversion?: (request: LeadConversionRequest) => Promise<string | null>;
 };
 
 function isNotFoundError(error: unknown): boolean {
@@ -51,6 +65,7 @@ export function LeadSummaryContainer({
   sellers,
   onCreateClient,
   onOpenSale,
+  onRequestConversion,
 }: LeadSummaryContainerProps) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -60,8 +75,15 @@ export function LeadSummaryContainer({
   const saveLead = useSaveLead();
   const deleteLead = useDeleteLead();
   const undo = useUndoNotice();
+  const advance = useAdvanceLead();
+  const addNote = useAddLeadNote();
+  const addFollowup = useAddLeadFollowup();
+  const markDone = useMarkFollowupDone();
+  const moveLead = useMoveLead(undefined);
+  const pipelinesQuery = usePipelines();
   const [editOpen, setEditOpen] = React.useState(false);
   const [deleteOpen, setDeleteOpen] = React.useState(false);
+  const [advanceOpen, setAdvanceOpen] = React.useState(false);
   // Stable per mount, as on the board: the day counters need days, not milliseconds.
   const today = React.useMemo(() => todayInSaoPaulo(), []);
   const now = React.useMemo(() => new Date(), []);
@@ -70,6 +92,15 @@ export function LeadSummaryContainer({
   const lead = summary?.lead;
   const definitions = definitionsQuery.data ?? [];
   const backPath = buildSalesOpsPath({ workspace, view: 'funil' });
+  const pipeline = React.useMemo(
+    () => pickPipeline(pipelinesQuery.data ?? [], summaryQuery.data?.pipeline.id ?? null),
+    [pipelinesQuery.data, summaryQuery.data?.pipeline.id],
+  );
+  // The destinations that open the proposta: the same set the board's conversion door uses.
+  const opensConversionIds = React.useMemo(
+    () => new Set((pipeline?.stages ?? []).filter((stage) => stageOpensOrcamentos(stage)).map((stage) => stage.id)),
+    [pipeline],
+  );
 
   function goBack() {
     if (isLeadSummaryOpenedInApp(location.state)) navigate(-1);
@@ -117,6 +148,15 @@ export function LeadSummaryContainer({
     });
   }
 
+  /** Resolves `true` once the proposta exists and the lead has moved; `false` when the operator cancelled the wizard. */
+  async function convert(stage: { id: string }): Promise<boolean> {
+    if (!onRequestConversion) throw new Error('conversion_unavailable');
+    const saleId = await onRequestConversion({ lead: lead!, toStageId: stage.id, toIndex: 0 });
+    if (saleId === null) return false;
+    await moveLead.mutateAsync({ leadId: lead!.id, toStageId: stage.id, toIndex: 0, saleId });
+    return true;
+  }
+
   async function confirmDelete(target: SalesOpsLead) {
     await deleteLead.mutateAsync(target.id);
     // The lead is gone and this page with it, so the restore notice would die here:
@@ -129,12 +169,46 @@ export function LeadSummaryContainer({
       <LeadSummary
         definitions={definitions}
         now={now}
+        notesSlot={(
+          <>
+            <NoteComposer onAdd={(body) => addNote.mutateAsync({ leadId: lead.id, body })} pending={addNote.isPending} />
+            <FollowupComposer
+              onAdd={(followup) => addFollowup.mutateAsync({ leadId: lead.id, ...followup })}
+              pending={addFollowup.isPending}
+              today={today}
+            />
+          </>
+        )}
+        onAdvance={leadIsConverted(lead) ? undefined : () => setAdvanceOpen(true)}
         onBack={goBack}
         onEdit={() => setEditOpen(true)}
         onOpenSale={onOpenSale}
+        renderFollowupAction={(followup) => (
+          <button
+            className={secondaryButtonClass}
+            data-followup-done={followup.id}
+            onClick={() => markDone.mutate(followup.id)}
+            type="button"
+          >
+            Concluir
+          </button>
+        )}
         summary={summary}
         today={today}
       />
+      {advanceOpen ? (
+        <AdvanceDialog
+          key="advance"
+          leadName={lead.contactName}
+          nextStages={summary.nextStages}
+          onConvert={convert}
+          onOpenChange={setAdvanceOpen}
+          onSubmit={(payload) => advance.mutateAsync({ leadId: lead.id, ...payload })}
+          open
+          opensConversionIds={opensConversionIds}
+          today={today}
+        />
+      ) : null}
       {editOpen && !definitionsQuery.isPending ? (
         <LeadForm
           clients={clients}

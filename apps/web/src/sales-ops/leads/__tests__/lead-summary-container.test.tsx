@@ -18,6 +18,12 @@ const mocks = vi.hoisted(() => ({
   definitions: [] as unknown[],
   mutateAsync: vi.fn(),
   deleteAsync: vi.fn(),
+  advanceAsync: vi.fn(),
+  addNoteAsync: vi.fn(),
+  addFollowupAsync: vi.fn(),
+  markDone: vi.fn(),
+  moveAsync: vi.fn(),
+  pipelines: [] as unknown[],
   roles: ['admin'] as string[],
 }));
 
@@ -33,15 +39,22 @@ vi.mock('../crm-hooks', () => ({
     refetch: async () => ({ data: mocks.summary }),
   }),
   useFieldDefinitions: () => ({ isPending: false, data: mocks.definitions }),
+  usePipelines: () => ({ isPending: false, data: mocks.pipelines }),
+  useAdvanceLead: () => ({ isPending: false, mutateAsync: mocks.advanceAsync }),
+  useAddLeadNote: () => ({ isPending: false, mutateAsync: mocks.addNoteAsync }),
+  useAddLeadFollowup: () => ({ isPending: false, mutateAsync: mocks.addFollowupAsync }),
+  useMarkFollowupDone: () => ({ isPending: false, mutate: mocks.markDone }),
 }));
 vi.mock('../hooks', () => ({
   useSaveLead: () => ({ isPending: false, mutateAsync: mocks.mutateAsync }),
   useDeleteLead: () => ({ isPending: false, mutateAsync: mocks.deleteAsync }),
+  useMoveLead: () => ({ isPending: false, mutateAsync: mocks.moveAsync }),
 }));
 
 const act = (React as typeof React & { act: typeof import('react-dom/test-utils').act }).act;
 let container: HTMLDivElement;
 let root: Root | null;
+const conversionDoor = vi.fn(async (_request: unknown): Promise<string | null> => null);
 
 function lead(overrides: Partial<SalesOpsLead> = {}): SalesOpsLead {
   return {
@@ -63,9 +76,14 @@ function summaryOf(current: SalesOpsLead): LeadSummaryResponse {
     lead: current,
     pipeline: { id: 'pipe-1', name: 'Funil padrão' },
     stage: { id: 'stage-contato', name: 'Contato', type: 'normal', exitKind: null },
-    nextStages: [{ id: 'stage-proposta', name: 'Proposta', type: 'normal', exitKind: null, requiresReason: false }],
+    nextStages: [
+      { id: 'stage-proposta', name: 'Proposta', type: 'orcamento', exitKind: null, requiresReason: false },
+      { id: 'stage-ganho', name: 'Ganho', type: 'saida', exitKind: 'ganho', requiresReason: false },
+    ],
     timeline: [],
-    followups: [],
+    followups: [
+      { id: 'fu-1', nextStep: 'Ligar', dueOn: '2026-10-25', ownerName: null, doneAt: null },
+    ],
   };
 }
 
@@ -80,7 +98,17 @@ async function renderAt(entries: Entry[], index = entries.length - 1) {
     <MemoryRouter initialEntries={entries} initialIndex={index}>
       <Routes>
         <Route
-          element={<LeadSummaryContainer clients={[]} leadId={LEAD_ID} onOpenSale={vi.fn()} products={[]} sellers={[]} workspace="operacional" />}
+          element={(
+            <LeadSummaryContainer
+              clients={[]}
+              leadId={LEAD_ID}
+              onOpenSale={vi.fn()}
+              onRequestConversion={(request) => conversionDoor(request)}
+              products={[]}
+              sellers={[]}
+              workspace="operacional"
+            />
+          )}
           path="/operacional/leads/:leadId"
         />
       </Routes>
@@ -93,10 +121,10 @@ async function renderAt(entries: Entry[], index = entries.length - 1) {
 async function settle() {
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
 }
-async function click(selector: string) {
+async function click(target: string | Element) {
   // Dialogs portal to <body>, so the lookup is document-wide.
-  const element = document.querySelector<HTMLElement>(selector);
-  if (!element) throw new Error(`Missing ${selector}`);
+  const element = typeof target === 'string' ? document.querySelector<HTMLElement>(target) : target;
+  if (!element) throw new Error(`Missing ${String(target)}`);
   await act(async () => element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })));
   await settle();
 }
@@ -108,6 +136,30 @@ function setInput(id: string, value: string) {
   input.dispatchEvent(new Event('input', { bubbles: true }));
 }
 const path = () => container.querySelector('[data-path]')?.textContent;
+function setTextarea(node: HTMLTextAreaElement, value: string) {
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+  setter?.call(node, value);
+  node.dispatchEvent(new Event('input', { bubbles: true }));
+}
+function dialogNode(): Element {
+  const node = document.querySelector('[role="dialog"]');
+  if (!node) throw new Error('dialog not rendered');
+  return node;
+}
+/** Opens the stage picker of the dialog and returns the offered labels. */
+async function openStagePicker(): Promise<string[]> {
+  const trigger = [...dialogNode().querySelectorAll('[role="combobox"]')][0];
+  if (!(trigger instanceof HTMLButtonElement)) throw new Error('combobox trigger not found');
+  await click(trigger);
+  return [...document.querySelectorAll('[role="listbox"] [role="option"]')].map((node) => node.textContent?.trim() ?? '');
+}
+async function clickOption(label: string) {
+  const row = [...document.querySelectorAll('[role="listbox"] [role="option"]')].find(
+    (node) => node.textContent?.trim() === label,
+  );
+  if (!row) throw new Error(`option "${label}" not offered`);
+  await click(row);
+}
 
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -121,6 +173,21 @@ beforeEach(() => {
   mocks.mutateAsync.mockReset();
   mocks.deleteAsync.mockReset();
   mocks.deleteAsync.mockResolvedValue(undefined);
+  mocks.advanceAsync.mockReset();
+  mocks.addNoteAsync.mockReset();
+  mocks.addFollowupAsync.mockReset();
+  mocks.markDone.mockReset();
+  mocks.moveAsync.mockReset();
+  conversionDoor.mockReset();
+  conversionDoor.mockResolvedValue(null);
+  mocks.pipelines = [{
+    id: 'pipe-1', name: 'Funil padrão', isDefault: true, position: 0, status: 'active', transitions: [],
+    stages: [
+      { id: 'stage-contato', name: 'Contato', position: 1, type: 'normal', behavior: 'none', exitKind: null, requiresReason: false, status: 'active' },
+      { id: 'stage-proposta', name: 'Proposta', position: 2, type: 'orcamento', behavior: 'opens_orcamentos', exitKind: null, requiresReason: false, status: 'active' },
+      { id: 'stage-ganho', name: 'Ganho', position: 3, type: 'saida', behavior: 'none', exitKind: 'ganho', requiresReason: false, status: 'active' },
+    ],
+  }];
 });
 
 afterEach(async () => {
@@ -192,5 +259,64 @@ describe('LeadSummaryContainer', () => {
     await renderAt([`/operacional/leads/${LEAD_ID}`]);
     expect(container.querySelector('[data-summary-edit]')).toBeNull();
     expect(container.querySelector('[data-summary-open-sale]')?.textContent).toBe('Abrir proposta P-0042');
+  });
+
+  it('Avançar offers only the summary destinations and posts the chosen exit with the lead id', async () => {
+    mocks.advanceAsync.mockResolvedValue({ lead: lead() });
+    await renderAt([`/operacional/leads/${LEAD_ID}`]);
+    await click('[data-summary-advance]');
+    expect(await openStagePicker()).toEqual(['Proposta', 'Ganho']);
+    await clickOption('Ganho');
+    await click('[data-advance-confirm]');
+
+    expect(mocks.advanceAsync).toHaveBeenCalledWith({ leadId: LEAD_ID, toStageId: 'stage-ganho' });
+    expect(document.querySelector('[data-advance-confirm]')).toBeNull();
+  });
+
+  it('a conversion destination goes through the board door and then moves the lead with the sale id', async () => {
+    mocks.moveAsync.mockResolvedValue({ lead: lead() });
+    conversionDoor.mockResolvedValue('sale-1');
+    await renderAt([`/operacional/leads/${LEAD_ID}`]);
+    await click('[data-summary-advance]');
+    await openStagePicker();
+    await clickOption('Proposta');
+    await click('[data-advance-confirm]');
+
+    expect(conversionDoor).toHaveBeenCalledWith({ lead: expect.objectContaining({ id: LEAD_ID }), toStageId: 'stage-proposta', toIndex: 0 });
+    expect(mocks.moveAsync).toHaveBeenCalledWith({ leadId: LEAD_ID, toStageId: 'stage-proposta', toIndex: 0, saleId: 'sale-1' });
+    expect(mocks.advanceAsync).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-advance-confirm]')).toBeNull();
+  });
+
+  it('a cancelled conversion writes nothing and keeps the dialog open', async () => {
+    conversionDoor.mockResolvedValue(null);
+    await renderAt([`/operacional/leads/${LEAD_ID}`]);
+    await click('[data-summary-advance]');
+    await openStagePicker();
+    await clickOption('Proposta');
+    await click('[data-advance-confirm]');
+
+    expect(conversionDoor).toHaveBeenCalledTimes(1);
+    expect(mocks.moveAsync).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-advance-confirm]')).not.toBeNull();
+  });
+
+  it('adding a note calls addLeadNote and a follow-up calls addLeadFollowup; Concluir marks it done', async () => {
+    mocks.addNoteAsync.mockResolvedValue({});
+    mocks.addFollowupAsync.mockResolvedValue({});
+    await renderAt([`/operacional/leads/${LEAD_ID}`]);
+
+    const note = document.getElementById('summary-note') as HTMLTextAreaElement;
+    setTextarea(note, '  Cliente pediu desconto  ');
+    await click('[data-note-add]');
+    expect(mocks.addNoteAsync).toHaveBeenCalledWith({ leadId: LEAD_ID, body: 'Cliente pediu desconto' });
+
+    setInput('summary-followup-step', 'Mandar proposta');
+    setInput('summary-followup-due', '2026-10-30');
+    await click('[data-followup-add]');
+    expect(mocks.addFollowupAsync).toHaveBeenCalledWith({ leadId: LEAD_ID, nextStep: 'Mandar proposta', dueOn: '2026-10-30' });
+
+    await click('[data-followup-done="fu-1"]');
+    expect(mocks.markDone).toHaveBeenCalledWith('fu-1');
   });
 });

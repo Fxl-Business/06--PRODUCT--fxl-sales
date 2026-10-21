@@ -76,6 +76,9 @@ const OWNED_FILES = [
   'LeadSummaryContainer.tsx',
   'summary-format.ts',
   'lead-summary-nav.ts',
+  'advance.ts',
+  'AdvanceDialog.tsx',
+  'SummaryComposers.tsx',
 ];
 
 /** The one file allowed to spell the conversion kind, because it owns the question. */
