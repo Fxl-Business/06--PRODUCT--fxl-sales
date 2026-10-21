@@ -292,3 +292,42 @@ describe('the shell reads the organization modules from the bootstrap', () => {
     expect(locationPath()).toBe('/operacional/funil');
   });
 });
+
+/** Every button whose visible text is exactly `label` (the header and the sidebar both carry one). */
+function buttonsLabelled(label: string): HTMLButtonElement[] {
+  return [...container.querySelectorAll('button')].filter(
+    (button) => button.textContent?.trim() === label,
+  );
+}
+
+describe('the proposta and commission chrome follows the modules, not the edition hint', () => {
+  it('orcamentos off: Comissoes shows no Nova proposta action', async () => {
+    settled({ ...LEADS_MODULES, comissoes: true });
+    await render('/operacional/comissoes', ['admin']);
+
+    expect(locationPath()).toBe('/operacional/comissoes');
+    expect(buttonsLabelled('Nova proposta')).toHaveLength(0);
+  });
+
+  it('orcamentos on: Comissoes keeps the Nova proposta action', async () => {
+    settled(FULL_MODULES);
+    await render('/operacional/comissoes', ['admin']);
+
+    expect(locationPath()).toBe('/operacional/comissoes');
+    expect(buttonsLabelled('Nova proposta').length).toBeGreaterThan(0);
+  });
+
+  it('comissoes on with orcamentos off: the commission balance card shows', async () => {
+    settled({ ...LEADS_MODULES, comissoes: true });
+    await render('/operacional/funil', ['admin']);
+
+    expect(container.textContent).toContain('A pagar este mês');
+  });
+
+  it('comissoes off with orcamentos on: the commission balance card is hidden', async () => {
+    settled({ ...FULL_MODULES, comissoes: false });
+    await render('/operacional/funil', ['admin']);
+
+    expect(container.textContent).not.toContain('A pagar este mês');
+  });
+});
