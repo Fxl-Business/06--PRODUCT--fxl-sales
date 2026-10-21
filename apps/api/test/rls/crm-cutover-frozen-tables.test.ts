@@ -93,30 +93,32 @@ describe('the frozen pre-cutover lead tables are never written', () => {
 
     const stages = await ensureLeadStagesForOrg(db, orgId);
     const novo = stages.find((s) => s.name === 'Novo')!;
-    const negociacao = stages.find((s) => s.name === 'Em negociação')!;
+    const qualificacao = stages.find((s) => s.name === 'Qualificação')!;
     const created = await createLeadStage(db, orgId, LeadStageSchema.parse({ name: 'Diagnóstico' }));
     if (typeof created === 'string') throw new Error('unexpected duplicate');
     await updateLeadStage(db, orgId, created.id, { name: 'Diagnóstico 2' });
     const active = (await ensureLeadStagesForOrg(db, orgId)).filter((s) => s.status === 'active').map((s) => s.id);
-    await reorderLeadStages(db, orgId, [...active].reverse());
 
     const a = await createLead(db, orgId, LeadWriteBaseSchema.parse({ contactName: 'Ana', contactEmail: 'a@x.com', products: [{ productName: 'Livre' }], description: 'd' }), SCOPE);
     if (!a.ok) throw new Error('create refused');
     await updateLead(db, orgId, a.lead.id, LeadPatchSchema.parse({ contactName: 'Ana 2', products: [{ productName: 'Outro' }] }), SCOPE);
-    const moved = await moveLead(db, orgId, a.lead.id, MoveLeadSchema.parse({ stageId: negociacao.id, position: 0 }), SCOPE);
+    const moved = await moveLead(db, orgId, a.lead.id, MoveLeadSchema.parse({ stageId: qualificacao.id, position: 0 }), SCOPE);
     expect(moved.ok).toBe(true);
     expect((await getLead(db, orgId, a.lead.id, SCOPE)).ok).toBe(true);
-    await listLeads(db, orgId, ListLeadsQuerySchema.parse({ stageId: negociacao.id }), SCOPE);
+    await listLeads(db, orgId, ListLeadsQuerySchema.parse({ stageId: qualificacao.id }), SCOPE);
     await summarizeLeadStages(db, orgId, {}, SCOPE);
     expect(await deleteLead(db, orgId, a.lead.id, SCOPE, ACTOR)).toEqual({ ok: true });
     expect((await listDeletedLeads(db, orgId, {})).items).toHaveLength(1);
     expect((await restoreLead(db, orgId, a.lead.id, true, ACTOR)).ok).toBe(true);
 
+    // The reorder comes last: it changes which etapa is the first open one.
+    await reorderLeadStages(db, orgId, [...active].reverse());
     expect(await fingerprint()).toEqual(before);
     expect(await crmCount('sales_ops_crm_leads')).toBe(1);
     expect(await crmCount('sales_ops_pipeline_stages')).toBe(8);
     expect(await crmCount('sales_ops_crm_lead_field_values')).toBeGreaterThan(0);
-    expect(await crmCount('sales_ops_crm_lead_events')).toBe(1);
+    // The initial entry plus the one the move wrote.
+    expect(await crmCount('sales_ops_crm_lead_events')).toBe(2);
     expect(novo.id).toBeDefined();
   });
 });

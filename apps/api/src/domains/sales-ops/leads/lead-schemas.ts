@@ -200,26 +200,84 @@ const CURSOR_RE =
  * three-part composite. It also caps the worst case at one column rather than
  * the whole board.
  */
-export const ListLeadsQuerySchema = z.object({
-  stageId: uuid,
-  limit: z.coerce.number().int().min(1).max(LEADS_MAX_LIMIT).optional(),
-  cursor: z.string().regex(CURSOR_RE).optional(),
-  sellerPersonId: uuid.optional(),
-});
+const isoDay = z.string().refine((value) => isIsoDay(value), { message: 'must be a real calendar day (YYYY-MM-DD)' });
+
+/** `from` / `to`: inclusive civil days in America/Sao_Paulo; a reversed range is a 400. */
+const periodShape = {
+  pipelineId: uuid.optional(),
+  from: isoDay.optional(),
+  to: isoDay.optional(),
+};
+const periodRefine = (query: { from?: string | undefined; to?: string | undefined }) =>
+  query.from === undefined || query.to === undefined || query.from <= query.to;
+const periodIssue = { message: 'from must not be after to', path: ['from'] };
+
+export const ListLeadsQuerySchema = z
+  .object({
+    stageId: uuid,
+    limit: z.coerce.number().int().min(1).max(LEADS_MAX_LIMIT).optional(),
+    cursor: z.string().regex(CURSOR_RE).optional(),
+    sellerPersonId: uuid.optional(),
+    ...periodShape,
+  })
+  .refine(periodRefine, periodIssue);
 
 /**
- * GET /leads/summary. The list's own `sellerPersonId` parsing, PICKED and not
- * re-spelled, so the two board reads can never disagree about what a valid
- * narrowing is. There is no stageId: the summary covers every column in one
- * GROUP BY.
+ * GET /leads/summary. No stageId: the summary covers every column of the pipeline in one GROUP BY.
+ * The same narrowing keys as the list (seller, pipeline, period), so a column's total and the
+ * summary's count are computed over the same set.
  */
-export const LeadStageSummaryQuerySchema = ListLeadsQuerySchema.pick({ sellerPersonId: true });
+export const LeadStageSummaryQuerySchema = z
+  .object({ sellerPersonId: uuid.optional(), ...periodShape })
+  .refine(periodRefine, periodIssue);
+
+/** One dynamic filter parsed from `f.<fieldKey>[.min|.max]=<value>` (validated against the definitions in the service). */
+export type DynamicFilterInput = { key: string; op: 'eq' | 'min' | 'max'; raw: string };
+
+export type ListLeadsQuery = z.infer<typeof ListLeadsQuerySchema> & { filters?: DynamicFilterInput[] };
+export type LeadStageSummaryQuery = z.infer<typeof LeadStageSummaryQuerySchema> & { filters?: DynamicFilterInput[] };
+
+const blankToUndefined = (value: unknown) => (typeof value === 'string' && value.trim() === '' ? undefined : value);
+
+/** POST /leads/:id/advance. Blank strings are read as absent (the web drops empties anyway). */
+export const AdvanceLeadSchema = z
+  .object({
+    toStageId: uuid,
+    nextStep: z.preprocess(blankToUndefined, z.string().trim().min(1).max(300).optional()),
+    dueOn: z.preprocess(blankToUndefined, isoDay.optional()),
+    note: z.preprocess(blankToUndefined, z.string().trim().min(1).max(4000).optional()),
+    reason: z.preprocess(blankToUndefined, z.string().trim().min(1).max(500).optional()),
+  })
+  .strict();
+export type AdvanceLeadInput = z.infer<typeof AdvanceLeadSchema>;
+
+export const LeadNoteSchema = z.object({ body: z.string().trim().min(1).max(4000) }).strict();
+export type LeadNoteInput = z.infer<typeof LeadNoteSchema>;
+
+export const LeadFollowupSchema = z
+  .object({
+    nextStep: z.string().trim().min(1).max(300),
+    dueOn: isoDay,
+    ownerPersonId: z.preprocess((value) => (value === '' ? null : value), uuid.nullish()),
+  })
+  .strict();
+export type LeadFollowupInput = z.infer<typeof LeadFollowupSchema>;
+
+/** GET /followups. `mine` is the caller's; `team` needs an admin (checked at the route). */
+export const ListFollowupsQuerySchema = z
+  .object({
+    scope: z.enum(['mine', 'team']).default('mine'),
+    status: z.enum(['open', 'done', 'all']).default('open'),
+    from: isoDay.optional(),
+    to: isoDay.optional(),
+    limit: z.coerce.number().int().min(1).max(LEADS_MAX_LIMIT).default(LEADS_MAX_LIMIT),
+  })
+  .refine(periodRefine, periodIssue);
+export type ListFollowupsQuery = z.infer<typeof ListFollowupsQuerySchema>;
 
 export type LeadWriteInput = z.infer<typeof LeadWriteBaseSchema>;
 export type LeadPatchInput = z.infer<typeof LeadPatchSchema>;
 export type MoveLeadInput = z.infer<typeof MoveLeadSchema>;
-export type ListLeadsQuery = z.infer<typeof ListLeadsQuerySchema>;
-export type LeadStageSummaryQuery = z.infer<typeof LeadStageSummaryQuerySchema>;
 
 /**
  * The deleted-list keyset cursor: `<deleted_at as UTC ISO with MICROseconds>_<id>`.

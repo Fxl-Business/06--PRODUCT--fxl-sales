@@ -16,6 +16,7 @@ import {
   renumberStage,
   resolveLeadScopePredicate,
 } from './lead-service.js';
+import { recordStageChange } from './lead-history.js';
 import { withTenant } from './with-tenant.js';
 
 /**
@@ -208,6 +209,18 @@ export function restoreLead(
       .where(restoreConditions);
     // Appended at the end; the renumber keeps the column dense even if it was not.
     await renumberStage(tx, orgId, target.id, null);
+    // A restore that lands in another etapa is a stage change like any other: one history event.
+    if (stageChanged) {
+      await recordStageChange(tx, {
+        orgId,
+        leadId: id,
+        fromStageId: current.stageId,
+        toStageId: target.id,
+        reason: null,
+        actorUserId: actor.userId,
+        actorName: actor.name,
+      });
+    }
 
     const lead = await readLeadView(tx, orgId, id);
     // LAST: the ledger tail lock is global and held until COMMIT. A restore is a

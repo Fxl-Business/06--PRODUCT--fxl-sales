@@ -48,6 +48,7 @@ import {
 } from '../../src/domains/sales-ops/service.js';
 import { testDatabaseUrls } from '../../src/db/__tests__/test-database-urls.js';
 import { deleteCrmForOrgs } from '../../src/db/__tests__/settlement-test-cleanup.js';
+import { walkToConversionDoor } from './lead-path.js';
 
 const { appUrl: APP_DB_URL, adminUrl: ADMIN_DB_URL } = testDatabaseUrls();
 const ADMIN_CONNECTION_OPTIONS = { connection: { 'app.fxl_admin': 'true' } } as const;
@@ -582,6 +583,8 @@ describe('sales operations leads: seller scope, movement and isolation', () => {
 
     const created = await expectOk(createLead(adminDb, orgA, leadPayload(), ADMIN_SCOPE));
     const id = (created as unknown as { lead: { id: string } }).lead.id;
+    // The graph only lets a lead reach Proposta from Em negociação.
+    await walkToConversionDoor(adminDb, orgA, id, ADMIN_SCOPE);
 
     await expect(
       moveLead(

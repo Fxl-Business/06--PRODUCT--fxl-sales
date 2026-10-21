@@ -20,6 +20,8 @@ import {
 } from '../../crm/lead-fields.js';
 import { LeadInputError } from '../../crm/lead-input-error.js';
 import { defaultPipelineId, pipelineExists } from '../../crm/pipeline-read.js';
+import { boardNarrowingConditions } from './lead-filters.js';
+import { recordStageChange, stageTransitionAllowed } from './lead-history.js';
 import type {
   LeadPatchInput,
   LeadStageSummaryQuery,
@@ -361,7 +363,7 @@ async function boundPersonId(tx: Db, orgId: string, userId: string): Promise<str
   return bound?.id ?? null;
 }
 
-type ResolvedSeller = { id: string; displayName: string };
+export type ResolvedSeller = { id: string; displayName: string };
 
 /**
  * The pessoa when it is an ACTIVE vendedor, else null. The one spelling of that
@@ -411,7 +413,7 @@ async function findActiveVendedor(
  * makes `personNameSnapshot` server-authoritative, so a disagreeing body label
  * loses.
  */
-async function resolveSellerPersonId(
+export async function resolveSellerPersonId(
   tx: Db,
   orgId: string,
   sellerPersonId: string,
@@ -577,6 +579,7 @@ export async function listLeads(
     // counts exactly the rows a page can return.
     const conditions = leadBoardConditions(orgId, gate, query.sellerPersonId);
     conditions.push(eq(salesOpsCrmLeads.stageId, query.stageId));
+    conditions.push(...(await boardNarrowingConditions(tx, orgId, query, { defaultToDefaultPipeline: false })));
 
     const [{ total }] = (await tx
       .select({ total: sql<number>`count(*)::int` })
@@ -665,7 +668,12 @@ export async function summarizeLeadStages(
         estimatedValueBrl: sql<string>`sum(${salesOpsCrmLeads.estimatedValueBrl})::bigint`.mapWith(Number),
       })
       .from(salesOpsCrmLeads)
-      .where(and(...leadBoardConditions(orgId, gate, query.sellerPersonId)))
+      .where(
+        and(
+          ...leadBoardConditions(orgId, gate, query.sellerPersonId),
+          ...(await boardNarrowingConditions(tx, orgId, query, { defaultToDefaultPipeline: true })),
+        ),
+      )
       .groupBy(salesOpsCrmLeads.stageId)
       .orderBy(asc(salesOpsCrmLeads.stageId));
 
@@ -718,7 +726,7 @@ export async function getLead(
  * would escape the org conjunct beside it and reach every org's pool. Anyone
  * else keeps exactly their own leads.
  */
-function leadSellerCondition(sellerPersonId: string, canClaimUnassigned: boolean): SQL {
+export function leadSellerCondition(sellerPersonId: string, canClaimUnassigned: boolean): SQL {
   const own = eq(salesOpsCrmLeads.sellerPersonId, sellerPersonId);
   if (!canClaimUnassigned) return own;
   return or(own, isNull(salesOpsCrmLeads.sellerPersonId))!;
@@ -791,7 +799,7 @@ function leadBoardConditions(
  * The `canClaimUnassigned` conjunct is redundant with the read predicate today
  * and kept so a future predicate change can never turn a finder into a claimant.
  */
-function claimantFor(gate: LeadScopeAllowed, current: LeadRow): string | null {
+export function claimantFor(gate: LeadScopeAllowed, current: LeadRow): string | null {
   if (gate.sellerPersonId === null || !gate.canClaimUnassigned) return null;
   return current.sellerPersonId === null ? gate.sellerPersonId : null;
 }
@@ -804,7 +812,15 @@ export type WriteLeadResult =
   | { ok: true; lead: LeadView }
   | {
       ok: false;
-      reason: 'not_found' | 'seller_scope' | 'seller_person_unmapped' | 'already_converted';
+      reason:
+        | 'not_found'
+        | 'seller_scope'
+        | 'seller_person_unmapped'
+        | 'already_converted'
+        // Phase 2b: the destination is not reachable from the lead's stage in its pipeline graph
+        | 'transition_not_allowed'
+        // Phase 2b (advance only): the destination opens a proposta, which the wizard owns
+        | 'sale_required_for_conversion';
     };
 
 /** The snapshot name of the actor of a write: the verified token name, else the e-mail, else null. */
@@ -1163,9 +1179,18 @@ async function applyLeadUpdate(
   });
 }
 
+export type MoveLeadOptions = {
+  /**
+   * The spreadsheet import places a historical lead straight into its etapa; there is no path to
+   * walk. Only the import executor passes it. Every other caller is held to the transition graph.
+   */
+  skipTransitionGraph?: boolean;
+};
+
 /**
- * The ONLY writer of `stage_id`, `position`, `stage_changed_at`, `lost_reason`
- * and `sale_id`.
+ * The writer of `stage_id`, `position`, `stage_changed_at`, `lost_reason` and `sale_id` for the
+ * board (`advanceLead` in lead-history-service.ts is the other one, sharing the lock order, the
+ * transition rule and the history event).
  */
 export async function moveLead(
   db: Db,
@@ -1173,6 +1198,7 @@ export async function moveLead(
   id: string,
   input: MoveLeadInput,
   scope: LeadScope,
+  options: MoveLeadOptions = {},
 ): Promise<WriteLeadResult> {
   return withTenant(db, orgId, async (tx) => {
     const gate = await resolveLeadScopePredicate(tx, orgId, scope);
@@ -1199,6 +1225,7 @@ export async function moveLead(
     const [destination] = await tx
       .select({
         id: salesOpsPipelineStages.id,
+        pipelineId: salesOpsPipelineStages.pipelineId,
         type: salesOpsPipelineStages.type,
         behavior: salesOpsPipelineStages.behavior,
         exitKind: salesOpsPipelineStages.exitKind,
@@ -1208,13 +1235,25 @@ export async function moveLead(
       .where(
         and(
           eq(salesOpsPipelineStages.orgId, orgId),
-          eq(salesOpsPipelineStages.pipelineId, current.pipelineId),
           eq(salesOpsPipelineStages.id, input.stageId),
           eq(salesOpsPipelineStages.status, 'active'),
         ),
       )
       .limit(1);
     if (!destination) throw new LeadInputError('stage_not_found');
+
+    const stageChanged = destination.id !== current.stageId;
+    // A reorder inside one column is always allowed. A cross-stage move must be an edge of the
+    // pipeline's explicit transition graph (a stage of another pipeline is never reachable).
+    if (stageChanged && !options.skipTransitionGraph) {
+      const allowed =
+        destination.pipelineId === current.pipelineId &&
+        (await stageTransitionAllowed(tx, orgId, current.pipelineId, current.stageId, destination.id));
+      if (!allowed) return { ok: false, reason: 'transition_not_allowed' } as const;
+    } else if (destination.pipelineId !== current.pipelineId) {
+      // Only the import can get here (graph skipped); the composite FK would refuse it anyway.
+      throw new LeadInputError('stage_not_found');
+    }
 
     // This cannot be a zod refine: the requirement depends on the DESTINATION
     // row, which is a database read. So it is the service sentinel 400, the same
@@ -1245,8 +1284,6 @@ export async function moveLead(
     const claimant = claimantFor(gate, current);
     const claimed = claimant !== null ? await resolveSellerPersonId(tx, orgId, claimant) : null;
 
-    const stageChanged = destination.id !== current.stageId;
-
     await tx
       .update(salesOpsCrmLeads)
       .set({
@@ -1264,7 +1301,19 @@ export async function moveLead(
       .where(and(eq(salesOpsCrmLeads.orgId, orgId), eq(salesOpsCrmLeads.id, id), liveLeadCondition()));
 
     await renumberStage(tx, orgId, destination.id, { moved: id, at: input.position });
-    if (stageChanged) await renumberStage(tx, orgId, current.stageId, null);
+    if (stageChanged) {
+      await renumberStage(tx, orgId, current.stageId, null);
+      // Exactly one history event per stage change, written by the server in this transaction.
+      await recordStageChange(tx, {
+        orgId,
+        leadId: id,
+        fromStageId: current.stageId,
+        toStageId: destination.id,
+        reason: destination.exitKind === 'perdido' ? (input.reason ?? null) : null,
+        actorUserId: scope.userId,
+        actorName: scopeActorName(scope),
+      });
+    }
 
     return { ok: true, lead: await readLeadView(tx, orgId, id) } as const;
   });

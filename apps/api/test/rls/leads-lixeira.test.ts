@@ -65,6 +65,7 @@ import { createLeadStage, updateLeadStage } from '../../src/domains/sales-ops/le
 import { ensureLeadStagesForOrg } from '../../src/domains/sales-ops/leads/stages-seed.js';
 import { PersonSchema, createPerson } from '../../src/domains/sales-ops/service.js';
 import { deleteCrmForOrgs } from '../../src/db/__tests__/settlement-test-cleanup.js';
+import { walkToConversionDoor } from './lead-path.js';
 
 const { leadsRouter } = await import('../../src/domains/sales-ops/leads/lead-routes.js');
 
@@ -419,6 +420,7 @@ describe('sales operations leads: the lixeira', () => {
       VALUES (${w.orgId}, 1, 'PROP-LIX-1', 'Empresa A', 'Vendedor A', 'pix', 'cash', now(),
               100000, 10, 3, 6, 0, 0, 0)
       RETURNING id`;
+    await walkToConversionDoor(db, w.orgId, lead.id, ADMIN_SCOPE);
     okLead(
       await moveLead(
         db,

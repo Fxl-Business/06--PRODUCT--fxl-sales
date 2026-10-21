@@ -16,7 +16,11 @@ import { describe, expect, it } from 'vitest';
 
 const SRC_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const SEED_CALL = /\bensure(DefaultPipeline|SystemFieldDefinitions|CrmDefaults|CrmDefaultsForOrg)\s*\(/;
-const ALLOWED_CALLERS = ['domains/crm/defaults.ts', 'domains/sales-ops/leads/stages-seed.ts'];
+const ALLOWED_CALLERS = [
+  'domains/crm/crm-read-service.ts', // GET /pipelines and GET /field-definitions
+  'domains/crm/defaults.ts',
+  'domains/sales-ops/leads/stages-seed.ts', // the legacy facade: GET /lead-stages, bootstrap, import routes
+];
 
 function walk(dir: string, visited: { count: number }, hits: string[]): void {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
