@@ -128,6 +128,11 @@ async function click(target: string | Element) {
   await act(async () => element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })));
   await settle();
 }
+/** Dispatched with `bubbles: true`, exactly as a real key press is. */
+async function escape(target: Element) {
+  await act(async () => target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+  await settle();
+}
 function setInput(id: string, value: string) {
   const input = document.getElementById(id) as HTMLInputElement | null;
   if (!input) throw new Error(`Missing ${id}`);
@@ -294,6 +299,26 @@ describe('LeadSummaryContainer', () => {
 
     expect(mocks.deleteAsync).toHaveBeenCalledWith(LEAD_ID);
     expect(path()).toBe('/operacional/funil');
+  });
+
+  it('Escape on the delete confirmation closes only the confirmation and keeps the edit form open', async () => {
+    await renderAt([`/operacional/leads/${LEAD_ID}`]);
+    await click('[data-summary-edit]');
+    await click('[data-delete-lead-form]');
+    const confirmation = document.querySelector('[data-lead-delete-dialog]');
+    if (!confirmation) throw new Error('delete confirmation not rendered');
+
+    await escape(confirmation);
+
+    expect(document.querySelector('[data-lead-delete-dialog]')).toBeNull();
+    expect(document.getElementById('lead-contact-name')).not.toBeNull();
+    expect(mocks.deleteAsync).not.toHaveBeenCalled();
+
+    // POSITIVE CONTROL: with the confirmation gone, Escape reaches the edit form and closes it.
+    const contactName = document.getElementById('lead-contact-name');
+    if (!contactName) throw new Error('edit form input not rendered');
+    await escape(contactName);
+    expect(document.getElementById('lead-contact-name')).toBeNull();
   });
 
   it('a refused delete keeps the edit form and the confirmation open with the error', async () => {
