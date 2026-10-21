@@ -20,7 +20,7 @@ Both migrations are ordinary (non-phased), 100% additive, and carry no GRANT or 
 ## Rules every later slice must keep
 
 - The old tables `sales_ops_leads`, `sales_ops_lead_products`, `sales_ops_lead_stages` are never altered. The phase 2 API cutover is code only.
-- A phase 2 cutover migration (`0031_*`) repeats the `0030_crm_legacy_copy.sql` statements verbatim BEFORE the reads switch (copy with the same uuids, idempotent). Generate it with `drizzle-kit generate --custom` and copy the file body.
+- A phase 2 cutover migration (`0031_*`) repeats the `0030_crm_legacy_copy.sql` statements and then RESYNCS rows changed in the old tables since 0030 (UPDATE changed leads, upsert changed values, one history event per changed stage) BEFORE the reads switch. Generate it with `drizzle-kit generate --custom` and copy the file body.
 - Every new org-scoped table: `org_id text NOT NULL`, composite FKs with `org_id` first onto a `UNIQUE (org_id, id)`, FORCE RLS with `<table>_tenant_isolation` and `<table>_admin_context` spelled like 0022.
 - An enumeration that may grow gets NO CHECK (the guard forbids DROP CONSTRAINT); validate it with zod and the constants below.
 - drizzle-kit emits FKs before the unique indexes they need when the tables are new: reorder to CREATE TABLE, indexes, FKs (the slice 05a helper script does it).
