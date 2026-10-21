@@ -223,6 +223,48 @@ describe('LeadSummaryContainer', () => {
     expect(inverse.fields.some((entry) => entry.fieldId === 'f-cli')).toBe(false);
   });
 
+  it('refuses the undo when the lead changed since the edit, with no second write', async () => {
+    await renderAt([`/operacional/leads/${LEAD_ID}`]);
+    await click('[data-summary-edit]');
+    mocks.mutateAsync.mockImplementation(async () => {
+      const updated = lead({ contactName: 'Ana Nova' });
+      mocks.summary = summaryOf(updated);
+      return { lead: updated };
+    });
+    setInput('lead-contact-name', 'Ana Nova');
+    await click('[data-lead-save]');
+    expect(mocks.mutateAsync).toHaveBeenCalledTimes(1);
+
+    // Another actor edits the lead before the operator clicks Desfazer.
+    mocks.summary = summaryOf(lead({ contactName: 'Outro ator' }));
+    mocks.mutateAsync.mockClear();
+    await click('[data-undo-action]');
+
+    expect(mocks.mutateAsync).not.toHaveBeenCalled();
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain('alterado');
+  });
+
+  it('the undo of an edit that added a field clears that field with an explicit null', async () => {
+    await renderAt([`/operacional/leads/${LEAD_ID}`]);
+    await click('[data-summary-edit]');
+    const ADDED = { fieldId: 'f-urg', key: 'urgencia', value: 'Alta' };
+    mocks.mutateAsync.mockImplementation(async () => {
+      const updated = lead({ fields: [...lead().fields!, ADDED] });
+      mocks.summary = summaryOf(updated);
+      return { lead: updated };
+    });
+    setInput('lead-contact-name', 'Ana Nova');
+    await click('[data-lead-save]');
+
+    mocks.mutateAsync.mockClear();
+    mocks.mutateAsync.mockResolvedValue({ lead: lead() });
+    await click('[data-undo-action]');
+
+    expect(mocks.mutateAsync).toHaveBeenCalledTimes(1);
+    const inverse = mocks.mutateAsync.mock.calls[0]?.[0] as { fields: Array<{ fieldId: string; value: unknown }> };
+    expect(inverse.fields).toContainEqual({ fieldId: 'f-urg', value: null });
+  });
+
   it('a 404 shows Lead não encontrado. with no id in the text', async () => {
     mocks.summaryState = { isPending: false, isError: true, error: { status: 404 } };
     await renderAt([`/operacional/leads/${LEAD_ID}`]);
@@ -252,6 +294,19 @@ describe('LeadSummaryContainer', () => {
 
     expect(mocks.deleteAsync).toHaveBeenCalledWith(LEAD_ID);
     expect(path()).toBe('/operacional/funil');
+  });
+
+  it('a refused delete keeps the edit form and the confirmation open with the error', async () => {
+    mocks.deleteAsync.mockRejectedValue({ status: 500, error: 'internal' });
+    await renderAt([`/operacional/leads/${LEAD_ID}`]);
+    await click('[data-summary-edit]');
+    await click('[data-delete-lead-form]');
+    await click('[data-confirm-delete]');
+
+    expect(mocks.deleteAsync).toHaveBeenCalledWith(LEAD_ID);
+    expect(document.querySelector('[data-lead-delete-error]')).not.toBeNull();
+    expect(document.getElementById('lead-contact-name')).not.toBeNull();
+    expect(path()).toBe(`/operacional/leads/${LEAD_ID}`);
   });
 
   it('a converted lead offers no Editar', async () => {
