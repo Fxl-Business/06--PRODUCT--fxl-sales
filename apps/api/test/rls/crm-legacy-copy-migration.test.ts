@@ -34,28 +34,8 @@ const BREAKPOINT = '--> statement-breakpoint';
 const TAG_0029 = '0029_crm_unificado_modelo';
 const FILE_0030 = '0030_crm_legacy_copy.sql';
 
-/** Every table the backfill must only READ. Ledger, outbox, finder tables and the legacy `leads` included. */
-const SOURCE_TABLES = [
-  'sales_ops_lead_stages',
-  'sales_ops_leads',
-  'sales_ops_lead_products',
-  'sales_ops_clients',
-  'sales_ops_people',
-  'sales_ops_products',
-  'sales_ops_sales',
-  'sales_ops_receivables',
-  'sales_ops_payables',
-  'sales_ops_settlements',
-  'sales_ops_settings',
-  'integration_outbox',
-  'leads',
-  'apps',
-  'products',
-  'finders',
-  'referral_links',
-  'clicks',
-  'conversions',
-] as const;
+/** Migration bookkeeping lives outside `public`, but it is excluded by name as well so the list never depends on that. */
+const BOOKKEEPING_TABLES = ['__drizzle_migrations'] as const;
 
 /** Every table 0029 creates; each carries org_id and FORCE RLS. */
 const CRM_TABLES = [
@@ -154,6 +134,8 @@ const PROBE_ROLLBACK = 'probe-rollback';
 describe('migration 0030 on a database populated at 0029', () => {
   let scratch: ScratchDatabase;
   let sourceBefore: Fingerprint;
+  /** Every public table that is not a CRM table: the backfill must only READ them. Read from pg_tables, never hand-listed. */
+  let sourceTables: string[] = [];
 
   /** count + md5 of every row's text form; adminScratch is the superuser, so RLS does not hide rows. */
   async function fingerprint(tables: readonly string[]): Promise<Fingerprint> {
@@ -186,7 +168,14 @@ describe('migration 0030 on a database populated at 0029', () => {
     await scratchClient(scratch).begin(async (tx) => {
       await tx.unsafe(SEED_SQL);
     });
-    sourceBefore = await fingerprint(SOURCE_TABLES);
+    const excluded = [...CRM_TABLES, ...BOOKKEEPING_TABLES].map((t) => `'${t}'`).join(',');
+    sourceTables = (
+      await rows<{ tablename: string }>(
+        `SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename NOT IN (${excluded}) ORDER BY tablename`,
+      )
+    ).map((r) => r.tablename);
+    expect(sourceTables.length).toBeGreaterThanOrEqual(30);
+    sourceBefore = await fingerprint(sourceTables);
     expect((await fingerprint(CRM_TABLES))['sales_ops_crm_leads']!.n).toBe(0);
     await runDatabaseMigrations({ databaseUrl: scratch.ownerUrl, migrationsFolder: MIGRATIONS_FOLDER });
   }, 120000);
@@ -205,8 +194,8 @@ describe('migration 0030 on a database populated at 0029', () => {
     }
   });
 
-  it('every source table (19) is identical before and after (row count and content hash)', async () => {
-    expect(await fingerprint(SOURCE_TABLES)).toEqual(sourceBefore);
+  it('every public non-CRM table is identical before and after (row count and content hash)', async () => {
+    expect(await fingerprint(sourceTables)).toEqual(sourceBefore);
     // spot checks that the fixture was not empty
     expect(sourceBefore['sales_ops_leads']!.n).toBe(7);
     expect(sourceBefore['sales_ops_lead_products']!.n).toBe(2);
@@ -501,10 +490,10 @@ describe('migration 0030 on a database populated at 0029', () => {
   });
 
   it('running the backfill SQL a second time is a no-op for every destination and source table', async () => {
-    const before = await fingerprint([...CRM_TABLES, ...SOURCE_TABLES]);
+    const before = await fingerprint([...CRM_TABLES, ...sourceTables]);
     await scratchClient(scratch).begin(async (tx) => {
       for (const chunk of copyChunks()) await tx.unsafe(chunk);
     });
-    expect(await fingerprint([...CRM_TABLES, ...SOURCE_TABLES])).toEqual(before);
+    expect(await fingerprint([...CRM_TABLES, ...sourceTables])).toEqual(before);
   });
 });
