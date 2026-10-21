@@ -1,6 +1,6 @@
 {
   "app": {
-    "name": "Fxl Sales"
+    "name": "FXL Vendas"
   },
   "nav": {
     "home": "Início",
@@ -17,7 +17,7 @@
   "errors": {
     "noRole": {
       "title": "Acesso não autorizado",
-      "body": "Sua conta ainda não tem um perfil associado na plataforma FXL Sales. Entre em contato com o administrador.",
+      "body": "Sua conta ainda não tem um perfil associado na plataforma FXL Vendas. Entre em contato com o administrador.",
       "signedInAs": "Conectado como",
       "switchAccount": "Trocar conta",
       "signOut": "Sair"
@@ -273,7 +273,7 @@
           "acceptUrlLabel": "Link do convite (uso único)"
         },
         "warnings": {
-          "application_url_missing": "O Sales não tem endereço cadastrado no Hub, então o convite pode não levar o vendedor de volta ao Sales. Peça ao operador do Hub para configurar o endereço do aplicativo.",
+          "application_url_missing": "O FXL Vendas não tem endereço cadastrado no Hub, então o convite pode não levar o vendedor de volta ao FXL Vendas. Peça ao operador do Hub para configurar o endereço do aplicativo.",
           "email_not_configured": "O envio de e-mail não está configurado no Hub. Copie o link abaixo e envie ao vendedor por outro canal.",
           "email_failed": "O convite foi criado, mas o e-mail não foi entregue. Tente reenviar."
         },

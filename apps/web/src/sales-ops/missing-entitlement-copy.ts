@@ -14,15 +14,15 @@
  * how the sidebar came to read as an Organization picker in the first place.
  */
 export const MISSING_ENTITLEMENT_COPY = {
-  title: 'FXL Sales não está ativo nesta Organização',
+  title: 'FXL Vendas não está ativo nesta Organização',
   activePrefix: 'A Organização ativa nesta sessão é ',
-  activeSuffix: ', e o FXL Sales não está liberado para ela.',
+  activeSuffix: ', e o FXL Vendas não está liberado para ela.',
   activeUnknown:
-    'Não foi possível identificar a Organização ativa nesta sessão, e o FXL Sales não está liberado para ela.',
+    'Não foi possível identificar a Organização ativa nesta sessão, e o FXL Vendas não está liberado para ela.',
   leadWithOthers:
-    'Troque para uma Organização que tenha o FXL Sales, ou contrate o FXL Sales para a Organização ativa no FXL Hub.',
+    'Troque para uma Organização que tenha o FXL Vendas, ou contrate o FXL Vendas para a Organização ativa no FXL Hub.',
   leadWithoutOthers:
-    'Não encontramos outra Organização nesta conta para onde trocar. Contrate o FXL Sales para a Organização ativa no FXL Hub.',
+    'Não encontramos outra Organização nesta conta para onde trocar. Contrate o FXL Vendas para a Organização ativa no FXL Hub.',
   switchHeading: 'Trocar de Organização',
   switchAriaLabel: 'Organização',
   switchPlaceholder: 'Selecionar Organização...',
@@ -32,7 +32,7 @@ export const MISSING_ENTITLEMENT_COPY = {
   switching: 'Trocando de Organização...',
   switchFailed:
     'Não foi possível trocar de Organização. Verifique se você ainda faz parte dela e tente novamente.',
-  checkoutHeading: 'Contratar o FXL Sales',
+  checkoutHeading: 'Contratar o FXL Vendas',
   checkoutBody: 'A contratação acontece no FXL Hub e vale para a Organização ativa.',
   checkoutLink: 'Abrir o FXL Hub',
   checkoutLoading: 'Preparando o link do FXL Hub',
@@ -42,6 +42,6 @@ export const MISSING_ENTITLEMENT_COPY = {
   accountSuffix: '.',
   switchAccountHeading: 'Usar outra conta',
   switchAccountBody:
-    'Se o FXL Sales está liberado em outra conta sua, troque de conta e entre com ela no FXL Hub.',
+    'Se o FXL Vendas está liberado em outra conta sua, troque de conta e entre com ela no FXL Hub.',
   switchAccount: 'Trocar conta',
 } as const;

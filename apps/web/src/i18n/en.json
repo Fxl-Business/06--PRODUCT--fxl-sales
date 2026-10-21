@@ -1,6 +1,6 @@
 {
   "app": {
-    "name": "Fxl Sales"
+    "name": "FXL Vendas"
   },
   "nav": {
     "home": "Home",
@@ -17,7 +17,7 @@
   "errors": {
     "noRole": {
       "title": "Access not authorized",
-      "body": "Your account does not have a profile assigned on the FXL Sales platform yet. Please contact the administrator.",
+      "body": "Your account does not have a profile assigned on the FXL Vendas platform yet. Please contact the administrator.",
       "signedInAs": "Signed in as",
       "switchAccount": "Switch account",
       "signOut": "Sign out"
@@ -273,7 +273,7 @@
           "acceptUrlLabel": "Invitation link (single use)"
         },
         "warnings": {
-          "application_url_missing": "Sales has no address registered in the Hub, so the invitation may not bring the seller back to Sales. Ask the Hub operator to set the application address.",
+          "application_url_missing": "FXL Vendas has no address registered in the Hub, so the invitation may not bring the seller back to FXL Vendas. Ask the Hub operator to set the application address.",
           "email_not_configured": "Email delivery is not configured in the Hub. Copy the link below and send it to the seller through another channel.",
           "email_failed": "The invitation was created, but the email was not delivered. Try resending."
         },

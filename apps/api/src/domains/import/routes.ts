@@ -21,8 +21,8 @@ import { MAX_UPLOAD_BYTES } from './workbook-schema.js';
  */
 
 export const XLSX_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-export const TEMPLATE_FILENAME = 'fxl-sales-importacao.xlsx';
-export const EXAMPLE_TEMPLATE_FILENAME = 'fxl-sales-importacao-exemplo.xlsx';
+export const TEMPLATE_FILENAME = 'fxl-vendas-importacao.xlsx';
+export const EXAMPLE_TEMPLATE_FILENAME = 'fxl-vendas-importacao-exemplo.xlsx';
 export const INVALID_FILE_BODY = { error: 'validation_error', reason: 'invalid_file' } as const;
 export const FILE_TOO_LARGE_BODY = { error: 'payload_too_large', reason: 'file_too_large' } as const;
 /** Room for the multipart boundary and part headers around the file itself. */

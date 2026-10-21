@@ -96,7 +96,7 @@ Base `/api/v1/sales-ops/import`, every route behind `requireAdmin`.
 
 | Route | Answer |
 | --- | --- |
-| `GET /template?example=0\|1` | `200` xlsx attachment (`fxl-sales-importacao.xlsx` or `fxl-sales-importacao-exemplo.xlsx`), `Cache-Control: no-store`, dropdowns from the org's active cadastros |
+| `GET /template?example=0\|1` | `200` xlsx attachment (`fxl-vendas-importacao.xlsx` or `fxl-vendas-importacao-exemplo.xlsx`), `Cache-Control: no-store`, dropdowns from the org's active cadastros |
 | `POST /preview` (multipart `file`) | `200 ImportPreviewBody { ok, counts, recognized, issues, truncated }` |
 | `POST /commit` (the same file again) | `201 { counts, recognized }`, `422 ImportPreviewBody`, or `409 { error: 'conflict', reason: 'import_execution_failed', message }` |
 
