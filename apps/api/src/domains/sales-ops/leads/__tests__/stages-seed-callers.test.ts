@@ -1,8 +1,12 @@
 /**
- * The leads edition has no system etapa (edicao-leads decision 5): a new org
- * starts with zero etapas and only the admin creates them. So nothing on a
- * request path may seed the default etapas, except the spreadsheet import route,
- * which the `import` capability keeps closed in that edition.
+ * Default etapa seed: the allow-list of callers (vendas-crm-unificado slice 02).
+ *
+ * The leads edition used to seed no etapa at all. The owner reversed that: an org
+ * with NO stage row gets the four default etapas on first read, in both editions.
+ * So a request path may seed in exactly four places: the stage read
+ * (`listLeadStages`), the bootstrap route, the spreadsheet import route and the
+ * seed module itself. Any other caller is a new seed site and must be added here
+ * deliberately.
  *
  * Non-vacuous by construction: the walker must visit a real tree and must find
  * the seed module's own definition, so a broken walker or a wrong root fails.
@@ -33,8 +37,8 @@ function walk(dir: string, visited: { count: number }, hits: string[]): void {
   }
 }
 
-describe('leads edition: no lazy etapa seed', () => {
-  it('only the import route and the seed module itself can seed default etapas', () => {
+describe('default etapa seed: only the allowed callers', () => {
+  it('only the import route, listLeadStages, the bootstrap route and the seed module itself call the seed', () => {
     const visited = { count: 0 };
     const hits: string[] = [];
     walk(SRC_ROOT, visited, hits);
@@ -43,7 +47,9 @@ describe('leads edition: no lazy etapa seed', () => {
     expect(hits).toContain('domains/sales-ops/leads/stages-seed.ts');
     expect(hits.sort()).toEqual([
       'domains/import/routes.ts',
+      'domains/sales-ops/leads/stage-service.ts',
       'domains/sales-ops/leads/stages-seed.ts',
+      'domains/sales-ops/routes.ts',
     ]);
   });
 });
