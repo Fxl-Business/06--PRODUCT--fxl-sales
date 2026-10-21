@@ -318,6 +318,21 @@ describe('migration 0030 on a database populated at 0029', () => {
     expect(value!.value_text).toHaveLength(4000);
   });
 
+  it('gives an org whose names collide with the exits a free name for each exit, once, and keeps its etapas', async () => {
+    const exits = await rows<{ name: string; type: string; exit_kind: string }>(
+      `SELECT name, type, exit_kind FROM sales_ops_pipeline_stages WHERE org_id = 'orgD' AND exit_kind IS NOT NULL ORDER BY exit_kind`,
+    );
+    expect(exits).toEqual([
+      { name: 'Ganho (saída 2)', type: 'saida', exit_kind: 'ganho' },
+      { name: 'Pausado (saída 2)', type: 'saida', exit_kind: 'pausado' },
+      { name: 'Perdido', type: 'saida', exit_kind: 'perdido' },
+    ]);
+    const kept = await rows<{ name: string }>(
+      `SELECT name FROM sales_ops_pipeline_stages WHERE org_id = 'orgD' AND exit_kind IS NULL ORDER BY position`,
+    );
+    expect(kept.map((r) => r.name)).toEqual(['Ganho', 'Ganho (saída)', 'Pausado', 'Pausado (saída)', 'Proposta']);
+  });
+
   it('gives an org with no etapa the pure default pipeline, equal to DEFAULT_PIPELINE_STAGES and its transitions', async () => {
     const stages = await rows<{ id: string; name: string; position: number; type: string; behavior: string; exit_kind: string | null; requires_reason: boolean }>(
       `SELECT id, name, position, type, behavior, exit_kind, requires_reason FROM sales_ops_pipeline_stages WHERE org_id = 'orgC' ORDER BY position`,
