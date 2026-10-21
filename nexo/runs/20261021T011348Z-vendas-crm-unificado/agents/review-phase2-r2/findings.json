@@ -1,0 +1,38 @@
+{
+  "verdict": "CHANGES_REQUESTED",
+  "round": 2,
+  "findings": [
+    {
+      "id": "R2-01",
+      "severity": "major",
+      "kind": "objective",
+      "file": "apps/web/src/sales-ops/leads/lead-form.ts",
+      "line": 256,
+      "claim": "R1-03 remains partially unresolved: undo silently preserves the first contact added to a legacy contactless lead.",
+      "evidence": "Edit a lead whose contacts are null, add a phone, save, then click Desfazer. leadToWriteSeed examines the previous state and omits both contact keys. The API preserves omitted keys at lead-service.ts:1161-1162, so undo succeeds while retaining the added phone. In-memory evaluation of the actual function confirmed previousContact:null, inverseHasContactPhone:false, contactAfterUndo:\"11999999999\". The new regression test covers only edits that remain contactless.",
+      "suggestion": "Keep omission for edits that remain contactless. Suppress the undo offer when an edit introduces the first contact unless a complete inverse is supported. Cover this scenario explicitly."
+    }
+  ],
+  "checks": [
+    {
+      "command": "git diff c15a0ca...HEAD --stat -- . ':(exclude)nexo/runs'",
+      "exit": 0,
+      "summary": "Confirmed the integrated phase 2 scope: 159 changed files."
+    },
+    {
+      "command": "git diff 4dfe1f5..HEAD -- apps/api/src apps/web/src CLAUDE.md",
+      "exit": 0,
+      "summary": "Reviewed all five fixes and web regression assertions. R1-01, R1-02, R1-04 and R1-05 are resolved; R1-03 has the residual case reported above."
+    },
+    {
+      "command": "git diff 4dfe1f5..HEAD -- apps/api/test/rls/crm-pipeline-history.test.ts",
+      "exit": 0,
+      "summary": "Reviewed API regression coverage for default selection, restored transitions and follow-up ownership. Used supplied Verify PASS results; suites were not rerun."
+    },
+    {
+      "command": "git diff 4dfe1f5..HEAD --check -- . ':(exclude)nexo/runs'",
+      "exit": 0,
+      "summary": "No whitespace errors in the correction diff."
+    }
+  ]
+}
