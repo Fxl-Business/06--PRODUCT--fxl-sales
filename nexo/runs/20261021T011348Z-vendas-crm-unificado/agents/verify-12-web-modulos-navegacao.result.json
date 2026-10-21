@@ -1,0 +1,1 @@
+{"agent":"verify","slice":"12-web-modulos-navegacao","status":"PASS","report":"nexo/runs/20261021T011348Z-vendas-crm-unificado/agents/verify-12-web-modulos-navegacao.md","summary":"oracle 139/139 (edition 132 + shell 7) · web suite 1961/1961 · lint 0 · type-check 0 · build+bundle clean · 1 minor (D6 shell test absent)","done":true,"ts":"2026-10-21T10:39:57Z"}
