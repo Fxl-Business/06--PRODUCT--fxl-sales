@@ -139,11 +139,16 @@ export function buildLeiameLines(catalog: ImportCatalog, opts: TemplateOptions):
   B('A conferência mostra cada erro com a aba, a linha, a coluna e o motivo.');
   B('Corrija os erros nesta mesma planilha, salve e envie o arquivo de novo; não é preciso baixar outro modelo.');
   B('O botão Importar só fica disponível quando não há nenhum erro, e a importação grava tudo de uma vez ou nada.');
-  H('Como salvar o arquivo');
-  B('Edite e salve esta planilha no Microsoft Excel instalado no computador, em Arquivo, Salvar como, com o tipo Pasta de Trabalho do Excel (.xlsx).');
-  B('Evite passar o arquivo por ferramentas que regravam a planilha, como Excel na web, Google Planilhas, conversores, scripts ou assistentes de IA, porque elas podem mudar o formato interno do arquivo.');
-  B('Não mude o nome das abas nem a extensão do arquivo, e não salve como .xls, .csv ou .ods.');
-  B('Se a importação disser que o arquivo não é uma planilha .xlsx válida, abra-o no Excel do computador, use Salvar como .xlsx com outro nome e envie essa cópia.');
+  H('Preencher com um assistente de IA');
+  B('Para preencher com um assistente de IA, como ChatGPT ou Claude, envie este arquivo e peça que ele siga as instruções desta seção.');
+  B('Instruções para o assistente de IA: preencha as células desta mesma planilha, abrindo o arquivo com openpyxl.load_workbook e gravando com save, sem recriar a planilha do zero nem convertê-la para outro formato.');
+  B('Não renomeie, reordene nem apague abas, inclusive Leia-me e Listas, e não altere os cabeçalhos da linha 1.');
+  B('Escreva um registro por linha a partir da linha 2 da aba certa, sem linhas em branco no meio e sem fórmulas.');
+  B('Digite datas como dd/mm/aaaa e valores em reais como 1.234,56, e escreva os nomes de cadastros exatamente como aparecem na aba Listas ou em outra aba desta planilha.');
+  B('Devolva o resultado como um arquivo .xlsx para download, nunca como .xls, .csv, .ods ou tabela no texto da conversa.');
+  H('Salvar o arquivo');
+  B('Quem editar à mão deve salvar como Pasta de Trabalho do Excel (.xlsx), sem mudar o nome das abas nem os cabeçalhos.');
+  B('Se a importação disser que o arquivo não é uma planilha .xlsx válida, envie o arquivo ao suporte da FXL, porque o problema está no formato do arquivo e não nos seus dados.');
   H('Colunas de cada aba');
   for (const def of WORKBOOK_SHEETS) {
     H(def.tab);

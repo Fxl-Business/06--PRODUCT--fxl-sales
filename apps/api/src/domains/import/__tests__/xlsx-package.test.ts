@@ -55,6 +55,40 @@ async function toOpenXmlSdkShape(input: Buffer): Promise<Buffer> {
   return Buffer.from(await out.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }));
 }
 
+/** exceljs `xl/comments2.xml` and `vmlDrawing2.vml` are openpyxl's first: `comment1.xml`, `commentsDrawing1.vml`. */
+function openpyxlPartName(path: string): string {
+  const comments = /^xl\/comments(\d+)\.xml$/.exec(path);
+  if (comments) return `xl/comments/comment${String(Number(comments[1]) - 1)}.xml`;
+  const vml = /^xl\/drawings\/vmlDrawing(\d+)\.vml$/.exec(path);
+  if (vml) return `xl/drawings/commentsDrawing${String(Number(vml[1]) - 1)}.vml`;
+  return path;
+}
+
+/**
+ * Re-saves an exceljs package the way openpyxl does when an AI assistant (ChatGPT, Claude)
+ * opens and saves the template: header notes under `xl/comments/comment<N>.xml`, their
+ * drawings as `xl/drawings/commentsDrawing<N>.vml`, absolute relationship targets.
+ */
+async function toOpenpyxlShape(input: Buffer): Promise<Buffer> {
+  const zip = await JSZip.loadAsync(input);
+  const out = new JSZip();
+  for (const entry of Object.values(zip.files)) {
+    if (entry.dir) continue;
+    let text = await entry.async('string');
+    if (entry.name.endsWith('.rels')) {
+      const dir = sourceDirOf(entry.name);
+      text = text.replace(
+        /Target="([^"]+)"/g,
+        (_m, target: string) => `Target="/${openpyxlPartName(posix.normalize(posix.join(dir, target)))}"`,
+      );
+    } else if (entry.name === '[Content_Types].xml') {
+      text = text.replace(/PartName="\/([^"]+)"/g, (_m, part: string) => `PartName="/${openpyxlPartName(part)}"`);
+    }
+    out.file(openpyxlPartName(entry.name), text);
+  }
+  return Buffer.from(await out.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }));
+}
+
 async function exampleTemplate(): Promise<Buffer> {
   return buildTemplateWorkbook(seededCatalog(), { example: true });
 }
@@ -118,5 +152,29 @@ describe('xlsx package written by the Open XML SDK', () => {
       const out = await parseWorkbook(bytes);
       expect(out.issues.map((i) => i.code)).toEqual(['invalid_file']);
     }
+  });
+});
+
+describe('xlsx package saved by openpyxl (an AI assistant filling the template)', () => {
+  it('the fixture reproduces the refusal: plain exceljs cannot load it', async () => {
+    const saved = await toOpenpyxlShape(await exampleTemplate());
+    const zip = await JSZip.loadAsync(saved);
+    expect(zip.file('xl/comments/comment1.xml')).not.toBeNull();
+    expect(zip.file('xl/drawings/commentsDrawing1.vml')).not.toBeNull();
+    await expect(new ExcelJS.Workbook().xlsx.load(arrayBufferOf(saved))).rejects.toThrow(TypeError);
+  });
+
+  it('parses into the same sheets and rows as the original, with no issue', async () => {
+    const original = await exampleTemplate();
+    const expected = await parseWorkbook(original);
+    const actual = await parseWorkbook(await toOpenpyxlShape(original));
+    expect(actual.issues).toEqual([]);
+    for (const key of SHEET_KEYS) expect(actual.sheets[key]).toEqual(expected.sheets[key]);
+  });
+
+  it('keeps the header notes through the normalization', async () => {
+    const original = await exampleTemplate();
+    const normalized = await normalizeXlsxPackage(await toOpenpyxlShape(original));
+    expect(await headerNotes(normalized)).toEqual(await headerNotes(original));
   });
 });

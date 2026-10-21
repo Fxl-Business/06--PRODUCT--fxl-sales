@@ -158,6 +158,11 @@ exceljs 4.4.0 reads only the package shape it writes: it matches unprefixed Spre
 The template's Leia-me carries a `Como salvar o arquivo` section after `Como importar`.
 A new package quirk that exceljs cannot read belongs in `normalizeXlsxPackage` with a fixture in `xlsx-package.test.ts`, never in a second parser.
 
+Follow-up hotfix v4.7.3 (same day): customers usually fill the template by handing it to an AI assistant (ChatGPT, Claude), which opens and saves it with openpyxl.
+openpyxl writes the header notes as `xl/comments/comment<N>.xml` and their drawings as `xl/drawings/commentsDrawing<N>.vml`, and exceljs only routes `xl/comments<N>.xml`, so every AI-filled file was still `invalid_file` on v4.7.2.
+`normalizeXlsxPackage` now finds the comments and VML drawing parts by the relationship type that points at them, never by path, and renames the ones exceljs does not route.
+The Leia-me section became `Preencher com um assistente de IA`, written as instructions TO the assistant (open with `openpyxl.load_workbook`, save with `save`, never rebuild, keep tabs and headers, one record per row, `.xlsx` out), followed by `Salvar o arquivo` for people editing by hand.
+
 ## Known gaps
 
 - One-shot payables not linked to a parcela (outros custos) cannot be settled from the sheet in v1; `Leia-me` says so.
