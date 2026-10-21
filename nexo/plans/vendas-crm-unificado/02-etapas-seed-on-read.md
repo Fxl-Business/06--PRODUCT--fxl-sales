@@ -85,7 +85,7 @@ Cases (names exact):
 3. `GET /lead-stages seeds in both editions and for a vendedor` - `it.each([['full','seller'],['leads','seller'],['leads','admin']])`; each on its own fresh org; count 4 and status 200.
 4. `GET /bootstrap seeds the four etapas and a second bootstrap adds none` - fresh org through `salesOpsRouter`; status 200; count 4; second call count 4; the JSON payload has no `stages` key (leads never enter bootstrap).
 5. `an org that renamed one etapa and archived another gets no reinsertion` - seed via `ensureLeadStagesForOrg`; `updateLeadStage` rename `Novo` to `Prospecção` and archive `Em negociação`; GET twice; names are exactly `['Prospecção','Em negociação','Proposta','Perdido']` (archived still listed), count 4, no row named `Novo`.
-6. `an org that created its own first etapa is never seeded` - fresh org, `createLeadStage(db, org, {name:'Somente minha'})`; GET returns exactly one stage; count 1.
+6. `an org that created its own first etapa is never seeded` - fresh org, `createLeadStage(db, org, LeadStageSchema.parse({name:'Somente minha'}))`; GET returns exactly one stage; count 1.
 7. `seeding org A leaves org B untouched` - GET for A; `countStages(B) === 0`.
 8. `eight concurrent first GETs all answer 200 and leave exactly four rows` - fresh org; `await Promise.all(Array.from({length: 8}, () => app.request('/lead-stages')))`; every status 200 (never 500), every body has 4 stages with identical id sets, `countStages === 4`. Repeat the whole case for 3 fresh orgs in a loop to make a race likely.
 9. `eight concurrent first bootstraps ...` is NOT required; the stages case covers the shared function.
@@ -113,3 +113,8 @@ Update the header comment to state the new rule (seed-on-read in both editions).
 - Leads edition: the seeded `Proposta` column cannot accept a drag (`sale_required_for_conversion`, no proposta flow in that edition) and `Perdido` needs a reason. Owner decision needed only if this is unwanted before phase 1 replaces the stage model; the plan follows the request as written.
 - Any test that lists stages of a deliberately empty org through `GET /lead-stages` or `/bootstrap` would now see four rows; the grep found none (service-level `listLeadStages` callers all pre-seed or create).
 - `leads-stage-summary.test.ts:416` ("an org with no etapas answers []") uses the summary function, not the GET stages route, so it is unaffected; run it to confirm.
+
+## Plan-check addendum (orchestrator, round 1)
+
+- Stale comments that say a leads-edition org has zero etapas are out of scope for this slice's `files_modified` and stay as they are (comments only, no behaviour); `nexo/knowledge/reference/kanban-de-leads.md` and `CLAUDE.md` carry the new rule. Slice 05 or later may refresh `apps/api/scripts/seed-dev.ts:298` and `apps/api/src/domains/sales-ops/leads/lead-service.ts:1090` when it touches those files.
+- Test case 6 passes its input through `LeadStageSchema.parse` (import it from where `stage-routes.ts` imports it).

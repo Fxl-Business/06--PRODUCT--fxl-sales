@@ -25,3 +25,10 @@ Decision: all 14 slices are registered at Frame; slices 01 to 04 are planned now
 
 The local Docker daemon (OrbStack) was not running; it was started to run the integration suite, and the container `06--product--fxl-sales-db-1` was started (it was stopped).
 Both are local; no remote database was touched.
+
+## A5 - Plan-check round 1 fixes applied by the orchestrator
+
+Plan-check (Sonnet) returned FAIL with one major defect: slice 04's oracle used `--git-base`, which reports untracked run records as changes.
+The fix was mechanical, so the orchestrator applied it to the plan text (one `replans` unit): the oracle runs without `--git-base`, and a separate `git status`/`git diff` outside `nexo/runs` proves no product file changed; 04 now depends on 01, 02 and 03; slice 02's test 6 parses its input through `LeadStageSchema`.
+The two stale "zero etapas" comments (`seed-dev.ts:298`, `lead-service.ts:1090`) stay as they are for now (comments only).
+Gate 1 skipped (autopilot), recorded in `nexo/state.json` at Capture.

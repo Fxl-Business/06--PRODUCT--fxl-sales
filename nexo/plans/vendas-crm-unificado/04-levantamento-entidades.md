@@ -2,14 +2,14 @@
 id: 04-levantamento-entidades
 milestone: v4.8.0
 status: todo
-depends_on: ["03-funil-padrao-e-guard-aditivo"]
+depends_on: ["01-marca-fxl-vendas", "02-etapas-seed-on-read", "03-funil-padrao-e-guard-aditivo"]
 files_modified: ["nexo/runs/20261021T011348Z-vendas-crm-unificado/levantamento-entidades.md", "nexo/runs/20261021T011348Z-vendas-crm-unificado/check-levantamento.mjs"]
 affected_tests: []
 acceptance: "given the code on the run branch after slices 01-03, when the checker runs on levantamento-entidades.md, then it covers all 13 entities with the 10 fixed sub-headings, every [identifier](path:line) citation resolves, entities 2 (legacy leads) and 10 (receivables, payables, settlements and the fxl-sales events) are classified alto, sections 5.1-5.3 carry the 0022 constraints and every reader of stage kind and stage_id, and git shows no product file changed"
 goal: "Read-only entity survey with verified citations and low/medium/high risk, the mandatory input of phase 1b"
 must_not_break: ["no product file is modified or created (apps/, packages/, scripts/, root package.json, CLAUDE.md, migrations, tests)", "fxl-sales.obligation.* and fxl-sales.settlement.* events, sales_ops_payables, sales_ops_receivables, sales_ops_settlements and the legacy leads table are described only, never changed", "root pnpm test guards (no-legacy-auth, no-legacy-env-names, local-database-guard, auth-fake-isolation, slice 01 brand guard) stay green because nothing outside nexo/ changes"]
 rules: ["Never use the em dash; use '-'", "One sentence per line in the Markdown document", "The executor copies the document by script (awk extraction from this plan) and never retypes it", "The executor may change line numbers, renamed identifiers and the two EXECUTOR-TODO markers; it may NOT change a risk class, a recommendation, a sub-heading, or delete a bullet to make the checker pass", "Never run the checker with --fix as the only verification: the final run is without --fix", "No commit, push or branch work beyond what the Nexo executor flow itself does"]
-verifier_focus: "Run the oracle without --fix and with --git-base; then spot-check at least 15 citations by hand with sed -n '<line>p'; mutate a throwaway copy (wrong line number, removed sub-heading, entity 10 set to medio, an em dash, a link text containing a closing square bracket) and confirm the checker fails each time; confirm entities 2 and 10 are alto and that sections 5.2 and 5.3 list every reader file the checker computes; confirm git diff --stat shows only the two files under nexo/runs/20261021T011348Z-vendas-crm-unificado/"
+verifier_focus: "Run the oracle without --fix and without --git-base, and check that no file outside nexo/runs changed; then spot-check at least 15 citations by hand with sed -n '<line>p'; mutate a throwaway copy (wrong line number, removed sub-heading, entity 10 set to medio, an em dash, a link text containing a closing square bracket) and confirm the checker fails each time; confirm entities 2 and 10 are alto and that sections 5.2 and 5.3 list every reader file the checker computes; confirm git diff --stat shows only the two files under nexo/runs/20261021T011348Z-vendas-crm-unificado/"
 oracle: "nexo/runs/20261021T011348Z-vendas-crm-unificado/check-levantamento.mjs"
 ---
 
@@ -63,7 +63,7 @@ All commands run from the root of the executor worktree. `PLAN` is this file; if
    - 5d. For each remaining failure of the form `identifier not found anywhere`: find the renamed identifier with `git grep -n "<main word>" -- <dir>`; update the link text and line. If the construct was removed by slices 01-03, rewrite that bullet to say what replaced it and cite the replacement; do not delete the bullet and do not delete the claim silently.
    - 5e. For each failure `5.2 does not cite reader of stage kind: <file>` or `5.3 does not cite reader of stage_id: <file>`: add one bullet to the Web or API list of that section, `- <short description>: [<identifier>](<file>:<line>).`, using the first non-comment line of that file that mentions `kind` (5.2) or `stageId`/`stage_id` (5.3); the identifier is a substring of that line.
    - 5f. Do not touch any risk class, any recommendation, any sub-heading, or any prose outside what 5b-5e names.
-6. Green: `node "$CHK" --doc "$DOC" --root . --git-base "$(git merge-base HEAD nexo/20261021T011348Z-vendas-crm-unificado)" --self "$CHK"` (without `--fix`) must print `PASS` and exit 0. Then `node "$CHK" --doc "$DOC" --root . --sample 15` and eyeball the 15 printed source lines against their link text.
+6. Green: `node "$CHK" --doc "$DOC" --root . --self "$CHK"` (without `--fix` and WITHOUT `--git-base`, which misreads untracked run records as changes) must print `PASS` and exit 0; then `git status --porcelain -- . ':!nexo/runs'` must print nothing and `git diff --name-only "$(git merge-base HEAD nexo/20261021T011348Z-vendas-crm-unificado)" -- . ':!nexo/runs'` must print nothing (no product file changed). Then `node "$CHK" --doc "$DOC" --root . --sample 15` and eyeball the 15 printed source lines against their link text.
 7. Final diff gate: `git status --porcelain` and `git diff --stat` must list only `$DOC` and `$CHK`. Report in the result: citation counts printed by the checker, the list of line numbers changed by `--fix`, the text used for markers 5b and 5c, and anything from 5d/5e.
 
 ## Tests
@@ -74,7 +74,7 @@ The oracle is `nexo/runs/20261021T011348Z-vendas-crm-unificado/check-levantament
 - Summary table has 13 rows, each risk in {alto, médio, baixo}, equal to the `Risco` sub-section of the same entity; entities 2 and 10 are `alto` in both places.
 - Section 3.10 contains the three `fxl-sales.*` event names, `FXS01` and `FXS02`; section 5.1 contains `sales_ops_lead_stages_org_kind_idx`, `sales_ops_lead_stages_system_kind_check`, `sales_ops_lead_stages_kind_check`, `sales_ops_leads_org_stage_fk`; section 4 has rows P1, P2, P3 and names legacy `leads` and `sales_ops_settlements`.
 - Sections 5.2 and 5.3 cite every non-comment reader file of stage kind and of stage_id found in `apps/api/src`, `apps/api/scripts`, `apps/web/src` (computed by the script).
-- No em dash, no `EXECUTOR-TODO`; with `--git-base`, no changed or untracked file other than the document and the script.
+- No em dash, no `EXECUTOR-TODO`; `git status --porcelain -- . ':!nexo/runs'` and the merge-base diff outside `nexo/runs` are empty.
 
 Mutation checks the Verify agent runs on throwaway copies (all must fail): change one citation line to `:7`; delete one `#### Recomendação` line; set `| 2 | ... | alto` to `médio`; append a line with an em dash; append `- [a[0]](apps/api/src/db/schema.ts:46)`.
 
@@ -84,8 +84,8 @@ Mutation checks the Verify agent runs on throwaway copies (all must fail): chang
 
 ## Commands
 
-- Oracle: `node nexo/runs/20261021T011348Z-vendas-crm-unificado/check-levantamento.mjs --doc nexo/runs/20261021T011348Z-vendas-crm-unificado/levantamento-entidades.md --root . --git-base "$(git merge-base HEAD nexo/20261021T011348Z-vendas-crm-unificado)" --self nexo/runs/20261021T011348Z-vendas-crm-unificado/check-levantamento.mjs`
-- Spot check: same command with `--sample 15` instead of `--git-base`.
+- Oracle: `node nexo/runs/20261021T011348Z-vendas-crm-unificado/check-levantamento.mjs --doc nexo/runs/20261021T011348Z-vendas-crm-unificado/levantamento-entidades.md --root . --self nexo/runs/20261021T011348Z-vendas-crm-unificado/check-levantamento.mjs` plus `git status --porcelain -- . ':!nexo/runs'` empty and `git diff --name-only $(git merge-base HEAD nexo/20261021T011348Z-vendas-crm-unificado) -- . ':!nexo/runs'` empty
+- Spot check: same command with `--sample 15` added.
 - Affected suite: none (see "Affected tests search").
 - Lint and type-check: not applicable, no package source changes; as a cheap guard run `node --test scripts/__tests__/no-legacy-auth.test.mjs scripts/__tests__/no-legacy-env-names.test.mjs` to prove the new files under `nexo/` do not trip the tracked-file guards.
 - Wave suite (`nexo/runs/20261021T011348Z-vendas-crm-unificado/wave-suite.sh`) stays the orchestrator's job; this slice cannot affect it.
