@@ -11,7 +11,10 @@ import type {
   CrmPipeline,
   FieldDefinition,
   FieldDefinitionsResponse,
+  FollowupListRow,
+  FollowupsResponse,
   LeadSummaryResponse,
+  ListFollowupsParams,
   PipelinesResponse,
 } from './crm-types';
 import type { LeadResponse } from './types';
@@ -94,5 +97,24 @@ export function useMarkFollowupDone() {
   return useAppMutation<unknown, Error, string>({
     mutationFn: async (followupId) => crmApi.markFollowupDone(followupId, await requireToken(getToken)),
     invalidates: [queryKeys.leads.all],
+  });
+}
+
+function selectFollowups(data: FollowupsResponse): FollowupListRow[] {
+  return Array.isArray(data.followups) ? data.followups : [];
+}
+
+/** The follow-ups list for one scope, status and period (`GET /followups`). */
+export function useFollowups(params: ListFollowupsParams) {
+  const { getToken } = useAccessToken();
+  return useQuery({
+    queryKey: queryKeys.leads.followups({
+      scope: params.scope,
+      status: params.status,
+      ...(params.from ? { from: params.from } : {}),
+      ...(params.to ? { to: params.to } : {}),
+    }),
+    queryFn: async () => crmApi.listFollowups(params, await requireToken(getToken)),
+    select: selectFollowups,
   });
 }

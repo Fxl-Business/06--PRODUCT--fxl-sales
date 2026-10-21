@@ -405,3 +405,5 @@ The free-text company path of the old dialogs is intentionally gone, because the
 - The advance rules are pure in `advance.ts` (`advanceNeeds`, `validateAdvance`, `buildAdvancePayload`, `advanceErrorCopy`); the dialog and the API must agree on them.
 - The note and the follow-up composers (`SummaryComposers.tsx`) write through `useAddLeadNote` and `useAddLeadFollowup`; `Concluir` calls `useMarkFollowupDone`, and every one of them refreshes the whole `['leads']` root.
 - Oracles: `advance.test.ts`, `advance-dialog.test.tsx`, `lead-summary-container.test.tsx`.
+- The follow-ups list (`follow-ups`, slice 09e) shows the open follow-ups of the period by default (`next7`), scoped `team` for an admin under `operacional` and `mine` everywhere else, with a Minha/Equipe toggle only where the team scope is offered.
+- The follow-ups nav entry is appended to the four parallel navigation lists, which phase 3 removes.

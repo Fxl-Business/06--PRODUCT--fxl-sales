@@ -120,7 +120,7 @@ Full reference: `nexo/knowledge/reference/ui-controls.md`.
 
 Full reference: `nexo/knowledge/reference/sales-ops-routing.md`.
 
-- Routes: `tatico/dashboard`, `operacional/vendas|comissoes|leads`, `cadastros/produtos|areas|clientes|pessoas|funcoes|etapas|importacao|leads-excluidos|geral`, `meus-dados/vendedores|comissoes|leads|finders|vendas`, plus the proposta detail `operacional/vendas/:saleId` (and `meus-dados/vendas/:saleId`), plus the lead summary `operacional/leads/:leadId` and `meus-dados/leads/:leadId`.
+- Routes: `tatico/dashboard`, `operacional/vendas|comissoes|leads`, `cadastros/produtos|areas|clientes|pessoas|funcoes|etapas|importacao|leads-excluidos|geral`, `meus-dados/vendedores|comissoes|leads|finders|vendas`, plus the proposta detail `operacional/vendas/:saleId` (and `meus-dados/vendas/:saleId`), plus the lead summary `operacional/leads/:leadId` and `meus-dados/leads/:leadId`, plus the follow-ups agenda `operacional/follow-ups` and `meus-dados/follow-ups`.
 - On the leads view the optional third segment is the LEAD id (the summary) and the selected stage is the `?etapa=<stageId>` query. `buildLeadStagePath` builds the query form, `buildLeadSummaryPath` the segment form, and a bare leads URL still redirects to funil.
 - The URL is the single source of truth for the active workspace and page.
 - The open proposta detail (and so is the open lead summary) is URL state too: one route `SALES_OPS_ROUTE_PATTERN` (`/:workspace/:view/:saleId?`) and `saleId` is honoured only on the `vendas` view; never hold the open detail in component state.

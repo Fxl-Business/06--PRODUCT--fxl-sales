@@ -53,3 +53,7 @@ Moved verbatim from `CLAUDE.md` on 2026-09-22 so the standing context stays shor
   Old stage URLs `/operacional/leads/<stageId>` now parse as a lead id and the summary answers `Lead não encontrado`; that is accepted because the sidebar of the prior release was the only producer and it now writes the query form.
   Stray `?etapa=` on another view is dropped with a `redirect`, so the address bar is rewritten through `replace`.
   Oracles: `lead-routes.test.ts`, `leads-stage-navigation.test.tsx`, `navigation.test.ts` (round trip case).
+- Follow-ups (slice 09e, v4.8.0) are the view id `follow-ups`, appended to the four navigation lists (`operational`, `meusDadosSeller`, `leadsEditionOperational`, `leadsEditionMeusDadosSeller`) because the feature has no edition branch.
+  The scope is `team` only for an admin under `operacional` (the API answers team to an admin alone); everywhere else it is `mine`.
+  The period defaults to the next seven days, the agenda's forward view, and every preset is a São Paulo civil day.
+  Oracles: `followups.test.ts`, `followups-view.test.tsx`, `followups-container.test.tsx`, `navigation-edition.test.ts`.

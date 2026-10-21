@@ -2,6 +2,7 @@ import {
   BadgeDollarSign,
   BarChart3,
   BriefcaseBusiness,
+  CalendarClock,
   Cog,
   ContactRound,
   Database,
@@ -94,6 +95,8 @@ const operational: SalesOpsNavigationItem[] = [
   */
   { id: 'leads', label: 'Prospecção', icon: LayoutGrid },
   { id: 'funil', label: 'Funil', icon: LayoutGrid },
+  // Appended with the follow-ups list (09e): the team's agenda of next steps.
+  { id: 'follow-ups', label: 'Follow-ups', icon: CalendarClock },
 ];
 
 const cadastros: SalesOpsNavigationItem[] = [
@@ -124,6 +127,8 @@ const meusDadosSeller: SalesOpsNavigationItem[] = [
   */
   { id: 'leads', label: 'Minha prospecção', icon: LayoutGrid },
   { id: 'funil', label: 'Funil', icon: LayoutGrid },
+  // Appended with the follow-ups list (09e): the seller's own agenda.
+  { id: 'follow-ups', label: 'Meus follow-ups', icon: CalendarClock },
 ];
 
 const meusDadosFinder: SalesOpsNavigationItem[] = [
@@ -141,6 +146,7 @@ const meusDadosFinder: SalesOpsNavigationItem[] = [
 const leadsEditionOperational: SalesOpsNavigationItem[] = [
   { id: 'leads', label: 'Prospecção', icon: LayoutGrid },
   { id: 'funil', label: 'Funil', icon: LayoutGrid },
+  { id: 'follow-ups', label: 'Follow-ups', icon: CalendarClock },
 ];
 
 /**
@@ -161,6 +167,7 @@ const leadsEditionCadastros: SalesOpsNavigationItem[] = [
 const leadsEditionMeusDadosSeller: SalesOpsNavigationItem[] = [
   { id: 'leads', label: 'Prospecção', icon: LayoutGrid },
   { id: 'funil', label: 'Funil', icon: LayoutGrid },
+  { id: 'follow-ups', label: 'Meus follow-ups', icon: CalendarClock },
 ];
 
 export const salesOpsWorkspaces: Array<{

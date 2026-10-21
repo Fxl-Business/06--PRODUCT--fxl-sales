@@ -84,19 +84,19 @@ const PREFERRED_PATH_FULL: Record<ComboName, [string, string, string, string]> =
 /** Role-independent team workspaces: the role set is ignored for these three. */
 const TEAM_NAV_FULL: Record<'tatico' | 'operacional' | 'cadastros', Array<[SalesOpsView, string]>> = {
   'tatico': [['dashboard', 'Visão geral']],
-  'operacional': [['vendas', 'Propostas'], ['comissoes', 'Comissões'], ['leads', 'Prospecção'], ['funil', 'Funil']],
+  'operacional': [['vendas', 'Propostas'], ['comissoes', 'Comissões'], ['leads', 'Prospecção'], ['funil', 'Funil'], ['follow-ups', 'Follow-ups']],
   'cadastros': [['produtos', 'Produtos & Serviços'], ['areas', 'Áreas'], ['clientes', 'Clientes'], ['pessoas', 'Pessoas'], ['funcoes', 'Funções'], ['etapas', 'Etapas do funil'], ['importacao', 'Importação'], ['leads-excluidos', 'Leads excluídos'], ['geral', 'Geral']],
 };
 
 const MEUS_DADOS_NAV_FULL: Record<ComboName, Array<[SalesOpsView, string]>> = {
   none: [],
   admin: [],
-  seller: [['vendedores', 'Meu painel'], ['comissoes', 'Comissões'], ['leads', 'Minha prospecção'], ['funil', 'Funil']],
+  seller: [['vendedores', 'Meu painel'], ['comissoes', 'Comissões'], ['leads', 'Minha prospecção'], ['funil', 'Funil'], ['follow-ups', 'Meus follow-ups']],
   finder: [['finders', 'Meu painel'], ['vendas', 'Indicações']],
-  adminSeller: [['vendedores', 'Meu painel'], ['comissoes', 'Comissões'], ['leads', 'Minha prospecção'], ['funil', 'Funil']],
+  adminSeller: [['vendedores', 'Meu painel'], ['comissoes', 'Comissões'], ['leads', 'Minha prospecção'], ['funil', 'Funil'], ['follow-ups', 'Meus follow-ups']],
   adminFinder: [['finders', 'Meu painel'], ['vendas', 'Indicações']],
-  sellerFinder: [['vendedores', 'Meu painel'], ['comissoes', 'Comissões'], ['leads', 'Minha prospecção'], ['funil', 'Funil'], ['finders', 'Meu painel'], ['vendas', 'Indicações']],
-  everything: [['vendedores', 'Meu painel'], ['comissoes', 'Comissões'], ['leads', 'Minha prospecção'], ['funil', 'Funil'], ['finders', 'Meu painel'], ['vendas', 'Indicações']],
+  sellerFinder: [['vendedores', 'Meu painel'], ['comissoes', 'Comissões'], ['leads', 'Minha prospecção'], ['funil', 'Funil'], ['follow-ups', 'Meus follow-ups'], ['finders', 'Meu painel'], ['vendas', 'Indicações']],
+  everything: [['vendedores', 'Meu painel'], ['comissoes', 'Comissões'], ['leads', 'Minha prospecção'], ['funil', 'Funil'], ['follow-ups', 'Meus follow-ups'], ['finders', 'Meu painel'], ['vendas', 'Indicações']],
 };
 
 /** url -> [resolved path, redirect]. */
@@ -295,7 +295,7 @@ const PREFERRED_PATH_LEADS: Record<ComboName, [string, string, string, string]> 
 /** Role-independent team workspaces: the role set is ignored for these three. */
 const TEAM_NAV_LEADS: Record<'tatico' | 'operacional' | 'cadastros', Array<[SalesOpsView, string]>> = {
   'tatico': [],
-  'operacional': [['leads', 'Prospecção'], ['funil', 'Funil']],
+  'operacional': [['leads', 'Prospecção'], ['funil', 'Funil'], ['follow-ups', 'Follow-ups']],
   'cadastros': [
     ['pessoas', 'Vendedores'],
     ['clientes', 'Clientes'],
@@ -308,12 +308,12 @@ const TEAM_NAV_LEADS: Record<'tatico' | 'operacional' | 'cadastros', Array<[Sale
 const MEUS_DADOS_NAV_LEADS: Record<ComboName, Array<[SalesOpsView, string]>> = {
   none: [],
   admin: [],
-  seller: [['leads', 'Prospecção'], ['funil', 'Funil']],
+  seller: [['leads', 'Prospecção'], ['funil', 'Funil'], ['follow-ups', 'Meus follow-ups']],
   finder: [],
-  adminSeller: [['leads', 'Prospecção'], ['funil', 'Funil']],
+  adminSeller: [['leads', 'Prospecção'], ['funil', 'Funil'], ['follow-ups', 'Meus follow-ups']],
   adminFinder: [],
-  sellerFinder: [['leads', 'Prospecção'], ['funil', 'Funil']],
-  everything: [['leads', 'Prospecção'], ['funil', 'Funil']],
+  sellerFinder: [['leads', 'Prospecção'], ['funil', 'Funil'], ['follow-ups', 'Meus follow-ups']],
+  everything: [['leads', 'Prospecção'], ['funil', 'Funil'], ['follow-ups', 'Meus follow-ups']],
 };
 
 /** url -> [resolved path, redirect]. */

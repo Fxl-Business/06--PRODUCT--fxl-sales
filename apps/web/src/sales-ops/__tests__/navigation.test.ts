@@ -52,12 +52,14 @@ describe('sales operations navigation', () => {
       'comissoes',
       'leads',
       'funil',
+      'follow-ups',
     ]);
     expect(getSalesOpsNavigation('operacional', team).map((item) => item.label)).toEqual([
       'Propostas',
       'Comissões',
       'Prospecção',
       'Funil',
+      'Follow-ups',
     ]);
     expect(getSalesOpsNavigation('cadastros', team).map((item) => item.id)).toEqual([
       'produtos',
@@ -89,12 +91,14 @@ describe('sales operations navigation', () => {
       'comissoes',
       'leads',
       'funil',
+      'follow-ups',
     ]);
     expect(getSalesOpsNavigation('meus-dados', seller).map((item) => item.label)).toEqual([
       'Meu painel',
       'Comissões',
       'Minha prospecção',
       'Funil',
+      'Meus follow-ups',
     ]);
     expect(getSalesOpsNavigation('meus-dados', finder).map((item) => item.id)).toEqual([
       'finders',
@@ -109,6 +113,7 @@ describe('sales operations navigation', () => {
       'comissoes',
       'leads',
       'funil',
+      'follow-ups',
       'finders',
       'vendas',
     ]);
@@ -565,5 +570,13 @@ describe('lead summary and stage query round trip', () => {
     expect(buildSalesOpsPath(summary.route)).toBe('/operacional/leads/L1');
     const stage = resolveSalesOpsRoute({ workspace: 'operacional', view: 'leads', etapa: 'S1' }, ['admin']);
     expect(buildSalesOpsPath(stage.route)).toBe('/operacional/leads?etapa=S1');
+  });
+});
+
+describe('follow-ups navigation', () => {
+  it('follow-ups resolves in operacional for an admin, in meus-dados for a seller, and not for a finder-only operator', () => {
+    expect(resolveSalesOpsRoute({ workspace: 'operacional', view: 'follow-ups' }, ['admin']).route).toStrictEqual({ workspace: 'operacional', view: 'follow-ups' });
+    expect(resolveSalesOpsRoute({ workspace: 'meus-dados', view: 'follow-ups' }, ['seller']).route).toStrictEqual({ workspace: 'meus-dados', view: 'follow-ups' });
+    expect(resolveSalesOpsRoute({ workspace: 'meus-dados', view: 'follow-ups' }, ['finder']).route.view).not.toBe('follow-ups');
   });
 });

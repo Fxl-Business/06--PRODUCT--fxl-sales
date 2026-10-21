@@ -154,6 +154,7 @@ import type { LeadConversionItem, LeadConversionPrefill } from './leads/conversi
 import type { LeadConversionRequest } from './leads/LeadsBoard';
 import { LeadsBoardContainer } from './leads/LeadsBoardContainer';
 import { LeadSummaryContainer } from './leads/LeadSummaryContainer';
+import { FollowupsContainer } from './leads/FollowupsContainer';
 import { LeadSidebarNavigation } from './leads/LeadSidebarNavigation';
 import { isNarrowViewport, subscribeNarrowViewport } from './narrow-viewport';
 import { LeadStagesContainer } from './leads/LeadStagesContainer';
@@ -2418,6 +2419,7 @@ export function SalesOpsApp() {
                   />
                 ) : null}
                 {view === 'etapas' ? <LeadStagesContainer /> : null}
+                {view === 'follow-ups' ? <FollowupsContainer workspace={workspace} /> : null}
                 {view === 'importacao' ? <ImportContainer /> : null}
                 {view === 'leads-excluidos' ? <DeletedLeadsContainer /> : null}
                 {view === 'geral' ? (
