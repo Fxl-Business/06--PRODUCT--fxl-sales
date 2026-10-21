@@ -70,6 +70,8 @@ vi.mock('../refresh', async (importOriginal) => ({
 }));
 
 import type { HubTokenResult } from '../refresh';
+import { OrgModulesContext } from '../org-modules-context';
+import { modulesForEdition } from '@fxl-sales/shared-utils/crm-model';
 import {
   AppAuthProvider,
   Protected,
@@ -2334,6 +2336,30 @@ describe('Sales edition from the token', () => {
     ({ container, root } = renderEditionProvider());
     await flushReact();
     expect(editionText(container)).toBe(expected);
+  });
+
+  it('projects the shell modules through OrgModulesContext and reads the token hint outside it', async () => {
+    mocks.cache.getToken.mockResolvedValue(ok(editionToken({ access: true, modules: [] })));
+    const host = document.createElement('div');
+    document.body.append(host);
+    const editionRoot = createRoot(host);
+    act(() => {
+      editionRoot.render(
+        <QueryClientProvider client={queryClient}>
+          <AppAuthProvider>
+            <OrgModulesContext.Provider value={modulesForEdition('leads')}>
+              <EditionProbe />
+            </OrgModulesContext.Provider>
+            <UserControls />
+          </AppAuthProvider>
+        </QueryClientProvider>,
+      );
+    });
+    container = host;
+    root = editionRoot;
+    await flushReact();
+    // The token says full (no modules); the shell's leads modules win for the leaf components.
+    expect(editionText(container)).toBe('full|leads');
   });
 
   it('flips the edition with the token on a workspace switch', async () => {

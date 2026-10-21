@@ -6,7 +6,8 @@ import { formatMoneyBrl } from '../calculations';
 import { UNASSIGNED_LEAD_LABEL } from './board-labels';
 import { leadContactLine } from './contact-lead';
 import { primaryButtonClass, secondaryButtonClass, stageColors } from './board-ui';
-import { legacyKindOf } from './crm-pipeline';
+import { summaryStageKind } from './crm-pipeline';
+import { OrgModulesContext } from '@/auth/org-modules-context';
 import type { FieldDefinition, LeadFollowup, LeadSummaryResponse } from './crm-types';
 import {
   FOLLOWUP_STATE_LABEL,
@@ -63,7 +64,8 @@ export function LeadSummary({
   const { lead, stage, pipeline, nextStages } = summary;
   const converted = leadIsConverted(lead);
   const unassigned = leadIsUnassigned(lead);
-  const stageColor = stageColors([{ id: stage.id, kind: legacyKindOf(stage) }]).get(stage.id);
+  const modules = React.useContext(OrgModulesContext);
+  const stageColor = stageColors([{ id: stage.id, kind: summaryStageKind(stage, modules) }]).get(stage.id);
   const openFollowups = summary.followups
     .filter((followup) => followup.doneAt === null)
     .sort((a, b) => (a.dueOn < b.dueOn ? -1 : a.dueOn > b.dueOn ? 1 : 0));
