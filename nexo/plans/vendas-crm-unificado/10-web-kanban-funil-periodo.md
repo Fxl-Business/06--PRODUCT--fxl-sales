@@ -36,3 +36,32 @@ Per part; the exact files and edits are listed in each part's `Affected tests` s
 ## Wire assumptions to reconcile with 07a/07b
 
 W1 lead write `fields: [{fieldId, value}]` (null clears, omitted untouched); W2 non-admin create omits sellerPersonId and the API assigns the caller's pessoa in both editions; A1 `GET /followups` returns `{followups: [{id, leadId, leadContactName, nextStep, dueOn, ownerName, doneAt}]}`; A2 advance returns `{lead}`; A3 notes/followups/done ignore the body. Part 08a and 08c isolate them.
+
+
+## Plan-check addendum (orchestrator revision 3, binding)
+
+Copied from the plan-check report `nexo/runs/20261021T011348Z-vendas-crm-unificado/agents/plan-check-fase2.md`. Where it conflicts with the body above, this addendum wins. Apply each fix in the part it names.
+
+#### 4. MAJOR - Funil "Acumulado" counts paused leads as won (10a Risks accepts it, but the figure is wrong, not just coarse)
+
+`LEGACY_KIND_BY_EXIT` maps `pausado` and `ganho` to `normal` (08a), and `buildCumulativeFunnel` keeps every non-`lost` stage in the progression in board order (CLAUDE.md, Edição Leads). With the 7 default etapas (Novo, Qualificação, Em negociação, Proposta, Ganho, Perdido, Pausado) a lead in Pausado (last) counts in EVERY earlier stage, Ganho included, so the Ganho revenue/volume and the retention `% do topo` are inflated by every paused lead. A new org gets this pipeline on first read (07a), so it is visible at once.
+
+Fix in `parts/10a-web-kanban-funil-periodo.md`: add Design item 6b and a test:
+
+```text
+6b. Funnel progression. `buildCumulativeFunnel` removes from the progression every stage whose exit is `perdido` OR `pausado` (a lost or paused lead has no known path), decided by an object lookup on `exitKind` (`NON_PROGRESSION_EXIT: Partial<Record<PipelineExitKind, true>> = { perdido: true, pausado: true }`, in `board-ui.ts`; no inline kind comparison). Both are reported in the aside (`[data-funnel-lost]` keeps the lost stage, a new `[data-funnel-parked]` line shows the Pausado count and value). Stages without `exitKind` (legacy fixtures) behave as today. The footer grand totals still read `buildLeadFunnel` (all leads).
+Test (`lead-funnel.test.tsx`, appended): with stages Novo, Proposta, Ganho, Perdido, Pausado and one lead in each, the `Acumulado` Ganho row counts 1 (not 2), the Pausado lead appears only in `[data-funnel-parked]`, and the footer total is 5.
+```
+
+(Drop the first Risks bullet of 10a accordingly.)
+
+
+#### 7. MINOR - `affected_tests: []` in the frontmatter of 08, 09 and 10
+
+About 25 existing web tests are edited (renames in 09c, container mocks in 10a, literal nav tables in 09e/10b, `board-write-surface.test.ts` OWNED_FILES). They are listed only in the parts. Fill the three frontmatters with the part lists (path, impact, update, command, owner) so Verify and wave tooling see them. Minimum for 09: `leads-board-keyboard`, `leads-contact-board`, `leads-list-view`, `leads-board-dropzones`, `leads-board-scroll`, `leads-board-search`, `lead-board-totals`, `lead-unassigned-marker`, `lead-delete`, `lead-conversion`, `leads-full-edition`, `lead-undo`, `leads-stage-navigation`, `navigation-edition`, `navigation`, `board-write-surface`.
+
+
+#### 10. MINOR - 409 `transition_not_allowed` has no visible copy outside the drag (10a)
+
+10a only reverts the optimistic move on a stale graph. Add to 10a Design 3: `a 409 from POST /leads/:id/move (Lista Mover, MoveLeadDialog) renders MOVE_NOT_ALLOWED_COPY through the existing MutationErrorBanner path (keyed on status 409 and error 'transition_not_allowed')`, plus one test in `leads-pipeline-container.test.tsx`.
+

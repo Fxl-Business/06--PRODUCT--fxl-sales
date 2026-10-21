@@ -987,3 +987,24 @@ describe('CRM schema 0029: RLS and constraints', () => {
 - drizzle-kit version drift changes the generated statement text: the helper script only reorders and appends, so it survives; the test pins ranks and RLS text, not the generated DDL.
 - The shared test DB: `global-setup.ts` applies 0029 (and later 0030) to it. Other worktrees on older code are unaffected because the old tables are untouched.
 - Postgres identifiers are capped at 63 bytes; the longest new name is 48. A longer rename would be silently truncated: keep the SEAM-CONTRACT names.
+
+## Plan-check addendum (orchestrator revision, round 2)
+
+Binding; copied from `nexo/runs/20261021T011348Z-vendas-crm-unificado/agents/plan-check-fase1bc.md` defects 3, 5, 7, 8. Where the ADR text says the cutover migration repeats 0030 verbatim, write instead the paragraph of defect 3.
+
+### 3. MAJOR - "0031 repeats 0030 verbatim" silently loses every edit made between 0030 and the cutover (ADR Consequences + SEAM-CONTRACT rule 2)
+
+0030 is `INSERT ... ON CONFLICT DO NOTHING`. The old API stays the write path until phase 2, so a lead moved, edited, soft-deleted/restored or re-produtized after 0030 is already present in `sales_ops_crm_leads` and a verbatim repeat keeps the STALE copy (value rows and first event too). The ADR only says "rows written in that window are not copied" (new rows), which understates it. The guard forbids DELETE, so a naive refresh is impossible.
+Paste into the ADR Consequences and SEAM-CONTRACT rule: "The repeat in 0031 only adds rows that do not exist yet. A lead that already exists in the new table is NOT refreshed. The phase 2 cutover must therefore either (a) make 0031 a resync: after the repeated inserts, `UPDATE sales_ops_crm_leads ... FROM sales_ops_leads` for stage_id/position/stage_changed_at/seller/client/value/lost_reason/sale_id/deleted_* where they differ, `INSERT ... ON CONFLICT (org_id, lead_id, field_id, position) DO UPDATE` for value rows, and a stage_changed event for each changed stage, with a test that mutates the old tables between 0030 and 0031; or (b) dual-write old and new tables from the first phase 2 deploy until the cutover. Choose and test one; a verbatim repeat is not enough." Also change the SEAM-CONTRACT wording "repeats ... verbatim" to "repeats and RESYNCS".
+
+
+### 5. MINOR - 05a step 4 check commands print 11, not 10
+The header comment contains the words "CREATE TABLE" and "FORCE ROW LEVEL SECURITY", so `grep -c "CREATE TABLE"` and `grep -c "FORCE ROW LEVEL SECURITY"` print 11. A haiku executor will stop or "fix" it. Replace with `grep -c '^CREATE TABLE'` (10) and `grep -c '^ALTER TABLE .* FORCE ROW LEVEL SECURITY'` (10); `grep -c "CREATE POLICY"` stays 20.
+
+
+### 7. MINOR - Cliente "vira valor do campo" is met only through the backing column
+The request says Cliente becomes the value of the reference field; the plans store it in `client_id` + snapshot and create only the definition row (documented in the ADR). Add one line to the ADR Consequences: "No `sales_ops_crm_lead_field_values` row is written for Cliente by design; the owner accepted the backing-column form (D3)" or confirm with the owner, so Verify does not flag the AC literally.
+
+### 8. MINOR - ADR does not label the untouched high-risk entities as pendencias
+1b AC: "entidades de risco alto sem alteração e listadas como pendência". D2 lists them as never touched. Append to D2: "They stay as pendencias of the survey (section 4); a later run owns them."
+

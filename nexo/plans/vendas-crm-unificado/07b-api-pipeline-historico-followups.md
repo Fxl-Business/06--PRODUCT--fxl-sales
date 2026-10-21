@@ -2520,3 +2520,35 @@ The tables, the migrations 0029 to 0031 and the decisions are in `nexo/knowledge
 - Oracles: `crm-cutover-resync.test.ts`, `crm-cutover-frozen-tables.test.ts`, `crm-lead-write-fields.test.ts`, `crm-pipeline-history.test.ts`, `lead-write-contract.test.ts`, `frozen-lead-tables.test.ts`.
 
 ```
+
+
+## Plan-check addendum (orchestrator revision 3, binding)
+
+Copied from the plan-check report `nexo/runs/20261021T011348Z-vendas-crm-unificado/agents/plan-check-fase2.md`. Where it conflicts with the body above, this addendum wins. Apply each fix in the part it names.
+
+#### 2. MAJOR - 08e step 8(b) edits a CLAUDE.md line that 07b already rewrote (the executor will STOP)
+
+07b (Docs, Old line 360) replaces `- Leads writes use \`ContactLeadFieldsSchema\` ...` by `- Lead writes use ONE strict schema, \`LeadWriteSchema\` ...`. 08e Design item 8(b) then asks to replace "the bullet starting `Leads writes use ContactLeadFieldsSchema`", which no longer exists (checked: the 07b old text for line 360 is present in the current CLAUDE.md exactly once; after 07b it is gone). 08e (a), (c), (d) anchors (lines 315, 363, 377 of the current CLAUDE.md) are NOT touched by 07b and stay valid.
+
+Fix in `parts/08e-web-lead-form-cutover.md` Design item 8, replace (b) by:
+
+```text
+(b) the bullet that 07b already rewrote (it now starts `- Lead writes use ONE strict schema, \`LeadWriteSchema\``): append at its end `The web writes it through the single LeadForm (apps/web/src/sales-ops/leads/LeadForm.tsx, logic in lead-form.ts): nome and one contact (telefone or e-mail) are required, dynamic fields come from GET /field-definitions, the Cliente is always present and not removable.` Do not search for the pre-07b text.
+```
+
+Also in `07b-api-pipeline-historico-followups.md` rules, replace `"CLAUDE.md and the kanban reference are edited by THIS slice only"` by `"CLAUDE.md and the kanban reference: this slice owns the API rules; the web slices 08e, 09a, 09c, 09e, 10a and 10b edit only the bullets they name (read the file first, anchors of bullets rewritten here are the post-07b text)"`.
+
+
+#### 9. MINOR - no oracle pins the lock order of advanceLead (07b)
+
+The brief lists the board lock order as top risk; 07b states "same lock order" and leaves it to review (Risks). Add a case to `crm-pipeline-history.test.ts`: `advance, move and create on the same org run concurrently without deadlock and keep positions dense` (Promise.all of `advanceLead` on lead A, `moveLead` on lead B inside the same stage, `createLead`; all resolve, column positions 1..N). Mutation to list for Verify: take the card row lock before `lockLeadBoard` in `advanceLead`.
+
+
+#### 11. MINOR - bookkeeping
+
+- 07a `files_modified` omits the deleted `apps/api/src/domains/sales-ops/leads/__tests__/contact-lead-contract.test.ts` (it is in affected_tests as DELETE); add it.
+- `apps/api/scripts/seed-dev.ts.bak2` is a tracked backup that names the three frozen tables; delete it in 07a3 (it is outside `frozen-lead-tables.test.ts` scope, but it is dead text that a grep for the frozen names will keep finding).
+- `lead-path.ts` (07b) hard-codes `stage.position > 1`; derive it from the graph (`allowedTargets of Novo`) or comment that it assumes the seven default etapas.
+- 07b design item 3 says moveLead refusals are "results"; the existing `sale_required_for_conversion` on a plain move is still a thrown `LeadInputError` (400 from 07a). Say so in item 3 so a reader does not expect 409 on `/move` for that case (the 409 `sale_required_for_conversion` is `/advance` only).
+- Phase 2 text says "sem listas paralelas por edicao"; 09e appends follow-ups to the four existing parallel lists (correct for now, phase 3 removes them). Note it in 09e Risks.
+

@@ -25,3 +25,19 @@ Consolidated by the orchestrator from the planner's part plans (run budget: at m
 - `parts/13b-dias-sem-comprar-web.md` - oracle `apps/web/src/sales-ops/clients/__tests__/client-recency.test.ts`
 
 All oracles: `packages/shared-utils/src/__tests__/purchase-recency.test.ts`, `apps/web/src/sales-ops/clients/__tests__/client-recency.test.ts`
+
+
+## Plan-check addendum (orchestrator revision 3, binding)
+
+Copied from the plan-check report `nexo/runs/20261021T011348Z-vendas-crm-unificado/agents/plan-check-fase34.md`. Where it conflicts with the body above, this addendum wins. Apply each fix in the part it names.
+
+Orchestrator decision on D7: take the recommended option (latest day over won sales AND live client-bound leads in a `saida/ganho` stage, day from `stage_changed_at`), reconciling the CLAUDE.md rule and `leads-no-financial-impact.test.ts` as the report says, without weakening that test.
+
+#### D7 [MAJOR] 13a/13b: "dias sem comprar" ignores won leads; misses half of the request AC
+Files: `parts/13a-dias-sem-comprar-api.md` Context ("latest won sale" = `sales_ops_sales.status='won'` only), Design, tests; `13-dias-sem-comprar.md` acceptance.
+Request section 4 phase 4: "hoje - data da ultima venda ganha (etapa de saida ganho / `sales_ops_sales.status='won'`)". An org with `orcamentos` off (Construbom) has NO propostas; its only purchases are leads that reached an exit stage `ganho`. With the sales-only query every Construbom cliente reads "Nunca comprou" forever.
+Recommendation: count both sources and take the maximum day. Paste into 13a Context:
+> A purchase is either (a) a proposta with `status = 'won'` and `won_at IS NOT NULL` (day = `saoPauloDayOf(won_at)`), or (b) a live lead (`deleted_at IS NULL`) with `client_id IS NOT NULL` whose stage is `type = 'saida' AND exit_kind = 'ganho'` (day = `saoPauloDayOf(stage_changed_at)`, the instant it entered the exit stage). The last purchase of a cliente is the greatest day over both. A lost, paused, cancelled, open, draft or deleted record never counts. A lead already converted to a proposta (`sale_id` set) counts once through the max.
+Add to 13a Steps a second SELECT on `sales_ops_crm_leads` joined to `sales_ops_pipeline_stages` (org-filtered both sides, in the same tenant tx) feeding `computePurchaseRecency` a third argument `leadWins: ReadonlyArray<{ clientId: string; wonAt: Date | string }>`, and test cases in `purchase-recency.test.ts` and `clients-purchase-recency.test.ts`: (1) a cliente with only a lead in a `ganho` exit stage gets that day; (2) a lead in `perdido`/`pausado` is ignored; (3) a deleted ganho lead is ignored; (4) sale and lead on different days gives the later one.
+Rule conflict to resolve in the same change: CLAUDE.md "Kanban de leads" says leads never enter `/bootstrap` and `leads-no-financial-impact.test.ts` deep-equals `getSalesOpsSnapshot` across lead activity. Therefore: (i) add to that oracle's deep-equal a projection that strips `lastPurchaseOn`/`daysSinceLastPurchase` from `clients` before comparing, plus one new assertion that moving a client-bound lead to the ganho exit changes ONLY those two keys; (ii) in CLAUDE.md add after the "Leads never enter /bootstrap" sentence: `The one derived exception is the per-cliente lastPurchaseOn/daysSinceLastPurchase (slice 13), which may read a ganho exit lead.` Add `apps/api/test/rls/leads-no-financial-impact.test.ts` and `CLAUDE.md` to 13's `files_modified` and change its affected row from "none expected, run to prove" to this update. If the product owner decides propostas-only is enough, the minimum is to state it in the slice acceptance and the final report as a known limitation; this check does not recommend that.
+

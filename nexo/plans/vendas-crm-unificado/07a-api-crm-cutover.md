@@ -110,3 +110,34 @@ Mutation checks the Verify agent runs on a throwaway copy: (a) make `insertLead`
 - The owner-visible behaviour changes are the seven-etapa default for a new org, W2, and the contact rule on create (the web of today posts a lead without contact until slice 08 lands; the rule is at the HTTP boundary only, services and the import are not affected).
 - Phase 3 reads `scope.edition` only inside `leadScope(c)` (one function in `lead-routes.ts`) and `LeadScope.edition`; keep that single seam.
 - `git apply` of a diff can fail if slices 05a to 06 were executed with different text: STOP and report, do not improvise.
+
+
+## Plan-check addendum (orchestrator revision 3, binding)
+
+Copied from the plan-check report `nexo/runs/20261021T011348Z-vendas-crm-unificado/agents/plan-check-fase2.md`. Where it conflicts with the body above, this addendum wins. Apply each fix in the part it names.
+
+#### 5. MAJOR - 0031 leaves an etapa created after 0030 with no transitions (07a1)
+
+The transition statement of the repeated 0030 body is guarded by `NOT EXISTS (SELECT 1 FROM sales_ops_pipeline_transitions t WHERE t.pipeline_id = s.pipeline_id)`. In the exact scenario 0031 exists for (a database that ran 0030 and kept using the old code, i.e. every dev and staging copy), an etapa created in `sales_ops_lead_stages` after 0030 is copied by statement 2 but gets NO edge, because its pipeline already has transitions. With 07b enforcing the graph, no lead can ever be moved into or out of that etapa (409 `transition_not_allowed`) and the oracle (`crm-cutover-resync.test.ts` "copies the rows ... same ids", "renames an etapa ...") does not look at transitions. Silent, and the 0031 header calls the resync complete.
+
+Fix in `parts/07a1-cutover-fundacao.md`: append to the 0031 body, after the etapa `UPDATE` and before the event INSERT, one statement (the same CTE as statement 6 without the pipeline-level guard, restricted to pairs that involve a stage with no edge at all; `ON CONFLICT DO NOTHING` keeps it idempotent), and add the oracle case:
+
+```text
+INSERT INTO "sales_ops_pipeline_transitions" ("org_id", "pipeline_id", "from_stage_id", "to_stage_id")
+WITH act AS (<same as statement 6 but WITHOUT the NOT EXISTS on transitions>), opn AS (<same>)
+SELECT "org_id", "pipeline_id", "from_id", "to_id" FROM (<same four UNION branches>) AS g
+WHERE NOT EXISTS (SELECT 1 FROM "sales_ops_pipeline_transitions" t WHERE t."pipeline_id" = g."pipeline_id" AND (t."from_stage_id" = g."from_id" OR t."to_stage_id" = g."from_id"))
+   OR NOT EXISTS (SELECT 1 FROM "sales_ops_pipeline_transitions" t WHERE t."pipeline_id" = g."pipeline_id" AND (t."from_stage_id" = g."to_id" OR t."to_stage_id" = g."to_id"))
+ON CONFLICT DO NOTHING;
+```
+Oracle case (`crm-cutover-resync.test.ts`): `an etapa created in the old table after 0030 gets its edges, and a graph the org shaped is left alone`. Update the 0031 header comment accordingly. If the planner prefers not to change SQL, the alternative is to record the limitation in the header AND in 07a Risks and keep a test that pins it; silence is not acceptable.
+
+
+#### 11. MINOR - bookkeeping
+
+- 07a `files_modified` omits the deleted `apps/api/src/domains/sales-ops/leads/__tests__/contact-lead-contract.test.ts` (it is in affected_tests as DELETE); add it.
+- `apps/api/scripts/seed-dev.ts.bak2` is a tracked backup that names the three frozen tables; delete it in 07a3 (it is outside `frozen-lead-tables.test.ts` scope, but it is dead text that a grep for the frozen names will keep finding).
+- `lead-path.ts` (07b) hard-codes `stage.position > 1`; derive it from the graph (`allowedTargets of Novo`) or comment that it assumes the seven default etapas.
+- 07b design item 3 says moveLead refusals are "results"; the existing `sale_required_for_conversion` on a plain move is still a thrown `LeadInputError` (400 from 07a). Say so in item 3 so a reader does not expect 409 on `/move` for that case (the 409 `sale_required_for_conversion` is `/advance` only).
+- Phase 2 text says "sem listas paralelas por edicao"; 09e appends follow-ups to the four existing parallel lists (correct for now, phase 3 removes them). Note it in 09e Risks.
+

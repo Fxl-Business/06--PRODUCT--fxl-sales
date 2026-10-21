@@ -39,3 +39,48 @@ Per part; the exact files and edits are listed in each part's `Affected tests` s
 ## Wire assumptions to reconcile with 07a/07b
 
 W1 lead write `fields: [{fieldId, value}]` (null clears, omitted untouched); W2 non-admin create omits sellerPersonId and the API assigns the caller's pessoa in both editions; A1 `GET /followups` returns `{followups: [{id, leadId, leadContactName, nextStep, dueOn, ownerName, doneAt}]}`; A2 advance returns `{lead}`; A3 notes/followups/done ignore the body. Part 08a and 08c isolate them.
+
+
+## Plan-check addendum (orchestrator revision 3, binding)
+
+Copied from the plan-check report `nexo/runs/20261021T011348Z-vendas-crm-unificado/agents/plan-check-fase2.md`. Where it conflicts with the body above, this addendum wins. Apply each fix in the part it names.
+
+#### 1. BLOCKER - the edit undo always answers 400 field_invalid (08c leadToWriteSeed, 08e saveWithUndo, 09c container)
+
+Evidence: `readLeadFields` (07a1 `lead-fields.ts`, the `definitions.map` at the end of the function) returns ONE entry per active definition INCLUDING the Cliente (`key 'cliente'`, value `[{id,name}]` or `null`, read from `client_id`). `leadToWriteSeed` (08c item 11) copies `lead.fields` verbatim AND sends top-level `clientId`. The API refuses that pair: 07a2 `lead-service.ts` `pickClientId`: `if (topLevel !== undefined && cliente !== null) throw new LeadInputError('field_invalid', cliente.index)`. So the PATCH sent by "Lead editado" undo (board in 08e, summary in 09c) is a 400. The planned tests do not see it: the round trip fixture in 08c and the `lead-undo`/`lead-summary-container` fixtures contain no cliente entry (vacuous for this path).
+
+Fix in `parts/08c-web-lead-form-logica.md`, Design item 11, replace the `fields` part of the sentence by:
+
+```text
+`fields`: `[...(lead.fields ?? []).filter((f) => f.key !== CLIENTE_FIELD_KEY).map((f) => ({ fieldId: f.fieldId, value: f.value })), ...clearFieldIds.map((fieldId) => ({ fieldId, value: null }))]`, with `export const CLIENTE_FIELD_KEY = 'cliente';` declared in `lead-form.ts` (it equals `SYSTEM_FIELD_CLIENTE.key`). The Cliente is carried ONLY by the top-level `clientId`/`clientName`, because the API refuses `clientId` together with a Cliente entry of `fields` (`400 field_invalid`). `fieldIdsWithValue` also skips the cliente key.
+```
+
+Add to the 08c Tests list:
+
+```text
+- `leadToWriteSeed never sends a Cliente entry`: the lead fixture carries `{ fieldId: 'f-cli', key: 'cliente', value: [{ id: 'c1', name: 'Acme' }] }` and `{ fieldId: 'f-cli', key: 'cliente', value: null }` in two cases; the seed has `clientId` and NO entry with `fieldId 'f-cli'`. The round trip case also includes the cliente entry and still deep-equals.
+```
+
+Add to 08e Tests (`lead-undo.test.tsx`) and 09c Tests (`lead-summary-container.test.tsx`): the lead fixture has the cliente entry in `fields`, and the inverse PATCH body `fields` is asserted to contain only `{ fieldId: 'f-desc', value: 'Antes' }` (no `f-cli`). In 08e the `added` computation also filters `f.key !== CLIENTE_FIELD_KEY`.
+
+
+#### 6. MAJOR - CLAUDE.md rules about the card click and the edit form are left false by 09c
+
+CLAUDE.md "Kanban de leads" says the card "otherwise clicking it opens edit via `onEdit`", "the Lista row and both edit forms (edit mode) also offer `Excluir`", and "`data-move-trigger`/`data-edit-lead` now live on the Lista rows". 09c renames to `onOpen`/`onOpenLead`/`data-open-lead`, moves the editor behind the summary and removes the board edit path, but its text has no docs step (only 09a, 09e, 10a, 10b do). The repo header says to update the reference in the same change when a rule moves, and the AC "clicar no card abre o resumo, nao o form" is itself a rule.
+
+Fix: add to `parts/09c-web-lead-resumo.md` a Docs step: in CLAUDE.md replace `otherwise clicking it opens edit via \`onEdit\` and dragging moves it` by `otherwise clicking it opens the lead summary (operacional|meus-dados/leads/:leadId) via \`onOpen\` and dragging moves it, and a converted card still opens its proposta`; replace `The Lista row and both edit forms (edit mode) also offer \`Excluir\`` by `The Lista row and the LeadForm in edit mode (opened from the summary) also offer \`Excluir\``; replace `\`data-move-trigger\`/\`data-edit-lead\` now live on the Lista rows` by `\`data-move-trigger\`/\`data-open-lead\` live on the Lista rows`. Mirror one sentence per line in `nexo/knowledge/reference/kanban-de-leads.md`.
+
+
+#### 7. MINOR - `affected_tests: []` in the frontmatter of 08, 09 and 10
+
+About 25 existing web tests are edited (renames in 09c, container mocks in 10a, literal nav tables in 09e/10b, `board-write-surface.test.ts` OWNED_FILES). They are listed only in the parts. Fill the three frontmatters with the part lists (path, impact, update, command, owner) so Verify and wave tooling see them. Minimum for 09: `leads-board-keyboard`, `leads-contact-board`, `leads-list-view`, `leads-board-dropzones`, `leads-board-scroll`, `leads-board-search`, `lead-board-totals`, `lead-unassigned-marker`, `lead-delete`, `lead-conversion`, `leads-full-edition`, `lead-undo`, `leads-stage-navigation`, `navigation-edition`, `navigation`, `board-write-surface`.
+
+
+#### 11. MINOR - bookkeeping
+
+- 07a `files_modified` omits the deleted `apps/api/src/domains/sales-ops/leads/__tests__/contact-lead-contract.test.ts` (it is in affected_tests as DELETE); add it.
+- `apps/api/scripts/seed-dev.ts.bak2` is a tracked backup that names the three frozen tables; delete it in 07a3 (it is outside `frozen-lead-tables.test.ts` scope, but it is dead text that a grep for the frozen names will keep finding).
+- `lead-path.ts` (07b) hard-codes `stage.position > 1`; derive it from the graph (`allowedTargets of Novo`) or comment that it assumes the seven default etapas.
+- 07b design item 3 says moveLead refusals are "results"; the existing `sale_required_for_conversion` on a plain move is still a thrown `LeadInputError` (400 from 07a). Say so in item 3 so a reader does not expect 409 on `/move` for that case (the 409 `sale_required_for_conversion` is `/advance` only).
+- Phase 2 text says "sem listas paralelas por edicao"; 09e appends follow-ups to the four existing parallel lists (correct for now, phase 3 removes them). Note it in 09e Risks.
+

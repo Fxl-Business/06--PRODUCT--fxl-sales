@@ -33,3 +33,47 @@ Consolidated by the orchestrator from the planner's part plans (run budget: at m
 - `parts/11c-api-modulos-admin.md` - oracle `apps/api/src/domains/org-modules/__tests__/org-modules-routes.integration.test.ts`
 
 All oracles: `apps/api/test/rls/org-modules.test.ts`, `apps/api/src/middleware/__tests__/edition-gate-map.test.ts`, `apps/api/src/domains/org-modules/__tests__/org-modules-routes.integration.test.ts`
+
+
+## Plan-check addendum (orchestrator revision 3, binding)
+
+Copied from the plan-check report `nexo/runs/20261021T011348Z-vendas-crm-unificado/agents/plan-check-fase34.md`. Where it conflicts with the body above, this addendum wins. Apply each fix in the part it names.
+
+Orchestrator decision on D4: take the recommended option (requireAdmin plus the platform-operator allow-list `SALES_MODULE_OPERATOR_ACCOUNT_IDS`, empty by default, `403 module_operator_required`); register the new env name wherever the env guards (`no-legacy-env-names`, env example contract) require it.
+
+#### D2 [MAJOR] 11b: `leadScope` becomes async but phase 2 adds un-awaited callers outside 11b's grep
+Files: `parts/11b-api-modulos-cutover.md` Design 3 and step 2f.
+`07b-api-pipeline-historico-followups.md:229-269` creates a new router file (`import { failureResponse, leadScope, validationResponse } from './leads/lead-routes.js'`, `listFollowups(..., leadScope(c))`, `markFollowupDone(..., leadScope(c))`), and `07b:1405-1559` exports `leadScope` and calls it synchronously in summary, advance, notes and follow-up handlers. These contain no `salesEdition` string, so 11b's `grep -rn "salesEdition"` does not find them; tsc would flag a Promise passed as `LeadScope`, but the plan promises a grep net, not a compiler net.
+Replace 11b step 2f with:
+> f. `domains/sales-ops/leads/lead-routes.ts`: make `leadScope` `async` (`export async function leadScope(c: Context): Promise<LeadScope>`, `const edition = await getSalesEdition(c);` then the same object) and `usesContactFields` async if it still exists. Then convert EVERY caller found by `grep -rn "leadScope(" apps/api/src | grep -v __tests__` (at least `lead-routes.ts` and the phase 2b CRM routes file that imports `leadScope`, e.g. the follow-ups/pipelines router of slice 07b): `await leadScope(c)`; `leadScope(c).isAdmin` becomes `(await leadScope(c)).isAdmin`. Add to Commands: `grep -rn "leadScope(c)" apps/api/src | grep -v "await leadScope(c)" | grep -v __tests__` must print nothing.
+And in the Tests section add: any unit test of those routers that mounts them with a `hubAuth` and no `orgModules` presets `c.set('orgModules', ALL_MODULES_ENABLED)` (already in step 3, extend the sentence to the 07b router tests).
+
+
+#### D3 [MAJOR] 11c: how the orcamentos flag reaches the services (single seam)
+Files: `parts/11c-api-modulos-admin.md` Design 3 bullet "The route passes `await getOrgModules(c)` into the service as a new TRAILING parameter `modules ... = ALL_MODULES_ENABLED`".
+Problem: `moveLead` already has a 6th parameter `options: MoveLeadOptions = {}` (07b), `advanceLead`, `getLeadSummary`, `listLeadStages`, `listPipelines` and the import executor each have different tails; a default of `ALL_MODULES_ENABLED` makes every forgotten caller fail OPEN to full behaviour (a Construbom lead stops at 409). Phase 2's contract keeps `leadScope(c)` as the single per-request seam (`07a-api-crm-cutover.md:111`).
+Replace that bullet with:
+> The lead services get the flag through the one seam they already receive: add `modules?: OrgModules` to `LeadScope` (next to `edition?`), filled by `leadScope(c)` from `await getOrgModules(c)` (11b already awaits there). `moveLead`, `advanceLead`, `getLeadSummary` and every lead read that projects `kind`/`behavior` use `stageActsAsOrcamento(stage, scope.modules ?? ALL_MODULES_ENABLED)`. Services that take no scope (`listLeadStages`, `listPipelines`, the import planner/executor, `mapping/catalog.ts` of slice 14) get a trailing `modules: OrgModules` parameter WITHOUT a default, so a forgotten caller is a type error, not a silent full-edition answer. Routes pass `await getOrgModules(c)`.
+Also add the web side to the acceptance of D6 below.
+
+
+#### D4 [MAJOR] 11c Risks / Design: `PUT /org-modules` open to any org admin (decision requested)
+Files: `parts/11c-api-modulos-admin.md` Design 1, Tests (PUT cases), Risks "ORCHESTRATOR DECISION", Docs; `parts/11a` nothing.
+Analysis: the request AC is only "toggle de flag muda navegacao e 403 sem redeploy". Nothing requires the tenant to toggle its own flags, and the request says onboarding/module configuration screens are OUT of scope (section 0, item 11). With `requireAdmin` alone, a Construbom org admin (Hub owner/admin of that workspace) can `PUT {orcamentos:true, comissoes:true, financeiro:true}` and unlock the paid/propostas surface, ledger and settlement routes for their own org. `hasAdminRole` is a tenant role, not a platform role; no platform-operator concept exists in the repo (`grep -ri "operator\|platform" apps/api/src` finds none in the auth path).
+Recommendation (most conservative that still meets the AC): keep `GET /org-modules` as `requireAdmin` (read only, the bootstrap already exposes the same data); make `PUT /org-modules` require `requireAdmin` AND membership of a platform-operator allow-list that is EMPTY by default (default deny, fail closed). The AC test passes by configuring the allow-list for the test org's operator; production changes need an FXL operator account id in the env. A body or the token's org can never grant operator status.
+Paste into 11c Design 1 (replace the `PUT /org-modules (requireAdmin)` bullet's first clause) :
+> `PUT /org-modules` (`requireAdmin` then `requireModuleOperator`): `requireModuleOperator` (new file `apps/api/src/middleware/require-module-operator.ts`) answers `403 { error: 'forbidden', code: 'module_operator_required' }` unless `c.get('userId')` (the Hub account id) is listed in `env.SALES_MODULE_OPERATOR_ACCOUNT_IDS` (comma separated, trimmed, empty or absent = nobody). It reads the validated `env`, never `process.env`, and never anything from the body. `GET /org-modules` stays `requireAdmin` only. A tenant admin therefore cannot enable a module for their own organization.
+Paste into 11c files_modified: `apps/api/src/env.ts` (new optional string `SALES_MODULE_OPERATOR_ACCOUNT_IDS`), `apps/api/src/middleware/require-module-operator.ts`, `apps/api/src/middleware/__tests__/require-module-operator.test.ts`, `apps/api/.env.dev.example` (a commented line `# SALES_MODULE_OPERATOR_ACCOUNT_IDS=` OUTSIDE the contract block read by `env-example-contract.test.ts`).
+Paste into 11c Tests: (a) `PUT as an org admin who is not an operator -> 403 module_operator_required, updateOrgModules not called, rows unchanged`; (b) `PUT with an empty/absent allow-list -> 403 for everyone, admin or not`; (c) `GET stays 200 for the same admin`; (d) the existing "toggling a flag ... without a redeploy" integration test (test 4) and the stage test (test 8) run `PUT` as an operator (the harness sets `userId` to a listed account id via the mocked env); (e) a seller operator id still gets `ADMIN_ROLE_REQUIRED_BODY` (admin check first).
+Paste into 11c Risks (replace the ORCHESTRATOR DECISION bullet):
+> DECIDED: module writes are a platform-operator action, not a tenant-admin one. `PUT /org-modules` needs `requireAdmin` plus an id in `SALES_MODULE_OPERATOR_ACCOUNT_IDS` (default empty = nobody can toggle). Local dev-fake: set the variable to the fake identity's account id to toggle by hand. Staging/production: operators add their Hub account ids to the secret store; this is a configuration change, not a deploy of code. If modules become self-service later, that is a new product decision with an audit entry.
+Paste into CLAUDE.md edit (11c Docs, the Edicao Leads bullet 2): replace `An admin toggles a flag without a redeploy through GET/PUT ... (requireAdmin, not capability gated)` with `An operator toggles a flag without a redeploy through PUT /api/v1/sales-ops/org-modules (requireAdmin plus the SALES_MODULE_OPERATOR_ACCOUNT_IDS allow-list, default deny, not capability gated); GET is requireAdmin only; GET /bootstrap carries orgModules.` Add `module_operator_required` to the OPEN-route reasoning of `edition-gate-map.test.ts` (PUT with body `{}` answers 403/400 before any store call, still never `edition_capability`).
+
+
+#### m1 [MINOR] 11a/11b: backfill is first-request-wins on the token
+The token consulted is whichever the org's first request carries. A staging org whose first call happens with an old session token lacking the module is backfilled `full` forever. Add one sentence to 11a Risks: "The backfill uses the first token seen; before releasing, list orgs and compare against the Hub entitlement of each (a read-only query on `sales_ops_org_modules` after the first week), and fix with `PUT /org-modules` as operator."
+
+
+#### m3 [MINOR] 11c: bootstrap seed function name
+11c Context says bootstrap calls `ensureLeadStagesForOrg` "or, after phase 2, `ensureCrmDefaultsForOrg`". After 07a the bootstrap still calls the facade `ensureLeadStagesForOrg` (07a keeps `stages-seed.ts` as a facade). Replace by "`ensureLeadStagesForOrg` (the 07a facade)" so the executor does not rewrite the call.
+

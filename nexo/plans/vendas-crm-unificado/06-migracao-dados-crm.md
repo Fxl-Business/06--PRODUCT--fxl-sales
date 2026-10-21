@@ -3,7 +3,7 @@ id: 06-migracao-dados-crm
 milestone: v4.8.0
 status: todo
 depends_on: ["05a-crm-schema-migracao", "05b-crm-defaults-servicos"]
-files_modified: ["apps/api/drizzle/0030_crm_legacy_copy.sql", "apps/api/drizzle/meta/0030_snapshot.json", "apps/api/drizzle/meta/_journal.json", "apps/api/test/rls/crm-legacy-copy-migration.test.ts", "apps/api/src/domains/sales-ops/leads/__tests__/default-pipeline-parity.test.ts", "apps/api/scripts/seed/plan.ts", "apps/api/scripts/seed-dev.ts", "apps/api/scripts/__tests__/seed-plan.test.ts"]
+files_modified: ["apps/api/drizzle/0030_crm_legacy_copy.sql", "apps/api/drizzle/meta/0030_snapshot.json", "apps/api/drizzle/meta/_journal.json", "apps/api/test/rls/crm-legacy-copy-migration.test.ts", "apps/api/src/domains/sales-ops/leads/__tests__/default-pipeline-parity.test.ts", "apps/api/scripts/seed/plan.ts", "apps/api/scripts/seed-dev.ts", "apps/api/scripts/__tests__/seed-plan.test.ts", "apps/api/src/db/__tests__/settlement-test-cleanup.ts"]
 affected_tests: [
   {path: apps/api/src/domains/sales-ops/leads/__tests__/default-pipeline-parity.test.ts, impact: "extended: closes the SLICE-05-HOOK by comparing the 0030 default seed to DEFAULT_PIPELINE_STAGES", update: "append the describe block and two imports (step 5)", command: "pnpm --filter @fxl-sales/api exec vitest run src/domains/sales-ops/leads/__tests__/default-pipeline-parity.test.ts", owner: builder},
   {path: apps/api/scripts/__tests__/seed-plan.test.ts, impact: "SEED_DELETE_ORDER gains the CRM tables", update: "append one case (step 6)", command: "pnpm --filter @fxl-sales/api exec vitest run scripts/__tests__/seed-plan.test.ts", owner: builder},
@@ -814,3 +814,47 @@ describe('migration 0030 on a database populated at 0029', () => {
 - Rows written to the old tables between 0030 and the phase 2 cutover are not copied: the cutover migration must repeat these statements (SEAM-CONTRACT rule).
 - `ON CONFLICT DO NOTHING` also swallows a genuine unique violation on stage names (`Ganho` collision); the name rule above avoids losing the exit, and test 8 pins it.
 - The partial unique index on `sale_id` could reject a copied lead only if the source already violated the same index; it cannot.
+
+## Plan-check addendum (orchestrator revision, round 2)
+
+Binding. The plan-check report `nexo/runs/20261021T011348Z-vendas-crm-unificado/agents/plan-check-fase1bc.md` defects 1, 2 and 6 apply to this slice; the text below is copied from it and wins over the body above where they differ.
+
+### 1. BLOCKER - `purgeOrgLedgerForTests` is not updated; an existing integration test breaks on a seeded dev DB (06, files_modified)
+
+`apps/api/src/db/__tests__/settlement-test-cleanup.ts` `purgeOrgLedgerForTests` (used by `src/domains/integration/__tests__/finance-integration.integration.test.ts`, fixed org `org_fake_integrado`) deletes `sales_ops_leads` then `sales_ops_sales`.
+The shared integration DB is the dev DB (`.env` TEST_* all point at database `fxl_sales`), and the dev seed writes leads for `org_fake_integrado`, one with `saleId: saleIdS1` (`apps/api/scripts/seed/plan.ts` ~1467-1700).
+When global-setup applies 0030, that lead is copied to `sales_ops_crm_leads` with `sale_id`; the helper then fails with 23503 on `sales_ops_crm_leads_org_sale_fk` (the helper's own comment says a new reference to the sale tree must fail loudly).
+Reproduced: running the helper's exact delete sequence on a scratch DB after 0030 fails 23503; the same sequence with the CRM deletes first succeeds.
+No plan lists this file; the plans only patch the dev seed. This is the "most likely breakage" and it is real. All other cleanup helpers/tests (about 40 files that delete clientes/pessoas/produtos/propostas/stages) use their own orgs and are unaffected as long as no CRM row exists for those orgs.
+
+Paste into 06:
+- `files_modified` add `"apps/api/src/db/__tests__/settlement-test-cleanup.ts"`; `affected_tests` add `{path: apps/api/src/domains/integration/__tests__/finance-integration.integration.test.ts, impact: "its purge helper deletes sales that the CRM copy now references", update: none (helper fixed in step 7), command: "pnpm --filter @fxl-sales/api exec env VITEST_INTEGRATION=1 vitest run src/domains/integration/__tests__/finance-integration.integration.test.ts", owner: builder}`.
+- New step 7 (renumber the old 7 to 8): "In `purgeOrgLedgerForTests`, immediately BEFORE the line deleting `sales_ops_lead_products`, add five lines in this order, same pattern as the neighbours: `DELETE FROM sales_ops_crm_lead_notes`, `sales_ops_crm_lead_followups`, `sales_ops_crm_lead_field_values`, `sales_ops_crm_lead_events`, `sales_ops_crm_leads`, each `WHERE org_id = ANY(${ids})`. Extend its doc comment: 'the unified CRM lead copies restrict-reference the sale, the cliente, the pessoa and the produto'."
+- Add one oracle case to `crm-legacy-copy-migration.test.ts`: on the migrated scratch DB (superuser, settlements first via `SET LOCAL session_replication_role = replica`), the helper's delete sequence WITHOUT the CRM deletes rejects with `code: '23503'`, and WITH them succeeds (wrap in a transaction that throws to roll back). I wrote and ran exactly this probe; it passes.
+- Run `finance-integration.integration.test.ts` against the dev DB after global-setup applies 0030 (that DB holds the seeded leads).
+
+### 2. MAJOR - 06 oracle fixture misses the AC "leads legados de finder com click/link/conversion" and does not fingerprint ALL source tables
+
+The seed has one bare `INSERT INTO leads (id, org_id, status)`; no `finders`, `referral_links`, `clicks`, `conversions`, `apps`, `products`; `SOURCE_TABLES` has 13 entries and none of those. The request (1c AC) requires finder lead + click + link + conversion and "todas as tabelas de origem" identical.
+Paste (tested, oracle stays 18/18 green): replace the `INSERT INTO leads ...` line of `SEED_SQL` with
+```sql
+INSERT INTO apps (id, slug, name, publishable_key, secret_key_hash, secret_key_prefix, webhook_signing_secret, allowed_redirect_hosts, status, created_by_user_id) VALUES
+ ('d0000000-0000-4000-8000-0000000000a1','app-x','App X','pk_x','h','sk_','w','{example.com}','active','user_1');
+INSERT INTO products (id, app_id, slug, name, status) VALUES ('d0000000-0000-4000-8000-0000000000a2','d0000000-0000-4000-8000-0000000000a1','p','P','active');
+INSERT INTO finders (id, org_id, status, display_name, contact_email) VALUES ('d0000000-0000-4000-8000-0000000000a3','orgA','approved','Finder','f@x.com');
+INSERT INTO referral_links (id, org_id, code, finder_id, app_id, product_id, quoted_setup_brl, quoted_monthly_brl, signature, destination_url) VALUES
+ ('d0000000-0000-4000-8000-0000000000a4','orgA','CODE000001','d0000000-0000-4000-8000-0000000000a3','d0000000-0000-4000-8000-0000000000a1','d0000000-0000-4000-8000-0000000000a2',1000,500,'sig','https://example.com/x');
+INSERT INTO clicks (click_id, org_id, link_id, finder_id, app_id, product_id) VALUES
+ ('CLICK0000000000000000000001','orgA','d0000000-0000-4000-8000-0000000000a4','d0000000-0000-4000-8000-0000000000a3','d0000000-0000-4000-8000-0000000000a1','d0000000-0000-4000-8000-0000000000a2');
+INSERT INTO leads (id, org_id, click_id, link_id, status) VALUES ('d0000000-0000-4000-8000-000000000001','orgA','CLICK0000000000000000000001','d0000000-0000-4000-8000-0000000000a4','converted');
+INSERT INTO conversions (source, external_order_id, idempotency_key, org_id, link_id, click_id, finder_id, app_id, product_id, quoted_setup_brl, quoted_monthly_brl, realized_setup_brl, realized_monthly_brl, hold_until, closed_at) VALUES
+ ('fxl-financiero','ord1','idem1','orgA','d0000000-0000-4000-8000-0000000000a4','CLICK0000000000000000000001','d0000000-0000-4000-8000-0000000000a3','d0000000-0000-4000-8000-0000000000a1','d0000000-0000-4000-8000-0000000000a2',1000,500,1000,500,now(),now());
+```
+and add `'apps','products','finders','referral_links','clicks','conversions'` to `SOURCE_TABLES` (and a spot check `sourceBefore['conversions']!.n === 1`). Update oracle case 2 text from "13 tables" to "19 tables". Optional hardening (untested): build the list from `pg_tables` (all public tables except the ten CRM tables and the drizzle bookkeeping table) so "ALL" is literal.
+
+
+### 6. MINOR - Shared-DB residue risk is unmentioned (06 Risks)
+global-setup applies 0030 to whatever legacy leads sit in the shared DB (the dev DB, so seeded leads plus any residue). Add to Risks: "After the first integration run, `sales_ops_crm_leads` holds a copy of every legacy lead in the shared DB. A test that reuses an org with such a lead and deletes its cliente/pessoa/proposta hits 23503. Remedy: re-run the dev seed (SEED_DELETE_ORDER now clears the CRM tables) or delete the CRM rows of that org as the local superuser."
+
+
+Also add `deleteCrmForOrgs(orgIds)` in `apps/api/src/db/__tests__/settlement-test-cleanup.ts` (exported, order: notes, followups, field_values, events, leads, transitions, stages, pipelines, field_definitions, org_modules, each `WHERE org_id = ANY(ids)`), and make `purgeOrgLedgerForTests` call its lead part (notes to leads) before `sales_ops_lead_products`; phase 2 slice 07a reuses it everywhere else.
