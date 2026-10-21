@@ -1,0 +1,29 @@
+---
+id: 14-importacao-mapeamento
+milestone: v4.8.0
+status: todo
+depends_on: ["13-dias-sem-comprar"]
+files_modified: ["apps/api/src/domains/import/mapping/types.ts", "apps/api/src/domains/import/mapping/read-sheet.ts", "apps/api/src/domains/import/mapping/suggest.ts", "apps/api/src/domains/import/mapping/plan.ts", "apps/api/src/domains/import/mapping/__tests__/read-sheet.test.ts", "apps/api/src/domains/import/mapping/__tests__/suggest.test.ts", "apps/api/src/domains/import/mapping/__tests__/plan.test.ts", "apps/api/src/domains/import/mapping/catalog.ts", "apps/api/src/domains/import/mapping/executor.ts", "apps/api/src/domains/import/mapping/routes.ts", "apps/api/src/domains/import/routes.ts", "apps/api/src/domains/sales-ops/routes.ts", "apps/api/src/domains/crm/__tests__/crm-seed-callers.test.ts", "apps/api/src/domains/import/__tests__/mapping-routes.integration.test.ts", "apps/api/src/domains/import/__tests__/template-brand.test.ts", "nexo/knowledge/reference/importacao-por-planilha.md", "CLAUDE.md", "apps/web/src/sales-ops/import/mapping/api.ts", "apps/web/src/sales-ops/import/mapping/hooks.ts", "apps/web/src/sales-ops/import/mapping/mapping-state.ts", "apps/web/src/sales-ops/import/mapping/mapping-copy.ts", "apps/web/src/sales-ops/import/mapping/MappingImportView.tsx", "apps/web/src/sales-ops/import/ImportContainer.tsx", "apps/web/src/sales-ops/import/mapping/__tests__/mapping-state.test.ts", "apps/web/src/sales-ops/import/mapping/__tests__/mapping-import-view.test.tsx"]
+affected_tests: [{path: apps/api/src/domains/import/__tests__/import-routes.integration.test.ts, impact: "routes.ts only gains `export` keywords and the sales-ops router gains a sibling mount; the official flow must be byte-identical in behaviour", update: "none expected, run to prove", command: "pnpm --filter @fxl-sales/api exec env VITEST_INTEGRATION=1 vitest run src/domains/import/__tests__/import-routes.integration.test.ts", owner: builder},
+  {path: apps/api/src/domains/import/__tests__/import-routes.test.ts, impact: "unit routing test of the import router", update: "none expected, run to prove", command: "pnpm --filter @fxl-sales/api exec vitest run src/domains/import/__tests__/import-routes.test.ts", owner: builder},
+  {path: apps/api/src/domains/crm/__tests__/crm-seed-callers.test.ts, impact: "ALLOWED_CALLERS must list the new request path that calls ensureCrmDefaults", update: "add apps/api/src/domains/import/mapping/routes.ts to the allow-list", command: "pnpm --filter @fxl-sales/api exec vitest run src/domains/crm/__tests__/crm-seed-callers.test.ts", owner: builder},
+  {path: apps/api/src/domains/sales-ops/__tests__/edition-gate-map.test.ts, impact: "maps every route to a capability; /import/mapping/* is under /import/* and must stay gated by the same capability/module", update: "none expected unless the test enumerates routes; then add /import/mapping/* beside /import/*", command: "pnpm --filter @fxl-sales/api exec vitest run src/middleware/__tests__/edition-gate-map.test.ts", owner: builder}, {path: apps/web/src/sales-ops/import/__tests__/import-view.test.tsx, impact: "ImportView is untouched; the container gains a mode toggle", update: "none expected, run to prove", command: "pnpm --filter @fxl-sales/web exec vitest run src/sales-ops/import", owner: builder},
+  {path: apps/web/src/sales-ops/import/__tests__/import-routing.test.tsx, impact: "mocks the containers; the shell mounting is unchanged", update: "none expected, run to prove", command: "pnpm --filter @fxl-sales/web exec vitest run src/sales-ops/import/__tests__/import-routing.test.tsx", owner: builder}]
+acceptance: "given a sheet with arbitrary headers, a column mapping, a stage-value mapping and an in-memory catalog, when planMappedImport runs, then it returns the cliente and lead operations, row-numbered issues, counts and recognized counts, recognizes a lead that already exists, and never reads the clock, the database or the environment AND given an admin, a sheet with arbitrary headers and a mapping, when POST /import/mapping/preview then /commit run, then preview writes nothing, commit writes leads and clientes through the domain services in one transaction, and committing the same file again creates nothing and reports the leads and clientes as recognized AND given an uploaded sheet with arbitrary headers, when the operator maps columns, maps the stage values to stages of a pipeline, validates and confirms, then the screen shows the preview counts (with recognized leads and clientes), blocks on errors, commits once and shows the created and recognized counts"
+goal: "Spreadsheet import with column-to-field and stage mapping, idempotent preview and commit"
+rules: ["execute the parts in order, TDD inside each part", "each part's Steps, Tests, Commands and Affected tests sections are binding", "depends_on names inside a part that point at another part of this slice mean that part"]
+verifier_focus: "run every part's oracle and focused commands, then the affected package suites, lint and type-check"
+oracle: "apps/web/src/sales-ops/import/mapping/__tests__/mapping-state.test.ts"
+---
+
+# 14-importacao-mapeamento
+
+Consolidated by the orchestrator from the planner's part plans (run budget: at most 24 slices).
+
+## Parts, execute in order
+
+- `parts/14a-importacao-mapeamento-nucleo.md` - oracle `apps/api/src/domains/import/mapping/__tests__/plan.test.ts`
+- `parts/14b-importacao-mapeamento-api.md` - oracle `apps/api/src/domains/import/__tests__/mapping-routes.integration.test.ts`
+- `parts/14c-importacao-mapeamento-web.md` - oracle `apps/web/src/sales-ops/import/mapping/__tests__/mapping-state.test.ts`
+
+All oracles: `apps/api/src/domains/import/mapping/__tests__/plan.test.ts`, `apps/api/src/domains/import/__tests__/mapping-routes.integration.test.ts`, `apps/web/src/sales-ops/import/mapping/__tests__/mapping-state.test.ts`
