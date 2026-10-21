@@ -142,6 +142,11 @@ export function LeadSummaryContainer({
     const added = (result.lead.fields ?? [])
       .filter((f) => f.key !== CLIENTE_FIELD_KEY && !previousIds.has(f.fieldId))
       .map((f) => f.fieldId);
+    // The inverse omits the contact keys, so it cannot take a contact away again: an edit that
+    // gives a contactless lead its first contact is not undoable (the API keeps one contact).
+    const addedFirstContact = !previous.contactPhone && !previous.contactEmail
+      && (Boolean(result.lead.contactPhone) || Boolean(result.lead.contactEmail));
+    if (addedFirstContact) return;
     undo.publish('Lead editado', async () => {
       await requireUnchangedLead(result.lead);
       return saveLead.mutateAsync(leadToWriteSeed(previous, added));

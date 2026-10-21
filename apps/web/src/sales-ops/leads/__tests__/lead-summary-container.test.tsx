@@ -252,6 +252,23 @@ describe('LeadSummaryContainer', () => {
     expect(inverse).not.toHaveProperty('contactEmail');
   });
 
+  it('an edit that gives a contactless lead its first contact offers no undo', async () => {
+    mocks.summary = summaryOf(lead({ contactPhone: null, contactEmail: null }));
+    await renderAt([`/operacional/leads/${LEAD_ID}`]);
+    await click('[data-summary-edit]');
+    mocks.mutateAsync.mockImplementation(async () => {
+      const updated = lead({ contactName: 'Ana', contactPhone: '11988887777', contactEmail: null });
+      mocks.summary = summaryOf(updated);
+      return { lead: updated };
+    });
+    setInput('lead-phone', '11988887777');
+    await click('[data-lead-save]');
+
+    expect(mocks.mutateAsync).toHaveBeenCalledTimes(1);
+    expect(mocks.mutateAsync.mock.calls[0]?.[0]).toMatchObject({ id: LEAD_ID, contactPhone: '11988887777' });
+    expect(document.querySelector('[data-undo-notice]')).toBeNull();
+  });
+
   it('refuses the undo when the lead changed since the edit, with no second write', async () => {
     await renderAt([`/operacional/leads/${LEAD_ID}`]);
     await click('[data-summary-edit]');
