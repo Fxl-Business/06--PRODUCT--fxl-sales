@@ -420,3 +420,11 @@ The free-text company path of the old dialogs is intentionally gone, because the
 - O funil `Acumulado` tira da progressão as saídas `perdido` e `pausado` (`NON_PROGRESSION_EXIT`) e as reporta em separado (`[data-funnel-lost]`, `[data-funnel-parked]`).
   A saída `ganho` continua na progressão, porque é o fim do caminho de venda.
 - Os totais do rodapé do funil continuam lendo todos os leads, inclusive perdidos e pausados.
+
+## Phase 2 review fixes (10.1-fase2-review-fixes, v4.8.0)
+
+- The default pipeline is resolved `is_default` first.
+- Restoring an archived etapa with no transition in either direction inserts its default edges (the `planPipelineTransitions` rule, restricted to edges touching it); an etapa with edges is left as the org shaped it.
+- `POST /followups/:id/done` is allowed to whoever can access the lead under the seller scope, to an admin, and to the follow-up's own owner pessoa; anyone else gets 404.
+- The board publishes `Desfazer` for a stage move only when the graph allows the reverse edge (a move to `Perdido` has none).
+- An edit undo of a lead with no contact omits `contactPhone`/`contactEmail`, like the edit itself.
