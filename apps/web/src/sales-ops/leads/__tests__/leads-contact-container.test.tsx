@@ -102,7 +102,7 @@ vi.mock('../LeadsBoard', async () => {
         ),
         ReactModule.createElement(
           'button',
-          { 'data-stub': 'edit', onClick: call('onEditLead', mocks.leads[0]), type: 'button' },
+          { 'data-stub': 'edit', onClick: call('onOpenLead', mocks.leads[0]), type: 'button' },
           'stub-edit',
         ),
         ReactModule.createElement(
@@ -215,7 +215,7 @@ function PathEcho() {
   return <span data-path={useLocation().pathname} />;
 }
 
-async function renderContainer(options: { showSellerFilter?: boolean } = {}) {
+async function renderContainer(options: { showSellerFilter?: boolean; workspace?: 'operacional' | 'meus-dados' } = {}) {
   await act(async () => {
     root.render(
       <MemoryRouter initialEntries={['/operacional/leads']}>
@@ -225,6 +225,7 @@ async function renderContainer(options: { showSellerFilter?: boolean } = {}) {
               <>
                 <LeadsBoardContainer
                   clients={[]}
+                  workspace={options.workspace}
                   onOpenSale={onOpenSale}
                   onRequestConversion={onRequestConversion}
                   people={[]}
@@ -371,19 +372,14 @@ describe('LeadsBoardContainer, leads edition', () => {
     expect(payload.fields).toContainEqual({ fieldId: 'f-desc', value: 'Texto' });
   });
 
-  it('editing seeds the contact dialog and saves with the lead id', async () => {
-    await renderContainer();
+  it('a card click navigates to the lead summary, not the form', async () => {
+    await renderContainer({ workspace: 'operacional' });
     await clickSelector('[data-stub="edit"]');
-    const phone = document.getElementById('lead-phone') as HTMLInputElement | null;
-    expect(phone?.value).toBe('(11) 98888-7777');
-
-    await clickSelector('[data-lead-save]');
-    expect(mocks.mutateAsync).toHaveBeenCalledTimes(1);
-    expect(mocks.mutateAsync.mock.calls[0]?.[0]).toMatchObject({
-      id: LEAD_ID,
-      contactName: 'Ana Construbom',
-      contactPhone: '(11) 98888-7777',
-    });
+    expect(document.querySelector('[data-path]')?.getAttribute('data-path')).toBe(
+      `/operacional/leads/${LEAD_ID}`,
+    );
+    expect(document.getElementById('lead-phone')).toBeNull();
+    expect(mocks.mutateAsync).not.toHaveBeenCalled();
     expect(mocks.mutate).not.toHaveBeenCalled();
   });
 

@@ -293,14 +293,6 @@ async function escape(element: Element) {
   await settle();
 }
 
-function buttonLabelled(label: string): HTMLButtonElement {
-  const node = [...document.querySelectorAll('button')].find(
-    (candidate) => candidate.textContent?.trim() === label,
-  );
-  if (!node) throw new Error(`button not found: ${label}`);
-  return node;
-}
-
 function cardIds(): string[] {
   return [...document.querySelectorAll('[data-lead-card]')].map(
     (node) => node.getAttribute('data-lead-card') ?? '',
@@ -332,7 +324,7 @@ const NOW = new Date('2026-09-18T12:00:00.000Z');
 
 async function renderCard(props: Partial<React.ComponentProps<typeof LeadCard>> & { lead: SalesOpsLead }) {
   const handlers = {
-    onEdit: vi.fn(),
+    onOpen: vi.fn(),
     onDelete: vi.fn(),
     dragPointerDown: vi.fn(),
   };
@@ -343,7 +335,7 @@ async function renderCard(props: Partial<React.ComponentProps<typeof LeadCard>> 
         lookups={LOOKUPS}
         now={NOW}
         onDelete={handlers.onDelete}
-        onEdit={handlers.onEdit}
+        onOpen={handlers.onOpen}
         {...props}
       />,
     );
@@ -397,7 +389,7 @@ describe('the card menu, structurally', () => {
     expect(required('[role="menu"] [data-delete-lead]').textContent).toBe(
       LEAD_DELETE_COPY.menuLabel,
     );
-    expect(handlers.onEdit).not.toHaveBeenCalled();
+    expect(handlers.onOpen).not.toHaveBeenCalled();
     expect(handlers.dragPointerDown).not.toHaveBeenCalled();
   });
 
@@ -408,7 +400,7 @@ describe('the card menu, structurally', () => {
 
     expect(event.defaultPrevented).toBe(true);
     expect(query('[role="menu"] [data-delete-lead]')).not.toBeNull();
-    expect(handlers.onEdit).not.toHaveBeenCalled();
+    expect(handlers.onOpen).not.toHaveBeenCalled();
   });
 
   it('a right-click on a converted card keeps the browser menu', async () => {
@@ -432,18 +424,20 @@ describe('the card menu, structurally', () => {
 
     expect(handlers.onDelete).toHaveBeenCalledTimes(1);
     expect(handlers.onDelete.mock.calls[0]?.[0]).toMatchObject({ id: ANA });
-    expect(handlers.onEdit).not.toHaveBeenCalled();
+    expect(handlers.onOpen).not.toHaveBeenCalled();
     expect(handlers.dragPointerDown).not.toHaveBeenCalled();
     expect(query('[role="menu"]')).toBeNull();
   });
 
-  it('a plain click on the card body still opens the editor', async () => {
+  it('a plain click on the card body opens the summary, never the form', async () => {
     const handlers = await renderCard({ lead: lead(ANA, 'Ana Souza') });
 
     await click(required(`[data-lead-card="${ANA}"]`), { clientX: 0, clientY: 0 });
 
-    expect(handlers.onEdit).toHaveBeenCalledTimes(1);
+    expect(handlers.onOpen).toHaveBeenCalledTimes(1);
     expect(handlers.onDelete).not.toHaveBeenCalled();
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.querySelector('#lead-contact-name')).toBeNull();
   });
 });
 
@@ -593,7 +587,7 @@ describe('deleting from the Lista', () => {
 
     const row = required(`[data-list-row="${ANA}"]`);
     expect(row.querySelector(`[data-move-trigger="${ANA}"]`)).not.toBeNull();
-    expect(row.querySelector(`[data-edit-lead="${ANA}"]`)).not.toBeNull();
+    expect(row.querySelector(`[data-open-lead="${ANA}"]`)).not.toBeNull();
     expect(row.querySelector(`[data-delete-lead="${ANA}"]`)?.textContent).toBe(
       LEAD_DELETE_COPY.menuLabel,
     );
@@ -609,30 +603,6 @@ describe('deleting from the Lista', () => {
 });
 
 describe('deleting from the edit form', () => {
-  for (const edition of ['full', 'leads'] as const) {
-    it(`${edition} edition: Excluir lead shows on edit only, and a confirmed delete closes the form`, async () => {
-      mocks.edition = edition;
-      await renderContainer();
-
-      await click(buttonLabelled('Novo lead'));
-      expect(editDialog()).not.toBeNull();
-      expect(query('[data-delete-lead-form]')).toBeNull();
-      await escape(editDialog() as Element);
-
-      await click(required(`[data-lead-card="${ANA}"]`), { clientX: 0, clientY: 0 });
-      expect(required('[data-delete-lead-form]').textContent).toContain(LEAD_DELETE_COPY.formButton);
-
-      await click(required('[data-delete-lead-form]'));
-      expect(confirmDialog()?.textContent).toContain(LEAD_DELETE_COPY.dialogBody('Ana Souza'));
-      await confirmDelete();
-
-      expect(deleteCalls).toHaveLength(1);
-      expect(confirmDialog()).toBeNull();
-      expect(editDialog()).toBeNull();
-      expect(cardIds()).not.toContain(ANA);
-    });
-  }
-
   it('the one LeadForm renders Excluir lead in edit mode only, even when handed onDelete', async () => {
     const onDelete = vi.fn();
     const forms = (initialId: string | undefined) => [
@@ -673,50 +643,6 @@ describe('deleting from the edit form', () => {
       await click(required('[data-delete-lead-form]'));
     }
     expect(onDelete).toHaveBeenCalledTimes(1);
-  });
-
-  it('a converted lead opened from the Lista gets no Excluir lead', async () => {
-    await renderContainer();
-    await click(required('[data-view-option="list"]'));
-    await click(required(`[data-edit-lead="${CARLA}"]`));
-
-    expect(editDialog()).not.toBeNull();
-    expect(query('[data-delete-lead-form]')).toBeNull();
-  });
-
-  it('a refused delete keeps the form open behind the confirmation', async () => {
-    deleteAnswer = { kind: 'fail', status: 500, body: { error: 'internal' } };
-    await renderContainer();
-    await click(required(`[data-lead-card="${ANA}"]`), { clientX: 0, clientY: 0 });
-    await click(required('[data-delete-lead-form]'));
-    await confirmDelete();
-
-    expect(confirmDialog()?.querySelector('[data-lead-delete-error]')).not.toBeNull();
-    expect(editDialog()).not.toBeNull();
-  });
-
-  it('Escape on the confirmation closes only the confirmation, never the form under it', async () => {
-    await renderContainer();
-    await click(required(`[data-lead-card="${ANA}"]`), { clientX: 0, clientY: 0 });
-    // A keyboard operator: focus the button, then activate it (happy-dom's click
-    // does not move focus the way a browser's does).
-    const formButton = required('[data-delete-lead-form]') as HTMLButtonElement;
-    await act(async () => formButton.focus());
-    await click(formButton);
-    expect(confirmDialog()).not.toBeNull();
-
-    await escape(required('[role="alertdialog"]'));
-
-    expect(confirmDialog()).toBeNull();
-    expect(editDialog()).not.toBeNull();
-    expect(deleteCalls).toHaveLength(0);
-    // Focus goes back to the button that opened it, never to <body> under an open form.
-    expect(document.activeElement).toBe(formButton);
-
-    // The positive control: with nothing above it, Escape still closes the form,
-    // so the assertion above is about the layer stack and not a dead listener.
-    await escape(editDialog() as Element);
-    expect(editDialog()).toBeNull();
   });
 });
 

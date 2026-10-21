@@ -3,11 +3,17 @@ import { useAccessToken } from '@/auth/react';
 import { queryKeys } from '@/lib/query-keys';
 import { requireToken } from '@/lib/require-token';
 import { crmApi } from './crm-api';
-import type { CrmPipeline, FieldDefinition, PipelinesResponse, FieldDefinitionsResponse } from './crm-types';
+import type {
+  CrmPipeline,
+  FieldDefinition,
+  FieldDefinitionsResponse,
+  LeadSummaryResponse,
+  PipelinesResponse,
+} from './crm-types';
 
 /*
- * Only the READ hooks live here for slice 08. The mutation hooks join this file in
- * 09c and 09d. `useMutation` stays banned outside `app-mutation`, so this file reads only.
+ * The READ hooks of the CRM layer. The mutation hooks join this file in 09c and 09d
+ * through `useAppMutation`: `useMutation` stays banned outside `app-mutation`.
  */
 
 function selectPipelines(data: PipelinesResponse): CrmPipeline[] {
@@ -33,5 +39,17 @@ export function useFieldDefinitions() {
     queryKey: queryKeys.leads.fieldDefinitions(),
     queryFn: async () => crmApi.listFieldDefinitions(await requireToken(getToken)),
     select: selectFieldDefinitions,
+  });
+}
+
+/**
+ * The lead summary (`GET /leads/:id/summary`). No `retry` override: a 404 must
+ * reach the container at once so it can answer `Lead não encontrado.`.
+ */
+export function useLeadSummary(leadId: string) {
+  const { getToken } = useAccessToken();
+  return useQuery({
+    queryKey: queryKeys.leads.detail(leadId),
+    queryFn: async (): Promise<LeadSummaryResponse> => crmApi.getLeadSummary(leadId, await requireToken(getToken)),
   });
 }

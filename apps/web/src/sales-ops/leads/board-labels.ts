@@ -139,7 +139,7 @@ export const LIST_HEADERS = {
   actions: 'Ações',
 } as const;
 export const MOVE_LABEL = 'Mover';
-export const EDIT_LABEL = 'Editar';
+export const OPEN_LABEL = 'Abrir';
 export const TOTAL_LABEL = 'TOTAL';
 export const NO_PRODUCTS_DASH = '-';
 export const scopeLeadsCount = (scope: string, n: number): string =>

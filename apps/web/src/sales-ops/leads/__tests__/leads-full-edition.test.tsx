@@ -108,7 +108,7 @@ afterEach(async () => {
 // Stable callbacks, so both renders hand the board the same props.
 const handlers = {
   onCreateLead: vi.fn(),
-  onEditLead: vi.fn(),
+  onOpenLead: vi.fn(),
   onMoveLead: vi.fn(),
   onOpenSale: vi.fn(),
   onRequestConversion: vi.fn(async () => null),

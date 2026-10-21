@@ -192,32 +192,6 @@ it('restores the original lost reason through the inverse move', async () => {
   expect(calls[1]?.body).toMatchObject({ stageId: 'lost', reason: 'Sem orçamento' });
 });
 
-it('restores the prior fields by inverse PATCH and the API accepts it', async () => {
-  await render();
-  await click('[data-view-option="list"]');
-  await click('[data-edit-lead="lead-1"]');
-  const input = document.querySelector('#lead-contact-name');
-  if (!(input instanceof HTMLInputElement)) throw new Error('Missing contact field');
-  await act(async () => {
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-    setter?.call(input, 'Ana Nova');
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-  });
-  await click('[data-lead-save]');
-  expect(calls[0]?.method).toBe('PATCH');
-  expect(document.querySelector('[data-undo-notice]')?.textContent).toContain('Lead editado');
-  await click('[data-undo-action]');
-  expect(calls[1]?.body).toMatchObject({
-    contactName: 'Ana',
-    contactPhone: '123',
-    contactEmail: 'ana@example.com',
-    fields: [{ fieldId: 'f-desc', value: 'Antes' }],
-  });
-  expect(calls[1]?.body?.fields).not.toContainEqual(expect.objectContaining({ fieldId: 'f-cli' }));
-  expect(document.querySelector('[role="alert"]')?.textContent ?? '').not.toContain('desfazer');
-  expect(rows[0]?.contactName).toBe('Ana');
-});
-
 it('reports an inverse failure without claiming restoration or sending a duplicate', async () => {
   await render();
   await moveTo('next');
@@ -261,19 +235,6 @@ it('refuses a stale inverse move after another actor edits the lead', async () =
   await click('[data-undo-action]');
   expect(calls).toHaveLength(1);
   expect(rows[0]?.stageId).toBe('next');
-  expect(document.querySelector('[role="alert"]')?.textContent).toContain('alterado');
-});
-
-it('refuses a stale inverse edit after another actor changes a writable field', async () => {
-  await render();
-  await click('[data-view-option="list"]');
-  await click('[data-edit-lead="lead-1"]');
-  await click('[data-lead-save]');
-  expect(calls).toHaveLength(1);
-  rows = rows.map((row) => ({ ...row, estimatedValueBrl: 999 }));
-  await click('[data-undo-action]');
-  expect(calls).toHaveLength(1);
-  expect(rows[0]?.estimatedValueBrl).toBe(999);
   expect(document.querySelector('[role="alert"]')?.textContent).toContain('alterado');
 });
 

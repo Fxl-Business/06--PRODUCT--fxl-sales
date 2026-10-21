@@ -153,6 +153,7 @@ import { buildLeadConversionPrefill, findClientByName } from './leads/conversion
 import type { LeadConversionItem, LeadConversionPrefill } from './leads/conversion';
 import type { LeadConversionRequest } from './leads/LeadsBoard';
 import { LeadsBoardContainer } from './leads/LeadsBoardContainer';
+import { LeadSummaryContainer } from './leads/LeadSummaryContainer';
 import { LeadSidebarNavigation } from './leads/LeadSidebarNavigation';
 import { isNarrowViewport, subscribeNarrowViewport } from './narrow-viewport';
 import { LeadStagesContainer } from './leads/LeadStagesContainer';
@@ -2399,6 +2400,20 @@ export function SalesOpsApp() {
                     products={persistedBootstrap.products}
                     sellers={leadSellerOptions}
                     showSellerFilter={workspace === 'operacional'}
+                  />
+                ) : null}
+                {view === 'leads' && resolution.route.leadId ? (
+                  <LeadSummaryContainer
+                    clients={persistedBootstrap.clients}
+                    leadId={resolution.route.leadId}
+                    onCreateClient={async (name) => {
+                      const client = await createClientByName(name);
+                      return client ? { value: client.id, label: client.name } : null;
+                    }}
+                    onOpenSale={openSaleFromBoard}
+                    products={persistedBootstrap.products}
+                    sellers={leadSellerOptions}
+                    workspace={workspace}
                   />
                 ) : null}
                 {view === 'etapas' ? <LeadStagesContainer /> : null}
