@@ -145,6 +145,23 @@ describe('GET /pipelines and GET /field-definitions', () => {
   });
 });
 
+describe('the default pipeline wins over another active pipeline', () => {
+  it('an unqualified lead and GET /lead-stages use the default pipeline even when a custom one sorts first', async () => {
+    const w = await world('default-first');
+    const [custom] = await sql<{ id: string }[]>`
+      INSERT INTO sales_ops_pipelines (org_id, name, position, is_default, status)
+      VALUES (${w.orgId}, 'Funil Antigo', -5, false, 'active') RETURNING id`;
+    await sql`
+      INSERT INTO sales_ops_pipeline_stages (org_id, pipeline_id, name, position, type, behavior, status)
+      VALUES (${w.orgId}, ${custom!.id}, 'Caixa', 0, 'normal', 'none', 'active')`;
+    const lead = await w.create({});
+    expect(lead.stageId).toBe(w.stage('Novo'));
+    const stages = await call(w.app, 'GET', '/lead-stages');
+    expect(stages.status).toBe(200);
+    expect(stages.json.stages.map((s: { id: string }) => s.id)).toEqual(w.pipeline.stages.map((s) => s.id));
+  });
+});
+
 describe('the transition graph on move', () => {
   it('an absent pair is 409 transition_not_allowed and writes nothing; an allowed pair writes exactly one event', async () => {
     const w = await world('move');
