@@ -57,6 +57,7 @@ export async function deleteSettlementsForOrgs(orgIds: readonly string[]): Promi
 export async function purgeOrgLedgerForTests(orgIds: readonly string[]): Promise<void> {
   if (orgIds.length === 0) return;
   await deleteSettlementsForOrgs(orgIds);
+  await deleteCrmForOrgs(orgIds);
   const ids = orgIds as string[];
   const client = postgres(testDatabaseUrls().migrateUrl, { max: 1 });
   try {
@@ -69,7 +70,6 @@ export async function purgeOrgLedgerForTests(orgIds: readonly string[]): Promise
           'purgeOrgLedgerForTests needs the local superuser (TEST_MIGRATE_DATABASE_URL)',
         );
       }
-      await deleteCrmLeadRows(tx, ids);
       await tx`DELETE FROM sales_ops_lead_products WHERE org_id = ANY(${ids})`;
       await tx`DELETE FROM sales_ops_leads WHERE org_id = ANY(${ids})`;
       await tx`DELETE FROM sales_ops_payables WHERE org_id = ANY(${ids})`;
@@ -87,8 +87,8 @@ export async function purgeOrgLedgerForTests(orgIds: readonly string[]): Promise
 }
 
 /**
- * The CRM lead rows of the given orgs, children first. Shared by purgeOrgLedgerForTests
- * and deleteCrmForOrgs; runs inside the caller's superuser transaction.
+ * The CRM lead rows of the given orgs, children first. Runs inside deleteCrmForOrgs'
+ * superuser transaction.
  */
 async function deleteCrmLeadRows(tx: postgres.TransactionSql, ids: string[]): Promise<void> {
   await tx`DELETE FROM sales_ops_crm_lead_notes WHERE org_id = ANY(${ids})`;

@@ -4,7 +4,7 @@ import * as React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LeadCard } from '../LeadCard';
-import { LeadDialog } from '../LeadDialog';
+import { LeadForm } from '../LeadForm';
 import { LeadsBoard } from '../LeadsBoard';
 import { buildLabelLookups } from '../board-labels';
 import type { SalesOpsLead, SalesOpsLeadStage } from '../types';
@@ -108,7 +108,7 @@ afterEach(async () => {
 // Stable callbacks, so both renders hand the board the same props.
 const handlers = {
   onCreateLead: vi.fn(),
-  onEditLead: vi.fn(),
+  onOpenLead: vi.fn(),
   onMoveLead: vi.fn(),
   onOpenSale: vi.fn(),
   onRequestConversion: vi.fn(async () => null),
@@ -209,10 +209,25 @@ describe('full edition renders today markup', () => {
     expect(create?.hasAttribute('disabled')).toBe(false);
   });
 
-  it('LeadDialog still asks for empresa, produtos and valor', async () => {
+  it('the one LeadForm still asks for cliente, produtos and valor', async () => {
     await render(
-      <LeadDialog
+      <LeadForm
         clients={[]}
+        definitions={[
+          {
+            id: 'f-prod',
+            key: 'produtos',
+            label: 'Produtos em negociação',
+            kind: 'reference',
+            referenceTarget: 'produto',
+            multiple: true,
+            options: null,
+            filterable: true,
+            isSystem: false,
+            removable: true,
+            position: 1,
+          },
+        ]}
         initial={null}
         onOpenChange={vi.fn()}
         onSubmit={vi.fn()}
@@ -222,7 +237,7 @@ describe('full edition renders today markup', () => {
       />,
     );
     const text = document.querySelector('[role="dialog"]')?.textContent ?? '';
-    expect(text).toContain('Empresa (texto livre)');
+    expect(text).toContain('Cliente');
     expect(text).toContain('Produtos em negociação');
     expect(text).toContain('Valor estimado (R$)');
   });

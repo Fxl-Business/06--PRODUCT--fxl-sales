@@ -10,16 +10,16 @@
 import { randomUUID } from 'node:crypto';
 import { and, eq, sql } from 'drizzle-orm';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
-import { deleteSettlementsForOrgs } from '../../../db/__tests__/settlement-test-cleanup.js';
+import { deleteCrmForOrgs, deleteSettlementsForOrgs } from '../../../db/__tests__/settlement-test-cleanup.js';
 import { closeDb, getAdminDb, getDb } from '../../../db/client.js';
 import {
   auditLog,
   salesOpsAreas,
   salesOpsClients,
   salesOpsFuncoes,
-  salesOpsLeadProducts,
-  salesOpsLeadStages,
-  salesOpsLeads,
+  salesOpsCrmLeadFieldValues,
+  salesOpsPipelineStages,
+  salesOpsCrmLeads,
   salesOpsPayables,
   salesOpsPeople,
   salesOpsPersonFuncoes,
@@ -51,9 +51,15 @@ const COUNT_TABLES = [
   'sales_ops_people',
   'sales_ops_person_funcoes',
   'sales_ops_clients',
-  'sales_ops_lead_stages',
-  'sales_ops_leads',
-  'sales_ops_lead_products',
+  // The unified CRM tables the import writes, and the three FROZEN pre-cutover tables, which an
+  // import must never touch (their counts stay equal in every all-or-nothing comparison).
+  'sales_ops_pipelines',
+  'sales_ops_pipeline_stages',
+  'sales_ops_pipeline_transitions',
+  'sales_ops_field_definitions',
+  'sales_ops_crm_leads',
+  'sales_ops_crm_lead_field_values',
+  'sales_ops_crm_lead_events',
   'sales_ops_sales',
   'sales_ops_sale_items',
   'sales_ops_sale_professionals',
@@ -61,6 +67,9 @@ const COUNT_TABLES = [
   'sales_ops_payables',
   'sales_ops_settlements',
 ] as const;
+
+/** The FROZEN pre-cutover lead tables: snapshotted in every comparison, and zero after a successful import. */
+const FROZEN_TABLES = ['sales_ops_lead_stages', 'sales_ops_leads', 'sales_ops_lead_products'] as const;
 
 function must<T>(v: T | undefined): T {
   if (v === undefined) throw new Error('expected a row, got undefined');
@@ -83,7 +92,7 @@ async function countOf(query: ReturnType<typeof sql>): Promise<number> {
 
 async function snapshot(orgId: string): Promise<Record<string, number>> {
   const out: Record<string, number> = {};
-  for (const table of COUNT_TABLES) {
+  for (const table of [...COUNT_TABLES, ...FROZEN_TABLES]) {
     out[table] = await countOf(
       sql`SELECT count(*)::int AS n FROM ${sql.identifier(table)} WHERE org_id = ${orgId}`,
     );
@@ -112,9 +121,9 @@ async function seededOrg(tag: string): Promise<Seeded> {
     .from(salesOpsFuncoes)
     .where(and(eq(salesOpsFuncoes.orgId, orgId), eq(salesOpsFuncoes.slug, 'vendedor')));
   const [perdido] = await admin
-    .select({ id: salesOpsLeadStages.id })
-    .from(salesOpsLeadStages)
-    .where(and(eq(salesOpsLeadStages.orgId, orgId), eq(salesOpsLeadStages.kind, 'lost')));
+    .select({ id: salesOpsPipelineStages.id })
+    .from(salesOpsPipelineStages)
+    .where(and(eq(salesOpsPipelineStages.orgId, orgId), eq(salesOpsPipelineStages.exitKind, 'perdido')));
   return { orgId, areaId: area.id, vendedorId: must(vendedor).id, perdidoId: must(perdido).id };
 }
 
@@ -311,9 +320,7 @@ afterEach(async () => {
     // Same precedent as the other audit tests: chain-order oracles (conversion-ingest) need
     // the global chain free of leftovers, so each test removes its own org's entries.
     await admin.execute(sql`DELETE FROM audit_log WHERE actor_org_id = ${orgId}`);
-    await admin.delete(salesOpsLeadProducts).where(eq(salesOpsLeadProducts.orgId, orgId));
-    await admin.delete(salesOpsLeads).where(eq(salesOpsLeads.orgId, orgId));
-    await admin.delete(salesOpsLeadStages).where(eq(salesOpsLeadStages.orgId, orgId));
+    await deleteCrmForOrgs([orgId]);
     await admin.delete(salesOpsPayables).where(eq(salesOpsPayables.orgId, orgId));
     await admin.delete(salesOpsReceivables).where(eq(salesOpsReceivables.orgId, orgId));
     await admin.delete(salesOpsSaleItems).where(eq(salesOpsSaleItems.orgId, orgId));
@@ -361,8 +368,9 @@ describe('executeImportPlan', () => {
       .from(salesOpsPersonFuncoes)
       .where(eq(salesOpsPersonFuncoes.orgId, s.orgId));
     expect(personFuncoes).toHaveLength(2);
-    const stages = await admin.select().from(salesOpsLeadStages).where(eq(salesOpsLeadStages.orgId, s.orgId));
-    expect(stages).toHaveLength(5);
+    const stages = await admin.select().from(salesOpsPipelineStages).where(eq(salesOpsPipelineStages.orgId, s.orgId));
+    // The seven default etapas plus the workbook etapa.
+    expect(stages).toHaveLength(8);
 
     const sales = await admin
       .select()
@@ -414,9 +422,9 @@ describe('executeImportPlan', () => {
     const s = await seededOrg('leads');
     await run(s.orgId, fullPlan(s));
     const admin = getAdminDb();
-    const stages = await admin.select().from(salesOpsLeadStages).where(eq(salesOpsLeadStages.orgId, s.orgId));
+    const stages = await admin.select().from(salesOpsPipelineStages).where(eq(salesOpsPipelineStages.orgId, s.orgId));
     const diagnostico = must(stages.find((x) => x.name === 'Diagnóstico'));
-    const leads = await admin.select().from(salesOpsLeads).where(eq(salesOpsLeads.orgId, s.orgId));
+    const leads = await admin.select().from(salesOpsCrmLeads).where(eq(salesOpsCrmLeads.orgId, s.orgId));
     const bruno = must(leads.find((l) => l.contactName === 'Bruno'));
     const carla = must(leads.find((l) => l.contactName === 'Carla'));
     const diego = must(leads.find((l) => l.contactName === 'Diego'));
@@ -426,12 +434,14 @@ describe('executeImportPlan', () => {
     expect(carla.stageId).toBe(s.perdidoId);
     expect(carla.lostReason).toBe('Sem orçamento');
     expect(bruno.sellerNameSnapshot).toBe('Ana Importada');
+    // The produtos of a lead are the `produtos` field values: a catalog item carries value_product_id,
+    // a free item carries value_text and no product id.
     const products = await admin
       .select()
-      .from(salesOpsLeadProducts)
-      .where(eq(salesOpsLeadProducts.orgId, s.orgId));
-    expect(products.filter((p) => p.leadId === bruno.id && p.productId !== null)).toHaveLength(1);
-    expect(products.filter((p) => p.leadId === carla.id && p.productId === null)).toHaveLength(1);
+      .from(salesOpsCrmLeadFieldValues)
+      .where(eq(salesOpsCrmLeadFieldValues.orgId, s.orgId));
+    expect(products.filter((p) => p.leadId === bruno.id && p.valueProductId !== null)).toHaveLength(1);
+    expect(products.filter((p) => p.leadId === carla.id && p.valueProductId === null)).toHaveLength(1);
   });
 
   it('writes exactly one import.completed entry, last, with the counts and the actor label', async () => {
@@ -475,6 +485,10 @@ describe('executeImportPlan', () => {
     const baseline = await snapshot(newOrg('empty'));
     for (const table of COUNT_TABLES) {
       expect(after[table], table).toBeGreaterThan(baseline[table]!);
+    }
+    // The import wrote leads, etapas and produtos, and none of it into the frozen tables.
+    for (const table of FROZEN_TABLES) {
+      expect(after[table], table).toBe(0);
     }
     expect(after.audit_log).toBe(1);
   });

@@ -196,6 +196,33 @@ export function LeadsFunnelView({ aggregates, stages }: LeadsFunnelViewProps) {
         </div>
       ) : null}
 
+      {isCumulative
+        ? cumulative.parked.map((parkedAside) => (
+            <div
+              className="flex items-baseline justify-between gap-3 rounded-[10px] border border-dashed border-[#e8e8ec] bg-[#fbfbfc] px-[14px] py-2.5"
+              data-funnel-parked
+              key={parkedAside.stageId}
+            >
+              <span className="flex items-center gap-2">
+                <span
+                  className="h-[9px] w-[9px] shrink-0 rounded-full"
+                  style={{ backgroundColor: colors.get(parkedAside.stageId)?.dot }}
+                />
+                <span className="text-[13.5px] font-bold text-[#201f24]">{parkedAside.name}</span>
+                <span className="text-[11px] font-semibold uppercase tracking-[0.05em] text-[#b0b0b8]">
+                  {FUNNEL_LOST_ASIDE}
+                </span>
+              </span>
+              <span className="flex items-baseline gap-2 whitespace-nowrap">
+                <span className="sales-ops-num text-[15px] font-bold text-[#201f24]">
+                  {primaryText(parkedAside)}
+                </span>
+                <span className="text-[11.5px] text-[#9b9ba3]">· {secondaryText(parkedAside)}</span>
+              </span>
+            </div>
+          ))
+        : null}
+
       <div
         className="flex items-center justify-between rounded-[13px] bg-[#201f24] px-[14px] py-3 text-white"
         data-funnel-footer

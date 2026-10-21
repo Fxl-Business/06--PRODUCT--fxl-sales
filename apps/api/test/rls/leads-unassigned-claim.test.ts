@@ -5,29 +5,27 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import * as schema from '../../src/db/schema.js';
 import { testDatabaseUrls } from '../../src/db/__tests__/test-database-urls.js';
 import {
-  CreateContactLeadSchema,
-  CreateLeadSchema,
+  LeadPatchSchema,
+  LeadWriteBaseSchema,
   ListLeadsQuerySchema,
   MoveLeadSchema,
-  UpdateContactLeadSchema,
-  UpdateLeadSchema,
 } from '../../src/domains/sales-ops/leads/lead-schemas.js';
 import {
-  type LeadScope,
-  type LeadView,
-  type WriteLeadResult,
-  createContactLead,
   createLead,
   getLead,
   listLeads,
   moveLead,
-  updateContactLead,
+  type LeadScope,
+  type LeadView,
+  type WriteLeadResult,
   updateLead,
 } from '../../src/domains/sales-ops/leads/lead-service.js';
 import { LeadStageSchema } from '../../src/domains/sales-ops/leads/schemas.js';
 import { createLeadStage } from '../../src/domains/sales-ops/leads/stage-service.js';
 import { ensureLeadStagesForOrg } from '../../src/domains/sales-ops/leads/stages-seed.js';
 import { PersonSchema, createPerson } from '../../src/domains/sales-ops/service.js';
+import { deleteCrmForOrgs } from '../../src/db/__tests__/settlement-test-cleanup.js';
+import { walkToConversionDoor } from './lead-path.js';
 
 const { appUrl: APP_DB_URL, adminUrl: ADMIN_DB_URL } = testDatabaseUrls();
 const ADMIN_CONNECTION_OPTIONS = { connection: { 'app.fxl_admin': 'true' } } as const;
@@ -73,9 +71,7 @@ describe('sales operations leads: the unassigned pool and claim-on-write', () =>
     for (const orgId of orgIds) {
       // Defensive: nothing here should write a ledger row.
       await adminClient`DELETE FROM audit_log WHERE actor_org_id = ${orgId}`;
-      await adminClient`DELETE FROM sales_ops_lead_products WHERE org_id = ${orgId}`;
-      await adminClient`DELETE FROM sales_ops_leads WHERE org_id = ${orgId}`;
-      await adminClient`DELETE FROM sales_ops_lead_stages WHERE org_id = ${orgId}`;
+      await deleteCrmForOrgs([orgId]);
       await adminClient`DELETE FROM sales_ops_payables WHERE org_id = ${orgId}`;
       await adminClient`DELETE FROM sales_ops_receivables WHERE org_id = ${orgId}`;
       await adminClient`DELETE FROM sales_ops_sale_items WHERE org_id = ${orgId}`;
@@ -148,7 +144,7 @@ describe('sales operations leads: the unassigned pool and claim-on-write', () =>
       await createLead(
         db,
         orgId,
-        CreateLeadSchema.parse({
+        LeadWriteBaseSchema.parse({
           contactName,
           clientName: 'Empresa Pool',
           estimatedValueBrl: 100000,
@@ -162,7 +158,7 @@ describe('sales operations leads: the unassigned pool and claim-on-write', () =>
   /** A leads-edition lead an admin filed naming no vendedor: unassigned. */
   async function poolContact(orgId: string, contactName: string) {
     return okLead(
-      await createContactLead(db, orgId, CreateContactLeadSchema.parse({ contactName }), ADMIN_SCOPE),
+      await createLead(db, orgId, LeadWriteBaseSchema.parse({ contactName }), ADMIN_SCOPE),
     );
   }
 
@@ -180,7 +176,7 @@ describe('sales operations leads: the unassigned pool and claim-on-write', () =>
       }>
     >`SELECT seller_person_id, seller_name_snapshot, stage_id, "position", contact_name,
              contact_phone, sale_id, updated_at
-      FROM sales_ops_leads WHERE id = ${leadId}`;
+      FROM sales_ops_crm_leads WHERE id = ${leadId}`;
     return row!;
   }
 
@@ -211,9 +207,9 @@ describe('sales operations leads: the unassigned pool and claim-on-write', () =>
     });
     const done = adminClient.begin(async (sql) => {
       const [self] = await sql<Array<{ pid: number }>>`SELECT pg_backend_pid() AS pid`;
-      await sql`SELECT id FROM sales_ops_leads WHERE org_id = ${orgId} AND id = ${leadId} FOR UPDATE`;
+      await sql`SELECT id FROM sales_ops_crm_leads WHERE org_id = ${orgId} AND id = ${leadId} FOR UPDATE`;
       await sql`
-        UPDATE sales_ops_leads
+        UPDATE sales_ops_crm_leads
         SET seller_person_id = ${winner.id}, seller_name_snapshot = ${winner.displayName}, updated_at = now()
         WHERE org_id = ${orgId} AND id = ${leadId}`;
       locked(self!.pid);
@@ -314,7 +310,7 @@ describe('sales operations leads: the unassigned pool and claim-on-write', () =>
       await moveLead(adminDb, w.orgId, poolB.id, MoveLeadSchema.parse({ stageId: w.second.id, position: 0 }), ana),
     ).toEqual(NOT_FOUND);
     expect(
-      await updateLead(adminDb, w.orgId, poolB.id, UpdateLeadSchema.parse({ contactName: 'hijack' }), ana),
+      await updateLead(adminDb, w.orgId, poolB.id, LeadPatchSchema.parse({ contactName: 'hijack' }), ana),
     ).toEqual(NOT_FOUND);
     const row = await rowOf(poolB.id);
     expect(row.seller_person_id).toBeNull();
@@ -353,7 +349,7 @@ describe('sales operations leads: the unassigned pool and claim-on-write', () =>
     const micros = async () => {
       const [r] = await adminClient<{ micros: string }[]>`
         SELECT (EXTRACT(EPOCH FROM stage_changed_at)::numeric * 1000000)::bigint AS micros
-        FROM sales_ops_leads WHERE id = ${reorder.id}`;
+        FROM sales_ops_crm_leads WHERE id = ${reorder.id}`;
       return BigInt(r!.micros);
     };
     const before = await micros();
@@ -388,7 +384,7 @@ describe('sales operations leads: the unassigned pool and claim-on-write', () =>
     const ana = sellerScope('hub_ana');
 
     expect(
-      okLead(await updateLead(db, w.orgId, p1.id, UpdateLeadSchema.parse({ contactName: 'Editado' }), ana)),
+      okLead(await updateLead(db, w.orgId, p1.id, LeadPatchSchema.parse({ contactName: 'Editado' }), ana)),
     ).toMatchObject({ contactName: 'Editado', sellerPersonId: w.ana.id, sellerNameSnapshot: 'Ana Martins' });
     expect(
       okLead(
@@ -396,13 +392,13 @@ describe('sales operations leads: the unassigned pool and claim-on-write', () =>
           db,
           w.orgId,
           p2.id,
-          UpdateLeadSchema.parse({ sellerPersonId: null, description: 'nota' }),
+          LeadPatchSchema.parse({ sellerPersonId: null, description: 'nota' }),
           ana,
         ),
       ).sellerPersonId,
     ).toBe(w.ana.id);
     expect(
-      okLead(await updateLead(db, w.orgId, p3.id, UpdateLeadSchema.parse({ sellerPersonId: w.ana.id }), ana))
+      okLead(await updateLead(db, w.orgId, p3.id, LeadPatchSchema.parse({ sellerPersonId: w.ana.id }), ana))
         .sellerPersonId,
     ).toBe(w.ana.id);
 
@@ -411,7 +407,7 @@ describe('sales operations leads: the unassigned pool and claim-on-write', () =>
         db,
         w.orgId,
         p4.id,
-        UpdateLeadSchema.parse({ sellerPersonId: w.bruno.id, contactName: 'X' }),
+        LeadPatchSchema.parse({ sellerPersonId: w.bruno.id, contactName: 'X' }),
         ana,
       ),
     ).toEqual({ ok: false, reason: 'seller_scope' });
@@ -423,7 +419,7 @@ describe('sales operations leads: the unassigned pool and claim-on-write', () =>
 
     // Today's rule on an OWNED lead is unchanged.
     for (const sellerPersonId of [null, w.bruno.id]) {
-      expect(await updateLead(db, w.orgId, p1.id, UpdateLeadSchema.parse({ sellerPersonId }), ana)).toEqual({
+      expect(await updateLead(db, w.orgId, p1.id, LeadPatchSchema.parse({ sellerPersonId }), ana)).toEqual({
         ok: false,
         reason: 'seller_scope',
       });
@@ -443,12 +439,12 @@ describe('sales operations leads: the unassigned pool and claim-on-write', () =>
         db,
         w.orgId,
         pool.id,
-        UpdateLeadSchema.parse({ contactName: 'Nunca', products: [{ productId: randomUUID() }] }),
+        LeadPatchSchema.parse({ contactName: 'Nunca', products: [{ productId: randomUUID() }] }),
         ana,
       ),
     ).rejects.toMatchObject({ code: 'product_not_found' });
     await expect(
-      updateLead(db, w.orgId, pool.id, UpdateLeadSchema.parse({ clientId: randomUUID() }), ana),
+      updateLead(db, w.orgId, pool.id, LeadPatchSchema.parse({ clientId: randomUUID() }), ana),
     ).rejects.toMatchObject({ code: 'client_not_found' });
     await expect(
       moveLead(db, w.orgId, pool.id, MoveLeadSchema.parse({ stageId: randomUUID(), position: 0 }), ana),
@@ -464,7 +460,7 @@ describe('sales operations leads: the unassigned pool and claim-on-write', () =>
     expect(row.stage_id).toBe(w.open.id);
     expect(row.updated_at).toBeNull();
     const [products] = await adminClient<{ n: number }[]>`
-      SELECT count(*)::int AS n FROM sales_ops_lead_products WHERE lead_id = ${pool.id}`;
+      SELECT count(*)::int AS n FROM sales_ops_crm_lead_field_values WHERE lead_id = ${pool.id}`;
     expect(products!.n).toBe(0);
   });
 
@@ -475,7 +471,7 @@ describe('sales operations leads: the unassigned pool and claim-on-write', () =>
     const [c1, c2, c3, c4, c5, c6] = cs as [LeadView, LeadView, LeadView, LeadView, LeadView, LeadView];
     const ana = leadsSellerScope('hub_ana');
     const patch = (id: string, body: Record<string, unknown>) =>
-      updateContactLead(db, w.orgId, id, UpdateContactLeadSchema.parse(body), ana);
+      updateLead(db, w.orgId, id, LeadPatchSchema.parse(body), ana);
 
     expect(okLead(await patch(c1.id, { contactPhone: '(27) 99999-0000' }))).toMatchObject({
       contactPhone: '(27) 99999-0000',
@@ -576,7 +572,7 @@ describe('sales operations leads: the unassigned pool and claim-on-write', () =>
         db,
         w.orgId,
         pool.id,
-        UpdateLeadSchema.parse({ contactName: 'Bruno editou' }),
+        LeadPatchSchema.parse({ contactName: 'Bruno editou' }),
         sellerScope('hub_bruno'),
       ).finally(() => {
         settled = true;
@@ -624,7 +620,7 @@ describe('sales operations leads: the unassigned pool and claim-on-write', () =>
     expect((await rowOf(pool.id)).seller_person_id).toBeNull();
 
     const edited = okLead(
-      await updateLead(db, w.orgId, pool.id, UpdateLeadSchema.parse({ contactName: 'Admin editou' }), ADMIN_SCOPE),
+      await updateLead(db, w.orgId, pool.id, LeadPatchSchema.parse({ contactName: 'Admin editou' }), ADMIN_SCOPE),
     );
     expect(edited.sellerPersonId).toBeNull();
     const row = await rowOf(pool.id);
@@ -636,7 +632,7 @@ describe('sales operations leads: the unassigned pool and claim-on-write', () =>
     expect((await getLead(db, w.orgId, pool.id, sellerScope('hub_bruno'))).ok).toBe(true);
 
     const assigned = okLead(
-      await updateLead(db, w.orgId, pool.id, UpdateLeadSchema.parse({ sellerPersonId: w.ana.id }), ADMIN_SCOPE),
+      await updateLead(db, w.orgId, pool.id, LeadPatchSchema.parse({ sellerPersonId: w.ana.id }), ADMIN_SCOPE),
     );
     expect(assigned.sellerPersonId).toBe(w.ana.id);
     expect(assigned.sellerNameSnapshot).toBe('Ana Martins');
@@ -654,7 +650,7 @@ describe('sales operations leads: the unassigned pool and claim-on-write', () =>
       await moveLead(db, w.orgId, brunos.id, MoveLeadSchema.parse({ stageId: w.second.id, position: 0 }), ana),
     ).toEqual(NOT_FOUND);
     expect(
-      await updateLead(db, w.orgId, brunos.id, UpdateLeadSchema.parse({ contactName: 'hijack' }), ana),
+      await updateLead(db, w.orgId, brunos.id, LeadPatchSchema.parse({ contactName: 'hijack' }), ana),
     ).toEqual(NOT_FOUND);
     const brunoRow = await rowOf(brunos.id);
     expect(brunoRow.seller_person_id).toBe(w.bruno.id);
@@ -669,6 +665,7 @@ describe('sales operations leads: the unassigned pool and claim-on-write', () =>
       VALUES (${w.orgId}, 1, 'PROP-LUC-1', 'Empresa A', 'Vendedor A', 'pix', 'cash', now(),
               100000, 10, 3, 6, 0, 0, 0)
       RETURNING id`;
+    await walkToConversionDoor(db, w.orgId, pool.id, ADMIN_SCOPE);
     expect(
       okLead(
         await moveLead(
@@ -687,10 +684,10 @@ describe('sales operations leads: the unassigned pool and claim-on-write', () =>
       await moveLead(db, w.orgId, pool.id, MoveLeadSchema.parse({ stageId: w.open.id, position: 0 }), ana),
     ).toEqual(refused);
     expect(
-      await updateLead(db, w.orgId, pool.id, UpdateLeadSchema.parse({ contactName: 'Depois' }), ana),
+      await updateLead(db, w.orgId, pool.id, LeadPatchSchema.parse({ contactName: 'Depois' }), ana),
     ).toEqual(refused);
     expect(
-      await updateLead(db, w.orgId, pool.id, UpdateLeadSchema.parse({ sellerPersonId: w.ana.id }), ana),
+      await updateLead(db, w.orgId, pool.id, LeadPatchSchema.parse({ sellerPersonId: w.ana.id }), ana),
     ).toEqual(refused);
     const row = await rowOf(pool.id);
     expect(row.seller_person_id).toBeNull();
@@ -715,7 +712,7 @@ describe('sales operations leads: the unassigned pool and claim-on-write', () =>
     expect(
       await moveLead(db, w.orgId, pool.id, MoveLeadSchema.parse({ stageId: w.second.id, position: 0 }), fabio),
     ).toEqual(NOT_FOUND);
-    expect(await updateLead(db, w.orgId, pool.id, UpdateLeadSchema.parse({ contactName: 'X' }), fabio)).toEqual(
+    expect(await updateLead(db, w.orgId, pool.id, LeadPatchSchema.parse({ contactName: 'X' }), fabio)).toEqual(
       NOT_FOUND,
     );
 

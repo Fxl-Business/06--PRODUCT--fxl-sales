@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { LeadsBoardContainer } from '../LeadsBoardContainer';
 import type { SalesOpsLead, SalesOpsLeadStage } from '../types';
+import { pipelineFixtureFor } from './pipeline-fixture';
 
 const act = (React as typeof React & { act: typeof import('react-dom/test-utils').act }).act;
 const edition = vi.hoisted(() => ({ value: 'full' as 'full' | 'leads' }));
@@ -19,9 +20,18 @@ const stage = (id: string, kind: SalesOpsLeadStage['kind'], position: number): S
   archivedAt: null, createdAt: '2026-01-01T00:00:00Z', updatedAt: null,
 });
 const stages = [stage('new', 'normal', 0), stage('next', 'normal', 1), stage('lost', 'lost', 2), stage('converted', 'conversion', 3)];
+const FIELD_DEFINITIONS = [
+  { id: 'f-cli', key: 'cliente', label: 'Cliente', kind: 'reference', referenceTarget: 'cliente', multiple: false, options: null, filterable: true, isSystem: true, removable: false, position: 0 },
+  { id: 'f-desc', key: 'descricao', label: 'Descrição', kind: 'text', referenceTarget: null, multiple: false, options: null, filterable: true, isSystem: false, removable: true, position: 1 },
+];
+// The fixture carries the Cliente as a field entry, as the read model does: the undo must not send it back.
 const original: SalesOpsLead = {
-  id: 'lead-1', stageId: 'new', position: 0, contactName: 'Ana', clientId: null,
+  id: 'lead-1', stageId: 'new', position: 0, contactName: 'Ana', clientId: 'c1',
   clientNameSnapshot: 'Acme', estimatedValueBrl: 100, description: 'Antes',
+  fields: [
+    { fieldId: 'f-cli', key: 'cliente', value: [{ id: 'c1', name: 'Acme' }] },
+    { fieldId: 'f-desc', key: 'descricao', value: 'Antes' },
+  ],
   contactPhone: '123', contactEmail: 'ana@example.com', contactBirthDate: null,
   sellerPersonId: null, sellerNameSnapshot: '', lostReason: null,
   stageChangedAt: '2026-01-01T00:00:00Z', saleId: null, saleStatus: null,
@@ -32,6 +42,8 @@ let rows: SalesOpsLead[];
 let calls: Array<{ path: string; method: string; body: Record<string, unknown> | null }>;
 let failNext = false;
 let gatedMove: Promise<ReturnType<typeof response>> | null;
+/** When set, `GET /pipelines` answers this transition graph instead of the complete one. */
+let graphOverride: Array<{ fromStageId: string; toStageId: string }> | null;
 let root: Root;
 let host: HTMLDivElement;
 const response = (status: number, data: unknown) => ({ ok: status < 400, status, json: async () => data });
@@ -40,6 +52,11 @@ const fetcher = async (input: string, init?: RequestInit) => {
   const path = url.pathname;
   const method = init?.method ?? 'GET';
   const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : null;
+  if (method === 'GET' && path.endsWith('/pipelines')) {
+    const fixture = pipelineFixtureFor(stages);
+    if (graphOverride) fixture.pipelines[0]!.transitions = graphOverride;
+    return response(200, fixture);
+  }
   if (method === 'GET' && path.endsWith('/lead-stages')) return response(200, { stages });
   if (method === 'GET' && path.endsWith('/leads/summary')) return response(200, {
     stages: stages.map((stage) => ({
@@ -49,6 +66,7 @@ const fetcher = async (input: string, init?: RequestInit) => {
     })),
   });
   if (method === 'GET' && path.endsWith('/leads')) return response(200, { leads: rows.filter((row) => row.stageId === url.searchParams.get('stageId')), nextCursor: null });
+  if (method === 'GET' && path.endsWith('/field-definitions')) return response(200, { fields: FIELD_DEFINITIONS });
   calls.push({ path, method, body });
   if (failNext) { failNext = false; return response(500, { error: 'internal' }); }
   if (path.endsWith('/move')) {
@@ -57,15 +75,21 @@ const fetcher = async (input: string, init?: RequestInit) => {
     return response(200, { lead: rows.find((row) => row.id === original.id) });
   }
   if (method === 'PATCH') {
+    const writtenFields = Array.isArray(body?.fields) ? body.fields as Array<{ fieldId: string; value: unknown }> : [];
+    // The API refuses clientId together with a Cliente entry of fields (400 field_invalid).
+    if (body?.clientId !== undefined && writtenFields.some((f) => f.fieldId === 'f-cli')) {
+      return response(400, { error: 'validation_error', reason: 'field_invalid' });
+    }
     rows = rows.map((row) => row.id === original.id ? {
-      ...row, contactName: String(body?.contactName), description: body?.description as string | null,
+      ...row, contactName: String(body?.contactName), clientId: (body?.clientId ?? row.clientId) as string | null,
       contactPhone: (body?.contactPhone ?? row.contactPhone) as string | null,
-      products: Array.isArray(body?.products)
-        ? body.products.map((product: { productId?: string; productName?: string }) => ({
-            productId: product.productId ?? null,
-            productNameSnapshot: product.productName ?? 'Original item',
-          }))
-        : row.products,
+      contactEmail: (body?.contactEmail ?? row.contactEmail) as string | null,
+      fields: [
+        ...(row.fields ?? []).filter((f) => !writtenFields.some((w) => w.fieldId === f.fieldId)),
+        ...writtenFields
+          .filter((w) => w.value !== null)
+          .map((w) => ({ fieldId: w.fieldId, key: 'descricao', value: w.value as string })),
+      ],
     } : row);
     return response(200, { lead: rows.find((row) => row.id === original.id) });
   }
@@ -77,6 +101,7 @@ beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   edition.value = 'full'; rows = [{ ...original }]; calls = []; failNext = false;
   gatedMove = null;
+  graphOverride = null;
   vi.stubGlobal('fetch', vi.fn(fetcher));
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
 });
@@ -105,6 +130,15 @@ async function pickStage(id: string) {
   const option = [...document.querySelectorAll('[role="option"]')].find((node) => node.textContent?.trim() === id);
   if (!option) throw new Error(`Missing option ${id}`);
   await click(option);
+}
+async function typeLostReason(text: string) {
+  const area = document.querySelector<HTMLTextAreaElement>('[data-lost-reason="true"]');
+  if (!area) throw new Error('Missing lost reason');
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+  await act(async () => {
+    setter?.call(area, text);
+    area.dispatchEvent(new Event('input', { bubbles: true }));
+  });
 }
 async function moveTo(id: string) {
   await click('[data-view-option="list"]');
@@ -143,6 +177,24 @@ it('undoes a Mover write with the original stage and index', async () => {
   expect(rows[0]?.stageId).toBe('new');
 });
 
+it('offers no undo for a move to Perdido, whose reverse edge the graph does not allow', async () => {
+  // Forward edges only into Perdido: the reverse (Perdido -> Novo) is absent from the graph.
+  graphOverride = [
+    { fromStageId: 'new', toStageId: 'next' },
+    { fromStageId: 'next', toStageId: 'new' },
+    { fromStageId: 'new', toStageId: 'lost' },
+  ];
+  await render();
+  await click('[data-view-option="list"]');
+  await click('[data-move-trigger="lead-1"]');
+  await pickStage('lost');
+  await typeLostReason('Sem interesse');
+  await click('[data-move-confirm]');
+  expect(calls[0]?.body).toMatchObject({ stageId: 'lost' });
+  expect(rows[0]?.stageId).toBe('lost');
+  expect(document.querySelector('[data-undo-notice]')).toBeNull();
+});
+
 it('uses the visible source index when returning a lead to a populated column', async () => {
   rows = [{ ...original, id: 'lead-0', position: 0, contactName: 'Bia' }, { ...original, position: 1 }];
   await render();
@@ -174,32 +226,6 @@ it('restores the original lost reason through the inverse move', async () => {
   await moveTo('next');
   await click('[data-undo-action]');
   expect(calls[1]?.body).toMatchObject({ stageId: 'lost', reason: 'Sem orçamento' });
-});
-
-it.each(['full', 'leads'] as const)('restores prior %s edition fields by inverse PATCH', async (mode) => {
-  edition.value = mode;
-  await render();
-  await click('[data-view-option="list"]');
-  await click('[data-edit-lead="lead-1"]');
-  const input = document.querySelector('#lead-contact-name');
-  if (!(input instanceof HTMLInputElement)) throw new Error('Missing contact field');
-  await act(async () => {
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-    setter?.call(input, 'Ana Nova');
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-  });
-  if (mode === 'full') await click('[aria-label="Remover Original item"]');
-  await click('[data-lead-save]');
-  expect(calls[0]?.method).toBe('PATCH');
-  expect(document.querySelector('[data-undo-notice]')?.textContent).toContain('Lead editado');
-  await click('[data-undo-action]');
-  expect(calls[1]?.body).toMatchObject({ contactName: 'Ana', description: 'Antes' });
-  if (mode === 'leads') expect(calls[1]?.body).toMatchObject({ contactPhone: '123', contactEmail: 'ana@example.com' });
-  else {
-    expect(calls[0]?.body).toMatchObject({ products: [] });
-    expect(calls[1]?.body).toMatchObject({ products: [{ productName: 'Original item' }] });
-    expect(rows[0]?.products).toEqual(original.products);
-  }
 });
 
 it('reports an inverse failure without claiming restoration or sending a duplicate', async () => {
@@ -245,19 +271,6 @@ it('refuses a stale inverse move after another actor edits the lead', async () =
   await click('[data-undo-action]');
   expect(calls).toHaveLength(1);
   expect(rows[0]?.stageId).toBe('next');
-  expect(document.querySelector('[role="alert"]')?.textContent).toContain('alterado');
-});
-
-it('refuses a stale inverse edit after another actor changes a writable field', async () => {
-  await render();
-  await click('[data-view-option="list"]');
-  await click('[data-edit-lead="lead-1"]');
-  await click('[data-lead-save]');
-  expect(calls).toHaveLength(1);
-  rows = rows.map((row) => ({ ...row, estimatedValueBrl: 999 }));
-  await click('[data-undo-action]');
-  expect(calls).toHaveLength(1);
-  expect(rows[0]?.estimatedValueBrl).toBe(999);
   expect(document.querySelector('[role="alert"]')?.textContent).toContain('alterado');
 });
 

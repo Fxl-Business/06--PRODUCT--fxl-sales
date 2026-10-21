@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { apiFetch } from '@/lib/api-client';
 import { queryKeys } from '@/lib/query-keys';
 import { LEADS_PATH, LEAD_STAGES_PATH, deleteLead, leadsApi } from '../api';
-import { buildContactLeadPayload, contactDraftFromSeed } from '../contact-lead';
+import { buildLeadWritePayload, leadFormDraftFromLead } from '../lead-form';
 
 vi.mock('@/lib/api-client', () => ({
   apiFetch: vi.fn(async () => ({})),
@@ -32,8 +32,9 @@ afterEach(() => {
 describe('leadsApi', () => {
   it('every leads endpoint sends the bearer token it was given', async () => {
     await leadsApi.listLeads({ stageId: 'S1' }, 'token-1');
-    await leadsApi.saveLead({ contactName: 'Ana', clientName: 'Acme' }, 'token-1');
-    await leadsApi.saveLead({ id: 'L1', contactName: 'Ana', clientName: 'Acme' }, 'token-1');
+    const write = { contactName: 'Ana', contactPhone: '11999990000', clientId: null, clientName: 'Acme', estimatedValueBrl: 0, fields: [] };
+    await leadsApi.saveLead(write, 'token-1');
+    await leadsApi.saveLead({ id: 'L1', ...write }, 'token-1');
     await leadsApi.moveLead({ leadId: 'L1', toStageId: 'S2', toIndex: 0 }, 'token-1');
     await leadsApi.listStages('token-1');
     await leadsApi.saveStage({ name: 'Contato' }, 'token-1');
@@ -120,9 +121,9 @@ describe('leadsApi', () => {
     });
   });
 
-  it('saveLead sends the leads-edition contact body with empresa and valor keys', async () => {
+  it('saveLead sends the one LeadWriteSchema body with empresa, valor and fields keys', async () => {
     const draft = {
-      ...contactDraftFromSeed(null),
+      ...leadFormDraftFromLead(null, []),
       contactName: 'Ana',
       contactPhone: '(11) 98888-7777',
     };
@@ -130,16 +131,15 @@ describe('leadsApi', () => {
       'contactName',
       'contactPhone',
       'contactEmail',
-      'contactBirthDate',
-      'description',
       'clientId',
       'clientName',
       'estimatedValueBrl',
       'sellerPersonId',
+      'fields',
     ];
 
-    await leadsApi.saveLead(buildContactLeadPayload(draft), 't');
-    await leadsApi.saveLead(buildContactLeadPayload(draft, 'L1'), 't');
+    await leadsApi.saveLead(buildLeadWritePayload(draft, [], { includeSeller: true }), 't');
+    await leadsApi.saveLead(buildLeadWritePayload(draft, [], { id: 'L1', includeSeller: true }), 't');
 
     const [path, init] = call(0);
     expect(path).toBe('/api/v1/sales-ops/leads');
@@ -171,5 +171,36 @@ describe('leadsApi', () => {
       'board',
       { sellerPersonId: 'x' },
     ]);
+  });
+});
+
+describe('leads period and pipeline query', () => {
+  it('listLeads sends pipelineId, from and to; absent ones are absent', async () => {
+    await leadsApi.listLeads(
+      { stageId: 'S1', pipelineId: 'P1', from: '2026-10-19', to: '2026-10-20' },
+      'token-1',
+    );
+    const url = new URL(`http://x${call(0)[0]}`);
+    expect(url.searchParams.get('pipelineId')).toBe('P1');
+    expect(url.searchParams.get('from')).toBe('2026-10-19');
+    expect(url.searchParams.get('to')).toBe('2026-10-20');
+
+    vi.clearAllMocks();
+    await leadsApi.listLeads({ stageId: 'S1' }, 'token-1');
+    expect(call(0)[0]).toBe(`${LEADS_PATH}?stageId=S1&limit=100`);
+  });
+
+  it('stageSummary carries the same three params and omits absent ones', async () => {
+    await leadsApi.stageSummary({ pipelineId: 'P1', from: '2026-10-19', to: '2026-10-19', sellerPersonId: 'p-2' }, 'token-1');
+    const url = new URL(`http://x${call(0)[0]}`);
+    expect(url.pathname).toBe(`${LEADS_PATH}/summary`);
+    expect(url.searchParams.get('pipelineId')).toBe('P1');
+    expect(url.searchParams.get('from')).toBe('2026-10-19');
+    expect(url.searchParams.get('to')).toBe('2026-10-19');
+    expect(url.searchParams.get('sellerPersonId')).toBe('p-2');
+
+    vi.clearAllMocks();
+    await leadsApi.stageSummary(undefined, 'token-1');
+    expect(call(0)[0]).toBe(`${LEADS_PATH}/summary`);
   });
 });

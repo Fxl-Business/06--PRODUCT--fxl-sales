@@ -12,10 +12,9 @@ import { requireToken } from '@/lib/require-token';
 import {
   deleteLead,
   leadsApi,
+  type LeadWritePayload,
   type MoveLeadPayload,
   type ReorderLeadStagesPayload,
-  type SaveContactLeadPayload,
-  type SaveLeadPayload,
   type SaveLeadStagePayload,
   type SetLeadStageStatusPayload,
 } from './api';
@@ -125,6 +124,9 @@ export function useLeadsBoard(
               stageId: stage.id,
               cursor: cursors?.[stage.id] ?? null,
               sellerPersonId: filters?.sellerPersonId,
+              pipelineId: filters?.pipelineId,
+              from: filters?.from,
+              to: filters?.to,
             },
             token,
           ),
@@ -167,11 +169,14 @@ export function leadStageSummaryKey(filters?: LeadBoardFilters) {
  * lead write invalidates (create, update, move, delete, restore, stage writes,
  * import, conversion). `lead-board-totals.test.tsx` pins that for each one.
  */
-export function useLeadStageSummary(filters?: LeadBoardFilters) {
+export function useLeadStageSummary(filters?: LeadBoardFilters, enabled = true) {
   const { getToken } = useAccessToken();
   return useQuery({
     queryKey: leadStageSummaryKey(filters),
     queryFn: async () => leadsApi.stageSummary(filters, await requireToken(getToken)),
+    // The container waits for the pipeline, so the summary is asked once, for the
+    // selected pipeline, and never once for the unscoped default first.
+    enabled,
   });
 }
 
@@ -182,7 +187,7 @@ type SummarySnapshot = { key: QueryKey; previous: LeadStageSummary };
 function boardFiltersOf(boardKey: QueryKey): LeadBoardFilters {
   const segment = boardKey[2];
   return segment && typeof segment === 'object'
-    ? (segment as { sellerPersonId?: string })
+    ? (segment as NonNullable<LeadBoardFilters>)
     : undefined;
 }
 
@@ -218,7 +223,7 @@ function restoreSummaries(queryClient: QueryClient, snapshots: readonly SummaryS
  */
 export function useSaveLead() {
   const { getToken } = useAccessToken();
-  return useAppMutation<LeadResponse, Error, SaveLeadPayload | SaveContactLeadPayload>({
+  return useAppMutation<LeadResponse, Error, LeadWritePayload>({
     mutationFn: async (payload) => leadsApi.saveLead(payload, await requireToken(getToken)),
     invalidates: [queryKeys.leads.all],
   });

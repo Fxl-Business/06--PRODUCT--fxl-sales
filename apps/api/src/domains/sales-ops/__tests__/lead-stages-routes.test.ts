@@ -5,9 +5,9 @@ import { hubAuthContext as sharedHubAuthContext } from '../../../auth/__tests__/
 const mockedDb = { name: 'lead-stage-route-test-db' };
 const serviceMocks = vi.hoisted(() => ({
   listLeadStages: vi.fn(),
-  createLeadStage: vi.fn(),
+  createLeadStageInPipeline: vi.fn(),
   updateLeadStage: vi.fn(),
-  reorderLeadStages: vi.fn(),
+  reorderLeadStagesInPipeline: vi.fn(),
 }));
 
 vi.mock('../../../db/client.js', () => ({
@@ -19,9 +19,9 @@ vi.mock('../leads/stage-service.js', async (importOriginal) => {
   return {
     ...actual,
     listLeadStages: serviceMocks.listLeadStages,
-    createLeadStage: serviceMocks.createLeadStage,
+    createLeadStageInPipeline: serviceMocks.createLeadStageInPipeline,
     updateLeadStage: serviceMocks.updateLeadStage,
-    reorderLeadStages: serviceMocks.reorderLeadStages,
+    reorderLeadStagesInPipeline: serviceMocks.reorderLeadStagesInPipeline,
   };
 });
 
@@ -81,9 +81,9 @@ describe('Sales Ops lead stage routes', () => {
     currentRole = 'admin';
     for (const mock of Object.values(serviceMocks)) mock.mockReset();
     serviceMocks.listLeadStages.mockResolvedValue([stageResult]);
-    serviceMocks.createLeadStage.mockResolvedValue(stageResult);
+    serviceMocks.createLeadStageInPipeline.mockResolvedValue(stageResult);
     serviceMocks.updateLeadStage.mockResolvedValue(stageResult);
-    serviceMocks.reorderLeadStages.mockResolvedValue([stageResult]);
+    serviceMocks.reorderLeadStagesInPipeline.mockResolvedValue([stageResult]);
   });
 
   // The Kanban board and every stage picker need the list, and a seller has a
@@ -93,7 +93,7 @@ describe('Sales Ops lead stage routes', () => {
     const response = await app.request('/lead-stages');
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ stages: [stageResult] });
-    expect(serviceMocks.listLeadStages).toHaveBeenCalledWith(mockedDb, 'verified-org');
+    expect(serviceMocks.listLeadStages).toHaveBeenCalledWith(mockedDb, 'verified-org', undefined);
   });
 
   it.each(['seller', 'finder', undefined] as const)(
@@ -105,7 +105,7 @@ describe('Sales Ops lead stage routes', () => {
       expect(await response.json()).toEqual({ error: 'forbidden', reason: 'admin_role_required' });
       // The "never called" half is what makes this decisive rather than
       // incidental - a 403 could otherwise come from anywhere.
-      expect(serviceMocks.createLeadStage).not.toHaveBeenCalled();
+      expect(serviceMocks.createLeadStageInPipeline).not.toHaveBeenCalled();
     },
   );
 
@@ -129,7 +129,7 @@ describe('Sales Ops lead stage routes', () => {
       });
       expect(response.status).toBe(403);
       expect(await response.json()).toEqual({ error: 'forbidden', reason: 'admin_role_required' });
-      expect(serviceMocks.reorderLeadStages).not.toHaveBeenCalled();
+      expect(serviceMocks.reorderLeadStagesInPipeline).not.toHaveBeenCalled();
     },
   );
 
@@ -145,7 +145,7 @@ describe('Sales Ops lead stage routes', () => {
     expect(await response.json()).toEqual({ stage: stageResult });
     // A LITERAL third argument, not expect.objectContaining: that is what makes
     // this decisive against `{ ...parsed.data, ...body }`.
-    expect(serviceMocks.createLeadStage).toHaveBeenCalledWith(mockedDb, 'verified-org', {
+    expect(serviceMocks.createLeadStageInPipeline).toHaveBeenCalledWith(mockedDb, 'verified-org', {
       name: 'Qualificação',
       status: 'active',
     });
@@ -159,7 +159,7 @@ describe('Sales Ops lead stage routes', () => {
   });
 
   it('maps a duplicate stage name to 409 stage_name_taken', async () => {
-    serviceMocks.createLeadStage.mockResolvedValue('duplicate');
+    serviceMocks.createLeadStageInPipeline.mockResolvedValue('duplicate');
     const created = await jsonRequest('POST', '/lead-stages', { name: 'Novo' });
     expect(created.status).toBe(409);
     // toEqual on the WHOLE body is what says there is no second conflict reason
@@ -180,7 +180,7 @@ describe('Sales Ops lead stage routes', () => {
   });
 
   it('maps a reorder set mismatch to 400 validation_error stage_set_mismatch', async () => {
-    serviceMocks.reorderLeadStages.mockResolvedValue('set_mismatch');
+    serviceMocks.reorderLeadStagesInPipeline.mockResolvedValue('set_mismatch');
     const response = await jsonRequest('POST', '/lead-stages/reorder', { stageIds: [STAGE_ID] });
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({
@@ -196,10 +196,10 @@ describe('Sales Ops lead stage routes', () => {
     });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ stages: [stageResult] });
-    expect(serviceMocks.reorderLeadStages).toHaveBeenCalledWith(mockedDb, 'verified-org', [
+    expect(serviceMocks.reorderLeadStagesInPipeline).toHaveBeenCalledWith(mockedDb, 'verified-org', [
       OTHER_STAGE_ID,
       STAGE_ID,
-    ]);
+    ], undefined);
   });
 
   it('archives a lead stage through PATCH rather than a DELETE verb', async () => {
@@ -221,7 +221,7 @@ describe('Sales Ops lead stage routes', () => {
     const response = await jsonRequest('POST', '/lead-stages', { name: '   ' });
     expect(response.status).toBe(400);
     expect((await response.json()).error).toBe('validation_error');
-    expect(serviceMocks.createLeadStage).not.toHaveBeenCalled();
+    expect(serviceMocks.createLeadStageInPipeline).not.toHaveBeenCalled();
   });
 
   it('rejects a missing lead stage body with 400 rather than 500', async () => {
@@ -230,6 +230,6 @@ describe('Sales Ops lead stage routes', () => {
       headers: { 'content-type': 'application/json' },
     });
     expect(response.status).toBe(400);
-    expect(serviceMocks.createLeadStage).not.toHaveBeenCalled();
+    expect(serviceMocks.createLeadStageInPipeline).not.toHaveBeenCalled();
   });
 });

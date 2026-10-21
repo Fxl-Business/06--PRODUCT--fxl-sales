@@ -63,7 +63,7 @@ export type LeadCardProps = {
   lookups: LabelLookups;
   /** Injected clock. */
   now: Date;
-  onEdit?: (lead: SalesOpsLead) => void;
+  onOpen?: (lead: SalesOpsLead) => void;
   /**
    * Opens the proposta this lead became. Absent means the card renders the
    * status as plain text instead of a link, which is what an oracle rendering
@@ -162,7 +162,7 @@ export function LeadCard({
   lead,
   lookups,
   now,
-  onEdit,
+  onOpen,
   onOpenSale,
   dragHandleProps,
   isDragging = false,
@@ -230,7 +230,7 @@ export function LeadCard({
       if (lead.saleId && onOpenSale) onOpenSale(lead.saleId);
       return;
     }
-    onEdit?.(lead);
+    onOpen?.(lead);
   }
 
   /**

@@ -44,7 +44,7 @@ import {
 } from '../sales-ops/service.js';
 import { applyBaixaTx } from '../sales-ops/settlements.js';
 import { LeadInputError, createLead, moveLead, type LeadScope } from '../sales-ops/leads/lead-service.js';
-import { CreateLeadSchema, MoveLeadSchema } from '../sales-ops/leads/lead-schemas.js';
+import { LeadWriteBaseSchema, MoveLeadSchema } from '../sales-ops/leads/lead-schemas.js';
 import { LeadStageSchema } from '../sales-ops/leads/schemas.js';
 import { createLeadStage } from '../sales-ops/leads/stage-service.js';
 import type { EntityRef, ImportCounts, ImportOperation, ImportPlan, SheetKey } from './types.js';
@@ -315,7 +315,7 @@ export async function executeImportPlan(
         return;
       }
       case 'createLead': {
-        const parsed = CreateLeadSchema.safeParse({
+        const parsed = LeadWriteBaseSchema.safeParse({
           ...operation.input,
           clientId: resolveOrNull(operation.clientRef, operation),
           sellerPersonId: resolveOrNull(operation.sellerRef, operation),
@@ -337,7 +337,8 @@ export async function executeImportPlan(
           ...(operation.lostReason !== null ? { reason: operation.lostReason } : {}),
         });
         if (!move.success) throw new ImportExecutionError(operation, 'invalid_lead');
-        const moved = await moveLead(tx, orgId, created.lead.id, move.data, scope);
+        // A historical lead is placed straight into its etapa: there is no path to walk.
+        const moved = await moveLead(tx, orgId, created.lead.id, move.data, scope, { skipTransitionGraph: true });
         if (!moved.ok) throw new ImportExecutionError(operation, moved.reason);
         return;
       }

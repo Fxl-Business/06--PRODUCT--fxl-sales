@@ -18,15 +18,20 @@ import { Filter, List, Plus, SquareKanban } from 'lucide-react';
 import type { LeadFieldSet } from '@fxl-sales/shared-utils/sales-edition';
 import { Combobox, type ComboboxOption } from '@/components/ui/combobox';
 import { formatMoneyBrl } from '../calculations';
+import { PeriodFilter } from '../PeriodFilter';
+import type { PeriodSelection } from '../period';
+import type { CrmPipeline } from './crm-types';
+import { allowedTargetIds, isTransitionAllowed } from './crm-pipeline';
 import type { MoveLeadPayload } from './api';
 import {
   ALL_PHASES_LABEL,
   BOARD_VIEW_LABEL,
-  EDIT_LABEL,
+  OPEN_LABEL,
   EMPTY_COLUMN_HINT,
   EMPTY_PHASE_LIST,
   LIST_HEADERS,
   MOVE_LABEL,
+  MOVE_NOT_ALLOWED_COPY,
   NO_PRODUCTS_DASH,
   PERCENT_OF_TOTAL,
   TOTAL_LABEL,
@@ -124,6 +129,23 @@ export type LeadConversionRequest = {
 
 export type LeadsBoardProps = {
   routedMode?: 'board' | 'stage';
+  /**
+   * The pipeline the columns belong to. Its transition graph bounds every move:
+   * the Mover targets and a drop are offered only along it. Absent means no
+   * graph is known and nothing is bounded, as before.
+   */
+  pipeline?: CrmPipeline;
+  /** The pipeline choice. Rendered only when there is more than one to choose from. */
+  pipelineSelector?: {
+    value: string | null;
+    options: ComboboxOption[];
+    onChange: (pipelineId: string) => void;
+  };
+  /** The period of the cards, shared by the Quadro, the Lista and the Funil. */
+  periodFilter?: {
+    value: PeriodSelection;
+    onChange: (next: PeriodSelection) => void;
+  };
   selectedStageId?: string;
   onOpenStage?: (stageId: string) => void;
   stages: SalesOpsLeadStage[];
@@ -140,7 +162,7 @@ export type LeadsBoardProps = {
   onMoveLead: (payload: MoveLeadPayload) => void;
   movePending?: boolean;
   onCreateLead?: () => void;
-  onEditLead?: (lead: SalesOpsLead) => void;
+  onOpenLead?: (lead: SalesOpsLead) => void;
   /**
    * Asks for the delete confirmation of a NON-converted lead: the card's kebab
    * menu (and right-click) and the Lista's `Excluir` call it. The container owns
@@ -180,7 +202,7 @@ type SortableCardProps = {
   lead: SalesOpsLead;
   lookups: LabelLookups;
   now: Date;
-  onEdit?: (lead: SalesOpsLead) => void;
+  onOpen?: (lead: SalesOpsLead) => void;
   onDelete?: (lead: SalesOpsLead) => void;
   onMove?: (lead: SalesOpsLead) => void;
   onOpenSale?: (saleId: string) => void;
@@ -196,7 +218,7 @@ function SortableLeadCard({
   lead,
   lookups,
   now,
-  onEdit,
+  onOpen,
   onDelete,
   onMove,
   onOpenSale,
@@ -222,7 +244,7 @@ function SortableLeadCard({
         now={now}
         onDelete={onDelete}
         onMove={onMove}
-        onEdit={onEdit}
+        onOpen={onOpen}
         fieldSet={fieldSet}
         onOpenSale={onOpenSale}
         showDaysBadge={showDaysBadge}
@@ -289,6 +311,9 @@ function StageDropZone({
 
 export function LeadsBoard({
   routedMode,
+  pipeline,
+  pipelineSelector,
+  periodFilter,
   selectedStageId,
   onOpenStage,
   stages,
@@ -299,7 +324,7 @@ export function LeadsBoard({
   onMoveLead,
   movePending = false,
   onCreateLead,
-  onEditLead,
+  onOpenLead,
   onDeleteLead,
   onRequestConversion,
   onOpenSale,
@@ -324,6 +349,12 @@ export function LeadsBoard({
    */
   const [pendingConversion, setPendingConversion] = React.useState<MoveLeadPayload | null>(null);
   const [boardSearch, setBoardSearch] = React.useState('');
+  /** Set when a drop lands outside the pipeline's transition graph; cleared on the next drag. */
+  const [moveNotice, setMoveNotice] = React.useState<string | null>(null);
+  // The stages a lead may be moved to from its own stage, by the pipeline graph.
+  // Absent when the board has no pipeline, so the legacy target list is unchanged.
+  const allowedFrom = (stageId: string): ReadonlySet<string> | undefined =>
+    pipeline ? allowedTargetIds(pipeline, stageId) : undefined;
 
   const columns = React.useMemo(() => boardStages(stages), [stages]);
   // The leads edition shows contact data in the Lista and the Cliente on the
@@ -491,6 +522,7 @@ export function LeadsBoard({
   }
 
   function handleDragStart(event: DragStartEvent) {
+    setMoveNotice(null);
     setActiveLeadId(String(event.active.id));
   }
 
@@ -517,6 +549,12 @@ export function LeadsBoard({
     const toStageId = overLead ? overLead.stageId : overId;
     const target = columns.find((stage) => stage.id === toStageId);
     if (!target) return;
+    // The API stays authoritative: a stale graph answers 409 and the optimistic
+    // move reverts. This check only spares the operator a request it would refuse.
+    if (pipeline && !isTransitionAllowed(pipeline, dragged.stageId, toStageId)) {
+      setMoveNotice(MOVE_NOT_ALLOWED_COPY);
+      return;
+    }
 
     const column = leadsInStage(leads, toStageId);
     const overIndex = overLead ? column.findIndex((row) => row.id === overId) : column.length;
@@ -548,6 +586,17 @@ export function LeadsBoard({
     >
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2.5">
+          {pipelineSelector && pipelineSelector.options.length > 1 ? (
+            <div className="w-[200px]">
+              <Combobox
+                aria-label="Funil"
+                className={comboboxTriggerClass}
+                onChange={pipelineSelector.onChange}
+                options={pipelineSelector.options}
+                value={pipelineSelector.value ?? ''}
+              />
+            </div>
+          ) : null}
           {!routedMode && <div
             aria-label="Alternar visualização"
             className={segmentedContainerClass}
@@ -598,6 +647,13 @@ export function LeadsBoard({
               />
             </div>
           ) : null}
+          {periodFilter ? (
+            <PeriodFilter
+              aria-label="Período dos leads"
+              onChange={periodFilter.onChange}
+              value={periodFilter.value}
+            />
+          ) : null}
           {leadView === 'board' ? (
             <input
               aria-label="Buscar leads"
@@ -620,6 +676,12 @@ export function LeadsBoard({
           </button>
         ) : null}
       </header>
+
+      {moveNotice ? (
+        <p className="mb-3 text-[13px] font-medium text-[#a5341c]" data-move-notice role="status">
+          {moveNotice}
+        </p>
+      ) : null}
 
       {/* Server and seller scope remain authoritative. Search narrows only loaded cards. */}
       {/*
@@ -744,7 +806,7 @@ export function LeadsBoard({
                       <SortableContext items={movableIds} strategy={verticalListSortingStrategy}>
                         <StageDropZone dotColor={c?.dot ?? '#cfcfd6'} stageId={stage.id}>
                           {column.map((lead) => {
-                            const targets = moveTargetsFor(lead, columns, hasConversionHandler);
+                            const targets = moveTargetsFor(lead, columns, hasConversionHandler, allowedFrom(lead.stageId));
                             if (targets.length === 0) {
                               return (
                                 <LeadCard
@@ -754,7 +816,7 @@ export function LeadsBoard({
                                   lookups={lookups}
                                   now={now}
                                   onDelete={onDeleteLead}
-                                  onEdit={onEditLead}
+                                  onOpen={onOpenLead}
                                   onOpenSale={onOpenSale}
                                   showDaysBadge={stageIsNormal(stage) && !leadIsConverted(lead)}
                                 />
@@ -769,7 +831,7 @@ export function LeadsBoard({
                                 now={now}
                                 onDelete={onDeleteLead}
                                 onMove={() => openMoveDialog(lead)}
-                                onEdit={onEditLead}
+                                onOpen={onOpenLead}
                                 onOpenSale={onOpenSale}
                                 showDaysBadge={stageIsNormal(stage) && !leadIsConverted(lead)}
                               />
@@ -999,11 +1061,11 @@ export function LeadsBoard({
                             ) : null}
                             <button
                               className={listActionButtonClass}
-                              data-edit-lead={row.id}
-                              onClick={() => onEditLead?.(row)}
+                              data-open-lead={row.id}
+                              onClick={() => onOpenLead?.(row)}
                               type="button"
                             >
-                              {EDIT_LABEL}
+                              {OPEN_LABEL}
                             </button>
                             {!converted && onDeleteLead ? (
                               <button
@@ -1071,7 +1133,7 @@ export function LeadsBoard({
           }}
           open
           pending={movePending}
-          targets={moveTargetsFor(moveLead, columns, hasConversionHandler)}
+          targets={moveTargetsFor(moveLead, columns, hasConversionHandler, allowedFrom(moveLead.stageId))}
         />
       ) : null}
     </div>

@@ -1,6 +1,6 @@
 import { and, desc, eq, isNotNull, sql, type SQL } from 'drizzle-orm';
 import type { getDb } from '../../../db/client.js';
-import { salesOpsLeadStages, salesOpsLeads } from '../../../db/schema.js';
+import { salesOpsCrmLeads, salesOpsPipelineStages } from '../../../db/schema.js';
 import { writeAuditEntry } from '../../audit/service.js';
 import { LEADS_DEFAULT_LIMIT, type ListDeletedLeadsQuery } from './lead-schemas.js';
 import {
@@ -16,6 +16,7 @@ import {
   renumberStage,
   resolveLeadScopePredicate,
 } from './lead-service.js';
+import { recordStageChange } from './lead-history.js';
 import { withTenant } from './with-tenant.js';
 
 /**
@@ -61,15 +62,15 @@ export type ListDeletedLeadsResult = { items: DeletedLeadView[]; nextCursor: str
 
 /** The inverse of liveLeadCondition(), for the two reads that want deleted rows on purpose. */
 function deletedLeadCondition(): SQL {
-  return isNotNull(salesOpsLeads.deletedAt);
+  return isNotNull(salesOpsCrmLeads.deletedAt);
 }
 
 /** The etapa's CURRENT name, for the ledger snapshot. The composite FK guarantees the row. */
 async function stageName(tx: Db, orgId: string, stageId: string): Promise<string> {
   const [stage] = await tx
-    .select({ name: salesOpsLeadStages.name })
-    .from(salesOpsLeadStages)
-    .where(and(eq(salesOpsLeadStages.orgId, orgId), eq(salesOpsLeadStages.id, stageId)))
+    .select({ name: salesOpsPipelineStages.name })
+    .from(salesOpsPipelineStages)
+    .where(and(eq(salesOpsPipelineStages.orgId, orgId), eq(salesOpsPipelineStages.id, stageId)))
     .limit(1);
   return stage?.name ?? '';
 }
@@ -93,7 +94,7 @@ export function deleteLead(
 
     const [current] = await tx
       .select()
-      .from(salesOpsLeads)
+      .from(salesOpsCrmLeads)
       .where(and(...leadIdentityConditions(orgId, id, gate)))
       .limit(1)
       .for('update');
@@ -107,14 +108,14 @@ export function deleteLead(
     // No seller column, no stage_id, no position: a delete never claims a pool
     // lead and keeps the etapa a restore returns it to.
     await tx
-      .update(salesOpsLeads)
+      .update(salesOpsCrmLeads)
       .set({
         deletedAt,
         deletedByUserId: actor.userId,
         deletedByName: actor.name,
         updatedAt: deletedAt,
       })
-      .where(and(eq(salesOpsLeads.orgId, orgId), eq(salesOpsLeads.id, id), liveLeadCondition()));
+      .where(and(eq(salesOpsCrmLeads.orgId, orgId), eq(salesOpsCrmLeads.id, id), liveLeadCondition()));
 
     // The column closes the gap at once, so it stays 1..N over live cards.
     await renumberStage(tx, orgId, current.stageId, null);
@@ -154,17 +155,17 @@ export function restoreLead(
 ): Promise<RestoreLeadResult> {
   return withTenant(db, orgId, async (tx) => {
     const restoreConditions = and(
-      eq(salesOpsLeads.orgId, orgId),
-      eq(salesOpsLeads.id, id),
+      eq(salesOpsCrmLeads.orgId, orgId),
+      eq(salesOpsCrmLeads.id, id),
       deletedLeadCondition(),
-      ...(isAdmin ? [] : [eq(salesOpsLeads.deletedByUserId, actor.userId)]),
+      ...(isAdmin ? [] : [eq(salesOpsCrmLeads.deletedByUserId, actor.userId)]),
     );
     // A restore writes stage_id and position: same lock order as every board writer.
     await lockLeadBoard(tx, orgId);
 
     const [current] = await tx
       .select()
-      .from(salesOpsLeads)
+      .from(salesOpsCrmLeads)
       .where(restoreConditions)
       .limit(1)
       .for('update');
@@ -173,12 +174,12 @@ export function restoreLead(
 
     const [own] = await tx
       .select({
-        id: salesOpsLeadStages.id,
-        name: salesOpsLeadStages.name,
-        status: salesOpsLeadStages.status,
+        id: salesOpsPipelineStages.id,
+        name: salesOpsPipelineStages.name,
+        status: salesOpsPipelineStages.status,
       })
-      .from(salesOpsLeadStages)
-      .where(and(eq(salesOpsLeadStages.orgId, orgId), eq(salesOpsLeadStages.id, current.stageId)))
+      .from(salesOpsPipelineStages)
+      .where(and(eq(salesOpsPipelineStages.orgId, orgId), eq(salesOpsPipelineStages.id, current.stageId)))
       .limit(1);
     // Its own etapa when it is still on the board; an archived etapa is not a
     // move target, so the lead goes where a new lead would. Never seeds one: the
@@ -186,13 +187,13 @@ export function restoreLead(
     const target =
       own && own.status === 'active'
         ? { id: own.id, name: own.name }
-        : await firstOpenLeadStage(tx, orgId);
+        : await firstOpenLeadStage(tx, orgId, current.pipelineId);
     if (!target) throw new LeadInputError('no_open_stage');
 
     const stageChanged = target.id !== current.stageId;
     const position = await nextLeadPosition(tx, orgId, target.id);
     await tx
-      .update(salesOpsLeads)
+      .update(salesOpsCrmLeads)
       .set({
         deletedAt: null,
         deletedByUserId: null,
@@ -208,6 +209,18 @@ export function restoreLead(
       .where(restoreConditions);
     // Appended at the end; the renumber keeps the column dense even if it was not.
     await renumberStage(tx, orgId, target.id, null);
+    // A restore that lands in another etapa is a stage change like any other: one history event.
+    if (stageChanged) {
+      await recordStageChange(tx, {
+        orgId,
+        leadId: id,
+        fromStageId: current.stageId,
+        toStageId: target.id,
+        reason: null,
+        actorUserId: actor.userId,
+        actorName: actor.name,
+      });
+    }
 
     const lead = await readLeadView(tx, orgId, id);
     // LAST: the ledger tail lock is global and held until COMMIT. A restore is a
@@ -242,39 +255,39 @@ export function listDeletedLeads(
   query: ListDeletedLeadsQuery,
 ): Promise<ListDeletedLeadsResult> {
   return withTenant(db, orgId, async (tx) => {
-    const conditions: SQL[] = [eq(salesOpsLeads.orgId, orgId), deletedLeadCondition()];
+    const conditions: SQL[] = [eq(salesOpsCrmLeads.orgId, orgId), deletedLeadCondition()];
     if (query.cursor) {
       const [deletedAt, cursorId] = query.cursor.split('_');
       conditions.push(
-        sql`(${salesOpsLeads.deletedAt}, ${salesOpsLeads.id}) < (${deletedAt}::timestamptz, ${cursorId}::uuid)`,
+        sql`(${salesOpsCrmLeads.deletedAt}, ${salesOpsCrmLeads.id}) < (${deletedAt}::timestamptz, ${cursorId}::uuid)`,
       );
     }
     const limit = query.limit ?? LEADS_DEFAULT_LIMIT;
     const rows = await tx
       .select({
-        id: salesOpsLeads.id,
-        contactName: salesOpsLeads.contactName,
-        clientName: salesOpsLeads.clientNameSnapshot,
+        id: salesOpsCrmLeads.id,
+        contactName: salesOpsCrmLeads.contactName,
+        clientName: salesOpsCrmLeads.clientNameSnapshot,
         // The etapa's CURRENT name, joined live, so a renamed etapa reads renamed.
-        stageName: salesOpsLeadStages.name,
-        sellerName: salesOpsLeads.sellerNameSnapshot,
-        estimatedValueBrl: salesOpsLeads.estimatedValueBrl,
-        deletedAt: salesOpsLeads.deletedAt,
-        deletedByName: salesOpsLeads.deletedByName,
+        stageName: salesOpsPipelineStages.name,
+        sellerName: salesOpsCrmLeads.sellerNameSnapshot,
+        estimatedValueBrl: salesOpsCrmLeads.estimatedValueBrl,
+        deletedAt: salesOpsCrmLeads.deletedAt,
+        deletedByName: salesOpsCrmLeads.deletedByName,
         // Rendered by Postgres with all six fractional digits: see the cursor
         // comment in lead-schemas.ts for why a JS Date cannot build it.
-        cursorAt: sql<string>`to_char(${salesOpsLeads.deletedAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
+        cursorAt: sql<string>`to_char(${salesOpsCrmLeads.deletedAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
       })
-      .from(salesOpsLeads)
+      .from(salesOpsCrmLeads)
       .innerJoin(
-        salesOpsLeadStages,
+        salesOpsPipelineStages,
         and(
-          eq(salesOpsLeadStages.orgId, salesOpsLeads.orgId),
-          eq(salesOpsLeadStages.id, salesOpsLeads.stageId),
+          eq(salesOpsPipelineStages.orgId, salesOpsCrmLeads.orgId),
+          eq(salesOpsPipelineStages.id, salesOpsCrmLeads.stageId),
         ),
       )
       .where(and(...conditions))
-      .orderBy(desc(salesOpsLeads.deletedAt), desc(salesOpsLeads.id))
+      .orderBy(desc(salesOpsCrmLeads.deletedAt), desc(salesOpsCrmLeads.id))
       .limit(limit + 1);
 
     const hasMore = rows.length > limit;

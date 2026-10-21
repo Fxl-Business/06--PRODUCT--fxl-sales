@@ -4,24 +4,29 @@ import { type LeadFieldSet, leadFieldSet } from '@fxl-sales/shared-utils/sales-e
 import { useAuthProfile, useSalesEdition } from '@/auth/react';
 import type { ComboboxOption } from '@/components/ui/combobox';
 import { Skeleton } from '@/components/ui/skeleton';
-import { buildLeadStagePath, buildSalesOpsPath, type SalesOpsWorkspace } from '../navigation';
+import { todayInSaoPaulo } from '@fxl-sales/shared-utils/sao-paulo-day';
+import { MutationErrorBanner } from '../MutationErrorBanner';
+import { PERIOD_ALL_SELECTION, periodQuery, selectionToRange, type PeriodSelection } from '../period';
+import { buildLeadStagePath, buildLeadSummaryPath, buildSalesOpsPath, type SalesOpsWorkspace } from '../navigation';
 import type { SalesOpsClient, SalesOpsPerson, SalesOpsProduct } from '../types';
-import type { MoveLeadPayload, SaveContactLeadPayload, SaveLeadPayload } from './api';
+import type { MoveLeadPayload } from './api';
 import { buildLabelLookups } from './board-labels';
 import { stageOpensConversion } from './board-move';
 import { mutedStateClass } from './board-ui';
-import { boardStages, leadIsConverted } from './calculations';
-import { ContactLeadDialog } from './ContactLeadDialog';
-import { leadToContactSeed } from './contact-lead';
+import { boardStages } from './calculations';
+import { useFieldDefinitions, usePipelines } from './crm-hooks';
+import { isTransitionAllowed, pickPipeline, pipelineStagesAsBoardStages } from './crm-pipeline';
 import { LeadDeleteDialog } from './LeadDeleteDialog';
-import { LeadDialog } from './LeadDialog';
+import { LeadForm } from './LeadForm';
 import { LeadsBoard, type LeadConversionRequest } from './LeadsBoard';
-import { RestoreUndoNotice, UndoNotice } from './UndoNotice';
+import { UNDO_CONFLICT, UndoConflictError } from './undo-conflict';
+import { useUndoNotice } from './use-undo-notice';
+import { LEAD_SUMMARY_OPENED_IN_APP } from './lead-summary-nav';
+import { UndoLayer } from './UndoLayer';
 import {
   useDeleteLead,
   useLeadsBoard,
   useLeadStageSummary,
-  useLeadStages,
   useMoveLead,
   useSaveLead,
 } from './hooks';
@@ -29,7 +34,7 @@ import type { LeadBoardFilters, SalesOpsLead } from './types';
 
 /**
  * The ONLY file in this slice that names a hook. Everything above it -
- * `LeadsBoard`, `LeadCard`, `MoveLeadDialog`, `LeadDialog` - is pure props in,
+ * `LeadsBoard`, `LeadCard`, `MoveLeadDialog`, `LeadForm` - is pure props in,
  * callbacks out, which is what lets every board oracle drive the real components
  * with no query client at all.
  *
@@ -40,10 +45,6 @@ import type { LeadBoardFilters, SalesOpsLead } from './types';
 const BOARD_LOAD_FAILED = 'Não foi possível carregar o funil de leads.';
 const SELLER_PERSON_UNMAPPED =
   'Seu acesso ainda não está vinculado a um vendedor. Peça ao gestor para conferir seu cadastro em Vendedores.';
-const UNDO_CONFLICT = 'Este lead foi alterado por outra pessoa. Atualize o funil antes de desfazer.';
-
-class UndoConflictError extends Error {}
-
 function sameLeadSnapshot(current: SalesOpsLead | undefined, expected: SalesOpsLead): boolean {
   // The response to the forward write is the expected server state. A fresh
   // board read must still match it before a compensating write can be offered.
@@ -102,28 +103,12 @@ export type LeadsBoardContainerProps = {
   /** Opens the proposta a converted lead became. Forwarded verbatim. */
   onOpenSale?: (saleId: string) => void;
   /**
-   * Leads edition only: create a client by name inline from the contact dialog's
-   * empresa picker. Owned by `SalesOpsApp` (the one client-create seam), so this
+   * Create a client by name inline from the LeadForm's empresa picker, in both
+   * editions. Owned by `SalesOpsApp` (the one client-create seam), so this
    * container keeps naming only leads hooks. Absent means the Criar row is hidden.
    */
   onCreateClient?: (name: string) => Promise<ComboboxOption | null>;
 };
-
-/** The edit path maps a rendered lead back into the write payload the dialog seeds from. */
-function leadToSeed(lead: SalesOpsLead): SaveLeadPayload {
-  return {
-    id: lead.id,
-    contactName: lead.contactName,
-    clientId: lead.clientId,
-    clientName: lead.clientNameSnapshot,
-    estimatedValueBrl: lead.estimatedValueBrl,
-    description: lead.description,
-    sellerPersonId: lead.sellerPersonId,
-    products: lead.products.map((row) =>
-      row.productId ? { productId: row.productId } : { productName: row.productNameSnapshot },
-    ),
-  };
-}
 
 export function LeadsBoardContainer({
   routedMode,
@@ -147,13 +132,33 @@ export function LeadsBoardContainer({
   const isAdmin = useAuthProfile().roles.includes('admin');
   const canManageStages = isAdmin;
   const navigate = useNavigate();
-  const [contactSeed, setContactSeed] = React.useState<SaveContactLeadPayload | null>(null);
   const [sellerPersonId, setSellerPersonId] = React.useState<string | null>(null);
   // The columns are resolved FIRST: the board query fans out one request per
-  // stage and the API requires a `stageId`, so without the stage list there is
-  // nothing to ask for.
-  const stagesQuery = useLeadStages();
-  const stages = React.useMemo(() => stagesQuery.data ?? [], [stagesQuery.data]);
+  // stage and the API requires a `stageId`, so without the pipeline there is
+  // nothing to ask for. The Quadro is a view of ONE pipeline: its columns are
+  // that pipeline's stages, and the choice is component state (not URL state).
+  const pipelinesQuery = usePipelines();
+  const pipelines = React.useMemo(() => pipelinesQuery.data ?? [], [pipelinesQuery.data]);
+  const [pipelineChoice, setPipelineChoice] = React.useState<string | null>(null);
+  const [period, setPeriod] = React.useState<PeriodSelection>(PERIOD_ALL_SELECTION);
+  const [moveError, setMoveError] = React.useState<unknown>(null);
+  // A routed stage belongs to exactly one pipeline, so an `?etapa=` link lands on it.
+  const owningPipelineId = selectedStageId
+    ? pipelines.find((candidate) => candidate.stages.some((stage) => stage.id === selectedStageId))?.id
+    : undefined;
+  const pipeline = pickPipeline(pipelines, owningPipelineId ?? pipelineChoice);
+  const pipelineId = pipeline?.id ?? null;
+  const stages = React.useMemo(() => pipelineStagesAsBoardStages(pipeline), [pipeline]);
+  const pipelineOptions = React.useMemo(
+    () =>
+      pipelines
+        .filter((candidate) => candidate.status === 'active')
+        .sort((a, b) => a.position - b.position)
+        .map((candidate) => ({ value: candidate.id, label: candidate.name })),
+    [pipelines],
+  );
+  const range = React.useMemo(() => selectionToRange(period, todayInSaoPaulo()), [period]);
+  const { from: periodFrom, to: periodTo } = range;
 
   // A filter that is not OFFERED can never narrow: an operator who filters under
   // `operacional` and then opens their own board must not carry that narrowing
@@ -165,66 +170,21 @@ export function LeadsBoardContainer({
     the board renders, so a mismatch would silently degrade to no optimistic
     write at all.
   */
-  const filters = React.useMemo<LeadBoardFilters>(
-    () => (sellerFilterValue ? { sellerPersonId: sellerFilterValue } : undefined),
-    [sellerFilterValue],
-  );
+  const filters = React.useMemo<LeadBoardFilters>(() => {
+    const next = {
+      ...(sellerFilterValue ? { sellerPersonId: sellerFilterValue } : {}),
+      ...(pipelineId ? { pipelineId } : {}),
+      ...periodQuery({ from: periodFrom, to: periodTo }),
+    };
+    return Object.keys(next).length > 0 ? next : undefined;
+  }, [sellerFilterValue, pipelineId, periodFrom, periodTo]);
 
   const boardQuery = useLeadsBoard(stages, filters);
-  const summaryQuery = useLeadStageSummary(filters);
+  const summaryQuery = useLeadStageSummary(filters, pipelinesQuery.isSuccess);
   const moveLead = useMoveLead(filters);
   const saveLead = useSaveLead();
   const deleteLead = useDeleteLead();
-  const [undoNotice, setUndoNotice] = React.useState<{
-    id: number;
-    label: string;
-    undo?: () => Promise<unknown>;
-    restoreLeadId?: string;
-  } | null>(null);
-  const [undoError, setUndoError] = React.useState<string | null>(null);
-  const [undoBusy, setUndoBusy] = React.useState(false);
-  const undoSequence = React.useRef(0);
-  const undoInFlight = React.useRef(false);
-
-  React.useEffect(() => {
-    if (!undoNotice || undoBusy || undoError) return;
-    const timer = window.setTimeout(() => setUndoNotice((current) =>
-      current?.id === undoNotice.id ? null : current,
-    ), 5000);
-    return () => window.clearTimeout(timer);
-  }, [undoNotice, undoBusy, undoError]);
-
-  function publishUndo(label: string, undo: () => Promise<unknown>) {
-    setUndoError(null);
-    setUndoNotice({ id: ++undoSequence.current, label, undo });
-  }
-
-  function publishDeleteUndo(leadId: string) {
-    setUndoError(null);
-    setUndoNotice({ id: ++undoSequence.current, label: 'Lead excluído', restoreLeadId: leadId });
-  }
-
-  async function runUndo(restore?: () => Promise<unknown>) {
-    if (!undoNotice || undoInFlight.current) return;
-    const active = undoNotice;
-    const action = restore ?? active.undo;
-    if (!action) return;
-    undoInFlight.current = true;
-    setUndoBusy(true);
-    setUndoError(null);
-    try {
-      await action();
-      setUndoNotice((current) => current?.id === active.id ? null : current);
-      setUndoError(null);
-    } catch (error) {
-      setUndoError(error instanceof UndoConflictError
-        ? UNDO_CONFLICT
-        : 'Não foi possível desfazer. Tente novamente.');
-    } finally {
-      undoInFlight.current = false;
-      setUndoBusy(false);
-    }
-  }
+  const undo = useUndoNotice();
 
   async function requireUnchangedLead(expected: SalesOpsLead) {
     const fresh = await boardQuery.refetch({ throwOnError: true });
@@ -241,9 +201,11 @@ export function LeadsBoardContainer({
       : [];
     const sourceIndex = sourceColumn.findIndex((row) => row.id === payload.leadId);
     const result = await moveLead.mutateAsync(payload);
+    // The inverse is a move back along the graph, so it is offered only when the graph allows it.
     if (!previous || sourceIndex < 0 || payload.saleId ||
-      stageOpensConversion(stages.find((stage) => stage.id === payload.toStageId))) return;
-    publishUndo('Lead movido', async () => {
+      stageOpensConversion(stages.find((stage) => stage.id === payload.toStageId)) ||
+      !isTransitionAllowed(pipeline, payload.toStageId, previous.stageId)) return;
+    undo.publish('Lead movido', async () => {
       await requireUnchangedLead(result.lead);
       return moveLead.mutateAsync({
         leadId: payload.leadId,
@@ -251,17 +213,6 @@ export function LeadsBoardContainer({
         toIndex: sourceIndex,
         ...(previous.lostReason ? { reason: previous.lostReason } : {}),
       });
-    });
-  }
-
-  async function saveWithUndo(payload: SaveLeadPayload | SaveContactLeadPayload) {
-    const previous = editingLead?.id === payload.id ? editingLead : null;
-    const result = await saveLead.mutateAsync(payload);
-    if (previous) publishUndo('Lead editado', async () => {
-      await requireUnchangedLead(result.lead);
-      return saveLead.mutateAsync(
-        fieldSet === 'contact' ? leadToContactSeed(previous) : leadToSeed(previous),
-      );
     });
   }
 
@@ -279,47 +230,26 @@ export function LeadsBoardContainer({
   const now = React.useMemo(() => new Date(), []);
 
   const [dialogOpen, setDialogOpen] = React.useState(false);
-  const [dialogSeed, setDialogSeed] = React.useState<SaveLeadPayload | null>(null);
-  /** The lead the open edit form is editing; null while creating. */
-  const [editingLead, setEditingLead] = React.useState<SalesOpsLead | null>(null);
   /** The lead whose delete confirmation is open; null when none is. */
   const [deleteTarget, setDeleteTarget] = React.useState<SalesOpsLead | null>(null);
 
-  /*
-    The edit form offers `Excluir lead` only for a lead that can be deleted: a
-    converted one answers 409 and gets no button at all.
-  */
-  const requestDeleteFromForm =
-    editingLead !== null && !leadIsConverted(editingLead)
-      ? () => setDeleteTarget(editingLead)
-      : undefined;
-
   async function confirmDelete(lead: SalesOpsLead) {
     await deleteLead.mutateAsync(lead.id);
-    publishDeleteUndo(lead.id);
-    // The edit dialog is modal, so a delete confirmed while it is open came from
-    // it: its lead is gone, so the form closes with the confirmation.
-    if (editingLead?.id === lead.id) setDialogOpen(false);
+    undo.publishRestore(lead.id);
   }
 
-  const clientOptions = React.useMemo(
-    () => clients.map((row) => ({ value: row.id, label: row.name })),
-    [clients],
-  );
-  const productOptions = React.useMemo(
-    () => products.map((row) => ({ value: row.id, label: row.name })),
-    [products],
-  );
+  const definitionsQuery = useFieldDefinitions();
+  const definitions = definitionsQuery.data ?? [];
 
   // `useLeadsBoard` is disabled while there are zero stage rows, so its query
   // stays pending forever; waiting on it would leave a fresh leads-edition org
   // on the Skeleton instead of its empty-state. FXL always has stage rows, so
   // its behaviour is unchanged.
-  if (stagesQuery.isPending || (stages.length > 0 && boardQuery.isPending)) {
+  if (pipelinesQuery.isPending || (stages.length > 0 && boardQuery.isPending)) {
     return <Skeleton className="h-[420px] w-full" />;
   }
 
-  if (stagesQuery.isError || boardQuery.isError) {
+  if (pipelinesQuery.isError || boardQuery.isError) {
     const copy = boardQuery.isError
       ? boardLoadErrorCopy(boardQuery.error, fieldSet)
       : BOARD_LOAD_FAILED;
@@ -334,7 +264,15 @@ export function LeadsBoardContainer({
 
   return (
     <>
+      <MutationErrorBanner error={moveError} onDismiss={() => setMoveError(null)} />
       <LeadsBoard
+        pipeline={pipeline}
+        pipelineSelector={{
+          value: pipelineId,
+          options: pipelineOptions,
+          onChange: (id) => setPipelineChoice(id),
+        }}
+        periodFilter={{ value: period, onChange: setPeriod }}
         routedMode={routedMode}
         selectedStageId={selectedStageId}
         onOpenStage={workspace ? (stageId) => navigate(buildLeadStagePath(workspace, stageId)) : undefined}
@@ -347,22 +285,19 @@ export function LeadsBoardContainer({
         movePending={moveLead.isPending}
         now={now}
         onCreateLead={() => {
-          setDialogSeed(null);
-          setContactSeed(null);
-          setEditingLead(null);
           setDialogOpen(true);
         }}
         onDeleteLead={setDeleteTarget}
-        onEditLead={(lead) => {
-          setDialogSeed(leadToSeed(lead));
-          setContactSeed(leadToContactSeed(lead));
-          setEditingLead(lead);
-          setDialogOpen(true);
-        }}
+        onOpenLead={workspace
+          ? (lead) => navigate(buildLeadSummaryPath(workspace, lead.id), { state: LEAD_SUMMARY_OPENED_IN_APP })
+          : undefined}
         onLoadMore={() => {
           void boardQuery.fetchNextPage();
         }}
-        onMoveLead={(payload) => { void moveWithUndo(payload).catch(() => undefined); }}
+        onMoveLead={(payload) => {
+          setMoveError(null);
+          void moveWithUndo(payload).catch((error: unknown) => setMoveError(error));
+        }}
         // The leads edition has no proposta, so the board is never handed the
         // conversion door, even if a conversion-kind etapa somehow exists:
         // `moveTargetsFor` then excludes it and `emitMove` returns early.
@@ -384,37 +319,25 @@ export function LeadsBoardContainer({
         stages={stages}
       />
 
-      {dialogOpen && fieldSet === 'full' ? (
-        <LeadDialog
-          clients={clientOptions}
-          initial={dialogSeed}
-          // `LeadDialog` seeds its fields at MOUNT, so the identity of what is
-          // being edited has to be the identity of the component.
-          key={dialogSeed?.id ?? 'novo'}
-          onDelete={requestDeleteFromForm}
-          onOpenChange={setDialogOpen}
-          onSubmit={saveWithUndo}
-          open
-          pending={saveLead.isPending}
-          products={productOptions}
-          sellers={sellers}
-        />
-      ) : null}
-
-      {dialogOpen && fieldSet === 'contact' ? (
-        <ContactLeadDialog
-          clients={clientOptions}
-          initial={contactSeed}
-          key={contactSeed?.id ?? 'novo'}
+      {dialogOpen && !definitionsQuery.isPending ? (
+        // One mount for both editions. It seeds at MOUNT, so it waits for the field
+        // definitions to settle (success or error) and is keyed by the lead it edits.
+        <LeadForm
+          clients={clients}
+          definitions={definitions}
+          initial={null}
+          key="novo"
           onCreateClient={onCreateClient}
-          onDelete={requestDeleteFromForm}
           onOpenChange={setDialogOpen}
-          // The dialog awaits the save: it closes on success and, on a rejection
-          // (400 no_open_stage included), stays open with the typed values and
-          // the mapped error inline (D-07.1c).
-          onSubmit={saveWithUndo}
+          // The form awaits the save: it closes on success and, on a rejection
+          // (400 no_open_stage included), stays open with the typed values and the
+          // mapped error inline. The form is create-only here: an existing lead is
+          // edited on its summary page.
+          onSubmit={saveLead.mutateAsync}
           open
           pending={saveLead.isPending}
+          pipelineId={pipelineId ?? undefined}
+          products={products}
           sellers={sellers}
           showSellerPicker={isAdmin}
         />
@@ -438,10 +361,7 @@ export function LeadsBoardContainer({
           open
         />
       ) : null}
-      {undoNotice?.restoreLeadId ? (
-        <RestoreUndoNotice leadId={undoNotice.restoreLeadId} busy={undoBusy} onUndo={(restore) => { void runUndo(restore); }} />
-      ) : undoNotice ? <UndoNotice label={undoNotice.label} busy={undoBusy} onUndo={() => { void runUndo(); }} /> : null}
-      {undoError ? <p className="fixed bottom-20 right-6 z-50 rounded-lg border bg-background px-4 py-3 text-destructive shadow-lg" role="alert">{undoError}</p> : null}
+      <UndoLayer undo={undo} />
     </>
   );
 }

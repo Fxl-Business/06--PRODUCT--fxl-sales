@@ -60,16 +60,25 @@ const OWNED_FILES = [
   // proposta, and the ban it must obey is the same one.
   'conversion.ts',
   'LeadCard.tsx',
-  'LeadDialog.tsx',
+  'LeadForm.tsx',
+  'LeadFormFields.tsx',
+  'lead-form.ts',
   'LeadsBoard.tsx',
   'LeadsBoardContainer.tsx',
   'MoveLeadDialog.tsx',
   'contact-lead.ts',
-  'ContactLeadDialog.tsx',
   // The lixeira's delete UI: the shared confirmation and its copy. Deleting a lead
   // is a lead write, so it obeys the same bans (no transition, no second write path).
   'delete-copy.ts',
   'LeadDeleteDialog.tsx',
+  // The lead summary (09c): it writes through the same lead hooks and obeys the same bans.
+  'LeadSummary.tsx',
+  'LeadSummaryContainer.tsx',
+  'summary-format.ts',
+  'lead-summary-nav.ts',
+  'advance.ts',
+  'AdvanceDialog.tsx',
+  'SummaryComposers.tsx',
 ];
 
 /** The one file allowed to spell the conversion kind, because it owns the question. */

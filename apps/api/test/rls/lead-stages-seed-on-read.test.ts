@@ -9,6 +9,7 @@
  * Run once: `VITEST_INTEGRATION=1 pnpm exec vitest run test/rls/lead-stages-seed-on-read.test.ts`
  */
 import { randomUUID } from 'node:crypto';
+import { DEFAULT_PIPELINE_STAGES } from '@fxl-sales/shared-utils/default-pipeline';
 import { Hono } from 'hono';
 import postgres from 'postgres';
 import { afterAll, describe, expect, it, vi } from 'vitest';
@@ -34,13 +35,14 @@ vi.hoisted(() => {
 import { hubAuthContext } from '../../src/auth/__tests__/hub-auth-context-fixture.js';
 import { closeDb, getDb } from '../../src/db/client.js';
 import { testDatabaseUrls } from '../../src/db/__tests__/test-database-urls.js';
+import { deleteCrmForOrgs } from '../../src/db/__tests__/settlement-test-cleanup.js';
 import { LeadStageSchema } from '../../src/domains/sales-ops/leads/schemas.js';
 import {
   createLeadStage,
   listLeadStages,
   updateLeadStage,
 } from '../../src/domains/sales-ops/leads/stage-service.js';
-import { LEAD_STAGE_SEEDS, ensureLeadStagesForOrg } from '../../src/domains/sales-ops/leads/stages-seed.js';
+import { ensureLeadStagesForOrg } from '../../src/domains/sales-ops/leads/stages-seed.js';
 
 const { leadStagesRouter } = await import('../../src/domains/sales-ops/leads/stage-routes.js');
 const { salesOpsRouter } = await import('../../src/domains/sales-ops/routes.js');
@@ -84,13 +86,17 @@ function appFor(
 
 async function countStages(orgId: string): Promise<number> {
   const [row] = await adminClient<{ n: number }[]>`
-    SELECT count(*)::int AS n FROM sales_ops_lead_stages WHERE org_id = ${orgId}
+    SELECT count(*)::int AS n FROM sales_ops_pipeline_stages WHERE org_id = ${orgId}
   `;
   return row?.n ?? -1;
 }
 
+/** The seven stages of the default CRM pipeline, in the derived legacy vocabulary. */
 function expectedDefaults(): [string, string, boolean, number][] {
-  return LEAD_STAGE_SEEDS.map((seed) => [seed.name, seed.kind, seed.isSystem, seed.position]);
+  return DEFAULT_PIPELINE_STAGES.map((stage) => {
+    const kind = stage.type === 'orcamento' ? 'conversion' : stage.exitKind === 'perdido' ? 'lost' : 'normal';
+    return [stage.label, kind, kind !== 'normal', stage.order];
+  });
 }
 
 type StageJson = {
@@ -109,21 +115,20 @@ async function getStages(app: Hono): Promise<{ status: number; stages: StageJson
 
 afterAll(async () => {
   for (const orgId of orgIds) {
-    await adminClient`DELETE FROM sales_ops_leads WHERE org_id = ${orgId}`;
-    await adminClient`DELETE FROM sales_ops_lead_stages WHERE org_id = ${orgId}`;
+    await deleteCrmForOrgs([orgId]);
   }
   await adminClient.end();
   await closeDb();
 });
 
 describe('lead stages are seeded on read', () => {
-  it('GET /lead-stages seeds the four default etapas for an org with none', async () => {
+  it('GET /lead-stages seeds the seven default etapas for an org with none', async () => {
     const orgId = newOrg('fresh');
     const { status, stages } = await getStages(appFor(orgId, { roles: ['admin'], edition: 'full', router: 'stages' }));
 
     expect(status).toBe(200);
     expect(stages.map((s) => [s.name, s.kind, s.isSystem, s.position])).toEqual(expectedDefaults());
-    expect(await countStages(orgId)).toBe(4);
+    expect(await countStages(orgId)).toBe(7);
   });
 
   it('a second GET /lead-stages does not duplicate', async () => {
@@ -134,7 +139,7 @@ describe('lead stages are seeded on read', () => {
     const second = await getStages(app);
 
     expect(first.stages.map((s) => s.id)).toEqual(second.stages.map((s) => s.id));
-    expect(await countStages(orgId)).toBe(4);
+    expect(await countStages(orgId)).toBe(7);
   });
 
   it.each([
@@ -146,10 +151,10 @@ describe('lead stages are seeded on read', () => {
     const { status } = await getStages(appFor(orgId, { roles: [role], edition, router: 'stages' }));
 
     expect(status).toBe(200);
-    expect(await countStages(orgId)).toBe(4);
+    expect(await countStages(orgId)).toBe(7);
   });
 
-  it('GET /bootstrap seeds the four etapas and a second bootstrap adds none', async () => {
+  it('GET /bootstrap seeds the seven etapas and a second bootstrap adds none', async () => {
     const orgId = newOrg('bootstrap');
     const app = appFor(orgId, { roles: ['admin'], edition: 'leads', router: 'bootstrap' });
 
@@ -157,11 +162,11 @@ describe('lead stages are seeded on read', () => {
     expect(first.status).toBe(200);
     const body = (await first.json()) as Record<string, unknown>;
     expect(body).not.toHaveProperty('stages');
-    expect(await countStages(orgId)).toBe(4);
+    expect(await countStages(orgId)).toBe(7);
 
     const second = await app.request('/bootstrap');
     expect(second.status).toBe(200);
-    expect(await countStages(orgId)).toBe(4);
+    expect(await countStages(orgId)).toBe(7);
   });
 
   it('an org that renamed one etapa and archived another gets no reinsertion', async () => {
@@ -182,9 +187,10 @@ describe('lead stages are seeded on read', () => {
     const first = await getStages(app);
     const second = await getStages(app);
 
-    expect(first.stages.map((s) => s.name)).toEqual(['Prospecção', 'Em negociação', 'Proposta', 'Perdido']);
-    expect(second.stages.map((s) => s.name)).toEqual(['Prospecção', 'Em negociação', 'Proposta', 'Perdido']);
-    expect(await countStages(orgId)).toBe(4);
+    const expectedNames = DEFAULT_PIPELINE_STAGES.map((stage) => (stage.label === 'Novo' ? 'Prospecção' : stage.label));
+    expect(first.stages.map((s) => s.name)).toEqual(expectedNames);
+    expect(second.stages.map((s) => s.name)).toEqual(expectedNames);
+    expect(await countStages(orgId)).toBe(7);
     expect(first.stages.some((s) => s.name === 'Novo')).toBe(false);
   });
 
@@ -206,11 +212,11 @@ describe('lead stages are seeded on read', () => {
 
     await getStages(appFor(orgA, { roles: ['admin'], edition: 'full', router: 'stages' }));
 
-    expect(await countStages(orgA)).toBe(4);
+    expect(await countStages(orgA)).toBe(7);
     expect(await countStages(orgB)).toBe(0);
   });
 
-  it('eight concurrent first GETs all answer 200 and leave exactly four rows', async () => {
+  it('eight concurrent first GETs all answer 200 and leave exactly seven rows', async () => {
     for (let round = 0; round < 3; round += 1) {
       const orgId = newOrg(`race_${round}`);
       const app = appFor(orgId, { roles: ['admin'], edition: 'full', router: 'stages' });
@@ -221,8 +227,8 @@ describe('lead stages are seeded on read', () => {
       expect(responses.map((r) => r.status)).toEqual(Array(8).fill(200));
       const idSets = bodies.map((b) => b.stages.map((s) => s.id).sort().join(','));
       expect(new Set(idSets).size).toBe(1);
-      expect(bodies[0]?.stages).toHaveLength(4);
-      expect(await countStages(orgId)).toBe(4);
+      expect(bodies[0]?.stages).toHaveLength(7);
+      expect(await countStages(orgId)).toBe(7);
     }
   });
 });

@@ -261,14 +261,14 @@ describe('a converted card names its proposta', () => {
   });
 
   it('opens the editor when a non-converted Quadro card is clicked', async () => {
-    const onEditLead = vi.fn();
+    const onOpenLead = vi.fn();
     await act(async () => {
       root.render(
         <LeadsBoard
           leads={[lead('l1', NOVO_ID)]}
           lookups={LOOKUPS}
           now={NOW}
-          onEditLead={onEditLead}
+          onOpenLead={onOpenLead}
           onMoveLead={vi.fn()}
           stages={STAGES}
         />,
@@ -279,6 +279,6 @@ describe('a converted card names its proposta', () => {
     await act(async () => {
       card?.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 0, clientY: 0 }));
     });
-    expect(onEditLead).toHaveBeenCalledTimes(1);
+    expect(onOpenLead).toHaveBeenCalledTimes(1);
   });
 });

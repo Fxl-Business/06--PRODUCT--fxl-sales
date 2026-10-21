@@ -10,6 +10,7 @@ import { requireCapability } from '../../middleware/require-capability.js';
 import { HISTORY_MAX_LIMIT, listOrgAuditHistory } from '../audit/history-service.js';
 import { importRouter } from '../import/routes.js';
 import { cadastroActor } from './cadastro-actor.js';
+import { crmRouter } from './crm-routes.js';
 import { leadsRouter } from './leads/lead-routes.js';
 import { leadStagesRouter } from './leads/stage-routes.js';
 import { ensureLeadStagesForOrg } from './leads/stages-seed.js';
@@ -320,6 +321,9 @@ salesOpsRouter.patch('/funcoes/:id', requireAdmin, async (c) => {
 // The lead stage cadastro owns the whole /lead-stages... path, so the mount
 // prefix is '/'. The lead entity mounts its own router separately at '/leads'.
 salesOpsRouter.route('/', leadStagesRouter);
+
+// The CRM configuration reads (pipelines, field definitions) and the follow-up list.
+salesOpsRouter.route('/', crmRouter);
 
 // The lead entity. Two imports, two mounts, two distinct identifiers and no
 // alias: '/lead-stages...' and '/leads...' do not overlap, and naming the

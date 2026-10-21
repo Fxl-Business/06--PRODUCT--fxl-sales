@@ -1,4 +1,12 @@
+import type { PipelineExitKind } from './crm-types';
 import type { LeadStageKind, LeadStageSummary, SalesOpsLead, SalesOpsLeadStage } from './types';
+
+/**
+ * Pipeline exits that leave the cumulative progression, as the lost stage does: a
+ * lead that is paused has no known path to the stages above it. Object lookup,
+ * so the funnel never compares a kind inline.
+ */
+const NON_PROGRESSION_EXIT: Partial<Record<PipelineExitKind, true>> = { perdido: true, pausado: true };
 
 /**
  * Pure board derivations. Imports only types, and every question the board, the
@@ -293,10 +301,12 @@ export type LostAside = {
 };
 
 export type CumulativeFunnel = {
-  /** Progression stages (board order, `lost` removed), top-to-bottom, cumulative. */
+  /** Progression stages (board order, `lost` and paused removed), top-to-bottom, cumulative. */
   rows: CumulativeFunnelRow[];
   /** The lost stage set apart, or null when the board has none. */
   lost: LostAside | null;
+  /** The paused stages set apart, each on its own leads only. Empty when there are none. */
+  parked: LostAside[];
   topCount: number;
   topBrl: number;
 };
@@ -319,7 +329,15 @@ export function buildCumulativeFunnel(
   stages: readonly SalesOpsLeadStage[],
 ): CumulativeFunnel {
   const lost = lostStage(stages);
-  const progression = boardStages(stages).filter((stage) => stage.id !== lost?.id);
+  const leavesProgression = (stage: SalesOpsLeadStage) =>
+    stage.exitKind ? NON_PROGRESSION_EXIT[stage.exitKind] === true : false;
+  // The lost stage keeps its own aside; any other non-progression stage (paused) is parked.
+  const parkedStages = boardStages(stages).filter(
+    (stage) => stage.id !== lost?.id && leavesProgression(stage),
+  );
+  const progression = boardStages(stages).filter(
+    (stage) => stage.id !== lost?.id && !leavesProgression(stage),
+  );
   // FRESH row objects: the accumulation below mutates them, and it must never
   // write into the caller's aggregate map.
   const rows: CumulativeFunnelRow[] = progression.map((stage) => {
@@ -332,8 +350,13 @@ export function buildCumulativeFunnel(
     rows[i]!.totalBrl += rows[i + 1]!.totalBrl;
   }
   const lostAggregate = lost ? stageAggregate(aggregates, lost.id) : null;
+  const parked = parkedStages.map((stage) => {
+    const { count, totalBrl } = stageAggregate(aggregates, stage.id);
+    return { stageId: stage.id, name: stage.name, count, totalBrl };
+  });
   return {
     rows,
+    parked,
     lost:
       lost && lostAggregate
         ? {

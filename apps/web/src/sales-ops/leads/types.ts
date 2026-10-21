@@ -1,4 +1,5 @@
 import type { SalesOpsStatus } from '../types';
+import type { LeadFieldValue, PipelineExitKind, PipelineStageType } from './crm-types';
 
 /**
  * The lead pipeline's WIRE types, reconciled against the shipped slice 03 API
@@ -47,6 +48,12 @@ export type SalesOpsLeadStage = {
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string | null;
+  /** Additive wire fields of the phase 2 API; optional so pre-cutover fixtures still compile. */
+  pipelineId?: string;
+  type?: PipelineStageType;
+  behavior?: string;
+  exitKind?: PipelineExitKind | null;
+  requiresReason?: boolean;
 };
 
 /**
@@ -113,6 +120,11 @@ export type SalesOpsLead = {
   products: SalesOpsLeadProduct[];
   createdAt: string;
   updatedAt: string | null;
+  /** Additive wire fields of the phase 2 API; optional so pre-cutover fixtures still compile. */
+  pipelineId?: string;
+  stageType?: PipelineStageType;
+  stageExitKind?: PipelineExitKind | null;
+  fields?: LeadFieldValue[];
 };
 
 /**
@@ -140,7 +152,9 @@ export type LeadBoardModel = { leads: SalesOpsLead[]; hasMore: boolean };
  * is imported by `admin/`, `finder/` and `lib/` and must not grow an edge into a
  * sales-ops subtree. It mirrors `CommissionFilters`, duplicated the same way.
  */
-export type LeadBoardFilters = { sellerPersonId?: string } | undefined;
+export type LeadBoardFilters =
+  | { sellerPersonId?: string; pipelineId?: string; from?: string; to?: string }
+  | undefined;
 
 /**
  * One row of `GET /api/v1/sales-ops/leads/summary`: every LIVE lead the caller

@@ -13,6 +13,7 @@
   sites pass only non-geometry extras.
 */
 
+import type { PipelineExitKind, PipelineStageType } from './crm-types';
 import type { LeadStageKind, SalesOpsLeadStage } from './types';
 
 export const formInputClass =
@@ -246,21 +247,35 @@ const NORMAL_PALETTE: readonly StageColor[] = [
   { dot: '#22928f', soft: '#eef8f7', border: '#d0ebe9', ink: '#17706d' },
 ];
 
-// Only the two special kinds are keys; the normal kind is NOT, so its lookup is
-// undefined and no inline kind comparison is ever needed.
-const KIND_COLORS: Partial<Record<LeadStageKind, StageColor>> = {
+/**
+ * The key a stage is coloured by: its pipeline exit first (`ganho`, `perdido`,
+ * `pausado`), then its pipeline type (`orcamento`), then the legacy kind. A plain
+ * `normal` stage has no key of its own, so its lookup is undefined and it takes a
+ * palette colour. Object lookups only, never an inline kind comparison.
+ */
+type ColorKey = LeadStageKind | PipelineExitKind | PipelineStageType;
+type ColorableStage = Pick<SalesOpsLeadStage, 'id' | 'kind'> &
+  Partial<Pick<SalesOpsLeadStage, 'type' | 'exitKind'>>;
+
+function colorKeyOf(stage: Pick<ColorableStage, 'kind' | 'type' | 'exitKind'>): ColorKey {
+  return stage.exitKind ?? stage.type ?? stage.kind;
+}
+
+const KIND_COLORS: Partial<Record<ColorKey, StageColor>> = {
   conversion: { dot: '#2f9155', soft: '#eef7f1', border: '#d3ebdc', ink: '#226c3f' },
   lost: { dot: '#c2413b', soft: '#fcf1f0', border: '#f2d6d4', ink: '#9b2f2a' },
+  orcamento: { dot: '#b7791f', soft: '#fdf6e7', border: '#f3e2b8', ink: '#8a5a0a' },
+  ganho: { dot: '#2f9155', soft: '#eef7f1', border: '#d3ebdc', ink: '#226c3f' },
+  perdido: { dot: '#c2413b', soft: '#fcf1f0', border: '#f2d6d4', ink: '#9b2f2a' },
+  pausado: { dot: '#8b8b92', soft: '#f4f4f6', border: '#e1e1e6', ink: '#57575f' },
 };
 
 /** `stages` must already be in position order; it is not reordered here. */
-export function stageColors(
-  stages: readonly Pick<SalesOpsLeadStage, 'id' | 'kind'>[],
-): Map<string, StageColor> {
+export function stageColors(stages: readonly ColorableStage[]): Map<string, StageColor> {
   const map = new Map<string, StageColor>();
   let normalIndex = 0;
   for (const stage of stages) {
-    const special = KIND_COLORS[stage.kind];
+    const special = KIND_COLORS[colorKeyOf(stage)];
     if (special) {
       map.set(stage.id, special);
     } else {
@@ -271,8 +286,8 @@ export function stageColors(
   return map;
 }
 
-export function stageIsNormal(stage: Pick<SalesOpsLeadStage, 'kind'>): boolean {
-  return !KIND_COLORS[stage.kind];
+export function stageIsNormal(stage: Pick<ColorableStage, 'kind' | 'type' | 'exitKind'>): boolean {
+  return !KIND_COLORS[colorKeyOf(stage)];
 }
 
 export function dayBadgeTone(days: number): string {

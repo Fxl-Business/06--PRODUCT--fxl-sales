@@ -15,7 +15,7 @@ import ExcelJS from 'exceljs';
 import { Hono } from 'hono';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { hubAuthContext } from '../../../auth/__tests__/hub-auth-context-fixture.js';
-import { deleteSettlementsForOrgs } from '../../../db/__tests__/settlement-test-cleanup.js';
+import { deleteCrmForOrgs, deleteSettlementsForOrgs } from '../../../db/__tests__/settlement-test-cleanup.js';
 import { closeDb, getAdminDb, getDb } from '../../../db/client.js';
 import {
   auditLog,
@@ -23,9 +23,9 @@ import {
   salesOpsAreas,
   salesOpsClients,
   salesOpsFuncoes,
-  salesOpsLeadProducts,
-  salesOpsLeadStages,
-  salesOpsLeads,
+  salesOpsCrmLeadFieldValues,
+  salesOpsPipelineStages,
+  salesOpsCrmLeads,
   salesOpsPayables,
   salesOpsPeople,
   salesOpsPersonFuncoes,
@@ -39,7 +39,7 @@ import {
   salesOpsSettlements,
 } from '../../../db/schema.js';
 import { registerProducerFlowGate } from '../../integration/producer-gate.js';
-import { LEAD_STAGE_SEEDS } from '../../sales-ops/leads/stages-seed.js';
+import { DEFAULT_PIPELINE_STAGES } from '@fxl-sales/shared-utils/default-pipeline';
 import { AreaSchema, ClientSchema, createArea, createClient } from '../../sales-ops/service.js';
 
 // The router transitively resolves the Hub contract at module scope; this file drives an
@@ -150,9 +150,9 @@ const ORG_TABLES: Array<[string, OrgTable]> = [
   ['people', salesOpsPeople],
   ['personFuncoes', salesOpsPersonFuncoes],
   ['clients', salesOpsClients],
-  ['leadStages', salesOpsLeadStages],
-  ['leads', salesOpsLeads],
-  ['leadProducts', salesOpsLeadProducts],
+  ['leadStages', salesOpsPipelineStages],
+  ['leads', salesOpsCrmLeads],
+  ['leadProducts', salesOpsCrmLeadFieldValues],
   ['sales', salesOpsSales],
   ['saleItems', salesOpsSaleItems],
   ['saleProfessionals', salesOpsSaleProfessionals],
@@ -194,18 +194,18 @@ async function createdBySheet(orgId: string): Promise<ImportCounts> {
     custosProduto: await countWhere(salesOpsProductFuncaoCosts, o(salesOpsProductFuncaoCosts)),
     pessoas: await countWhere(salesOpsPeople, o(salesOpsPeople)),
     clientes: await countWhere(salesOpsClients, o(salesOpsClients)),
-    // The D11 seeds Novo and Em negociação are not system rows, so match them by name.
+    // The D11 seeds (the default CRM pipeline) are matched by name.
     etapas: await countWhere(
-      salesOpsLeadStages,
+      salesOpsPipelineStages,
       and(
-        o(salesOpsLeadStages),
+        o(salesOpsPipelineStages),
         notInArray(
-          salesOpsLeadStages.name,
-          LEAD_STAGE_SEEDS.map((s) => s.name),
+          salesOpsPipelineStages.name,
+          DEFAULT_PIPELINE_STAGES.map((s) => s.label),
         ),
       ),
     ),
-    leads: await countWhere(salesOpsLeads, o(salesOpsLeads)),
+    leads: await countWhere(salesOpsCrmLeads, o(salesOpsCrmLeads)),
     propostas: await countWhere(salesOpsSales, o(salesOpsSales)),
     itens: await countWhere(salesOpsSaleItems, o(salesOpsSaleItems)),
     profissionais: await countWhere(salesOpsSaleProfessionals, o(salesOpsSaleProfessionals)),
@@ -275,9 +275,7 @@ afterEach(async () => {
     await admin.delete(salesOpsSaleProfessionals).where(eq(salesOpsSaleProfessionals.orgId, orgId));
     await admin.delete(salesOpsSaleItems).where(eq(salesOpsSaleItems.orgId, orgId));
     await admin.delete(salesOpsSales).where(eq(salesOpsSales.orgId, orgId));
-    await admin.delete(salesOpsLeadProducts).where(eq(salesOpsLeadProducts.orgId, orgId));
-    await admin.delete(salesOpsLeads).where(eq(salesOpsLeads.orgId, orgId));
-    await admin.delete(salesOpsLeadStages).where(eq(salesOpsLeadStages.orgId, orgId));
+    await deleteCrmForOrgs([orgId]);
     await admin.delete(salesOpsProductFuncaoCosts).where(eq(salesOpsProductFuncaoCosts.orgId, orgId));
     await admin.delete(salesOpsProducts).where(eq(salesOpsProducts.orgId, orgId));
     await admin.delete(salesOpsPersonFuncoes).where(eq(salesOpsPersonFuncoes.orgId, orgId));
@@ -444,10 +442,10 @@ describe('import routes (real router, real database)', () => {
     expect(await countWhere(integrationOutbox, eq(integrationOutbox.organizationId, orgId))).toBe(0);
 
     const stages = await admin
-      .select({ name: salesOpsLeadStages.name })
-      .from(salesOpsLeadStages)
-      .where(eq(salesOpsLeadStages.orgId, orgId));
-    expect(stages.map((s) => s.name).sort()).toEqual([...LEAD_STAGE_SEEDS.map((s) => s.name), 'Diagnóstico'].sort());
+      .select({ name: salesOpsPipelineStages.name })
+      .from(salesOpsPipelineStages)
+      .where(eq(salesOpsPipelineStages.orgId, orgId));
+    expect(stages.map((s) => s.name).sort()).toEqual([...DEFAULT_PIPELINE_STAGES.map((s) => s.label), 'Diagnóstico'].sort());
   });
 
   it('refuses to commit a workbook whose fresh plan has errors', async () => {
@@ -563,7 +561,7 @@ describe('import routes (real router, real database)', () => {
     const admin = getAdminDb();
     const clientsOf = () =>
       admin.select().from(salesOpsClients).where(eq(salesOpsClients.orgId, orgId)).orderBy(asc(salesOpsClients.id));
-    const leadsOf = () => admin.select().from(salesOpsLeads).where(eq(salesOpsLeads.orgId, orgId));
+    const leadsOf = () => admin.select().from(salesOpsCrmLeads).where(eq(salesOpsCrmLeads.orgId, orgId));
 
     const first = await upload('/import/commit', bytes, 'leads');
     expect(first.status).toBe(201);
@@ -660,7 +658,7 @@ describe('import routes (real router, real database)', () => {
     expect(await commit.json()).toEqual({ counts: { leads: 1 }, recognized: { clientes: 1 } });
 
     expect(await clientsOf()).toEqual(clientsBefore);
-    const leads = await admin.select().from(salesOpsLeads).where(eq(salesOpsLeads.orgId, orgId));
+    const leads = await admin.select().from(salesOpsCrmLeads).where(eq(salesOpsCrmLeads.orgId, orgId));
     expect(leads.map((l) => [l.clientId, l.clientNameSnapshot])).toEqual([[existing.id, 'Construtora Alfa']]);
   });
 
@@ -689,7 +687,7 @@ describe('import routes (real router, real database)', () => {
     const admin = getAdminDb();
     const clients = await admin.select().from(salesOpsClients).where(eq(salesOpsClients.orgId, orgId));
     expect(clients.map((c) => c.id)).toEqual([existing.id]);
-    const leads = await admin.select().from(salesOpsLeads).where(eq(salesOpsLeads.orgId, orgId));
+    const leads = await admin.select().from(salesOpsCrmLeads).where(eq(salesOpsCrmLeads.orgId, orgId));
     expect(leads.map((l) => l.clientId)).toEqual([existing.id]);
   });
 

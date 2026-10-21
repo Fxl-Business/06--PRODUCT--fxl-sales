@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { CreateLeadSchema } from '../../sales-ops/leads/lead-schemas.js';
+import { LeadWriteBaseSchema } from '../../sales-ops/leads/lead-schemas.js';
 import { planLeads } from '../plan/leads.js';
 import { buildRefIndex } from '../refs.js';
 import type { CellValue, ImportCatalog, ImportIssue, ImportOperation, SheetKey } from '../types.js';
@@ -274,7 +274,7 @@ describe('planLeads', () => {
     expect(none.counts).toEqual({});
   });
 
-  it('every emitted input passes CreateLeadSchema once refs are replaced by uuids', () => {
+  it('every emitted input passes LeadWriteBaseSchema once refs are replaced by uuids', () => {
     const r = plan({
       pessoas: [{ nome: 'Duda Nova', funcoes: ['Vendedor'] }],
       clientes: [{ nome: 'Mercado Novo' }],
@@ -290,7 +290,7 @@ describe('planLeads', () => {
     for (const op of r.operations) {
       const o = leadOp([op]);
       expect(() =>
-        CreateLeadSchema.parse({
+        LeadWriteBaseSchema.parse({
           ...o.input,
           clientId: o.clientRef ? uuid : null,
           sellerPersonId: o.sellerRef ? uuid : null,
@@ -325,7 +325,7 @@ describe('planLeads', () => {
     }
   });
 
-  it('runs the CreateLeadSchema backstop and maps to headers', () => {
+  it('runs the LeadWriteBaseSchema backstop and maps to headers', () => {
     const r = plan({ leads: [lead({ descricao: 'd'.repeat(4001) })] });
     expect(r.issues.map((i) => [i.code, i.column])).toEqual([['invalid_value', 'Descrição']]);
     expect(r.operations).toEqual([]);

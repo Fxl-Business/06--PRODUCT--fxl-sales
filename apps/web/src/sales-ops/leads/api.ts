@@ -31,58 +31,22 @@ type Token = string;
 export const LEADS_PATH = '/api/v1/sales-ops/leads';
 export const LEAD_STAGES_PATH = '/api/v1/sales-ops/lead-stages';
 
-/**
- * RECONCILED against the shipped `LeadProductSchema`: the wire takes
- * `{productId?, productName?}` on WRITE (at least one of the two), while it
- * READS back `{productId, productNameSnapshot}`. The write shape is the one
- * modelled here, because this is the write payload.
- */
-export type SaveLeadProductPayload = { productId?: string; productName?: string };
-
-/**
- * RECONCILED against the shipped `CreateLeadSchema` / `UpdateLeadSchema`, which
- * are both `.strict()`:
- *  - there is NO `stageId`: a new lead always lands in the first active
- *    `kind = 'normal'` stage by position, so a card born converted or lost is not
- *    expressible rather than merely rejected;
- *  - the empresa field is `clientName` (free text, REQUIRED, min 1) and not the
- *    plan's `companyName`. It maps to the NOT NULL `client_name_snapshot`, and it
- *    loses to the cadastro row whenever `clientId` resolves.
- */
-export type SaveLeadPayload = {
+export type LeadFieldWriteValue = string | number | null | Array<{ id: string | null; name: string }>;
+export type LeadFieldWrite = { fieldId: string; value: LeadFieldWriteValue };
+/** THE single lead write body of the phase 2 API (LeadWriteSchema). */
+export type LeadWritePayload = {
   id?: string;
   contactName: string;
-  clientId?: string | null;
-  clientName: string;
-  estimatedValueBrl?: number;
-  description?: string | null;
+  /** Absent (not null) when an edit leaves a contact-less lead contact-less: the API keeps the stored value. */
+  contactPhone?: string | null;
+  contactEmail?: string | null;
+  clientId: string | null;
+  clientName: string | null;
+  estimatedValueBrl: number;
   sellerPersonId?: string | null;
-  products?: SaveLeadProductPayload[];
+  pipelineId?: string;
+  fields: LeadFieldWrite[];
 };
-
-/**
- * The leads-edition write body, mirroring `ContactLeadFieldsSchema` key for key.
- * Every optional key is always SENT (null when empty) so a PATCH can clear it,
- * except `sellerPersonId`, which is OMITTED when the viewer is not offered the
- * vendedor picker: the API then defaults a create to the caller's own pessoa and
- * an edit leaves the stored vendedor untouched (D-07.1a/b).
- * The leads edition DOES carry an empresa (`clientId` links a cadastro row, else
- * the free-text `clientName` snapshot) and a `estimatedValueBrl` (integer cents).
- * There are still no produtos in this edition.
- */
-export type ContactLeadPayload = {
-  contactName: string;
-  contactPhone: string | null;
-  contactEmail: string | null;
-  contactBirthDate: string | null;
-  description: string | null;
-  sellerPersonId?: string | null;
-  clientId?: string | null;
-  clientName?: string | null;
-  estimatedValueBrl?: number;
-};
-
-export type SaveContactLeadPayload = ContactLeadPayload & { id?: string };
 
 /**
  * `toIndex` is the destination index INSIDE the destination column, 0-based, as
@@ -127,6 +91,11 @@ export type ListLeadsParams = {
   stageId: string;
   cursor?: string | null;
   sellerPersonId?: string;
+  /** The pipeline whose stages the columns are; the API defaults to the org's default one. */
+  pipelineId?: string;
+  /** Inclusive Sao Paulo civil days, forwarded only when set. */
+  from?: string;
+  to?: string;
   limit?: number;
 };
 
@@ -140,6 +109,9 @@ function listLeadsQuery(params: ListLeadsParams): string {
   search.set('limit', String(params.limit ?? LEADS_PAGE_SIZE));
   if (params.cursor) search.set('cursor', params.cursor);
   if (params.sellerPersonId) search.set('sellerPersonId', params.sellerPersonId);
+  if (params.pipelineId) search.set('pipelineId', params.pipelineId);
+  if (params.from) search.set('from', params.from);
+  if (params.to) search.set('to', params.to);
   return search.toString();
 }
 
@@ -159,6 +131,9 @@ export const leadsApi = {
   stageSummary: (filters: LeadBoardFilters, token: Token) => {
     const search = new URLSearchParams();
     if (filters?.sellerPersonId) search.set('sellerPersonId', filters.sellerPersonId);
+    if (filters?.pipelineId) search.set('pipelineId', filters.pipelineId);
+    if (filters?.from) search.set('from', filters.from);
+    if (filters?.to) search.set('to', filters.to);
     const query = search.toString();
     return apiFetch<LeadStageSummary>(`${LEADS_PATH}/summary${query ? `?${query}` : ''}`, {
       method: 'GET',
@@ -166,7 +141,7 @@ export const leadsApi = {
     });
   },
 
-  saveLead: ({ id, ...body }: SaveLeadPayload | SaveContactLeadPayload, token: Token) =>
+  saveLead: ({ id, ...body }: LeadWritePayload, token: Token) =>
     apiFetch<LeadResponse>(id ? `${LEADS_PATH}/${id}` : LEADS_PATH, {
       method: id ? 'PATCH' : 'POST',
       token,

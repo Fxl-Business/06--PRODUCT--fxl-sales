@@ -6,6 +6,7 @@ import * as schema from '../../src/db/schema.js';
 import { ensureLeadStagesForOrg } from '../../src/domains/sales-ops/leads/stages-seed.js';
 import { firstRow } from './first-row.js';
 import { testDatabaseUrls } from '../../src/db/__tests__/test-database-urls.js';
+import { deleteCrmForOrgs } from '../../src/db/__tests__/settlement-test-cleanup.js';
 
 /**
  * Slice 01 ships exactly ONE service function for the leads domain,
@@ -61,7 +62,7 @@ describe('sales operations leads persistence and RLS', () => {
 
   function stageCount(orgId: string) {
     return adminClient<{ count: string }[]>`
-      SELECT count(*)::text AS count FROM sales_ops_lead_stages WHERE org_id = ${orgId}
+      SELECT count(*)::text AS count FROM sales_ops_pipeline_stages WHERE org_id = ${orgId}
     `;
   }
 
@@ -104,12 +105,17 @@ describe('sales operations leads persistence and RLS', () => {
     return row.id;
   }
 
-  async function insertStage(orgId: string, name: string): Promise<string> {
+  /** A bare default pipeline and one normal stage of it; returns both ids. */
+  async function insertStage(orgId: string, name: string): Promise<{ id: string; pipelineId: string }> {
+    const pipeline = firstRow(await adminClient<{ id: string }[]>`
+      INSERT INTO sales_ops_pipelines (org_id, name, system_key, is_default)
+      VALUES (${orgId}, 'Funil CRM padrão', 'crm-padrao', true) RETURNING id
+    `, 'pipeline');
     const row = firstRow(await adminClient<{ id: string }[]>`
-      INSERT INTO sales_ops_lead_stages (org_id, name, kind, is_system, "position")
-      VALUES (${orgId}, ${name}, 'normal', false, 1) RETURNING id
+      INSERT INTO sales_ops_pipeline_stages (org_id, pipeline_id, name, type, "position")
+      VALUES (${orgId}, ${pipeline.id}, ${name}, 'normal', 1) RETURNING id
     `, 'row');
-    return row.id;
+    return { id: row.id, pipelineId: pipeline.id };
   }
 
   beforeAll(() => {
@@ -123,9 +129,7 @@ describe('sales operations leads persistence and RLS', () => {
   afterAll(async () => {
     for (const orgId of orgIds) {
       // Children first, or the restrict FKs reject the delete.
-      await adminClient`DELETE FROM sales_ops_lead_products WHERE org_id = ${orgId}`;
-      await adminClient`DELETE FROM sales_ops_leads WHERE org_id = ${orgId}`;
-      await adminClient`DELETE FROM sales_ops_lead_stages WHERE org_id = ${orgId}`;
+      await deleteCrmForOrgs([orgId]);
       await adminClient`DELETE FROM sales_ops_sales WHERE org_id = ${orgId}`;
       await adminClient`DELETE FROM sales_ops_products WHERE org_id = ${orgId}`;
       await adminClient`DELETE FROM sales_ops_clients WHERE org_id = ${orgId}`;
@@ -140,18 +144,30 @@ describe('sales operations leads persistence and RLS', () => {
     const [orgA] = newOrgPair('seed');
 
     const first = await ensureLeadStagesForOrg(db, orgA);
+    // The default CRM pipeline (7 stages); `kind` and `isSystem` are the derived legacy projection.
     expect(first.map((stage) => stage.name)).toEqual([
       'Novo',
+      'Qualificação',
       'Em negociação',
       'Proposta',
+      'Ganho',
       'Perdido',
+      'Pausado',
     ]);
-    expect(first.map((stage) => stage.kind)).toEqual(['normal', 'normal', 'conversion', 'lost']);
-    expect(first.map((stage) => stage.isSystem)).toEqual([false, false, true, true]);
+    expect(first.map((stage) => stage.kind)).toEqual([
+      'normal',
+      'normal',
+      'normal',
+      'conversion',
+      'normal',
+      'lost',
+      'normal',
+    ]);
+    expect(first.map((stage) => stage.isSystem)).toEqual([false, false, false, true, false, true, false]);
 
     const second = await ensureLeadStagesForOrg(db, orgA);
     expect(second.map((stage) => stage.id)).toEqual(first.map((stage) => stage.id));
-    expect(firstRow(await stageCount(orgA), 'the count').count).toBe('4');
+    expect(firstRow(await stageCount(orgA), 'the count').count).toBe('7');
   });
 
   it('ensureLeadStagesForOrg never re-inserts a stage the org has renamed or archived', async () => {
@@ -162,19 +178,19 @@ describe('sales operations leads persistence and RLS', () => {
     expect(novo).toBeDefined();
 
     await adminClient`
-      UPDATE sales_ops_lead_stages
+      UPDATE sales_ops_pipeline_stages
       SET name = 'Prospecção', status = 'archived', archived_at = now()
       WHERE id = ${novo!.id}
     `;
 
     const again = await ensureLeadStagesForOrg(db, orgA);
-    expect(again).toHaveLength(4);
+    expect(again).toHaveLength(7);
     expect(again.some((stage) => stage.name === 'Novo')).toBe(false);
     expect(again.some((stage) => stage.name === 'Prospecção')).toBe(true);
-    expect(firstRow(await stageCount(orgA), 'the count').count).toBe('4');
+    expect(firstRow(await stageCount(orgA), 'the count').count).toBe('7');
   });
 
-  it('two concurrent first calls for the same org still leave exactly four stages', async () => {
+  it('two concurrent first calls for the same org still leave exactly seven stages', async () => {
     const [orgA] = newOrgPair('race');
 
     const [left, right] = await Promise.all([
@@ -182,12 +198,12 @@ describe('sales operations leads persistence and RLS', () => {
       ensureLeadStagesForOrg(db, orgA),
     ]);
 
-    expect(left).toHaveLength(4);
-    expect(right).toHaveLength(4);
+    expect(left).toHaveLength(7);
+    expect(right).toHaveLength(7);
     expect(new Set(left.map((stage) => stage.id))).toEqual(
       new Set(right.map((stage) => stage.id)),
     );
-    expect(firstRow(await stageCount(orgA), 'the count').count).toBe('4');
+    expect(firstRow(await stageCount(orgA), 'the count').count).toBe('7');
   });
 
   it('scopes the stage read by orgId even when RLS is not doing the scoping', async () => {
@@ -196,13 +212,13 @@ describe('sales operations leads persistence and RLS', () => {
     const stagesA = await ensureLeadStagesForOrg(adminDb, orgA);
     const stagesB = await ensureLeadStagesForOrg(adminDb, orgB);
 
-    expect(stagesA).toHaveLength(4);
-    expect(stagesB).toHaveLength(4);
+    expect(stagesA).toHaveLength(7);
+    expect(stagesB).toHaveLength(7);
     expect(stagesA.every((stage) => stage.orgId === orgA)).toBe(true);
     expect(stagesB.every((stage) => stage.orgId === orgB)).toBe(true);
   });
 
-  it('raw RLS blocks cross-org reads of lead stages, leads and lead products and WITH CHECK blocks smuggled inserts', async () => {
+  it('raw RLS blocks cross-org reads of pipeline stages, leads and lead field values and WITH CHECK blocks smuggled inserts', async () => {
     // The migrate/admin connection is a cluster superuser and therefore always
     // bypasses row security, FORCE ROW LEVEL SECURITY included. To prove the
     // policies themselves are correct (not just the service layer's explicit
@@ -215,7 +231,7 @@ describe('sales operations leads persistence and RLS', () => {
     );
     await adminClient.unsafe(`GRANT USAGE ON SCHEMA public TO ${roleName}`);
     await adminClient.unsafe(
-      `GRANT SELECT, INSERT, UPDATE, DELETE ON sales_ops_lead_stages, sales_ops_leads, sales_ops_lead_products TO ${roleName}`,
+      `GRANT SELECT, INSERT, UPDATE, DELETE ON sales_ops_pipelines, sales_ops_pipeline_stages, sales_ops_crm_leads, sales_ops_field_definitions, sales_ops_crm_lead_field_values TO ${roleName}`,
     );
 
     const roleClient = postgres(withRole(APP_DB_URL, roleName, rolePassword), { max: 1 });
@@ -225,19 +241,29 @@ describe('sales operations leads persistence and RLS', () => {
 
       const { stageId, leadId, leadProductId } = await roleClient.begin(async (tx) => {
         await tx`SELECT set_config('app.current_org_id', ${ORG_A}, true)`;
+        const [pipeline] = await tx`
+          INSERT INTO sales_ops_pipelines (org_id, name, system_key, is_default)
+          VALUES (${ORG_A}, 'Funil CRM padrão', 'crm-padrao', true) RETURNING id
+        `;
+        const pipelineId = (pipeline as { id: string }).id;
         const [stage] = await tx`
-          INSERT INTO sales_ops_lead_stages (org_id, name, kind, is_system, "position")
-          VALUES (${ORG_A}, 'RLS Probe Etapa', 'normal', false, 1) RETURNING id
+          INSERT INTO sales_ops_pipeline_stages (org_id, pipeline_id, name, type, "position")
+          VALUES (${ORG_A}, ${pipelineId}, 'RLS Probe Etapa', 'normal', 1) RETURNING id
         `;
         const [lead] = await tx`
-          INSERT INTO sales_ops_leads (
-            org_id, contact_name, client_name_snapshot, stage_id
-          ) VALUES (${ORG_A}, 'RLS Probe Lead', 'Empresa', ${(stage as { id: string }).id})
+          INSERT INTO sales_ops_crm_leads (
+            org_id, contact_name, client_name_snapshot, pipeline_id, stage_id
+          ) VALUES (${ORG_A}, 'RLS Probe Lead', 'Empresa', ${pipelineId}, ${(stage as { id: string }).id})
           RETURNING id
         `;
+        const [field] = await tx`
+          INSERT INTO sales_ops_field_definitions (org_id, key, label, kind, reference_target, multiple)
+          VALUES (${ORG_A}, 'produtos', 'Produtos', 'reference', 'produto', true) RETURNING id
+        `;
         const [leadProduct] = await tx`
-          INSERT INTO sales_ops_lead_products (org_id, lead_id, product_name_snapshot)
-          VALUES (${ORG_A}, ${(lead as { id: string }).id}, 'Produto livre') RETURNING id
+          INSERT INTO sales_ops_crm_lead_field_values (org_id, lead_id, field_id, position, value_text, ref_name_snapshot)
+          VALUES (${ORG_A}, ${(lead as { id: string }).id}, ${(field as { id: string }).id}, 0, 'Produto livre', 'Produto livre')
+          RETURNING id
         `;
         return {
           stageId: (stage as { id: string }).id,
@@ -250,9 +276,9 @@ describe('sales operations leads persistence and RLS', () => {
       const own = await roleClient.begin(async (tx) => {
         await tx`SELECT set_config('app.current_org_id', ${ORG_A}, true)`;
         return [
-          await tx`SELECT id FROM sales_ops_lead_stages WHERE id = ${stageId}`,
-          await tx`SELECT id FROM sales_ops_leads WHERE id = ${leadId}`,
-          await tx`SELECT id FROM sales_ops_lead_products WHERE id = ${leadProductId}`,
+          await tx`SELECT id FROM sales_ops_pipeline_stages WHERE id = ${stageId}`,
+          await tx`SELECT id FROM sales_ops_crm_leads WHERE id = ${leadId}`,
+          await tx`SELECT id FROM sales_ops_crm_lead_field_values WHERE id = ${leadProductId}`,
         ];
       });
       expect(own[0]).toHaveLength(1);
@@ -263,9 +289,9 @@ describe('sales operations leads persistence and RLS', () => {
       const other = await roleClient.begin(async (tx) => {
         await tx`SELECT set_config('app.current_org_id', ${ORG_B}, true)`;
         return [
-          await tx`SELECT id FROM sales_ops_lead_stages WHERE id = ${stageId}`,
-          await tx`SELECT id FROM sales_ops_leads WHERE id = ${leadId}`,
-          await tx`SELECT id FROM sales_ops_lead_products WHERE id = ${leadProductId}`,
+          await tx`SELECT id FROM sales_ops_pipeline_stages WHERE id = ${stageId}`,
+          await tx`SELECT id FROM sales_ops_crm_leads WHERE id = ${leadId}`,
+          await tx`SELECT id FROM sales_ops_crm_lead_field_values WHERE id = ${leadProductId}`,
         ];
       });
       expect(other[0]).toHaveLength(0);
@@ -277,8 +303,8 @@ describe('sales operations leads persistence and RLS', () => {
         roleClient.begin(async (tx) => {
           await tx`SELECT set_config('app.current_org_id', ${ORG_A}, true)`;
           return tx`
-            INSERT INTO sales_ops_lead_stages (org_id, name, kind, is_system, "position")
-            VALUES (${ORG_B}, 'Etapa contrabandeada', 'normal', false, 1) RETURNING id
+            INSERT INTO sales_ops_pipeline_stages (org_id, pipeline_id, name, type, "position")
+            VALUES (${ORG_B}, (SELECT pipeline_id FROM sales_ops_pipeline_stages WHERE id = ${stageId}), 'Etapa contrabandeada', 'normal', 1) RETURNING id
           `;
         }),
       ).rejects.toThrow();
@@ -287,8 +313,9 @@ describe('sales operations leads persistence and RLS', () => {
         roleClient.begin(async (tx) => {
           await tx`SELECT set_config('app.current_org_id', ${ORG_A}, true)`;
           return tx`
-            INSERT INTO sales_ops_leads (org_id, contact_name, client_name_snapshot, stage_id)
-            VALUES (${ORG_B}, 'Lead contrabandeado', 'Empresa', ${stageId}) RETURNING id
+            INSERT INTO sales_ops_crm_leads (org_id, contact_name, client_name_snapshot, pipeline_id, stage_id)
+            VALUES (${ORG_B}, 'Lead contrabandeado', 'Empresa',
+              (SELECT pipeline_id FROM sales_ops_pipeline_stages WHERE id = ${stageId}), ${stageId}) RETURNING id
           `;
         }),
       ).rejects.toThrow();
@@ -296,7 +323,7 @@ describe('sales operations leads persistence and RLS', () => {
       // With no org context set at all, nothing is readable.
       const noContext = await roleClient.begin(async (tx) => {
         await tx`SELECT set_config('app.current_org_id', '', true)`;
-        return tx`SELECT id FROM sales_ops_leads WHERE id = ${leadId}`;
+        return tx`SELECT id FROM sales_ops_crm_leads WHERE id = ${leadId}`;
       });
       expect(noContext).toHaveLength(0);
     } finally {
@@ -318,49 +345,54 @@ describe('sales operations leads persistence and RLS', () => {
 
     const insertLeadIn = (
       orgId: string,
-      stageId: string,
+      stage: { id: string; pipelineId: string },
       extra: { clientId?: string; sellerPersonId?: string; saleId?: string } = {},
     ) => adminClient<{ id: string }[]>`
-      INSERT INTO sales_ops_leads (
+      INSERT INTO sales_ops_crm_leads (
         org_id, contact_name, client_id, client_name_snapshot,
-        seller_person_id, stage_id, sale_id
+        seller_person_id, pipeline_id, stage_id, sale_id
       ) VALUES (
         ${orgId}, 'Contato', ${extra.clientId ?? null}, 'Empresa',
-        ${extra.sellerPersonId ?? null}, ${stageId}, ${extra.saleId ?? null}
+        ${extra.sellerPersonId ?? null}, ${stage.pipelineId}, ${stage.id}, ${extra.saleId ?? null}
       ) RETURNING id
     `;
 
-    await expect(insertLeadIn(orgA, stageB)).rejects.toThrow(/sales_ops_leads_org_stage_fk/);
+    await expect(insertLeadIn(orgA, stageB)).rejects.toThrow(/sales_ops_crm_leads_org_pipeline_fk|sales_ops_crm_leads_org_stage_fk/);
     await expect(insertLeadIn(orgA, stageA, { clientId: clientB })).rejects.toThrow(
-      /sales_ops_leads_org_client_fk/,
+      /sales_ops_crm_leads_org_client_fk/,
     );
     await expect(insertLeadIn(orgA, stageA, { sellerPersonId: personB })).rejects.toThrow(
-      /sales_ops_leads_org_seller_fk/,
+      /sales_ops_crm_leads_org_seller_fk/,
     );
     await expect(insertLeadIn(orgA, stageA, { saleId: saleB })).rejects.toThrow(
-      /sales_ops_leads_org_sale_fk/,
+      /sales_ops_crm_leads_org_sale_fk/,
     );
 
     // Positive control: the same shape, all in org A, lands.
     const leadA = firstRow(await insertLeadIn(orgA, stageA), 'leadA');
     expect(leadA.id).toEqual(expect.any(String));
 
+    // Field values: the product reference and the lead reference are composite and org-scoped too.
+    const produtos = firstRow(await adminClient<{ id: string }[]>`
+      INSERT INTO sales_ops_field_definitions (org_id, key, label, kind, reference_target, multiple)
+      VALUES (${orgA}, 'produtos', 'Produtos', 'reference', 'produto', true) RETURNING id
+    `, 'produtos');
     await expect(adminClient`
-      INSERT INTO sales_ops_lead_products (org_id, lead_id, product_id, product_name_snapshot)
-      VALUES (${orgA}, ${leadA.id}, ${productB}, 'Produto B')
-    `).rejects.toThrow(/sales_ops_lead_products_org_product_fk/);
+      INSERT INTO sales_ops_crm_lead_field_values (org_id, lead_id, field_id, position, value_product_id, ref_name_snapshot)
+      VALUES (${orgA}, ${leadA.id}, ${produtos.id}, 0, ${productB}, 'Produto B')
+    `).rejects.toThrow(/sales_ops_crm_lead_field_values_org_product_fk/);
 
     const leadB = firstRow(await insertLeadIn(orgB, stageB), 'leadB');
     await expect(adminClient`
-      INSERT INTO sales_ops_lead_products (org_id, lead_id, product_name_snapshot)
-      VALUES (${orgA}, ${leadB.id}, 'Produto livre')
-    `).rejects.toThrow(/sales_ops_lead_products_org_lead_fk/);
+      INSERT INTO sales_ops_crm_lead_field_values (org_id, lead_id, field_id, position, value_text)
+      VALUES (${orgA}, ${leadB.id}, ${produtos.id}, 0, 'Produto livre')
+    `).rejects.toThrow(/sales_ops_crm_lead_field_values_org_lead_fk/);
 
     // Positive control: a same-org produto row lands.
     const productA = await insertProduct(orgA, 'Produto A');
     await expect(adminClient`
-      INSERT INTO sales_ops_lead_products (org_id, lead_id, product_id, product_name_snapshot)
-      VALUES (${orgA}, ${leadA.id}, ${productA}, 'Produto A')
+      INSERT INTO sales_ops_crm_lead_field_values (org_id, lead_id, field_id, position, value_product_id, ref_name_snapshot)
+      VALUES (${orgA}, ${leadA.id}, ${produtos.id}, 0, ${productA}, 'Produto A')
     `).resolves.toBeDefined();
   });
 });

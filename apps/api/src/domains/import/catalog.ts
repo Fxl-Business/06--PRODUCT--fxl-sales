@@ -8,13 +8,14 @@ import {
   salesOpsAreas,
   salesOpsClients,
   salesOpsFuncoes,
-  salesOpsLeadStages,
   salesOpsPeople,
   salesOpsPersonFuncoes,
   salesOpsProductFuncaoCosts,
   salesOpsProducts,
   salesOpsSettings,
 } from '../../db/schema.js';
+import { defaultPipelineId, listPipelineStages } from '../crm/pipeline-read.js';
+import { legacyStageKind } from '../crm/stage-view.js';
 import { isProducerFlowLive } from '../integration/producer-gate.js';
 import {
   ProductEntradaModeSchema,
@@ -166,21 +167,18 @@ export async function readImportCatalog(tx: Db, orgId: string, now: Date): Promi
     .where(eq(salesOpsClients.orgId, orgId))
     .orderBy(asc(salesOpsClients.name));
 
-  const stageRows = await tx
-    .select({
-      id: salesOpsLeadStages.id,
-      name: salesOpsLeadStages.name,
-      kind: salesOpsLeadStages.kind,
-      status: salesOpsLeadStages.status,
-      position: salesOpsLeadStages.position,
-    })
-    .from(salesOpsLeadStages)
-    .where(eq(salesOpsLeadStages.orgId, orgId))
-    .orderBy(asc(salesOpsLeadStages.position), asc(salesOpsLeadStages.name));
-  const stages: ImportCatalog['stages'] = stageRows.map((row) => ({
-    ...row,
-    kind: row.kind === 'conversion' || row.kind === 'lost' ? row.kind : 'normal',
-  }));
+  // The stages of the org's DEFAULT pipeline, in the legacy kind vocabulary the planner speaks
+  // (orcamento -> conversion, exit perdido -> lost). Read only: the import routes seed first.
+  const pipelineId = await defaultPipelineId(tx, orgId);
+  const stages: ImportCatalog['stages'] = (pipelineId === null ? [] : await listPipelineStages(tx, orgId, pipelineId)).map(
+    (row) => ({
+      id: row.id,
+      name: row.name,
+      kind: legacyStageKind(row),
+      status: row.status,
+      position: row.position,
+    }),
+  );
 
   const [settingsRow] = await tx
     .select({

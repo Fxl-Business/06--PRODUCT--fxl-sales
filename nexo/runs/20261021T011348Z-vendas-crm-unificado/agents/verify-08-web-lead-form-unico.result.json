@@ -1,0 +1,1 @@
+{"agent":"verify","slice":"08-web-lead-form-unico","status":"FAIL","report":"nexo/runs/20261021T011348Z-vendas-crm-unificado/agents/verify-08-web-lead-form-unico.md","summary":"oracle 24/24 · suite 1807/1807 · lint 0 · type-check 0 · 1 major (dropped birthday-future rule and vendedor Escape coverage)","done":true,"ts":"2026-10-21T08:54:11Z"}

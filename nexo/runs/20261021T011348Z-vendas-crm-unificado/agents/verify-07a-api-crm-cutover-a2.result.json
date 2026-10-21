@@ -1,0 +1,1 @@
+{"agent":"verify","slice":"07a-api-crm-cutover","status":"PASS","report":"nexo/runs/20261021T011348Z-vendas-crm-unificado/agents/verify-07a-api-crm-cutover-a2.md","summary":"integration 509/509 · unit 1555/1555 · both orders green · lint 0 · type-check 0","done":true,"ts":"2026-10-21T08:30:00Z"}

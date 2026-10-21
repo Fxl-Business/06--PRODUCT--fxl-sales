@@ -1,0 +1,1879 @@
+OpenAI Codex v0.161.0
+--------
+workdir: /Users/cauetpinciara/Documents/fxl/projects/06--PRODUCT--fxl-sales/.worktrees/20261021T011348Z-vendas-crm-unificado/run
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: high
+reasoning summaries: none
+session id: 01a15dd8-329f-7780-bb4e-e6fda806234c
+--------
+user
+# Reviewer agent
+
+## Objective
+
+Review the Builder's diff, run the named commands, and return structured findings.
+
+## Inputs
+
+The diff, the acceptance criteria, the test and command output, and the previous round's findings (empty in round 1).
+
+## Output
+
+Findings JSON validated against [`../agents-findings.schema.json`](../agents-findings.schema.json): `{verdict, round, findings[], checks[]}`. `verdict` is `APPROVED` or `CHANGES_REQUESTED`. Each finding `kind` is `objective` (proven by a command) or `judgment` (a design opinion). A response that does not validate counts as a failed round, repeated once, then plano B.
+On codex you answer the schema's strict variant, where an optional key such as `line` or `suggestion` is present and may be null.
+
+## Writing area (D8)
+
+You are given `FXL_SCRATCH`, a folder inside this run's scratchpad.
+Your sandbox is read-only, so you write no file at all, not even inside `$FXL_SCRATCH`, which only holds inputs this run prepared, such as the diff under review.
+Never redirect a command's output to a file: not to `$FXL_SCRATCH`, NEVER to `/tmp` and NEVER to the repository root; a read-only Reviewer reads command output directly.
+Writing anywhere is a slice failure.
+This rule reproduces the 2026-09-26 incident's fix: an agent that wrote `pnpm -r test > /tmp_pnpm_r_test_check.log` and then blocked 53 h waiting for an approval nobody saw.
+
+Sandbox: `read-only`.
+You never edit code.
+Being read-only, you cannot write even in `$FXL_SCRATCH`: read every command's output directly, and use the oracle and lint output the orchestrator already put in your prompt instead of re-running them.
+
+## No approval, ever (D7)
+
+You run non-interactively. You may never open a host approval prompt. An action that would require approval must fail immediately with a named error, never wait. Codex: approval `never` and an explicit sandbox. Claude: an explicit permission mode and an explicit tool list. If a slice genuinely needs an approval-gated action, park the slice - do not start a prompt that leaves the run idle.
+
+## Resumable rounds
+
+Across rounds you resume the SAME session.
+Driven by the skill scripts, the flow runs `nexo-agent.py run reviewer --resume`, which resumes your recorded session on the same CLI: `codex exec resume` on codex, `claude --resume` on claude-code.
+The session id comes from `agents.jsonl` and never crosses CLIs.
+Driven by the Harness, it is the peer-link delegate session.
+maxRounds is 3.
+After 3, H1 applies and the flow arbitrates.
+
+## Cross-check (D6)
+
+You use a different CLI than the Builder. Default per H7 (codex, inherit, high); plano B claude-code, claude-sonnet-5-5.
+
+## This review
+You are the Nexo REVIEWER (code review of one wave) for run 20261021T011348Z-vendas-crm-unificado of the FXL Vendas repo, round 2.
+Repository (read-only, current directory): the run worktree, HEAD is the integrated wave. Review the diff `git diff c15a0ca...HEAD -- . ':(exclude)nexo/runs'` (also saved at /private/tmp/claude-501/-Users-cauetpinciara-Documents-fxl-projects-06--PRODUCT--fxl-sales/7547107c-ada5-4f38-b18a-0e0045525fad/scratchpad/review/phase2-r2/diff.patch,    30173 lines).
+Binding owner request: /Users/cauetpinciara/Documents/fxl/projects/06--PRODUCT--fxl-sales/.nexo/tmp/vendas-crm-prompt-v1.md. Repo rules: CLAUDE.md. Slice plans: nexo/plans/vendas-crm-unificado/.
+Look for: correctness bugs, security (tenant isolation by org_id, RLS, trusting ids from bodies, secrets), destructive SQL or data loss, renamed technical ids (fxl-sales, @fxl-sales/*, SALES_*, sales_ops_*, fxl-sales.* events and storage keys, domains), tests that are vacuous or weakened, violations of CLAUDE.md rules, concurrency issues, and acceptance criteria not met.
+A finding is blocker or major only when it would ship a real defect or break a stated rule; style preferences are minor or nit. Use verdict CHANGES_REQUESTED only when at least one blocker or major finding exists.
+Do not re-run the full test suites; the orchestrator already ran them (results below). You may run quick read-only commands (grep, git show, cat, small node -e checks) and read output directly; never redirect output to a file.
+
+## Acceptance and gate results
+Phase 2 (waves 6-10) = slices 07a-api-crm-cutover (parts 07a1-07a3), 07b-api-pipeline-historico-followups, 08-web-lead-form-unico (08a-08e), 09-web-lead-resumo (09a-09e), 10-web-kanban-funil-periodo (10a-10b). Plans with binding addenda in nexo/plans/vendas-crm-unificado/ (parts/ for parts), contracts in contracts/SEAM-CONTRACT.md and contracts/SEAM-CONTRACT-PHASE2.md. Base = local master after phase 1 (c15a0ca).
+Request ACs (section 2 items 3,4,5,7,8 and section 4 Fase 2): one lead create/edit component (inline empresa creation by typing, prefill contacts and responsavel when choosing the empresa, dynamic fields by type), lead summary page (current stage, history with notes, Avancar listing only valid transitions, next step + date as follow-up, follow-ups list mine/team with period filter), stage history written by the server; Kanban is a view of the selected pipeline; Proposta x Vendido by stage type; period filter on every list and the Kanban (America/Sao_Paulo); each Propostas submenu item its own route. AC: invalid transition 4xx; advancing writes a history event server-side; follow-up requires a date; Cliente not removable; period filters correct in Sao Paulo; clicking the card opens the summary, not the form. The API cutover moves every lead/etapa read and write to the new sales_ops_crm_* tables (0031 resync of rows written to the old tables after 0030); old tables stay byte-intact.
+Separate Sonnet Verify (Gate 2), all PASS after fix rounds: 07a integration 509/509 (attempt 1 failed on an audit_log leak, fixed); 07b oracle 18/18, integration 527/527 (attempt 1 failed: lock-order case did not bite, fixed, inversion now red 3/3); 08 web 1812/1812 (attempt 1 failed on lost coverage: future-birthday rule, picker Escape; fixed); 09 web 1880/1880 (attempt 1 failed: Avancar picker Escape untested, stale-undo unasserted, docs stale; fixed); 10 web 1923/1923, build and bundle-clean ok.
+Known, documented gaps (not regressions): clientes have no responsible seller, so the empresa prefill fills only the contact (pending owner decision); delete from the lead summary shows no undo notice (restorable in Leads excluidos); Comissoes/Clientes/Leads excluidos lists have no period filter yet; the drag-drop 409 notice is not unit-tested (dnd-kit in happy-dom).
+
+## Previous round findings and builder answers
+Round 1: CHANGES_REQUESTED, R1-01..R1-05 (all major).
+Builder answers (fix slice 10.1-fase2-review-fixes, merged on the run branch; separate Sonnet Verify PASS: oracle 22/22, API integration 531/531, web leads 512/512, reverting each fix alone turns exactly its own new test red):
+- R1-01 corrigido: defaultPipelineId orders desc(isDefault) first; test with a second active non-default pipeline sorting first.
+- R1-02 corrigido: restoring an archived stage with no edges in either direction inserts its default edges (planPipelineTransitions rule restricted to it); a shaped graph is left alone (regression test).
+- R1-03 corrigido: leadToWriteSeed omits both contact keys when the lead has none; summary undo test asserts the inverse PATCH body and the API rule.
+- R1-04 corrigido: markFollowupDone admits the follow-up's own owner pessoa in addition to the lead seller scope; a third seller still gets 404; org filter unchanged.
+- R1-05 corrigido: moveWithUndo publishes Desfazer only when isTransitionAllowed(pipeline, to, from); a move to Perdido offers no undo.
+Docs: CLAUDE.md CRM unificado and kanban-de-leads.md record the rules. Re-evaluate the whole phase 2 diff (base c15a0ca).
+
+2026-10-21T09:57:38.433889Z ERROR rmcp::transport::worker: worker quit with fatal: Transport channel closed, when AuthRequired(AuthRequiredError { www_authenticate_header: "Bearer error=\"invalid_token\", error_description=\"Token is not authorized\", resource_metadata=\"https://api.githubcopilot.com/.well-known/oauth-protected-resource/mcp/\"" })
+hook: SessionStart
+hook: SessionStart Completed
+hook: UserPromptSubmit
+hook: UserPromptSubmit Completed
+codex
+Vou conferir as cinco correções e reavaliar os caminhos afetados no diff completo da fase 2, mantendo a revisão somente leitura e usando os resultados de testes fornecidos.
+
+hook: PreToolUse
+hook: PreToolUse
+hook: PreToolUse
+hook: PreToolUse
+hook: PreToolUse Completed
+hook: PreToolUse Completed
+hook: PreToolUse Completed
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc 'git log -8 --oneline' in /Users/cauetpinciara/Documents/fxl/projects/06--PRODUCT--fxl-sales/.worktrees/20261021T011348Z-vendas-crm-unificado/run
+exec
+/bin/zsh -lc 'git diff 4dfe1f5..HEAD -- apps/api/src apps/web/src CLAUDE.md' in /Users/cauetpinciara/Documents/fxl/projects/06--PRODUCT--fxl-sales/.worktrees/20261021T011348Z-vendas-crm-unificado/run
+ succeeded in 0ms:
+5eb5b82 docs: record the phase 2 review fix rules
+aab0df2 Merge branch 'feat/6q75vnog-10.1-fase2-review-fixes' into nexo/20261021T011348Z-vendas-crm-unificado
+9ec8fdd docs(nexo): run records
+a0f3f22 fix(web): offer undo only for reversible moves
+74b9f35 fix(web): keep a contactless lead's undo without contact keys
+890ac5c fix(crm): let the follow-up owner complete their task
+22c8ea0 fix(crm): give a restored disconnected stage its edges
+d8c47fc fix(crm): resolve the default pipeline first
+
+ succeeded in 0ms:
+diff --git a/CLAUDE.md b/CLAUDE.md
+index c3b8603..862d5ca 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -399,7 +399,10 @@ Full reference: `nexo/knowledge/reference/kanban-de-leads.md` (section CRM unifi
+ - A pipeline is a flowchart: etapas of `type` `normal | orcamento | saida` (exit `ganho | perdido | pausado`) and the explicit `sales_ops_pipeline_transitions` graph; a pair that is absent is not allowed. A cross-stage `POST /leads/:id/move` or `POST /leads/:id/advance` outside the graph answers `409 {"error":"transition_not_allowed"}` (a stage of another pipeline included); a reorder inside one column is always allowed. The spreadsheet import places historical leads with `skipTransitionGraph`.
+ - The history is written by the SERVER in the same transaction as the stage change: exactly one `stage_changed` event per change (create writes the initial one, a move, an advance and a restore that lands in another etapa write one), the actor name snapshotted from the token. It is NOT an `audit_log` entry.
+ - `POST /leads/:id/advance { toStageId, nextStep?, dueOn?, note?, reason? }` follows the lock order of `moveLead`; `400 followup_required` unless the destination is an exit (and a half follow-up is refused even on an exit), `400 reason_required` when the destination requires one, `409 sale_required_for_conversion` for an etapa that opens a proposta (the wizard and `POST /sales` own that conversion, and the lead's `sale_id` is still set by `moveLead`).
+-- Follow-ups: `GET /followups?scope=mine|team&from&to&status=open|done|all` (`team` is admin only, the shared 403 body), `POST /leads/:id/followups`, `POST /followups/:id/done` (idempotent). Their period is on `due_on`, a civil `date`, compared as written.
++- Restoring an archived etapa that has NO transition in either direction gives it the default edges (same rule as `planPipelineTransitions`); an etapa that already has edges keeps the graph the org shaped.
++- The default pipeline is resolved `is_default` first (`defaultPipelineId` orders `desc(isDefault)`).
++- Follow-ups: `GET /followups?scope=mine|team&from&to&status=open|done|all` (`team` is admin only, the shared 403 body), `POST /leads/:id/followups`, `POST /followups/:id/done` (idempotent; allowed to whoever can access the lead AND to the follow-up's own owner pessoa).
++- The board offers `Desfazer` for a stage move only when the reverse edge exists in the graph; an edit undo of a contactless legacy lead omits the contact keys. Their period is on `due_on`, a civil `date`, compared as written.
+ - Period filters on a timestamp column go through `saoPauloDayRangeToInstants` (`@fxl-sales/shared-utils/sao-paulo-day`): `[from 00:00 -03:00, to+1 00:00 -03:00)`, so a lead created at 02:30Z on day D+1 belongs to day D. Never `slice(0, 10)` of an instant.
+ - `GET /leads` and `GET /leads/summary` accept `pipelineId`, `from`, `to` and `f.<fieldKey>[.min|.max]` for FILTERABLE definitions only (cliente by id, options by key, text contains, number/money/date by min/max); an unknown, non-filterable or ill-typed key is `400 {"error":"validation_error","reason":"invalid_filter"}`. The summary defaults to the org's default pipeline.
+ - `GET /pipelines` and `GET /field-definitions` are read-only and seed the org's defaults on first read (registered in `crm-seed-callers.test.ts`). There is no route that creates, edits, archives or deletes a pipeline or a definition, so the Cliente definition (`removable = false`, backed by `client_id`) can never be removed. Onboarding of pipelines and fields is out of scope.
+diff --git a/apps/api/src/domains/crm/pipeline-read.ts b/apps/api/src/domains/crm/pipeline-read.ts
+index 070cf7a..8060e6c 100644
+--- a/apps/api/src/domains/crm/pipeline-read.ts
++++ b/apps/api/src/domains/crm/pipeline-read.ts
+@@ -1,4 +1,4 @@
+-import { and, asc, eq } from 'drizzle-orm';
++import { and, asc, desc, eq } from 'drizzle-orm';
+ import type { getDb } from '../../db/client.js';
+ import { salesOpsPipelines, salesOpsPipelineStages } from '../../db/schema.js';
+ import type { PipelineStageRow } from './stage-view.js';
+@@ -21,7 +21,7 @@ export async function defaultPipelineId(tx: Db, orgId: string): Promise<string |
+     .select({ id: salesOpsPipelines.id })
+     .from(salesOpsPipelines)
+     .where(and(eq(salesOpsPipelines.orgId, orgId), eq(salesOpsPipelines.status, 'active')))
+-    .orderBy(asc(salesOpsPipelines.isDefault), asc(salesOpsPipelines.position), asc(salesOpsPipelines.name))
++    .orderBy(desc(salesOpsPipelines.isDefault), asc(salesOpsPipelines.position), asc(salesOpsPipelines.name))
+     .limit(1);
+   return row?.id ?? null;
+ }
+diff --git a/apps/api/src/domains/sales-ops/leads/lead-history-service.ts b/apps/api/src/domains/sales-ops/leads/lead-history-service.ts
+index 1320dbf..b512b47 100644
+--- a/apps/api/src/domains/sales-ops/leads/lead-history-service.ts
++++ b/apps/api/src/domains/sales-ops/leads/lead-history-service.ts
+@@ -1,4 +1,4 @@
+-import { and, asc, eq, isNull, sql, type SQL } from 'drizzle-orm';
++import { and, asc, eq, isNull, or, sql, type SQL } from 'drizzle-orm';
+ import type { getDb } from '../../../db/client.js';
+ import {
+   salesOpsCrmLeadEvents,
+@@ -387,6 +387,16 @@ export type DoneResult =
+   | { ok: false; reason: 'not_found' | 'seller_person_unmapped' };
+ 
+ /** Idempotent: marking an already-done follow-up keeps its original `done_at`. */
++/**
++ * Who may complete a follow-up: a seller in the lead's scope, or the follow-up's own owner. The
++ * owner clause is the caller's own pessoa only, so an assignment never widens access to anyone
++ * else's lead. It is the same identity `listFollowups` shows in `scope=mine`, so a task a seller
++ * can see is a task they can complete.
++ */
++function followupCompletionCondition(sellerPersonId: string, canClaimUnassigned: boolean): SQL {
++  return or(leadSellerCondition(sellerPersonId, canClaimUnassigned), eq(salesOpsCrmLeadFollowups.ownerPersonId, sellerPersonId))!;
++}
++
+ export function markFollowupDone(db: Db, orgId: string, followupId: string, scope: LeadScope): Promise<DoneResult> {
+   return withTenant(db, orgId, async (tx) => {
+     const gate = await resolveLeadScopePredicate(tx, orgId, scope);
+@@ -403,7 +413,7 @@ export function markFollowupDone(db: Db, orgId: string, followupId: string, scop
+           eq(salesOpsCrmLeadFollowups.orgId, orgId),
+           eq(salesOpsCrmLeadFollowups.id, followupId),
+           liveLeadCondition(),
+-          ...(gate.sellerPersonId ? [leadSellerCondition(gate.sellerPersonId, gate.canClaimUnassigned)] : []),
++          ...(gate.sellerPersonId ? [followupCompletionCondition(gate.sellerPersonId, gate.canClaimUnassigned)] : []),
+         ),
+       )
+       .limit(1)
+diff --git a/apps/api/src/domains/sales-ops/leads/stage-service.ts b/apps/api/src/domains/sales-ops/leads/stage-service.ts
+index 4898503..544e08a 100644
+--- a/apps/api/src/domains/sales-ops/leads/stage-service.ts
++++ b/apps/api/src/domains/sales-ops/leads/stage-service.ts
+@@ -1,5 +1,5 @@
+ import { planPipelineTransitions, type TransitionPlanStage } from '@fxl-sales/shared-utils/crm-model';
+-import { and, asc, eq, max, ne } from 'drizzle-orm';
++import { and, asc, eq, max, ne, or } from 'drizzle-orm';
+ import type { getDb } from '../../../db/client.js';
+ import { salesOpsPipelineStages, salesOpsPipelineTransitions } from '../../../db/schema.js';
+ import { defaultPipelineId, listPipelineStages, pipelineExists } from '../../crm/pipeline-read.js';
+@@ -181,6 +181,31 @@ export function createLeadStageInPipeline(
+   });
+ }
+ 
++/**
++ * A stage restored from the archive that has NO edge in either direction (it was migrated or
++ * created while archived, so the rule never linked it) gets the edges the shared rule gives a new
++ * stage. A stage that already has any edge keeps the graph the org shaped.
++ */
++async function restoreTransitionsIfDisconnected(
++  tx: Db,
++  orgId: string,
++  pipelineId: string,
++  stageId: string,
++): Promise<void> {
++  const [edge] = await tx
++    .select({ id: salesOpsPipelineTransitions.id })
++    .from(salesOpsPipelineTransitions)
++    .where(
++      and(
++        eq(salesOpsPipelineTransitions.orgId, orgId),
++        or(eq(salesOpsPipelineTransitions.fromStageId, stageId), eq(salesOpsPipelineTransitions.toStageId, stageId)),
++      ),
++    )
++    .limit(1);
++  if (edge) return;
++  await addTransitionsForNewStage(tx, orgId, pipelineId, stageId);
++}
++
+ /**
+  * A new open stage must be reachable: the explicit transition graph says "a pair that is absent is
+  * not allowed". The pairs the shared rule (`planPipelineTransitions`) gives the new stage - to and
+@@ -253,6 +278,9 @@ export function updateLeadStage(
+       if (violated) return violated;
+       throw error;
+     }
++    if (current.status === 'archived' && stage?.status === 'active') {
++      await restoreTransitionsIfDisconnected(tx, orgId, current.pipelineId, id);
++    }
+     // Deliberately NO auditCadastroLifecycle call. The ledger is a closed wire
+     // contract whose CadastroEntityTypeSchema is the four audited cadastros, and
+     // a fifth entity type would be an entity the history UI cannot render and the
+diff --git a/apps/web/src/sales-ops/leads/LeadsBoardContainer.tsx b/apps/web/src/sales-ops/leads/LeadsBoardContainer.tsx
+index 1ef3d79..0eaf96a 100644
+--- a/apps/web/src/sales-ops/leads/LeadsBoardContainer.tsx
++++ b/apps/web/src/sales-ops/leads/LeadsBoardContainer.tsx
+@@ -15,7 +15,7 @@ import { stageOpensConversion } from './board-move';
+ import { mutedStateClass } from './board-ui';
+ import { boardStages } from './calculations';
+ import { useFieldDefinitions, usePipelines } from './crm-hooks';
+-import { pickPipeline, pipelineStagesAsBoardStages } from './crm-pipeline';
++import { isTransitionAllowed, pickPipeline, pipelineStagesAsBoardStages } from './crm-pipeline';
+ import { LeadDeleteDialog } from './LeadDeleteDialog';
+ import { LeadForm } from './LeadForm';
+ import { LeadsBoard, type LeadConversionRequest } from './LeadsBoard';
+@@ -201,8 +201,10 @@ export function LeadsBoardContainer({
+       : [];
+     const sourceIndex = sourceColumn.findIndex((row) => row.id === payload.leadId);
+     const result = await moveLead.mutateAsync(payload);
++    // The inverse is a move back along the graph, so it is offered only when the graph allows it.
+     if (!previous || sourceIndex < 0 || payload.saleId ||
+-      stageOpensConversion(stages.find((stage) => stage.id === payload.toStageId))) return;
++      stageOpensConversion(stages.find((stage) => stage.id === payload.toStageId)) ||
++      !isTransitionAllowed(pipeline, payload.toStageId, previous.stageId)) return;
+     undo.publish('Lead movido', async () => {
+       await requireUnchangedLead(result.lead);
+       return moveLead.mutateAsync({
+diff --git a/apps/web/src/sales-ops/leads/__tests__/lead-summary-container.test.tsx b/apps/web/src/sales-ops/leads/__tests__/lead-summary-container.test.tsx
+index 7b69ef7..9c69ad9 100644
+--- a/apps/web/src/sales-ops/leads/__tests__/lead-summary-container.test.tsx
++++ b/apps/web/src/sales-ops/leads/__tests__/lead-summary-container.test.tsx
+@@ -228,6 +228,30 @@ describe('LeadSummaryContainer', () => {
+     expect(inverse.fields.some((entry) => entry.fieldId === 'f-cli')).toBe(false);
+   });
+ 
++  it('the undo of an edit to a contactless legacy lead sends no contact keys', async () => {
++    mocks.summary = summaryOf(lead({ contactPhone: null, contactEmail: null }));
++    await renderAt([`/operacional/leads/${LEAD_ID}`]);
++    await click('[data-summary-edit]');
++    mocks.mutateAsync.mockImplementation(async () => {
++      const updated = lead({ contactName: 'Ana Nova', contactPhone: null, contactEmail: null });
++      mocks.summary = summaryOf(updated);
++      return { lead: updated };
++    });
++    setInput('lead-contact-name', 'Ana Nova');
++    await click('[data-lead-save]');
++    expect(mocks.mutateAsync.mock.calls[0]?.[0]).not.toHaveProperty('contactPhone');
++
++    mocks.mutateAsync.mockClear();
++    mocks.mutateAsync.mockResolvedValue({ lead: lead({ contactPhone: null, contactEmail: null }) });
++    await click('[data-undo-action]');
++
++    expect(mocks.mutateAsync).toHaveBeenCalledTimes(1);
++    const inverse = mocks.mutateAsync.mock.calls[0]?.[0] as Record<string, unknown>;
++    expect(inverse).toMatchObject({ id: LEAD_ID, contactName: 'Ana' });
++    expect(inverse).not.toHaveProperty('contactPhone');
++    expect(inverse).not.toHaveProperty('contactEmail');
++  });
++
+   it('refuses the undo when the lead changed since the edit, with no second write', async () => {
+     await renderAt([`/operacional/leads/${LEAD_ID}`]);
+     await click('[data-summary-edit]');
+diff --git a/apps/web/src/sales-ops/leads/__tests__/lead-undo.test.tsx b/apps/web/src/sales-ops/leads/__tests__/lead-undo.test.tsx
+index d0d46e9..3a1ed9e 100644
+--- a/apps/web/src/sales-ops/leads/__tests__/lead-undo.test.tsx
++++ b/apps/web/src/sales-ops/leads/__tests__/lead-undo.test.tsx
+@@ -42,6 +42,8 @@ let rows: SalesOpsLead[];
+ let calls: Array<{ path: string; method: string; body: Record<string, unknown> | null }>;
+ let failNext = false;
+ let gatedMove: Promise<ReturnType<typeof response>> | null;
++/** When set, `GET /pipelines` answers this transition graph instead of the complete one. */
++let graphOverride: Array<{ fromStageId: string; toStageId: string }> | null;
+ let root: Root;
+ let host: HTMLDivElement;
+ const response = (status: number, data: unknown) => ({ ok: status < 400, status, json: async () => data });
+@@ -50,7 +52,11 @@ const fetcher = async (input: string, init?: RequestInit) => {
+   const path = url.pathname;
+   const method = init?.method ?? 'GET';
+   const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : null;
+-  if (method === 'GET' && path.endsWith('/pipelines')) return response(200, pipelineFixtureFor(stages));
++  if (method === 'GET' && path.endsWith('/pipelines')) {
++    const fixture = pipelineFixtureFor(stages);
++    if (graphOverride) fixture.pipelines[0]!.transitions = graphOverride;
++    return response(200, fixture);
++  }
+   if (method === 'GET' && path.endsWith('/lead-stages')) return response(200, { stages });
+   if (method === 'GET' && path.endsWith('/leads/summary')) return response(200, {
+     stages: stages.map((stage) => ({
+@@ -95,6 +101,7 @@ beforeEach(() => {
+   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+   edition.value = 'full'; rows = [{ ...original }]; calls = []; failNext = false;
+   gatedMove = null;
++  graphOverride = null;
+   vi.stubGlobal('fetch', vi.fn(fetcher));
+   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
+ });
+@@ -124,6 +131,15 @@ async function pickStage(id: string) {
+   if (!option) throw new Error(`Missing option ${id}`);
+   await click(option);
+ }
++async function typeLostReason(text: string) {
++  const area = document.querySelector<HTMLTextAreaElement>('[data-lost-reason="true"]');
++  if (!area) throw new Error('Missing lost reason');
++  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
++  await act(async () => {
++    setter?.call(area, text);
++    area.dispatchEvent(new Event('input', { bubbles: true }));
++  });
++}
+ async function moveTo(id: string) {
+   await click('[data-view-option="list"]');
+   await click('[data-move-trigger="lead-1"]');
+@@ -161,6 +177,24 @@ it('undoes a Mover write with the original stage and index', async () => {
+   expect(rows[0]?.stageId).toBe('new');
+ });
+ 
++it('offers no undo for a move to Perdido, whose reverse edge the graph does not allow', async () => {
++  // Forward edges only into Perdido: the reverse (Perdido -> Novo) is absent from the graph.
++  graphOverride = [
++    { fromStageId: 'new', toStageId: 'next' },
++    { fromStageId: 'next', toStageId: 'new' },
++    { fromStageId: 'new', toStageId: 'lost' },
++  ];
++  await render();
++  await click('[data-view-option="list"]');
++  await click('[data-move-trigger="lead-1"]');
++  await pickStage('lost');
++  await typeLostReason('Sem interesse');
++  await click('[data-move-confirm]');
++  expect(calls[0]?.body).toMatchObject({ stageId: 'lost' });
++  expect(rows[0]?.stageId).toBe('lost');
++  expect(document.querySelector('[data-undo-notice]')).toBeNull();
++});
++
+ it('uses the visible source index when returning a lead to a populated column', async () => {
+   rows = [{ ...original, id: 'lead-0', position: 0, contactName: 'Bia' }, { ...original, position: 1 }];
+   await render();
+diff --git a/apps/web/src/sales-ops/leads/lead-form.ts b/apps/web/src/sales-ops/leads/lead-form.ts
+index 4d56051..88314ce 100644
+--- a/apps/web/src/sales-ops/leads/lead-form.ts
++++ b/apps/web/src/sales-ops/leads/lead-form.ts
+@@ -240,16 +240,20 @@ export function buildLeadWritePayload(
+  * The full previous state as a write body, used by the edit undo. The Cliente is
+  * carried ONLY by `clientId`/`clientName`: the API refuses `clientId` together with a
+  * Cliente entry of `fields` (400 field_invalid), so that entry is dropped here.
++ *
++ * A legacy lead that never had a contact has both contact keys null. They are omitted
++ * exactly as the normal edit omits them (`buildLeadWritePayload` with `contactOptional`),
++ * because the API refuses a PATCH that carries both contact keys empty (400 contact_required).
+  */
+ export function leadToWriteSeed(lead: SalesOpsLead, clearFieldIds: readonly string[] = []): LeadWritePayload {
+   const kept: LeadFieldWrite[] = (lead.fields ?? [])
+     .filter((f) => f.key !== CLIENTE_FIELD_KEY)
+     .map((f) => ({ fieldId: f.fieldId, value: f.value }));
++  const contactless = !lead.contactPhone && !lead.contactEmail;
+   return {
+     id: lead.id,
+     contactName: lead.contactName,
+-    contactPhone: lead.contactPhone,
+-    contactEmail: lead.contactEmail,
++    ...(contactless ? {} : { contactPhone: lead.contactPhone, contactEmail: lead.contactEmail }),
+     clientId: lead.clientId,
+     clientName: lead.clientNameSnapshot || null,
+     estimatedValueBrl: lead.estimatedValueBrl,
+
+exec
+/bin/zsh -lc "git diff 4dfe1f5..HEAD --stat -- . ':(exclude)nexo/runs'" in /Users/cauetpinciara/Documents/fxl/projects/06--PRODUCT--fxl-sales/.worktrees/20261021T011348Z-vendas-crm-unificado/run
+ succeeded in 0ms:
+ CLAUDE.md                                          |  5 +-
+ apps/api/src/domains/crm/pipeline-read.ts          |  4 +-
+ .../sales-ops/leads/lead-history-service.ts        | 14 +++-
+ .../src/domains/sales-ops/leads/stage-service.ts   | 30 +++++++-
+ apps/api/test/rls/crm-pipeline-history.test.ts     | 89 ++++++++++++++++++++++
+ .../src/sales-ops/leads/LeadsBoardContainer.tsx    |  6 +-
+ .../__tests__/lead-summary-container.test.tsx      | 24 ++++++
+ .../sales-ops/leads/__tests__/lead-undo.test.tsx   | 36 ++++++++-
+ apps/web/src/sales-ops/leads/lead-form.ts          |  8 +-
+ nexo/knowledge/reference/kanban-de-leads.md        |  8 ++
+ .../10.1-fase2-review-fixes.md                     | 29 +++++++
+ 11 files changed, 242 insertions(+), 11 deletions(-)
+
+hook: PostToolUse
+hook: PostToolUse
+hook: PostToolUse
+exec
+/bin/zsh -lc "git diff c15a0ca...HEAD --stat -- . ':(exclude)nexo/runs'" in /Users/cauetpinciara/Documents/fxl/projects/06--PRODUCT--fxl-sales/.worktrees/20261021T011348Z-vendas-crm-unificado/run
+ succeeded in 0ms:
+ CLAUDE.md                                          |   69 +-
+ apps/api/drizzle/0031_crm_cutover_resync.sql       |  226 +
+ apps/api/drizzle/meta/0031_snapshot.json           | 7773 ++++++++++++++++++++
+ apps/api/drizzle/meta/_journal.json                |    7 +
+ apps/api/scripts/__tests__/crm-seed-rows.test.ts   |   59 +
+ apps/api/scripts/seed-dev.ts                       |   57 +-
+ apps/api/scripts/seed-dev.ts.bak2                  |  438 --
+ apps/api/scripts/seed/crm-rows.ts                  |  217 +
+ .../src/db/__tests__/settlement-test-cleanup.ts    |    6 +-
+ .../domains/crm/__tests__/crm-seed-callers.test.ts |    6 +-
+ .../crm/__tests__/frozen-lead-tables.test.ts       |   43 +
+ apps/api/src/domains/crm/crm-read-service.ts       |  110 +
+ apps/api/src/domains/crm/lead-fields.ts            |  453 ++
+ apps/api/src/domains/crm/lead-input-error.ts       |   42 +
+ apps/api/src/domains/crm/pipeline-read.ts          |   45 +
+ apps/api/src/domains/crm/pipeline-write.ts         |   27 +
+ apps/api/src/domains/crm/stage-view.ts             |   69 +
+ .../import/__tests__/catalog.integration.test.ts   |   23 +-
+ .../import/__tests__/executor.integration.test.ts  |   58 +-
+ .../__tests__/import-routes.integration.test.ts    |   46 +-
+ .../domains/import/__tests__/plan-leads.test.ts    |    8 +-
+ .../import/__tests__/workbook-schema.test.ts       |    8 +-
+ apps/api/src/domains/import/catalog.ts             |   30 +-
+ apps/api/src/domains/import/executor.ts            |    7 +-
+ apps/api/src/domains/import/plan/leads.ts          |    6 +-
+ apps/api/src/domains/import/types.ts               |    4 +-
+ .../sales-ops/__tests__/lead-stages-routes.test.ts |   32 +-
+ apps/api/src/domains/sales-ops/crm-routes.ts       |   51 +
+ .../leads/__tests__/contact-lead-contract.test.ts  |  165 -
+ .../leads/__tests__/lead-contract.test.ts          |   42 +-
+ .../leads/__tests__/lead-routes-edition.test.ts    |  169 +-
+ .../sales-ops/leads/__tests__/lead-routes.test.ts  |    8 +-
+ .../leads/__tests__/lead-write-contract.test.ts    |  109 +
+ .../src/domains/sales-ops/leads/lead-filters.ts    |  136 +
+ .../sales-ops/leads/lead-history-service.ts        |  487 ++
+ .../src/domains/sales-ops/leads/lead-history.ts    |   61 +
+ .../api/src/domains/sales-ops/leads/lead-routes.ts |  164 +-
+ .../src/domains/sales-ops/leads/lead-schemas.ts    |  301 +-
+ .../src/domains/sales-ops/leads/lead-service.ts    |  655 +-
+ .../domains/sales-ops/leads/lead-trash-service.ts  |   83 +-
+ apps/api/src/domains/sales-ops/leads/schemas.ts    |    4 +
+ .../src/domains/sales-ops/leads/stage-routes.ts    |   21 +-
+ .../src/domains/sales-ops/leads/stage-service.ts   |  238 +-
+ .../api/src/domains/sales-ops/leads/stages-seed.ts |   75 +-
+ apps/api/src/domains/sales-ops/routes.ts           |    4 +
+ .../middleware/__tests__/edition-gate-map.test.ts  |    9 +
+ .../api/test/rls/crm-cutover-frozen-tables.test.ts |  124 +
+ apps/api/test/rls/crm-cutover-resync.test.ts       |  266 +
+ apps/api/test/rls/crm-lead-write-fields.test.ts    |  253 +
+ apps/api/test/rls/crm-pipeline-history.test.ts     |  570 ++
+ apps/api/test/rls/lead-path.ts                     |   29 +
+ apps/api/test/rls/lead-stages-rls.test.ts          |   68 +-
+ apps/api/test/rls/lead-stages-seed-on-read.test.ts |   44 +-
+ apps/api/test/rls/leads-edition.test.ts            |  109 +-
+ apps/api/test/rls/leads-lixeira.test.ts            |   43 +-
+ apps/api/test/rls/leads-move-concurrency.test.ts   |   34 +-
+ .../api/test/rls/leads-no-financial-impact.test.ts |   16 +-
+ apps/api/test/rls/leads-rls.test.ts                |  144 +-
+ apps/api/test/rls/leads-seller-scope.test.ts       |   58 +-
+ apps/api/test/rls/leads-stage-summary.test.ts      |   19 +-
+ apps/api/test/rls/leads-unassigned-claim.test.ts   |   67 +-
+ apps/web/src/lib/query-keys.ts                     |   10 +-
+ apps/web/src/sales-ops/PeriodFilter.tsx            |   67 +
+ apps/web/src/sales-ops/SalesOpsApp.tsx             |  118 +-
+ .../src/sales-ops/__tests__/lead-routes.test.ts    |   78 +
+ .../__tests__/leads-stage-navigation.test.tsx      |   36 +-
+ .../sales-ops/__tests__/navigation-edition.test.ts |   20 +-
+ .../web/src/sales-ops/__tests__/navigation.test.ts |   59 +
+ .../src/sales-ops/__tests__/period-filter.test.tsx |  102 +
+ apps/web/src/sales-ops/__tests__/period.test.ts    |   98 +
+ .../sales-ops/__tests__/propostas-lists.test.tsx   |  369 +
+ .../src/sales-ops/__tests__/sales-views.test.ts    |   92 +
+ apps/web/src/sales-ops/leads/AdvanceDialog.tsx     |  219 +
+ apps/web/src/sales-ops/leads/ContactLeadDialog.tsx |  361 -
+ .../web/src/sales-ops/leads/FollowupsContainer.tsx |   58 +
+ apps/web/src/sales-ops/leads/FollowupsView.tsx     |  143 +
+ apps/web/src/sales-ops/leads/LeadCard.tsx          |    6 +-
+ apps/web/src/sales-ops/leads/LeadDeleteDialog.tsx  |    2 +-
+ apps/web/src/sales-ops/leads/LeadDialog.tsx        |  405 -
+ apps/web/src/sales-ops/leads/LeadForm.tsx          |  336 +
+ apps/web/src/sales-ops/leads/LeadFormFields.tsx    |  282 +
+ apps/web/src/sales-ops/leads/LeadSummary.tsx       |  179 +
+ .../src/sales-ops/leads/LeadSummaryContainer.tsx   |  243 +
+ apps/web/src/sales-ops/leads/LeadsBoard.tsx        |   88 +-
+ .../src/sales-ops/leads/LeadsBoardContainer.tsx    |  262 +-
+ apps/web/src/sales-ops/leads/LeadsFunnelView.tsx   |   27 +
+ apps/web/src/sales-ops/leads/SummaryComposers.tsx  |  120 +
+ apps/web/src/sales-ops/leads/UndoLayer.tsx         |   16 +
+ .../__tests__/advance-dialog-inline-layer.test.tsx |  130 +
+ .../leads/__tests__/advance-dialog.test.tsx        |  153 +
+ .../src/sales-ops/leads/__tests__/advance.test.ts  |   96 +
+ .../sales-ops/leads/__tests__/board-move.test.ts   |   14 +
+ .../src/sales-ops/leads/__tests__/board-ui.test.ts |   26 +
+ .../leads/__tests__/board-write-surface.test.ts    |   13 +-
+ .../leads/__tests__/contact-lead-dialog.test.tsx   |  600 --
+ .../sales-ops/leads/__tests__/contact-lead.test.ts |  236 +-
+ .../leads/__tests__/crm-api-contract.test.ts       |  108 +
+ .../sales-ops/leads/__tests__/crm-pipeline.test.ts |   91 +
+ .../leads/__tests__/followups-container.test.tsx   |  108 +
+ .../leads/__tests__/followups-view.test.tsx        |   98 +
+ .../sales-ops/leads/__tests__/followups.test.ts    |   26 +
+ .../leads/__tests__/kanban-pipeline.test.tsx       |  120 +
+ .../leads/__tests__/lead-board-totals.test.tsx     |    7 +-
+ .../leads/__tests__/lead-conversion.test.tsx       |    2 +
+ .../sales-ops/leads/__tests__/lead-delete.test.tsx |  132 +-
+ .../sales-ops/leads/__tests__/lead-dialog.test.tsx |  358 -
+ .../sales-ops/leads/__tests__/lead-form.test.ts    |  347 +
+ .../sales-ops/leads/__tests__/lead-form.test.tsx   |  595 ++
+ .../sales-ops/leads/__tests__/lead-funnel.test.tsx |   69 +
+ .../__tests__/lead-summary-container.test.tsx      |  429 ++
+ .../leads/__tests__/lead-summary.test.tsx          |  129 +
+ .../__tests__/lead-unassigned-marker.test.tsx      |    2 +-
+ .../sales-ops/leads/__tests__/lead-undo.test.tsx   |  107 +-
+ .../leads/__tests__/leads-api-contract.test.ts     |   49 +-
+ .../leads/__tests__/leads-board-dropzones.test.tsx |    6 +-
+ .../leads/__tests__/leads-board-keyboard.test.tsx  |   22 +-
+ .../leads/__tests__/leads-contact-board.test.tsx   |   18 +-
+ .../__tests__/leads-contact-container.test.tsx     |   95 +-
+ .../leads/__tests__/leads-full-edition.test.tsx    |   25 +-
+ .../leads/__tests__/leads-list-view.test.tsx       |   14 +-
+ .../leads/__tests__/leads-period.test.tsx          |  195 +
+ .../__tests__/leads-pipeline-container.test.tsx    |  197 +
+ .../__tests__/move-dialog-inline-layer.test.tsx    |    9 +-
+ .../sales-ops/leads/__tests__/pipeline-fixture.ts  |   31 +
+ .../leads/__tests__/summary-format.test.ts         |   80 +
+ .../leads/__tests__/use-undo-notice.test.tsx       |  107 +
+ apps/web/src/sales-ops/leads/advance.ts            |  104 +
+ apps/web/src/sales-ops/leads/api.ts                |   73 +-
+ apps/web/src/sales-ops/leads/board-labels.ts       |    5 +-
+ apps/web/src/sales-ops/leads/board-move.ts         |   11 +-
+ apps/web/src/sales-ops/leads/board-ui.ts           |   33 +-
+ apps/web/src/sales-ops/leads/calculations.ts       |   27 +-
+ apps/web/src/sales-ops/leads/client-picker-copy.ts |    9 +-
+ apps/web/src/sales-ops/leads/contact-lead.ts       |  145 +-
+ apps/web/src/sales-ops/leads/crm-api.ts            |   62 +
+ apps/web/src/sales-ops/leads/crm-hooks.ts          |  120 +
+ apps/web/src/sales-ops/leads/crm-pipeline.ts       |   68 +
+ apps/web/src/sales-ops/leads/crm-types.ts          |   91 +
+ apps/web/src/sales-ops/leads/followups.ts          |   54 +
+ apps/web/src/sales-ops/leads/hooks.ts              |   15 +-
+ apps/web/src/sales-ops/leads/lead-form.ts          |  275 +
+ apps/web/src/sales-ops/leads/lead-summary-nav.ts   |   11 +
+ apps/web/src/sales-ops/leads/summary-format.ts     |  111 +
+ apps/web/src/sales-ops/leads/types.ts              |   16 +-
+ apps/web/src/sales-ops/leads/undo-conflict.ts      |    7 +
+ apps/web/src/sales-ops/leads/use-undo-notice.ts    |   69 +
+ apps/web/src/sales-ops/mutation-error-copy.ts      |    9 +
+ apps/web/src/sales-ops/navigation.ts               |   62 +-
+ apps/web/src/sales-ops/period.ts                   |  118 +
+ apps/web/src/sales-ops/sales-views.ts              |   60 +
+ nexo/knowledge/reference/kanban-de-leads.md        |   76 +-
+ nexo/knowledge/reference/propostas.md              |    6 +
+ nexo/knowledge/reference/sales-ops-routing.md      |   25 +-
+ .../vendas-crm-unificado/09-web-lead-resumo.md     |    2 +-
+ .../10-web-kanban-funil-periodo.md                 |    2 +-
+ .../10.1-fase2-review-fixes.md                     |   29 +
+ .../parts/09e-web-followups.md                     |    1 +
+ .../src/__tests__/sao-paulo-range.test.ts          |   31 +
+ packages/shared-utils/src/sao-paulo-day.ts         |   33 +
+ 159 files changed, 20438 insertions(+), 4457 deletions(-)
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PostToolUse Completed
+hook: PostToolUse Completed
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+hook: PostToolUse
+hook: PostToolUse Completed
+2026-10-21T09:57:55.218928Z ERROR rmcp::transport::worker: worker quit with fatal: Transport channel closed, when AuthRequired(AuthRequiredError { www_authenticate_header: "Bearer error=\"invalid_token\", error_description=\"Token is not authorized\", resource_metadata=\"https://api.githubcopilot.com/.well-known/oauth-protected-resource/mcp/\"" })
+hook: PreToolUse
+hook: PreToolUse Completed
+hook: PostToolUse
+hook: PostToolUse Completed
+2026-10-21T09:58:00.619335Z ERROR rmcp::transport::worker: worker quit with fatal: Transport channel closed, when AuthRequired(AuthRequiredError { www_authenticate_header: "Bearer error=\"invalid_token\", error_description=\"Token is not authorized\", resource_metadata=\"https://api.githubcopilot.com/.well-known/oauth-protected-resource/mcp/\"" })
+hook: PreToolUse
+hook: PreToolUse
+hook: PreToolUse
+hook: PreToolUse
+hook: PreToolUse Completed
+hook: PreToolUse Completed
+hook: PreToolUse Completed
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc 'cat apps/api/src/domains/crm/crm-read-service.ts apps/api/src/domains/sales-ops/crm-routes.ts' in /Users/cauetpinciara/Documents/fxl/projects/06--PRODUCT--fxl-sales/.worktrees/20261021T011348Z-vendas-crm-unificado/run
+exec
+/bin/zsh -lc 'cat apps/web/src/sales-ops/sales-views.ts apps/web/src/sales-ops/period.ts' in /Users/cauetpinciara/Documents/fxl/projects/06--PRODUCT--fxl-sales/.worktrees/20261021T011348Z-vendas-crm-unificado/run
+exec
+/bin/zsh -lc 'cat apps/api/src/domains/sales-ops/leads/lead-trash-service.ts' in /Users/cauetpinciara/Documents/fxl/projects/06--PRODUCT--fxl-sales/.worktrees/20261021T011348Z-vendas-crm-unificado/run
+exec
+/bin/zsh -lc 'git diff 4dfe1f5..HEAD -- apps/api/test/rls/crm-pipeline-history.test.ts' in /Users/cauetpinciara/Documents/fxl/projects/06--PRODUCT--fxl-sales/.worktrees/20261021T011348Z-vendas-crm-unificado/run
+ succeeded in 0ms:
+import { and, asc, eq } from 'drizzle-orm';
+import type { getDb } from '../../db/client.js';
+import { salesOpsPipelineStages, salesOpsPipelineTransitions, salesOpsPipelines } from '../../db/schema.js';
+import { withTenant } from '../sales-ops/leads/with-tenant.js';
+import { ensureCrmDefaults } from './defaults.js';
+
+/**
+ * The read side of the CRM configuration: `GET /pipelines` and `GET /field-definitions`.
+ * Both seed the org's defaults on first read (the default pipeline and the Cliente system field),
+ * so a brand-new org answers a usable configuration. There is no write side in this run: pipelines,
+ * stages and definitions are not editable through the API, which is what keeps the Cliente
+ * definition impossible to remove or archive.
+ */
+type Db = ReturnType<typeof getDb>;
+
+export type PipelineView = {
+  id: string;
+  name: string;
+  isDefault: boolean;
+  position: number;
+  status: string;
+  stages: Array<{
+    id: string;
+    name: string;
+    position: number;
+    type: string;
+    behavior: string;
+    exitKind: string | null;
+    requiresReason: boolean;
+    status: string;
+  }>;
+  transitions: Array<{ fromStageId: string; toStageId: string }>;
+};
+
+export function listPipelines(db: Db, orgId: string): Promise<PipelineView[]> {
+  return withTenant(db, orgId, async (tx) => {
+    await ensureCrmDefaults(tx, orgId);
+    const pipelines = await tx
+      .select()
+      .from(salesOpsPipelines)
+      .where(and(eq(salesOpsPipelines.orgId, orgId), eq(salesOpsPipelines.status, 'active')))
+      .orderBy(asc(salesOpsPipelines.position), asc(salesOpsPipelines.name));
+    const stages = await tx
+      .select()
+      .from(salesOpsPipelineStages)
+      .where(eq(salesOpsPipelineStages.orgId, orgId))
+      .orderBy(asc(salesOpsPipelineStages.position), asc(salesOpsPipelineStages.name));
+    const transitions = await tx
+      .select()
+      .from(salesOpsPipelineTransitions)
+      .where(eq(salesOpsPipelineTransitions.orgId, orgId));
+    return pipelines.map((pipeline) => ({
+      id: pipeline.id,
+      name: pipeline.name,
+      isDefault: pipeline.isDefault,
+      position: pipeline.position,
+      status: pipeline.status,
+      stages: stages
+        .filter((stage) => stage.pipelineId === pipeline.id)
+        .map((stage) => ({
+          id: stage.id,
+          name: stage.name,
+          position: stage.position,
+          type: stage.type,
+          behavior: stage.behavior,
+          exitKind: stage.exitKind,
+          requiresReason: stage.requiresReason,
+          status: stage.status,
+        })),
+      transitions: transitions
+        .filter((transition) => transition.pipelineId === pipeline.id)
+        .map((transition) => ({ fromStageId: transition.fromStageId, toStageId: transition.toStageId })),
+    }));
+  });
+}
+
+export type FieldDefinitionView = {
+  id: string;
+  key: string;
+  label: string;
+  kind: string;
+  referenceTarget: string | null;
+  multiple: boolean;
+  options: unknown;
+  filterable: boolean;
+  isSystem: boolean;
+  removable: boolean;
+  position: number;
+};
+
+export function listFieldDefinitions(db: Db, orgId: string): Promise<FieldDefinitionView[]> {
+  return withTenant(db, orgId, async (tx) => {
+    const { fields } = await ensureCrmDefaults(tx, orgId);
+    return fields
+      .filter((field) => field.status === 'active')
+      .map((field) => ({
+        id: field.id,
+        key: field.key,
+        label: field.label,
+        kind: field.kind,
+        referenceTarget: field.referenceTarget,
+        multiple: field.multiple,
+        options: field.options,
+        filterable: field.filterable,
+        isSystem: field.isSystem,
+        removable: field.removable,
+        position: field.position,
+      }));
+  });
+}
+import { Hono } from 'hono';
+import { z } from 'zod';
+import { getDb } from '../../db/client.js';
+import { ADMIN_ROLE_REQUIRED_BODY, hasAdminRole } from '../../middleware/require-admin.js';
+import { listFieldDefinitions, listPipelines } from '../crm/crm-read-service.js';
+import { listFollowups, markFollowupDone } from './leads/lead-history-service.js';
+import { ListFollowupsQuerySchema } from './leads/lead-schemas.js';
+import { failureResponse, leadScope, validationResponse } from './leads/lead-routes.js';
+
+/**
+ * The CRM configuration reads and the follow-up list, mounted at '/' into salesOpsRouter.
+ *
+ * Read-only on purpose. There is no POST, PATCH or DELETE for pipelines or field definitions in
+ * this run (onboarding is out of scope), so the Cliente system field can never be removed or
+ * archived through any route. Every read takes the org from `c.get('orgId')` only.
+ */
+export const crmRouter = new Hono();
+
+crmRouter.get('/pipelines', async (c) => {
+  const pipelines = await listPipelines(getDb(), c.get('orgId'));
+  return c.json({ pipelines });
+});
+
+crmRouter.get('/field-definitions', async (c) => {
+  const fields = await listFieldDefinitions(getDb(), c.get('orgId'));
+  return c.json({ fields });
+});
+
+/** `team` needs an admin and answers the shared 403 body; `mine` is the caller's own. */
+crmRouter.get('/followups', async (c) => {
+  const parsed = ListFollowupsQuerySchema.safeParse({
+    scope: c.req.query('scope'),
+    status: c.req.query('status'),
+    from: c.req.query('from'),
+    to: c.req.query('to'),
+    limit: c.req.query('limit'),
+  });
+  if (!parsed.success) return validationResponse(c, parsed.error);
+  if (parsed.data.scope === 'team' && !hasAdminRole(c)) return c.json(ADMIN_ROLE_REQUIRED_BODY, 403);
+  const result = await listFollowups(getDb(), c.get('orgId'), parsed.data, leadScope(c));
+  if (!result.ok) return failureResponse(c, result.reason);
+  return c.json({ followups: result.followups });
+});
+
+crmRouter.post('/followups/:id/done', async (c) => {
+  const id = z.string().uuid().safeParse(c.req.param('id'));
+  if (!id.success) return c.json({ error: 'not_found' }, 404);
+  const result = await markFollowupDone(getDb(), c.get('orgId'), id.data, leadScope(c));
+  if (!result.ok) return failureResponse(c, result.reason);
+  return c.json({ followup: result.followup });
+});
+
+ succeeded in 0ms:
+import type { ComboboxOption } from '@/components/ui/combobox';
+import { filterSalesByPeriod, type PeriodRange } from './period';
+import type { SalesOpsSale, SalesOpsSaleItem, SalesOpsStatus } from './types';
+
+/**
+ * The Propostas lists, one route each. Pure: the route, the status options, the
+ * status a stale URL falls back to, and the filtering all live here so the view
+ * and the tests read the same rule.
+ *
+ * `vendas` keeps every status; the three others are the groups the operator
+ * works in: Proposta (draft and open), Vendido (won) and the closed ones.
+ */
+export type SalesListView = 'vendas' | 'vendas-abertas' | 'vendas-ganhas' | 'vendas-encerradas';
+
+export const SALES_VIEW_STATUSES: Record<SalesListView, readonly SalesOpsStatus[] | null> = {
+  vendas: null,
+  'vendas-abertas': ['draft', 'open'],
+  'vendas-ganhas': ['won'],
+  'vendas-encerradas': ['lost', 'cancelled'],
+};
+
+export function isSalesListView(view: string): view is SalesListView {
+  return Object.hasOwn(SALES_VIEW_STATUSES, view);
+}
+
+/** The status picker for a view: `all` plus the view's own statuses, in the given order. */
+export function salesStatusOptionsForView(view: SalesListView, all: ComboboxOption[]): ComboboxOption[] {
+  const statuses = SALES_VIEW_STATUSES[view];
+  return all.filter((option) => option.value === 'all' || statuses === null || statuses.includes(option.value as SalesOpsStatus));
+}
+
+/** A status outside the view (left in state by another list) reads as `all`. */
+export function effectiveSalesStatus(view: SalesListView, status: SalesOpsStatus | 'all'): SalesOpsStatus | 'all' {
+  if (status === 'all') return 'all';
+  const statuses = SALES_VIEW_STATUSES[view];
+  if (statuses === null || statuses.includes(status)) return status;
+  return 'all';
+}
+
+export function filterSalesList(input: {
+  sales: SalesOpsSale[];
+  saleItems: SalesOpsSaleItem[];
+  view: SalesListView;
+  status: SalesOpsStatus | 'all';
+  areaId: string | 'all';
+  range: PeriodRange;
+}): SalesOpsSale[] {
+  const { sales, saleItems, view, areaId, range } = input;
+  const statuses = SALES_VIEW_STATUSES[view];
+  const status = effectiveSalesStatus(view, input.status);
+  const byStatus = sales.filter(
+    (sale) =>
+      (statuses === null || statuses.includes(sale.status)) && (status === 'all' || sale.status === status),
+  );
+  const byArea =
+    areaId === 'all'
+      ? byStatus
+      : byStatus.filter((sale) => saleItems.some((item) => item.saleId === sale.id && item.areaId === areaId));
+  return filterSalesByPeriod(byArea, range);
+}
+import { addDaysToIsoDay, isIsoDay, saoPauloDayOf } from '@fxl-sales/shared-utils/sao-paulo-day';
+
+/**
+ * Period filter model shared by every list (propostas, prospecção, funil, follow-ups).
+ * Pure and React-free. Civil days are `America/Sao_Paulo` days; "today" is always passed
+ * in by the caller (`todayInSaoPaulo()`), never read from the clock here.
+ */
+
+export type PeriodPreset = 'all' | 'today' | 'last7' | 'last30' | 'next7' | 'month' | 'lastMonth' | 'custom';
+/** `from` and `to` are only read for `custom`. */
+export type PeriodSelection = { preset: PeriodPreset; from: string; to: string };
+/** Inclusive ISO civil days; `null` is an open end. */
+export type PeriodRange = { from: string | null; to: string | null };
+
+export const PERIOD_ALL: PeriodRange = { from: null, to: null };
+export const PERIOD_ALL_SELECTION: PeriodSelection = { preset: 'all', from: '', to: '' };
+
+export const PERIOD_COPY = {
+  label: 'Período',
+  from: 'De',
+  to: 'Até',
+  invalid: 'A data inicial não pode ser depois da final.',
+  badDay: 'Informe uma data válida.',
+} as const;
+
+export const PERIOD_PRESET_LABEL: Record<PeriodPreset, string> = {
+  all: 'Todo o período',
+  today: 'Hoje',
+  last7: 'Últimos 7 dias',
+  last30: 'Últimos 30 dias',
+  next7: 'Próximos 7 dias',
+  month: 'Este mês',
+  lastMonth: 'Mês passado',
+  custom: 'Personalizado',
+};
+
+export const DEFAULT_PERIOD_PRESETS: readonly PeriodPreset[] = [
+  'all',
+  'today',
+  'last7',
+  'last30',
+  'month',
+  'lastMonth',
+  'custom',
+];
+
+/** Last calendar day of the month that holds `day`. Civil-day arithmetic, not a clock read. */
+function endOfMonth(day: string): string {
+  const [year, month] = day.split('-').map(Number) as [number, number];
+  return new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
+}
+
+function startOfMonth(day: string): string {
+  return `${day.slice(0, 7)}-01`;
+}
+
+type RangeForToday = (today: string) => PeriodRange;
+
+const PRESET_RANGE: Record<Exclude<PeriodPreset, 'custom'>, RangeForToday> = {
+  all: () => PERIOD_ALL,
+  today: (today) => ({ from: today, to: today }),
+  last7: (today) => ({ from: addDaysToIsoDay(today, -6), to: today }),
+  last30: (today) => ({ from: addDaysToIsoDay(today, -29), to: today }),
+  next7: (today) => ({ from: today, to: addDaysToIsoDay(today, 6) }),
+  month: (today) => ({ from: startOfMonth(today), to: endOfMonth(today) }),
+  lastMonth: (today) => {
+    const previous = addDaysToIsoDay(startOfMonth(today), -1);
+    return { from: startOfMonth(previous), to: endOfMonth(previous) };
+  },
+};
+
+/** The custom range the operator typed is reported when it is malformed, and never applied. */
+export function periodError(selection: PeriodSelection): string | null {
+  if (selection.preset !== 'custom') return null;
+  const { from, to } = selection;
+  if ((from !== '' && !isIsoDay(from)) || (to !== '' && !isIsoDay(to))) return PERIOD_COPY.badDay;
+  if (from !== '' && to !== '' && from > to) return PERIOD_COPY.invalid;
+  return null;
+}
+
+export function selectionToRange(selection: PeriodSelection, today: string): PeriodRange {
+  if (selection.preset === 'custom') {
+    if (periodError(selection) !== null) return PERIOD_ALL;
+    return { from: selection.from || null, to: selection.to || null };
+  }
+  return PRESET_RANGE[selection.preset](today);
+}
+
+export function periodQuery(range: PeriodRange): { from?: string; to?: string } {
+  return {
+    ...(range.from !== null ? { from: range.from } : {}),
+    ...(range.to !== null ? { to: range.to } : {}),
+  };
+}
+
+export function dayInPeriod(day: string, range: PeriodRange): boolean {
+  return (range.from === null || day >= range.from) && (range.to === null || day <= range.to);
+}
+
+/** An instant belongs to the period by its Sao Paulo civil day. */
+export function instantInPeriod(iso: string, range: PeriodRange): boolean {
+  if (range.from === null && range.to === null) return true;
+  const instant = new Date(iso);
+  if (Number.isNaN(instant.getTime())) return false;
+  return dayInPeriod(saoPauloDayOf(instant), range);
+}
+
+/** Won sales are dated by the won day; everything else by its creation. */
+export function saleReferenceInstant(sale: { status: string; wonAt: string | null; createdAt: string }): string {
+  return sale.status === 'won' && sale.wonAt ? sale.wonAt : sale.createdAt;
+}
+
+export function filterSalesByPeriod<T extends { status: string; wonAt: string | null; createdAt: string }>(
+  sales: readonly T[],
+  range: PeriodRange,
+): T[] {
+  return sales.filter((sale) => instantInPeriod(saleReferenceInstant(sale), range));
+}
+
+ succeeded in 0ms:
+diff --git a/apps/api/test/rls/crm-pipeline-history.test.ts b/apps/api/test/rls/crm-pipeline-history.test.ts
+index 81ed95c..17868eb 100644
+--- a/apps/api/test/rls/crm-pipeline-history.test.ts
++++ b/apps/api/test/rls/crm-pipeline-history.test.ts
+@@ -145,6 +145,61 @@ describe('GET /pipelines and GET /field-definitions', () => {
+   });
+ });
+ 
++describe('the default pipeline wins over another active pipeline', () => {
++  it('an unqualified lead and GET /lead-stages use the default pipeline even when a custom one sorts first', async () => {
++    const w = await world('default-first');
++    const [custom] = await sql<{ id: string }[]>`
++      INSERT INTO sales_ops_pipelines (org_id, name, position, is_default, status)
++      VALUES (${w.orgId}, 'Funil Antigo', -5, false, 'active') RETURNING id`;
++    await sql`
++      INSERT INTO sales_ops_pipeline_stages (org_id, pipeline_id, name, position, type, behavior, status)
++      VALUES (${w.orgId}, ${custom!.id}, 'Caixa', 0, 'normal', 'none', 'active')`;
++    const lead = await w.create({});
++    expect(lead.stageId).toBe(w.stage('Novo'));
++    const stages = await call(w.app, 'GET', '/lead-stages');
++    expect(stages.status).toBe(200);
++    expect(stages.json.stages.map((s: { id: string }) => s.id)).toEqual(w.pipeline.stages.map((s) => s.id));
++  });
++});
++
++describe('a restored stage that never had edges', () => {
++  it('a stage created archived gets its edges on restore, so leads move in and out of it', async () => {
++    const w = await world('restore-edges');
++    // Position -1 sorts it before Novo in the open order, so the shared rule links it to Novo.
++    const [archived] = await sql<{ id: string }[]>`
++      INSERT INTO sales_ops_pipeline_stages (org_id, pipeline_id, name, position, type, behavior, status, archived_at)
++      VALUES (${w.orgId}, ${w.pipeline.id}, 'Retomada', -1, 'normal', 'none', 'archived', now()) RETURNING id`;
++    const [edges] = await sql<{ n: number }[]>`
++      SELECT count(*)::int AS n FROM sales_ops_pipeline_transitions
++      WHERE org_id = ${w.orgId} AND (from_stage_id = ${archived!.id} OR to_stage_id = ${archived!.id})`;
++    expect(edges!.n).toBe(0);
++    const lead = await w.create({});
++    expect(lead.stageId).toBe(w.stage('Novo'));
++    const restored = await call(w.app, 'PATCH', `/lead-stages/${archived!.id}`, { status: 'active' });
++    expect(restored.status, JSON.stringify(restored.json)).toBe(200);
++    const into = await call(w.app, 'POST', `/leads/${lead.id}/move`, { stageId: archived!.id, position: 0 });
++    expect(into.status, JSON.stringify(into.json)).toBe(200);
++    const out = await call(w.app, 'POST', `/leads/${lead.id}/move`, { stageId: w.stage('Novo'), position: 0 });
++    expect(out.status, JSON.stringify(out.json)).toBe(200);
++  });
++
++  it('a restore leaves a graph the org already shaped alone', async () => {
++    const w = await world('restore-keeps');
++    const [archived] = await sql<{ id: string }[]>`
++      INSERT INTO sales_ops_pipeline_stages (org_id, pipeline_id, name, position, type, behavior, status, archived_at)
++      VALUES (${w.orgId}, ${w.pipeline.id}, 'Retomada', -1, 'normal', 'none', 'archived', now()) RETURNING id`;
++    await sql`
++      INSERT INTO sales_ops_pipeline_transitions (org_id, pipeline_id, from_stage_id, to_stage_id)
++      VALUES (${w.orgId}, ${w.pipeline.id}, ${w.stage('Novo')}, ${archived!.id})`;
++    const restored = await call(w.app, 'PATCH', `/lead-stages/${archived!.id}`, { status: 'active' });
++    expect(restored.status).toBe(200);
++    const [edges] = await sql<{ n: number }[]>`
++      SELECT count(*)::int AS n FROM sales_ops_pipeline_transitions
++      WHERE org_id = ${w.orgId} AND (from_stage_id = ${archived!.id} OR to_stage_id = ${archived!.id})`;
++    expect(edges!.n).toBe(1);
++  });
++});
++
+ describe('the transition graph on move', () => {
+   it('an absent pair is 409 transition_not_allowed and writes nothing; an allowed pair writes exactly one event', async () => {
+     const w = await world('move');
+@@ -379,6 +434,40 @@ describe('seller scope and RLS isolation on the new routes', () => {
+   });
+ });
+ 
++describe('the follow-up owner completes their own task', () => {
++  it('the owner of a follow-up on another seller lead completes it; a seller with no access to the lead answers 404', async () => {
++    const w = await world('followup-owner');
++    const db = getDb();
++    const ana = await createPerson(db, w.orgId, PersonSchema.parse({ displayName: 'Ana', isSeller: true }));
++    const bruno = await createPerson(db, w.orgId, PersonSchema.parse({ displayName: 'Bruno', isSeller: true }));
++    const carla = await createPerson(db, w.orgId, PersonSchema.parse({ displayName: 'Carla', isSeller: true }));
++    if (typeof ana === 'string' || typeof bruno === 'string' || typeof carla === 'string') throw new Error('person');
++    await sql`UPDATE sales_ops_people SET hub_account_id = 'hub_ana_f' WHERE id = ${ana.id}`;
++    await sql`UPDATE sales_ops_people SET hub_account_id = 'hub_bruno_f' WHERE id = ${bruno.id}`;
++    await sql`UPDATE sales_ops_people SET hub_account_id = 'hub_carla_f' WHERE id = ${carla.id}`;
++    const anaWho: Who = { userId: 'hub_ana_f', role: 'seller', name: 'Ana' };
++    const brunoWho: Who = { userId: 'hub_bruno_f', role: 'seller', name: 'Bruno' };
++    const carlaWho: Who = { userId: 'hub_carla_f', role: 'seller', name: 'Carla' };
++    const anasLead = await w.create({ sellerPersonId: ana.id });
++    const assigned = await call(appFor(w.orgId, anaWho), 'POST', `/leads/${anasLead.id}/followups`, {
++      nextStep: 'Retornar ao cliente',
++      dueOn: '2026-10-22',
++      ownerPersonId: bruno.id,
++    });
++    expect(assigned.status, JSON.stringify(assigned.json)).toBe(201);
++    const followupId = assigned.json.followup.id as string;
++
++    const listed = await call(appFor(w.orgId, brunoWho), 'GET', '/followups?scope=mine&status=open');
++    expect(listed.json.followups.map((f: { id: string }) => f.id)).toContain(followupId);
++
++    const denied = await call(appFor(w.orgId, carlaWho), 'POST', `/followups/${followupId}/done`, {});
++    expect(denied.status).toBe(404);
++    const done = await call(appFor(w.orgId, brunoWho), 'POST', `/followups/${followupId}/done`, {});
++    expect(done.status, JSON.stringify(done.json)).toBe(200);
++    expect(done.json.followup.doneAt).not.toBeNull();
++  });
++});
++
+ describe('period and dynamic filters', () => {
+   it('filters on created_at by Sao Paulo civil days: 02:30Z on D+1 is day D, 03:00Z is D+1', async () => {
+     const w = await world('period');
+
+ succeeded in 0ms:
+import { and, desc, eq, isNotNull, sql, type SQL } from 'drizzle-orm';
+import type { getDb } from '../../../db/client.js';
+import { salesOpsCrmLeads, salesOpsPipelineStages } from '../../../db/schema.js';
+import { writeAuditEntry } from '../../audit/service.js';
+import { LEADS_DEFAULT_LIMIT, type ListDeletedLeadsQuery } from './lead-schemas.js';
+import {
+  LeadInputError,
+  type LeadScope,
+  type LeadView,
+  firstOpenLeadStage,
+  leadIdentityConditions,
+  liveLeadCondition,
+  lockLeadBoard,
+  nextLeadPosition,
+  readLeadView,
+  renumberStage,
+  resolveLeadScopePredicate,
+} from './lead-service.js';
+import { recordStageChange } from './lead-history.js';
+import { withTenant } from './with-tenant.js';
+
+/**
+ * The lead lixeira: soft delete, restore and the deleted list.
+ *
+ * This is the ONE lead file that writes the ledger. Moves stay unaudited in
+ * `lead-service.ts` (high-frequency noise behind a global tail lock); a delete or
+ * a restore is a rare, deliberate act the gestor must be able to trace, so it is
+ * audited like an archive. `lead-contract.test.ts` keeps the audit writer out of
+ * `lead-service.ts` and pins both writes here.
+ *
+ * It never claims a lead (no seller column is written) and never seeds an etapa.
+ *
+ * Lock order, the same one every board writer takes: scope gate, `lockLeadBoard`,
+ * the card row `FOR UPDATE`, the column renumber, and the ledger entry LAST (its
+ * global tail lock is held until COMMIT).
+ */
+
+type Db = ReturnType<typeof getDb>;
+
+/** Who deletes or restores, from the VERIFIED context only (route boundary). */
+export type LeadActor = { userId: string; name: string | null };
+
+export type DeleteLeadResult =
+  | { ok: true }
+  | { ok: false; reason: 'not_found' | 'seller_person_unmapped' | 'already_converted' };
+
+export type RestoreLeadResult = { ok: true; lead: LeadView } | { ok: false; reason: 'not_found' };
+
+/** One row of Cadastros > Leads excluídos. `id` is the restore key and is never rendered. */
+export type DeletedLeadView = {
+  id: string;
+  contactName: string;
+  clientName: string;
+  stageName: string;
+  sellerName: string;
+  estimatedValueBrl: number;
+  deletedAt: string;
+  deletedByName: string | null;
+};
+
+export type ListDeletedLeadsResult = { items: DeletedLeadView[]; nextCursor: string | null };
+
+/** The inverse of liveLeadCondition(), for the two reads that want deleted rows on purpose. */
+function deletedLeadCondition(): SQL {
+  return isNotNull(salesOpsCrmLeads.deletedAt);
+}
+
+/** The etapa's CURRENT name, for the ledger snapshot. The composite FK guarantees the row. */
+async function stageName(tx: Db, orgId: string, stageId: string): Promise<string> {
+  const [stage] = await tx
+    .select({ name: salesOpsPipelineStages.name })
+    .from(salesOpsPipelineStages)
+    .where(and(eq(salesOpsPipelineStages.orgId, orgId), eq(salesOpsPipelineStages.id, stageId)))
+    .limit(1);
+  return stage?.name ?? '';
+}
+
+export function deleteLead(
+  db: Db,
+  orgId: string,
+  id: string,
+  scope: LeadScope,
+  actor: LeadActor,
+): Promise<DeleteLeadResult> {
+  return withTenant(db, orgId, async (tx) => {
+    // The same gate every lead read uses: an admin reaches any live lead, an
+    // active vendedor his own and the unassigned pool, anyone else his own. A
+    // lead outside it is not_found, never forbidden (a 403 confirms the row).
+    const gate = await resolveLeadScopePredicate(tx, orgId, scope);
+    if (!gate.ok) return { ok: false, reason: gate.reason } as const;
+    // Before the card's row lock: a delete renumbers the column, so it is a board
+    // writer and takes the one lock order (see lockLeadBoard).
+    await lockLeadBoard(tx, orgId);
+
+    const [current] = await tx
+      .select()
+      .from(salesOpsCrmLeads)
+      .where(and(...leadIdentityConditions(orgId, id, gate)))
+      .limit(1)
+      .for('update');
+    // Already deleted is not_found too: leadIdentityConditions carries the live predicate.
+    if (!current) return { ok: false, reason: 'not_found' } as const;
+    // A converted card belongs to its proposta; deleting it would orphan the link.
+    if (current.saleId !== null) return { ok: false, reason: 'already_converted' } as const;
+
+    const fromStage = await stageName(tx, orgId, current.stageId);
+    const deletedAt = new Date();
+    // No seller column, no stage_id, no position: a delete never claims a pool
+    // lead and keeps the etapa a restore returns it to.
+    await tx
+      .update(salesOpsCrmLeads)
+      .set({
+        deletedAt,
+        deletedByUserId: actor.userId,
+        deletedByName: actor.name,
+        updatedAt: deletedAt,
+      })
+      .where(and(eq(salesOpsCrmLeads.orgId, orgId), eq(salesOpsCrmLeads.id, id), liveLeadCondition()));
+
+    // The column closes the gap at once, so it stays 1..N over live cards.
+    await renumberStage(tx, orgId, current.stageId, null);
+
+    // LAST: the ledger tail lock is global and held until COMMIT.
+    await writeAuditEntry(tx, {
+      actorUserId: actor.userId,
+      // Never null: the org-scoped history read filters on actor_org_id.
+      actorOrgId: orgId,
+      action: 'lead.deleted',
+      entityType: 'lead',
+      entityId: id,
+      beforeJsonb: { deleted: false },
+      afterJsonb: {
+        deleted: true,
+        label: current.contactName,
+        actorLabel: actor.name,
+        metadata: {
+          contactName: current.contactName,
+          clientName: current.clientNameSnapshot,
+          stageName: fromStage,
+          sellerName: current.sellerNameSnapshot,
+        },
+      },
+    });
+    return { ok: true } as const;
+  });
+}
+
+/** Admins restore any org lead; others restore only their own deletion. */
+export function restoreLead(
+  db: Db,
+  orgId: string,
+  id: string,
+  isAdmin: boolean,
+  actor: LeadActor,
+): Promise<RestoreLeadResult> {
+  return withTenant(db, orgId, async (tx) => {
+    const restoreConditions = and(
+      eq(salesOpsCrmLeads.orgId, orgId),
+      eq(salesOpsCrmLeads.id, id),
+      deletedLeadCondition(),
+      ...(isAdmin ? [] : [eq(salesOpsCrmLeads.deletedByUserId, actor.userId)]),
+    );
+    // A restore writes stage_id and position: same lock order as every board writer.
+    await lockLeadBoard(tx, orgId);
+
+    const [current] = await tx
+      .select()
+      .from(salesOpsCrmLeads)
+      .where(restoreConditions)
+      .limit(1)
+      .for('update');
+    // A live, unknown or other-org id: there is nothing to restore.
+    if (!current) return { ok: false, reason: 'not_found' } as const;
+
+    const [own] = await tx
+      .select({
+        id: salesOpsPipelineStages.id,
+        name: salesOpsPipelineStages.name,
+        status: salesOpsPipelineStages.status,
+      })
+      .from(salesOpsPipelineStages)
+      .where(and(eq(salesOpsPipelineStages.orgId, orgId), eq(salesOpsPipelineStages.id, current.stageId)))
+      .limit(1);
+    // Its own etapa when it is still on the board; an archived etapa is not a
+    // move target, so the lead goes where a new lead would. Never seeds one: the
+    // leads edition may have none, and that is the existing 400.
+    const target =
+      own && own.status === 'active'
+        ? { id: own.id, name: own.name }
+        : await firstOpenLeadStage(tx, orgId, current.pipelineId);
+    if (!target) throw new LeadInputError('no_open_stage');
+
+    const stageChanged = target.id !== current.stageId;
+    const position = await nextLeadPosition(tx, orgId, target.id);
+    await tx
+      .update(salesOpsCrmLeads)
+      .set({
+        deletedAt: null,
+        deletedByUserId: null,
+        deletedByName: null,
+        stageId: target.id,
+        position,
+        // KEY OMISSION, the moveLead rule: stage_changed_at moves only when the
+        // etapa changes. The fallback target is a normal etapa, which carries no
+        // lost reason, so the reason is cleared with it.
+        ...(stageChanged ? { stageChangedAt: new Date(), lostReason: null } : {}),
+        updatedAt: new Date(),
+      })
+      .where(restoreConditions);
+    // Appended at the end; the renumber keeps the column dense even if it was not.
+    await renumberStage(tx, orgId, target.id, null);
+    // A restore that lands in another etapa is a stage change like any other: one history event.
+    if (stageChanged) {
+      await recordStageChange(tx, {
+        orgId,
+        leadId: id,
+        fromStageId: current.stageId,
+        toStageId: target.id,
+        reason: null,
+        actorUserId: actor.userId,
+        actorName: actor.name,
+      });
+    }
+
+    const lead = await readLeadView(tx, orgId, id);
+    // LAST: the ledger tail lock is global and held until COMMIT. A restore is a
+    // NEW entry, never an undo of the delete entry.
+    await writeAuditEntry(tx, {
+      actorUserId: actor.userId,
+      actorOrgId: orgId,
+      action: 'lead.restored',
+      entityType: 'lead',
+      entityId: id,
+      beforeJsonb: { deleted: true, stageName: own?.name ?? '' },
+      afterJsonb: {
+        deleted: false,
+        label: current.contactName,
+        actorLabel: actor.name,
+        metadata: {
+          contactName: current.contactName,
+          clientName: current.clientNameSnapshot,
+          stageName: target.name,
+          sellerName: current.sellerNameSnapshot,
+        },
+      },
+    });
+    return { ok: true, lead } as const;
+  });
+}
+
+/** Admin-only at the route. */
+export function listDeletedLeads(
+  db: Db,
+  orgId: string,
+  query: ListDeletedLeadsQuery,
+): Promise<ListDeletedLeadsResult> {
+  return withTenant(db, orgId, async (tx) => {
+    const conditions: SQL[] = [eq(salesOpsCrmLeads.orgId, orgId), deletedLeadCondition()];
+    if (query.cursor) {
+      const [deletedAt, cursorId] = query.cursor.split('_');
+      conditions.push(
+        sql`(${salesOpsCrmLeads.deletedAt}, ${salesOpsCrmLeads.id}) < (${deletedAt}::timestamptz, ${cursorId}::uuid)`,
+      );
+    }
+    const limit = query.limit ?? LEADS_DEFAULT_LIMIT;
+    const rows = await tx
+      .select({
+        id: salesOpsCrmLeads.id,
+        contactName: salesOpsCrmLeads.contactName,
+        clientName: salesOpsCrmLeads.clientNameSnapshot,
+        // The etapa's CURRENT name, joined live, so a renamed etapa reads renamed.
+        stageName: salesOpsPipelineStages.name,
+        sellerName: salesOpsCrmLeads.sellerNameSnapshot,
+        estimatedValueBrl: salesOpsCrmLeads.estimatedValueBrl,
+        deletedAt: salesOpsCrmLeads.deletedAt,
+        deletedByName: salesOpsCrmLeads.deletedByName,
+        // Rendered by Postgres with all six fractional digits: see the cursor
+        // comment in lead-schemas.ts for why a JS Date cannot build it.
+        cursorAt: sql<string>`to_char(${salesOpsCrmLeads.deletedAt} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
+      })
+      .from(salesOpsCrmLeads)
+      .innerJoin(
+        salesOpsPipelineStages,
+        and(
+          eq(salesOpsPipelineStages.orgId, salesOpsCrmLeads.orgId),
+          eq(salesOpsPipelineStages.id, salesOpsCrmLeads.stageId),
+        ),
+      )
+      .where(and(...conditions))
+      .orderBy(desc(salesOpsCrmLeads.deletedAt), desc(salesOpsCrmLeads.id))
+      .limit(limit + 1);
+
+    const hasMore = rows.length > limit;
+    const page = hasMore ? rows.slice(0, limit) : rows;
+    const last = page.at(-1);
+    return {
+      // Projected field by field: deleted_by_user_id is never selected, so it can
+      // never reach a client.
+      items: page.map((row) => ({
+        id: row.id,
+        contactName: row.contactName,
+        clientName: row.clientName,
+        stageName: row.stageName,
+        sellerName: row.sellerName,
+        estimatedValueBrl: row.estimatedValueBrl,
+        deletedAt: row.deletedAt!.toISOString(),
+        deletedByName: row.deletedByName,
+      })),
+      nextCursor: hasMore && last ? `${last.cursorAt}_${last.id}` : null,
+    };
+  });
+}
+
+hook: PostToolUse
+hook: PostToolUse
+hook: PostToolUse
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PostToolUse Completed
+hook: PostToolUse Completed
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse
+hook: PreToolUse
+hook: PreToolUse Completed
+hook: PreToolUse Completed
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc 'cat apps/web/src/sales-ops/leads/FollowupsContainer.tsx apps/web/src/sales-ops/leads/FollowupsView.tsx' in /Users/cauetpinciara/Documents/fxl/projects/06--PRODUCT--fxl-sales/.worktrees/20261021T011348Z-vendas-crm-unificado/run
+ succeeded in 0ms:
+import * as React from 'react';
+import { useNavigate } from 'react-router-dom';
+import { todayInSaoPaulo } from '@fxl-sales/shared-utils/sao-paulo-day';
+import { useAuthProfile } from '@/auth/react';
+import { Skeleton } from '@/components/ui/skeleton';
+import { buildSalesOpsPath, type SalesOpsWorkspace } from '../navigation';
+import { type PeriodSelection, selectionToRange } from '../period';
+import type { FollowupScope, FollowupStatus } from './crm-types';
+import { useFollowups, useMarkFollowupDone } from './crm-hooks';
+import { followupsParams } from './followups';
+import { FollowupsView } from './FollowupsView';
+import { LEAD_SUMMARY_OPENED_IN_APP } from './lead-summary-nav';
+
+/*
+ * The follow-ups route. The scope is `team` only for an admin under `operacional`
+ * (the API answers team to an admin alone); everywhere else it is `mine`. The
+ * period defaults to the next seven days, the agenda's forward view.
+ */
+
+const DEFAULT_PERIOD: PeriodSelection = { preset: 'next7', from: '', to: '' };
+
+export function FollowupsContainer({ workspace }: { workspace: SalesOpsWorkspace }) {
+  const navigate = useNavigate();
+  const isAdmin = useAuthProfile().roles.includes('admin');
+  const showScopeToggle = workspace === 'operacional' && isAdmin;
+  const [scope, setScope] = React.useState<FollowupScope>(showScopeToggle ? 'team' : 'mine');
+  const [status, setStatus] = React.useState<FollowupStatus>('open');
+  const [period, setPeriod] = React.useState<PeriodSelection>(DEFAULT_PERIOD);
+  const today = React.useMemo(() => todayInSaoPaulo(), []);
+  const range = React.useMemo(() => selectionToRange(period, today), [period, today]);
+  const params = React.useMemo(() => followupsParams(scope, status, range), [scope, status, range]);
+  const followupsQuery = useFollowups(params);
+  const markDone = useMarkFollowupDone();
+
+  if (followupsQuery.isPending) {
+    return <Skeleton className="h-[320px] w-full" />;
+  }
+
+  return (
+    <FollowupsView
+      loadFailed={followupsQuery.isError}
+      onMarkDone={(followupId) => markDone.mutate(followupId)}
+      onOpenLead={(leadId) =>
+        navigate(buildSalesOpsPath({ workspace, view: 'leads', leadId }), { state: LEAD_SUMMARY_OPENED_IN_APP })
+      }
+      onPeriodChange={setPeriod}
+      onScopeChange={setScope}
+      onStatusChange={setStatus}
+      pendingId={markDone.isPending ? (markDone.variables ?? null) : null}
+      period={period}
+      rows={followupsQuery.data ?? []}
+      scope={scope}
+      showScopeToggle={showScopeToggle}
+      status={status}
+      today={today}
+    />
+  );
+}
+import { Combobox } from '@/components/ui/combobox';
+import { PeriodFilter } from '../PeriodFilter';
+import type { PeriodSelection } from '../period';
+import { displayDate } from '../civil-day';
+import {
+  blockedNoticeClass,
+  comboboxTriggerClass,
+  mutedStateClass,
+  secondaryButtonClass,
+  segmentedButtonActiveClass,
+  segmentedButtonClass,
+  segmentedContainerClass,
+} from './board-ui';
+import type { FollowupListRow, FollowupScope, FollowupStatus } from './crm-types';
+import {
+  FOLLOWUP_COPY,
+  FOLLOWUP_PRESETS,
+  FOLLOWUP_SCOPE_OPTIONS,
+  FOLLOWUP_STATUS_OPTIONS,
+  sortFollowups,
+} from './followups';
+import { FOLLOWUP_STATE_LABEL, followupDueState } from './summary-format';
+
+export type FollowupsViewProps = {
+  rows: readonly FollowupListRow[];
+  /** The São Paulo civil day, passed in. */
+  today: string;
+  scope: FollowupScope;
+  onScopeChange: (scope: FollowupScope) => void;
+  /** The team scope is offered to an admin under `operacional` only. */
+  showScopeToggle: boolean;
+  status: FollowupStatus;
+  onStatusChange: (status: FollowupStatus) => void;
+  period: PeriodSelection;
+  onPeriodChange: (period: PeriodSelection) => void;
+  onOpenLead: (leadId: string) => void;
+  onMarkDone: (followupId: string) => void;
+  pendingId?: string | null;
+  loadFailed?: boolean;
+};
+
+/** The follow-ups agenda. Presentational: the container owns the queries and the navigation. */
+export function FollowupsView({
+  rows,
+  today,
+  scope,
+  onScopeChange,
+  showScopeToggle,
+  status,
+  onStatusChange,
+  period,
+  onPeriodChange,
+  onOpenLead,
+  onMarkDone,
+  pendingId = null,
+  loadFailed = false,
+}: FollowupsViewProps) {
+  const ordered = sortFollowups(rows);
+  return (
+    <div className="flex flex-col gap-4" data-followups-view="">
+      <div className="flex flex-wrap items-center gap-3">
+        {showScopeToggle ? (
+          <div aria-label="Escopo" className={segmentedContainerClass} role="group">
+            {FOLLOWUP_SCOPE_OPTIONS.map((option) => (
+              <button
+                aria-pressed={scope === option.value}
+                className={scope === option.value ? segmentedButtonActiveClass : segmentedButtonClass}
+                data-followup-scope={option.value}
+                key={option.value}
+                onClick={() => onScopeChange(option.value)}
+                type="button"
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        ) : null}
+        <div className="w-[190px]">
+          <Combobox
+            aria-label={FOLLOWUP_COPY.statusLabel}
+            className={`w-full ${comboboxTriggerClass}`}
+            onChange={(value) => onStatusChange(value as FollowupStatus)}
+            options={FOLLOWUP_STATUS_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+            value={status}
+          />
+        </div>
+        <PeriodFilter
+          aria-label="Período do follow-up"
+          onChange={onPeriodChange}
+          presets={FOLLOWUP_PRESETS}
+          value={period}
+        />
+      </div>
+
+      {loadFailed ? (
+        <p className={blockedNoticeClass} role="alert">{FOLLOWUP_COPY.loadFailed}</p>
+      ) : ordered.length === 0 ? (
+        <p className={mutedStateClass}>{FOLLOWUP_COPY.empty}</p>
+      ) : (
+        <ul className="flex flex-col divide-y divide-[#f0f0f3] rounded-[14px] border border-[#e8e8ec] bg-white" data-followups-list="">
+          {ordered.map((row) => {
+            const done = row.doneAt !== null;
+            const state = done ? null : followupDueState(row.dueOn, today);
+            return (
+              <li className="flex flex-wrap items-center gap-3 px-4 py-3" data-followup-row={row.id} key={row.id}>
+                <button
+                  aria-label={`${FOLLOWUP_COPY.openLead}: ${row.leadContactName}`}
+                  className="min-w-0 max-w-[220px] truncate text-left text-[14px] font-semibold text-[#1f1f27] hover:underline"
+                  data-followup-open-lead={row.leadId}
+                  onClick={() => onOpenLead(row.leadId)}
+                  type="button"
+                >
+                  {row.leadContactName}
+                </button>
+                <span className="min-w-0 flex-1 break-words text-[14px] text-[#57575f]">{row.nextStep}</span>
+                <span className="text-[13px] text-[#57575f]">{displayDate(row.dueOn)}</span>
+                {state ? (
+                  <span className="rounded-full bg-[#f4f4f6] px-2 py-0.5 text-[12px] font-semibold text-[#57575f]" data-followup-state={state}>
+                    {FOLLOWUP_STATE_LABEL[state]}
+                  </span>
+                ) : null}
+                <span className="text-[13px] text-[#8b8b92]">{row.ownerName ?? FOLLOWUP_COPY.noOwner}</span>
+                {done ? (
+                  <span className="text-[13px] text-[#8b8b92]">{FOLLOWUP_COPY.doneBadge}</span>
+                ) : (
+                  <button
+                    className={secondaryButtonClass}
+                    data-followup-done={row.id}
+                    disabled={pendingId === row.id}
+                    onClick={() => onMarkDone(row.id)}
+                    type="button"
+                  >
+                    {FOLLOWUP_COPY.done}
+                  </button>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+hook: PostToolUse
+hook: PostToolUse Completed
+exec
+/bin/zsh -lc "rg -n 'wonAt|civil|UTC|period' nexo/plans/vendas-crm-unificado/parts/08b* nexo/plans/vendas-crm-unificado/parts/10b* nexo/knowledge/reference/propostas.md" in /Users/cauetpinciara/Documents/fxl/projects/06--PRODUCT--fxl-sales/.worktrees/20261021T011348Z-vendas-crm-unificado/run
+exec
+/bin/zsh -lc "rg -n 'wonAt:|won_at|wonAt =' apps/api/src/domains/sales-ops/service.ts apps/web/src/sales-ops/SalesOpsApp.tsx apps/web/src/sales-ops/__tests__/period.test.ts apps/web/src/sales-ops/__tests__/sales-views.test.ts" in /Users/cauetpinciara/Documents/fxl/projects/06--PRODUCT--fxl-sales/.worktrees/20261021T011348Z-vendas-crm-unificado/run
+ succeeded in 0ms:
+apps/web/src/sales-ops/__tests__/sales-views.test.ts:21:function sale(id: string, status: SalesOpsSale['status'], createdAt: string, wonAt: string | null = null): SalesOpsSale {
+apps/web/src/sales-ops/__tests__/period.test.ts:81:    expect(saleReferenceInstant({ status: 'won', wonAt: '2026-10-10T12:00:00.000Z', createdAt: '2026-09-01T12:00:00.000Z' })).toBe(
+apps/web/src/sales-ops/__tests__/period.test.ts:84:    expect(saleReferenceInstant({ status: 'open', wonAt: '2026-10-10T12:00:00.000Z', createdAt: '2026-09-01T12:00:00.000Z' })).toBe(
+apps/web/src/sales-ops/__tests__/period.test.ts:87:    expect(saleReferenceInstant({ status: 'won', wonAt: null, createdAt: '2026-09-01T12:00:00.000Z' })).toBe(
+apps/web/src/sales-ops/__tests__/period.test.ts:93:    const sale = { status: 'won', wonAt: '2026-10-10T12:00:00.000Z', createdAt: '2026-09-01T12:00:00.000Z' };
+apps/api/src/domains/sales-ops/service.ts:2613:        wonAt: input.status === 'won' ? now : null,
+apps/api/src/domains/sales-ops/service.ts:2971:      patch = { status: 'won', wonAt: now, lostAt: null, updatedAt: now };
+apps/api/src/domains/sales-ops/service.ts:2994:      patch = { status: 'open', wonAt: null, lostAt: null, updatedAt: now };
+
+ succeeded in 0ms:
+nexo/knowledge/reference/propostas.md:148:  `due_date` stays `timestamptz` and a civil day `D` is still stored as `D T00:00:00Z` and read back with the UTC slice, so storage and every existing row are unchanged.
+nexo/knowledge/reference/propostas.md:151:  `createSale` and `transitionSale` pass `saoPauloDayOf(now)` as the won date (the one-shot `other_cost` and professional fallback due date), and `cancelContract` defaults its cut-off to `todayInSaoPaulo(now)`; both take a trailing optional `now` so tests can pin an instant near UTC midnight.
+nexo/knowledge/reference/propostas.md:154:  Oracles: `packages/shared-utils/src/__tests__/sao-paulo-day.test.ts`, `apps/api/test/rls/sao-paulo-day.test.ts`, `apps/api/src/domains/sales-ops/__tests__/sao-paulo-day-decisions.test.ts`, `apps/web/src/sales-ops/__tests__/civil-day.test.ts` and `apps/web/src/sales-ops/__tests__/sale-detail-civil-day.test.tsx`, the web ones running under `TZ=America/Sao_Paulo` with a `getDate()` positive control.
+nexo/knowledge/reference/propostas.md:155:- "No mês" is the São Paulo civil month of today (audit P7, slice 12).
+nexo/knowledge/reference/propostas.md:158:  Won revenue counts by `saoPauloDayOf(new Date(sale.wonAt))`, so a proposta won at `2026-09-01T02:00:00Z` (23:00 on August 31 in São Paulo) belongs to August; a null `wonAt` is excluded.
+nexo/knowledge/reference/propostas.md:175:- The backfill gives every pre-existing paid row with `amount_brl > 0` one synthetic baixa: `paid_on = LEAST((due_date AT TIME ZONE 'UTC')::date, (now() AT TIME ZONE 'America/Sao_Paulo')::date)`, `origin = 'manual'`, `actor_user_id = 'system'`, `actor_name = 'Migração'`.
+nexo/knowledge/reference/propostas.md:176:  The cast is deliberately `AT TIME ZONE 'UTC'` and never a bare `due_date::date`, because a bare cast uses the session's own `TimeZone` GUC and turns `2026-03-01T00:00:00Z` into `2026-02-28` inside a São Paulo session.
+nexo/knowledge/reference/propostas.md:194:- A one-shot payable (`other_cost`, the professional fallback) keeps its stored due date, because recomputing it from the won day in São Paulo would move rows written with the old UTC day.
+nexo/knowledge/reference/propostas.md:227:- `paidOn` and `dueDate` are civil days, so the UI formats them by splitting the string; `new Date('2026-09-23')` is UTC midnight and prints the 22nd in São Paulo.
+nexo/knowledge/reference/propostas.md:228:  Only "today" is a São Paulo decision: `Marcar como pago` seeds and caps its date with `todayInSaoPaulo()`, which near UTC midnight is the previous UTC day; the oracle pins the clock at `2026-09-24T01:30:00Z` and expects `2026-09-23`.
+nexo/knowledge/reference/propostas.md:237:  `ledger-order.ts` holds the one display order: civil due day, then label (receivables) or kind rank and beneficiary (payables), then id, all fields a settlement never writes.
+nexo/knowledge/reference/propostas.md:242:## Listas de Propostas e período (10-web-kanban-funil-periodo, v4.8.0)
+nexo/knowledge/reference/propostas.md:245:- O filtro de período usa o dia civil de São Paulo, e uma proposta `won` entra pelo dia de `wonAt` (sem `wonAt`, pelo dia de criação, como em `saleReferenceInstant`).
+nexo/plans/vendas-crm-unificado/parts/10b-web-propostas-rotas.md:1:# Part 10b - Propostas: one route per list, Proposta versus Vendido, period filter
+nexo/plans/vendas-crm-unificado/parts/10b-web-propostas-rotas.md:3:Part of slice `10-web-kanban-funil-periodo`. Depends on part 10a (08b for the period helper, 09a for `navigation.ts` shape).
+nexo/plans/vendas-crm-unificado/parts/10b-web-propostas-rotas.md:9:- Requirements: each Propostas submenu entry is its own route under the existing pattern `/:workspace/:view/:saleId?`; `buildSaleDetailPath` stays `/operacional/vendas/<id>` (Finance `deepLinkPath`); the detail id must work on `vendas` AND on each sub-list; Proposta versus Vendido is decided by `status` on the proposta side (open or draft = Proposta, `won` = Vendido) and by stage type on the lead side (done by the stage colours/type in 10a); period filter on Propostas with the contract's semantics: non-won by creation day, won by `won_at` day, in Sao Paulo (`filterSalesByPeriod`, part 08b).
+nexo/plans/vendas-crm-unificado/parts/10b-web-propostas-rotas.md:10:- The bootstrap carries every sale (`bootstrap.sales`), so the period filter is applied client-side with the shared helper; no new endpoint.
+nexo/plans/vendas-crm-unificado/parts/10b-web-propostas-rotas.md:55:- `routing.test.tsx` (existing SalesOpsApp harness) new cases: `/operacional/vendas-ganhas` lists only won sales and its title is `Vendas ganhas`; `/operacional/vendas-abertas` lists draft and open; `/operacional/vendas-ganhas/<id>` opens the detail dialog and closing it returns to `/operacional/vendas-ganhas`; `/operacional/vendas/<id>` (Finance deep link) still opens the detail (existing `sale-deep-link.test.tsx` stays unchanged and green); choosing a period in the header filters the rows and the `registros` counter.
+nexo/plans/vendas-crm-unificado/parts/10b-web-propostas-rotas.md:67:- Won propostas without `wonAt` fall back to creation; the helper pins it.
+nexo/plans/vendas-crm-unificado/parts/10b-web-propostas-rotas.md:68:- The period state lives in `SalesOpsApp` (like `salesFilters`) and survives switching between sales lists, resets on remount.
+nexo/plans/vendas-crm-unificado/parts/08b-web-period-filter.md:7:- Request item 8: every list (Propostas, Prospecção Lista and Quadro, Funil, Follow-ups) filters by period, in `America/Sao_Paulo` civil days.
+nexo/plans/vendas-crm-unificado/parts/08b-web-period-filter.md:9:- The API side (phase 2 contract): `from`/`to` are inclusive ISO civil days interpreted in Sao Paulo; leads filter on `created_at`, follow-ups on `due_on`, propostas on their existing date semantics (created for non-won, `won_at` for won).
+nexo/plans/vendas-crm-unificado/parts/08b-web-period-filter.md:15:`period.ts` (pure, React-free, imports only the sao-paulo-day subpath):
+nexo/plans/vendas-crm-unificado/parts/08b-web-period-filter.md:22:export type PeriodRange = { from: string | null; to: string | null };               // inclusive ISO civil days, null = open end
+nexo/plans/vendas-crm-unificado/parts/08b-web-period-filter.md:33:- `addDaysToIsoDay(day: string, delta: number): string`: `const [y,m,d] = day.split('-').map(Number); const t = new Date(Date.UTC(y!, m! - 1, d! + delta)); return t.toISOString().slice(0, 10);` (UTC arithmetic on a civil day; this is NOT a "today" decision, so the `toISOString().slice` rule does not apply, and a comment says so).
+nexo/plans/vendas-crm-unificado/parts/08b-web-period-filter.md:35:- `endOfMonth(day)`: `const [y,m] = day.split('-').map(Number); return new Date(Date.UTC(y!, m!, 0)).toISOString().slice(0, 10);`
+nexo/plans/vendas-crm-unificado/parts/08b-web-period-filter.md:36:- `periodError(sel: PeriodSelection): string | null`: only for `custom`: a non-blank `from`/`to` that fails `isIsoDay` -> `PERIOD_COPY.badDay`; both set and `from > to` (string compare) -> `PERIOD_COPY.invalid`; otherwise `null`.
+nexo/plans/vendas-crm-unificado/parts/08b-web-period-filter.md:40:  - `custom` -> if `periodError(sel)` is non-null `PERIOD_ALL` (an invalid range is reported by the control and never applied), else `{from: sel.from || null, to: sel.to || null}`.
+nexo/plans/vendas-crm-unificado/parts/08b-web-period-filter.md:42:- `periodQuery(range: PeriodRange): { from?: string; to?: string }`: only the non-null ends.
+nexo/plans/vendas-crm-unificado/parts/08b-web-period-filter.md:45:- `saleReferenceInstant(sale: { status: string; wonAt: string | null; createdAt: string }): string` -> `sale.status === 'won' && sale.wonAt ? sale.wonAt : sale.createdAt` (the contract's "existing date semantics": won by `won_at`, everything else by creation).
+nexo/plans/vendas-crm-unificado/parts/08b-web-period-filter.md:46:- `filterSalesByPeriod<T extends { status: string; wonAt: string | null; createdAt: string }>(sales: readonly T[], range: PeriodRange): T[]`: returns the same array reference semantics are not needed; returns `sales.filter((s) => instantInPeriod(saleReferenceInstant(s), range))`, and `[...sales]` when the range is open.
+nexo/plans/vendas-crm-unificado/parts/08b-web-period-filter.md:59:- Root `<div className="flex flex-wrap items-center gap-2" data-period-filter="">`.
+nexo/plans/vendas-crm-unificado/parts/08b-web-period-filter.md:61:- When `value.preset === 'custom'`: two `<Input type="date" aria-label="De" ...>` and `aria-label="Até"` with `className="h-10 w-[150px] rounded-md border-[#dcdce2] bg-[#fafafb] px-3 text-sm"`, `data-period-from` / `data-period-to`; `onChange` writes `from` / `to` as typed.
+nexo/plans/vendas-crm-unificado/parts/08b-web-period-filter.md:62:- `const error = periodError(value)`; when non-null render `<p className="text-[13px] font-medium text-[#a5341c]" data-period-error="" role="alert">{error}</p>`.
+nexo/plans/vendas-crm-unificado/parts/08b-web-period-filter.md:67:1. Write `period.test.ts` and `period-filter.test.tsx`; run: fail (missing modules).
+nexo/plans/vendas-crm-unificado/parts/08b-web-period-filter.md:68:2. Create `period.ts` as designed. Run `period.test.ts` green.
+nexo/plans/vendas-crm-unificado/parts/08b-web-period-filter.md:69:3. Create `PeriodFilter.tsx`. Run `period-filter.test.tsx` green.
+nexo/plans/vendas-crm-unificado/parts/08b-web-period-filter.md:74:`apps/web/src/sales-ops/__tests__/period.test.ts` (node):
+nexo/plans/vendas-crm-unificado/parts/08b-web-period-filter.md:75:- `last7 and last30 end on today and span 7 and 30 civil days`: today `2026-10-20` -> `{2026-10-14, 2026-10-20}` and `{2026-09-21, 2026-10-20}`.
+nexo/plans/vendas-crm-unificado/parts/08b-web-period-filter.md:78:- `custom with from after to is reported and not applied`: `periodError` equals `PERIOD_COPY.invalid`, `selectionToRange` equals `PERIOD_ALL`.
+nexo/plans/vendas-crm-unificado/parts/08b-web-period-filter.md:81:- `periodQuery drops open ends`.
+nexo/plans/vendas-crm-unificado/parts/08b-web-period-filter.md:82:- `instantInPeriod uses the Sao Paulo day, not the UTC day`: range `{2026-10-20, 2026-10-20}`; instant `2026-10-21T01:30:00.000Z` (22:30 in Sao Paulo on the 20th) is INSIDE; instant `2026-10-20T02:59:00.000Z` (23:59 on the 19th) is OUTSIDE; instant `2026-10-20T03:00:00.000Z` (00:00 on the 20th) is INSIDE.
+nexo/plans/vendas-crm-unificado/parts/08b-web-period-filter.md:84:- `saleReferenceInstant: won uses wonAt, everything else createdAt; a won sale without wonAt falls back to createdAt`.
+nexo/plans/vendas-crm-unificado/parts/08b-web-period-filter.md:87:`apps/web/src/sales-ops/__tests__/period-filter.test.tsx` (happy-dom, real `Combobox`; helper style from `leads/__tests__/contact-lead-dialog.test.tsx` lines 30-70):
+nexo/plans/vendas-crm-unificado/parts/08b-web-period-filter.md:90:- `typing a reversed range shows the inline error and the control reports it`: render with `{preset:'custom', from:'2026-10-20', to:'2026-10-01'}`; `[data-period-error]` text equals `PERIOD_COPY.invalid`.
+nexo/plans/vendas-crm-unificado/parts/08b-web-period-filter.md:96:New files only; no existing file is edited. Searched `apps/web/src` for `period`, `Período` and `todayInSaoPaulo` consumers: none is touched by this slice.
+nexo/plans/vendas-crm-unificado/parts/08b-web-period-filter.md:100:- Oracle: `pnpm --filter @fxl-sales/web exec vitest run src/sales-ops/__tests__/period.test.ts src/sales-ops/__tests__/period-filter.test.tsx`
+nexo/plans/vendas-crm-unificado/parts/08b-web-period-filter.md:105:- `Date.UTC` arithmetic is only used for civil-day math, never for "today". A reviewer might flag `toISOString().slice(0, 10)`; the comment in `addDaysToIsoDay` explains why it is the civil-day arithmetic and not a clock read.
+
+hook: PostToolUse
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PostToolUse Completed
+codex
+As correções resolvem os cinco cenários apontados na rodada anterior. Resta uma variação do “Desfazer”: ao adicionar o primeiro contato a um lead antigo, a reversão agora é aceita, mas mantém o contato recém-adicionado. Estou fechando a revisão com esse caso comprovado e conferindo a cobertura das demais correções.
+
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "node -e 'const fs=require(\"node:fs\"),ts=require(\"typescript\"),vm=require(\"node:vm\");const s=fs.readFileSync(\"apps/web/src/sales-ops/leads/lead-form.ts\",\"utf8\");const body=s.slice(s.indexOf(\"export function leadToWriteSeed\"),s.indexOf(\"export function leadFormSaveErrorCopy\"));const ctx={exports:{},CLIENTE_FIELD_KEY:\"cliente\"};vm.runInNewContext(ts.transpileModule(body,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,ctx);const before={id:\"legacy\",contactName:\"Ana\",contactPhone:null,contactEmail:null,clientId:null,clientNameSnapshot:\"\",estimatedValueBrl:0,sellerPersonId:null,fields:[]};const current={...before,contactPhone:\"11999999999\"};const inverse=ctx.exports.leadToWriteSeed(before);console.log(JSON.stringify({previousContact:before.contactPhone,currentContact:current.contactPhone,inverseHasContactPhone:Object.hasOwn(inverse,\"contactPhone\"),contactAfterUndo:inverse.contactPhone"'!==undefined?inverse.contactPhone:current.contactPhone}));'"'" in /Users/cauetpinciara/Documents/fxl/projects/06--PRODUCT--fxl-sales/.worktrees/20261021T011348Z-vendas-crm-unificado/run
+ succeeded in 0ms:
+{"previousContact":null,"currentContact":"11999999999","inverseHasContactPhone":false,"contactAfterUndo":"11999999999"}
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse
+hook: PreToolUse
+hook: PreToolUse
+hook: PreToolUse
+hook: PreToolUse Completed
+hook: PreToolUse Completed
+hook: PreToolUse Completed
+hook: PreToolUse Completed
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "nl -ba apps/api/src/domains/sales-ops/leads/lead-service.ts | sed -n '1121,1130p;1154,1166p'" in /Users/cauetpinciara/Documents/fxl/projects/06--PRODUCT--fxl-sales/.worktrees/20261021T011348Z-vendas-crm-unificado/run
+exec
+/bin/zsh -lc "nl -ba apps/web/src/sales-ops/leads/LeadSummaryContainer.tsx | sed -n '135,153p'" in /Users/cauetpinciara/Documents/fxl/projects/06--PRODUCT--fxl-sales/.worktrees/20261021T011348Z-vendas-crm-unificado/run
+exec
+/bin/zsh -lc "nl -ba apps/web/src/sales-ops/leads/lead-form.ts | sed -n '237,267p'" in /Users/cauetpinciara/Documents/fxl/projects/06--PRODUCT--fxl-sales/.worktrees/20261021T011348Z-vendas-crm-unificado/run
+ succeeded in 0ms:
+   135	  }
+   136	
+   137	  async function saveWithUndo(payload: LeadWritePayload) {
+   138	    const previous = lead!;
+   139	    const result = await saveLead.mutateAsync(payload);
+   140	    // The Cliente travels as clientId, never as a field entry, so it never counts as "added".
+   141	    const previousIds = new Set((previous.fields ?? []).map((f) => f.fieldId));
+   142	    const added = (result.lead.fields ?? [])
+   143	      .filter((f) => f.key !== CLIENTE_FIELD_KEY && !previousIds.has(f.fieldId))
+   144	      .map((f) => f.fieldId);
+   145	    undo.publish('Lead editado', async () => {
+   146	      await requireUnchangedLead(result.lead);
+   147	      return saveLead.mutateAsync(leadToWriteSeed(previous, added));
+   148	    });
+   149	  }
+   150	
+   151	  /** Resolves `true` once the proposta exists and the lead has moved; `false` when the operator cancelled the wizard. */
+   152	  async function convert(stage: { id: string }): Promise<boolean> {
+   153	    if (!onRequestConversion) throw new Error('conversion_unavailable');
+
+ succeeded in 0ms:
+  1121	      seller = requested ? await resolveSellerPersonId(tx, orgId, requested) : null;
+  1122	    }
+  1123	
+  1124	    // A write that touches the contact must leave at least one of phone and e-mail.
+  1125	    if (input.contactPhone !== undefined || input.contactEmail !== undefined) {
+  1126	      const phone = input.contactPhone !== undefined ? input.contactPhone : current.contactPhone;
+  1127	      const email = input.contactEmail !== undefined ? input.contactEmail : current.contactEmail;
+  1128	      if (!phone && !email) throw new LeadInputError('contact_required');
+  1129	    }
+  1130	
+  1154	      .set({
+  1155	        ...(input.contactName !== undefined ? { contactName: input.contactName } : {}),
+  1156	        ...(clientTouched ? { clientId: nextClientId } : {}),
+  1157	        ...(clientNameSnapshot !== undefined ? { clientNameSnapshot } : {}),
+  1158	        ...(input.estimatedValueBrl !== undefined
+  1159	          ? { estimatedValueBrl: input.estimatedValueBrl }
+  1160	          : {}),
+  1161	        ...(input.contactPhone !== undefined ? { contactPhone: input.contactPhone } : {}),
+  1162	        ...(input.contactEmail !== undefined ? { contactEmail: input.contactEmail } : {}),
+  1163	        ...(writesSeller
+  1164	          ? {
+  1165	              sellerPersonId: seller?.id ?? null,
+  1166	              sellerNameSnapshot: seller?.displayName ?? '',
+
+ succeeded in 0ms:
+   237	}
+   238	
+   239	/**
+   240	 * The full previous state as a write body, used by the edit undo. The Cliente is
+   241	 * carried ONLY by `clientId`/`clientName`: the API refuses `clientId` together with a
+   242	 * Cliente entry of `fields` (400 field_invalid), so that entry is dropped here.
+   243	 *
+   244	 * A legacy lead that never had a contact has both contact keys null. They are omitted
+   245	 * exactly as the normal edit omits them (`buildLeadWritePayload` with `contactOptional`),
+   246	 * because the API refuses a PATCH that carries both contact keys empty (400 contact_required).
+   247	 */
+   248	export function leadToWriteSeed(lead: SalesOpsLead, clearFieldIds: readonly string[] = []): LeadWritePayload {
+   249	  const kept: LeadFieldWrite[] = (lead.fields ?? [])
+   250	    .filter((f) => f.key !== CLIENTE_FIELD_KEY)
+   251	    .map((f) => ({ fieldId: f.fieldId, value: f.value }));
+   252	  const contactless = !lead.contactPhone && !lead.contactEmail;
+   253	  return {
+   254	    id: lead.id,
+   255	    contactName: lead.contactName,
+   256	    ...(contactless ? {} : { contactPhone: lead.contactPhone, contactEmail: lead.contactEmail }),
+   257	    clientId: lead.clientId,
+   258	    clientName: lead.clientNameSnapshot || null,
+   259	    estimatedValueBrl: lead.estimatedValueBrl,
+   260	    sellerPersonId: lead.sellerPersonId,
+   261	    fields: [...kept, ...clearFieldIds.map((fieldId) => ({ fieldId, value: null }))],
+   262	  };
+   263	}
+   264	
+   265	export function leadFormSaveErrorCopy(error: unknown): string {
+   266	  if (
+   267	    typeof error === 'object' &&
+
+hook: PostToolUse
+hook: PostToolUse
+hook: PostToolUse
+exec
+/bin/zsh -lc "git diff 4dfe1f5..HEAD --check -- . ':(exclude)nexo/runs'" in /Users/cauetpinciara/Documents/fxl/projects/06--PRODUCT--fxl-sales/.worktrees/20261021T011348Z-vendas-crm-unificado/run
+exec
+/bin/zsh -lc "rg -n 'salesOpsLeads|salesOpsLeadProducts|salesOpsLeadStages|sales_ops_leads|sales_ops_lead_stages' apps/api/src --glob '"'!**/__tests__/**'"' --glob '"'!**/schema.ts'"'" in /Users/cauetpinciara/Documents/fxl/projects/06--PRODUCT--fxl-sales/.worktrees/20261021T011348Z-vendas-crm-unificado/run
+ succeeded in 0ms:
+ succeeded in 0ms:
+apps/api/src/domains/sales-ops/leads/stage-service.ts:25: * ships one uniqueness rule a caller can trip, sales_ops_lead_stages_org_name_idx
+apps/api/src/domains/sales-ops/leads/stage-service.ts:32: * Maps a Postgres unique violation on sales_ops_lead_stages onto the service
+apps/api/src/domains/sales-ops/leads/schemas.ts:14: * There is no `slug` key, because sales_ops_lead_stages has no slug column:
+
+hook: PostToolUse
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PostToolUse Completed
+hook: PostToolUse Completed
+hook: PostToolUse Completed
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+hook: PostToolUse
+hook: PostToolUse Completed
+codex
+{
+  "verdict": "CHANGES_REQUESTED",
+  "round": 2,
+  "findings": [
+    {
+      "id": "R2-01",
+      "severity": "major",
+      "kind": "objective",
+      "file": "apps/web/src/sales-ops/leads/lead-form.ts",
+      "line": 256,
+      "claim": "R1-03 remains partially unresolved: undo silently preserves the first contact added to a legacy contactless lead.",
+      "evidence": "Edit a lead whose contacts are null, add a phone, save, then click Desfazer. leadToWriteSeed examines the previous state and omits both contact keys. The API preserves omitted keys at lead-service.ts:1161-1162, so undo succeeds while retaining the added phone. In-memory evaluation of the actual function confirmed previousContact:null, inverseHasContactPhone:false, contactAfterUndo:\"11999999999\". The new regression test covers only edits that remain contactless.",
+      "suggestion": "Keep omission for edits that remain contactless. Suppress the undo offer when an edit introduces the first contact unless a complete inverse is supported. Cover this scenario explicitly."
+    }
+  ],
+  "checks": [
+    {
+      "command": "git diff c15a0ca...HEAD --stat -- . ':(exclude)nexo/runs'",
+      "exit": 0,
+      "summary": "Confirmed the integrated phase 2 scope: 159 changed files."
+    },
+    {
+      "command": "git diff 4dfe1f5..HEAD -- apps/api/src apps/web/src CLAUDE.md",
+      "exit": 0,
+      "summary": "Reviewed all five fixes and web regression assertions. R1-01, R1-02, R1-04 and R1-05 are resolved; R1-03 has the residual case reported above."
+    },
+    {
+      "command": "git diff 4dfe1f5..HEAD -- apps/api/test/rls/crm-pipeline-history.test.ts",
+      "exit": 0,
+      "summary": "Reviewed API regression coverage for default selection, restored transitions and follow-up ownership. Used supplied Verify PASS results; suites were not rerun."
+    },
+    {
+      "command": "git diff 4dfe1f5..HEAD --check -- . ':(exclude)nexo/runs'",
+      "exit": 0,
+      "summary": "No whitespace errors in the correction diff."
+    }
+  ]
+}
+hook: Stop
+hook: Stop Completed
+tokens used
+149.949
+{
+  "verdict": "CHANGES_REQUESTED",
+  "round": 2,
+  "findings": [
+    {
+      "id": "R2-01",
+      "severity": "major",
+      "kind": "objective",
+      "file": "apps/web/src/sales-ops/leads/lead-form.ts",
+      "line": 256,
+      "claim": "R1-03 remains partially unresolved: undo silently preserves the first contact added to a legacy contactless lead.",
+      "evidence": "Edit a lead whose contacts are null, add a phone, save, then click Desfazer. leadToWriteSeed examines the previous state and omits both contact keys. The API preserves omitted keys at lead-service.ts:1161-1162, so undo succeeds while retaining the added phone. In-memory evaluation of the actual function confirmed previousContact:null, inverseHasContactPhone:false, contactAfterUndo:\"11999999999\". The new regression test covers only edits that remain contactless.",
+      "suggestion": "Keep omission for edits that remain contactless. Suppress the undo offer when an edit introduces the first contact unless a complete inverse is supported. Cover this scenario explicitly."
+    }
+  ],
+  "checks": [
+    {
+      "command": "git diff c15a0ca...HEAD --stat -- . ':(exclude)nexo/runs'",
+      "exit": 0,
+      "summary": "Confirmed the integrated phase 2 scope: 159 changed files."
+    },
+    {
+      "command": "git diff 4dfe1f5..HEAD -- apps/api/src apps/web/src CLAUDE.md",
+      "exit": 0,
+      "summary": "Reviewed all five fixes and web regression assertions. R1-01, R1-02, R1-04 and R1-05 are resolved; R1-03 has the residual case reported above."
+    },
+    {
+      "command": "git diff 4dfe1f5..HEAD -- apps/api/test/rls/crm-pipeline-history.test.ts",
+      "exit": 0,
+      "summary": "Reviewed API regression coverage for default selection, restored transitions and follow-up ownership. Used supplied Verify PASS results; suites were not rerun."
+    },
+    {
+      "command": "git diff 4dfe1f5..HEAD --check -- . ':(exclude)nexo/runs'",
+      "exit": 0,
+      "summary": "No whitespace errors in the correction diff."
+    }
+  ]
+}
