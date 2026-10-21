@@ -31,6 +31,7 @@ import {
   type RawScalar,
 } from './cells.js';
 import type { ImportIssue, ParsedRow, ParsedSheet, ParsedWorkbook, SheetKey } from './types.js';
+import { normalizeXlsxPackage } from './xlsx-package.js';
 
 export type ParseIssueCode =
   | 'invalid_file'
@@ -174,8 +175,9 @@ export async function parseWorkbook(input: Buffer | Uint8Array): Promise<ParsedW
   const parsed = emptyParsedWorkbook();
   if (input.byteLength === 0) return invalidFile(parsed);
 
-  const ab = new ArrayBuffer(input.byteLength);
-  new Uint8Array(ab).set(input);
+  const bytes = await normalizeXlsxPackage(input);
+  const ab = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(ab).set(bytes);
   const workbook = new ExcelJS.Workbook();
   try {
     await workbook.xlsx.load(ab);

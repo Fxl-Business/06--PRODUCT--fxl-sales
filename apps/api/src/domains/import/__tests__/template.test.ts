@@ -379,6 +379,16 @@ describe('template workbook', () => {
     expect(text).not.toContain('Clientes e pessoas parecidos com um cadastro existente');
   });
 
+  it('Leia-me tells how to save the file, right after Como importar', () => {
+    const lines = buildLeiameLines(catalogFixture(), { example: false });
+    const headings = lines.filter((l) => l.kind === 'heading').map((l) => l.text);
+    expect(headings[headings.indexOf('Como importar') + 1]).toBe('Como salvar o arquivo');
+    const text = lines.map((l) => l.text).join('\n');
+    for (const s of ['Microsoft Excel instalado no computador', 'Excel na web', '.xls, .csv ou .ods', 'Salvar como .xlsx com outro nome']) {
+      expect(text).toContain(s);
+    }
+  });
+
   it('derives no metadata from the clock', () => {
     for (let i = 0; i < 2; i++) {
       const wb = createTemplateWorkbook(catalogFixture(), { example: false });
