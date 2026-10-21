@@ -58,6 +58,9 @@ describe('the frozen pre-cutover lead tables are never written', () => {
   });
 
   afterAll(async () => {
+    // The flow writes lead.deleted and lead.restored into the hash-chained audit_log; drop them so the
+    // ledger tail stays clean for the chain checks in conversion-ingest.test.ts.
+    await adminClient`DELETE FROM audit_log WHERE actor_org_id = ${orgId}`;
     await deleteCrmForOrgs([orgId]);
     await adminClient`DELETE FROM sales_ops_lead_products WHERE org_id = ${orgId}`;
     await adminClient`DELETE FROM sales_ops_leads WHERE org_id = ${orgId}`;
