@@ -162,6 +162,44 @@ describe('the default pipeline wins over another active pipeline', () => {
   });
 });
 
+describe('a restored stage that never had edges', () => {
+  it('a stage created archived gets its edges on restore, so leads move in and out of it', async () => {
+    const w = await world('restore-edges');
+    // Position -1 sorts it before Novo in the open order, so the shared rule links it to Novo.
+    const [archived] = await sql<{ id: string }[]>`
+      INSERT INTO sales_ops_pipeline_stages (org_id, pipeline_id, name, position, type, behavior, status, archived_at)
+      VALUES (${w.orgId}, ${w.pipeline.id}, 'Retomada', -1, 'normal', 'none', 'archived', now()) RETURNING id`;
+    const [edges] = await sql<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM sales_ops_pipeline_transitions
+      WHERE org_id = ${w.orgId} AND (from_stage_id = ${archived!.id} OR to_stage_id = ${archived!.id})`;
+    expect(edges!.n).toBe(0);
+    const lead = await w.create({});
+    expect(lead.stageId).toBe(w.stage('Novo'));
+    const restored = await call(w.app, 'PATCH', `/lead-stages/${archived!.id}`, { status: 'active' });
+    expect(restored.status, JSON.stringify(restored.json)).toBe(200);
+    const into = await call(w.app, 'POST', `/leads/${lead.id}/move`, { stageId: archived!.id, position: 0 });
+    expect(into.status, JSON.stringify(into.json)).toBe(200);
+    const out = await call(w.app, 'POST', `/leads/${lead.id}/move`, { stageId: w.stage('Novo'), position: 0 });
+    expect(out.status, JSON.stringify(out.json)).toBe(200);
+  });
+
+  it('a restore leaves a graph the org already shaped alone', async () => {
+    const w = await world('restore-keeps');
+    const [archived] = await sql<{ id: string }[]>`
+      INSERT INTO sales_ops_pipeline_stages (org_id, pipeline_id, name, position, type, behavior, status, archived_at)
+      VALUES (${w.orgId}, ${w.pipeline.id}, 'Retomada', -1, 'normal', 'none', 'archived', now()) RETURNING id`;
+    await sql`
+      INSERT INTO sales_ops_pipeline_transitions (org_id, pipeline_id, from_stage_id, to_stage_id)
+      VALUES (${w.orgId}, ${w.pipeline.id}, ${w.stage('Novo')}, ${archived!.id})`;
+    const restored = await call(w.app, 'PATCH', `/lead-stages/${archived!.id}`, { status: 'active' });
+    expect(restored.status).toBe(200);
+    const [edges] = await sql<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM sales_ops_pipeline_transitions
+      WHERE org_id = ${w.orgId} AND (from_stage_id = ${archived!.id} OR to_stage_id = ${archived!.id})`;
+    expect(edges!.n).toBe(1);
+  });
+});
+
 describe('the transition graph on move', () => {
   it('an absent pair is 409 transition_not_allowed and writes nothing; an allowed pair writes exactly one event', async () => {
     const w = await world('move');
