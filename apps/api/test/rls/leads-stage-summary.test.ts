@@ -5,23 +5,24 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import * as schema from '../../src/db/schema.js';
 import { testDatabaseUrls } from '../../src/db/__tests__/test-database-urls.js';
 import {
-  CreateLeadSchema,
   LeadStageSummaryQuerySchema,
+  LeadWriteBaseSchema,
   ListLeadsQuerySchema,
   MoveLeadSchema,
 } from '../../src/domains/sales-ops/leads/lead-schemas.js';
 import {
-  type LeadScope,
-  type LeadView,
-  type WriteLeadResult,
   createLead,
   listLeads,
   moveLead,
   summarizeLeadStages,
+  type LeadScope,
+  type LeadView,
+  type WriteLeadResult,
 } from '../../src/domains/sales-ops/leads/lead-service.js';
 import { deleteLead } from '../../src/domains/sales-ops/leads/lead-trash-service.js';
 import { ensureLeadStagesForOrg } from '../../src/domains/sales-ops/leads/stages-seed.js';
 import { PersonSchema, createPerson } from '../../src/domains/sales-ops/service.js';
+import { deleteCrmForOrgs } from '../../src/db/__tests__/settlement-test-cleanup.js';
 
 // Org assertions are made over `adminDb` (where only the service's own org
 // predicate scopes the read); seller assertions are load-bearing over either
@@ -69,9 +70,7 @@ describe('sales operations leads: per-stage summary', () => {
       // is safe only because the integration project runs with
       // `fileParallelism: false`, so no other file appends meanwhile.
       await adminClient`DELETE FROM audit_log WHERE actor_org_id = ${orgId}`;
-      await adminClient`DELETE FROM sales_ops_lead_products WHERE org_id = ${orgId}`;
-      await adminClient`DELETE FROM sales_ops_leads WHERE org_id = ${orgId}`;
-      await adminClient`DELETE FROM sales_ops_lead_stages WHERE org_id = ${orgId}`;
+      await deleteCrmForOrgs([orgId]);
       await adminClient`DELETE FROM sales_ops_payables WHERE org_id = ${orgId}`;
       await adminClient`DELETE FROM sales_ops_receivables WHERE org_id = ${orgId}`;
       await adminClient`DELETE FROM sales_ops_sale_items WHERE org_id = ${orgId}`;
@@ -122,7 +121,7 @@ describe('sales operations leads: per-stage summary', () => {
       await createLead(
         db,
         orgId,
-        CreateLeadSchema.parse({
+        LeadWriteBaseSchema.parse({
           contactName,
           clientName: 'Empresa Soma',
           estimatedValueBrl: valueCents,
@@ -385,7 +384,7 @@ describe('sales operations leads: per-stage summary', () => {
     await deleteLead(db, w.orgId, moved.id, ADMIN_SCOPE, actor);
     for (const id of [pool.id, moved.id]) {
       const [row] = await adminClient<{ deleted_at: Date | null }[]>`
-        SELECT deleted_at FROM sales_ops_leads WHERE id = ${id}`;
+        SELECT deleted_at FROM sales_ops_crm_leads WHERE id = ${id}`;
       expect(row!.deleted_at).not.toBeNull();
     }
 

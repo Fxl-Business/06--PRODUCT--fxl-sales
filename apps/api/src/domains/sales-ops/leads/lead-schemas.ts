@@ -30,6 +30,11 @@ const money = z.number().int().nonnegative();
  * same reason: one screenful with room to spare, and a ceiling that bounds the
  * worst-case payload.
  */
+/** Text caps of the lead write contract; the import workbook columns are tested against them. */
+export const LEAD_CONTACT_NAME_MAX = 140;
+export const LEAD_CLIENT_NAME_MAX = 200;
+export const LEAD_DESCRIPTION_MAX = 4000;
+
 export const LEADS_DEFAULT_LIMIT = 50;
 export const LEADS_MAX_LIMIT = 200;
 
@@ -49,36 +54,121 @@ export const LeadProductSchema = z
     });
   });
 
-const LeadFieldsSchema = z.object({
-  contactName: z.string().trim().min(1).max(140),
-  clientId: uuid.nullish(),
-  /**
-   * The empresa as free text. Maps to the NOT NULL `client_name_snapshot`, and
-   * is the fallback when `clientId` is absent. When `clientId` DOES resolve, the
-   * snapshot is overwritten from the cadastro row and this value loses - the
-   * same server-authoritative rule `resolvePartyContexts` applies to
-   * `personNameSnapshot`.
-   */
-  clientName: z.string().trim().min(1).max(200),
-  estimatedValueBrl: money.default(0),
-  description: z.string().max(4000).nullish(),
-  /**
-   * NULLABLE: a lead may sit unassigned. An unassigned lead is visible to admins
-   * and to every active vendedor, and the first vendedor to write it claims it
-   * (leads-sem-vendedor, see `claimantFor` in lead-service.ts).
-   */
-  sellerPersonId: uuid.nullish(),
-  products: z.array(LeadProductSchema).max(50).default([]),
-});
+/**
+ * Optional text normalization shared by every nullable lead key: trimmed, and an empty string is
+ * stored as NULL ("cleared"), while an ABSENT key stays absent (PATCH semantics).
+ */
+function blankToNull(value: string | null | undefined): string | null | undefined {
+  if (value === undefined || value === null) return value;
+  return value === '' ? null : value;
+}
+
+const ContactPhoneSchema = z.string().trim().max(40).nullish().transform(blankToNull);
+
+const ContactEmailSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .max(254)
+  .refine((value) => value === '' || z.string().email().safeParse(value).success, {
+    message: 'contactEmail must be a valid e-mail address',
+  })
+  .nullish()
+  .transform(blankToNull);
 
 /**
- * No `stageId` and no `saleId`, deliberately: a new lead always lands in the
- * first active `kind = 'normal'` stage by position. A card that is converted or
- * lost the instant it is born is therefore not expressible, rather than merely
- * rejected.
+ * A civil day, never after today in Sao Paulo. Compared as a string, never through Date.
+ * Zod runs every refine even after an earlier one failed, so the future check
+ * re-guards with `isIsoDay` (an impossible day is already reported above) instead
+ * of letting `isAfterTodayInSaoPaulo` throw its RangeError.
  */
-export const CreateLeadSchema = LeadFieldsSchema.strict();
-export const UpdateLeadSchema = LeadFieldsSchema.partial().strict();
+const ContactBirthDateSchema = z
+  .string()
+  .trim()
+  .refine((value) => value === '' || isIsoDay(value), {
+    message: 'contactBirthDate must be a real calendar day (YYYY-MM-DD)',
+  })
+  .refine((value) => value === '' || !isIsoDay(value) || !isAfterTodayInSaoPaulo(value), {
+    message: 'contactBirthDate cannot be in the future',
+  })
+  .nullish()
+  .transform(blankToNull);
+
+
+/** One entry of `fields`: a dynamic field value, addressed by its definition id or its key. */
+const FieldItemSchema = z
+  .object({
+    id: uuid.nullish(),
+    name: z.string().trim().max(200).optional(),
+  })
+  .strict();
+
+export const LeadFieldWriteSchema = z
+  .object({
+    fieldId: uuid.optional(),
+    key: z.string().trim().min(1).max(60).optional(),
+    /** text, number, money (integer cents), date (civil day), option key, or reference items; null clears. */
+    value: z.union([z.string().max(4000), z.number(), z.null(), z.array(FieldItemSchema).max(50)]),
+  })
+  .strict()
+  .refine((entry) => entry.fieldId !== undefined || entry.key !== undefined, {
+    message: 'fieldId or key is required',
+    path: ['key'],
+  });
+
+/**
+ * THE lead write contract (phase 2 cutover): one schema for both editions. `contactName` is the
+ * only required key; everything else is optional. The old keys `description`, `contactBirthDate`
+ * and `products` are still accepted and stored as the `descricao`, `nascimento` and `produtos`
+ * field values, so the web of today keeps working. `.strict()` stays: an unknown key is a loud 400.
+ *
+ * `LeadWriteBaseSchema` is the shape; `LeadWriteSchema` (create) adds the contact rule - at least
+ * one of `contactPhone` or `contactEmail` - and `LeadPatchSchema` (PATCH) is the same shape with
+ * every key optional and no `pipelineId` / `stageId` (a lead changes stage only through the move
+ * and advance routes, so `stage_changed_at` has exactly one writer).
+ * The spreadsheet import writes through the BASE schema: a workbook row has no contact column.
+ */
+const leadWriteShape = {
+  contactName: z.string().trim().min(1).max(LEAD_CONTACT_NAME_MAX),
+  contactPhone: ContactPhoneSchema,
+  contactEmail: ContactEmailSchema,
+  /** Create only. Absent means the org's default pipeline. */
+  pipelineId: uuid.optional(),
+  /** Create only. Absent means the first active normal stage of the pipeline. */
+  stageId: uuid.optional(),
+  /**
+   * NULLABLE: a lead may sit unassigned. An unassigned lead is visible to admins and to every
+   * active vendedor, and the first vendedor to write it claims it (see `claimantFor`).
+   */
+  sellerPersonId: z.preprocess((value) => (value === '' ? null : value), uuid.nullish()),
+  /** The empresa. `clientId` resolves the snapshot; otherwise `clientName` is the free text. */
+  clientId: z.preprocess((value) => (value === '' ? null : value), uuid.nullish()),
+  clientName: z.string().trim().max(LEAD_CLIENT_NAME_MAX).nullish().transform(blankToNull),
+  /** Integer CENTS. */
+  estimatedValueBrl: money.default(0),
+  fields: z.array(LeadFieldWriteSchema).max(50).optional(),
+  // Legacy keys, mapped onto the descricao / nascimento / produtos field values.
+  description: z.string().trim().max(LEAD_DESCRIPTION_MAX).nullish().transform(blankToNull),
+  contactBirthDate: ContactBirthDateSchema,
+  products: z.array(LeadProductSchema).max(50).optional(),
+};
+
+export const LeadWriteBaseSchema = z.object(leadWriteShape).strict();
+
+export const LeadWriteSchema = LeadWriteBaseSchema.superRefine((lead, ctx) => {
+  if (lead.contactPhone || lead.contactEmail) return;
+  ctx.addIssue({
+    code: z.ZodIssueCode.custom,
+    path: ['contactPhone'],
+    message: 'contactPhone or contactEmail is required',
+  });
+});
+
+export const LeadPatchSchema = z
+  .object(leadWriteShape)
+  .omit({ pipelineId: true, stageId: true })
+  .partial()
+  .strict();
 
 /**
  * The move wire body, and the field NAMES are the contract: slice 04's client
@@ -125,8 +215,8 @@ export const ListLeadsQuerySchema = z.object({
  */
 export const LeadStageSummaryQuerySchema = ListLeadsQuerySchema.pick({ sellerPersonId: true });
 
-export type CreateLeadInput = z.infer<typeof CreateLeadSchema>;
-export type UpdateLeadInput = z.infer<typeof UpdateLeadSchema>;
+export type LeadWriteInput = z.infer<typeof LeadWriteBaseSchema>;
+export type LeadPatchInput = z.infer<typeof LeadPatchSchema>;
 export type MoveLeadInput = z.infer<typeof MoveLeadSchema>;
 export type ListLeadsQuery = z.infer<typeof ListLeadsQuerySchema>;
 export type LeadStageSummaryQuery = z.infer<typeof LeadStageSummaryQuerySchema>;
@@ -158,76 +248,3 @@ export const ListDeletedLeadsQuerySchema = z.object({
 export type ListDeletedLeadsQuery = z.infer<typeof ListDeletedLeadsQuerySchema>;
 export type LeadProductInput = z.infer<typeof LeadProductSchema>;
 
-/**
- * The LEADS EDITION wire contract (edicao-leads, SEAM-CONTRACT section 2).
- *
- * A separate schema rather than a widened LeadFieldsSchema, on purpose: the full
- * schemas above stay byte-identical and `.strict()`, so an FXL client can never
- * send a contact key, and a leads-edition client can never send produtos. The
- * leads edition DOES carry an empresa (`clientId`/`clientName`) and a valor
- * estimado (`estimatedValueBrl`). The route picks one by `leadFieldSet(salesEdition)`.
- *
- * Every optional text normalizes the same way: trimmed, and an empty string is
- * stored as NULL ("cleared"), while an ABSENT key stays absent (PATCH semantics).
- */
-function blankToNull(value: string | null | undefined): string | null | undefined {
-  if (value === undefined || value === null) return value;
-  return value === '' ? null : value;
-}
-
-const ContactPhoneSchema = z.string().trim().max(40).nullish().transform(blankToNull);
-
-const ContactEmailSchema = z
-  .string()
-  .trim()
-  .toLowerCase()
-  .max(254)
-  .refine((value) => value === '' || z.string().email().safeParse(value).success, {
-    message: 'contactEmail must be a valid e-mail address',
-  })
-  .nullish()
-  .transform(blankToNull);
-
-/**
- * A civil day, never after today in Sao Paulo. Compared as a string, never through Date.
- * Zod runs every refine even after an earlier one failed, so the future check
- * re-guards with `isIsoDay` (an impossible day is already reported above) instead
- * of letting `isAfterTodayInSaoPaulo` throw its RangeError.
- */
-const ContactBirthDateSchema = z
-  .string()
-  .trim()
-  .refine((value) => value === '' || isIsoDay(value), {
-    message: 'contactBirthDate must be a real calendar day (YYYY-MM-DD)',
-  })
-  .refine((value) => value === '' || !isIsoDay(value) || !isAfterTodayInSaoPaulo(value), {
-    message: 'contactBirthDate cannot be in the future',
-  })
-  .nullish()
-  .transform(blankToNull);
-
-export const ContactLeadFieldsSchema = z
-  .object({
-    contactName: z.string().trim().min(1).max(140),
-    contactPhone: ContactPhoneSchema,
-    contactEmail: ContactEmailSchema,
-    contactBirthDate: ContactBirthDateSchema,
-    // A2: null clears, '' is read as null, absent stays absent (PATCH semantics).
-    description: z.string().trim().max(4000).nullish().transform(blankToNull),
-    sellerPersonId: z.preprocess((value) => (value === '' ? null : value), uuid.nullish()),
-    // The leads edition (Construbom) DOES carry an empresa and a valor estimado:
-    // `clientId` optionally links a sales_ops_clients row (the vendedor may create
-    // one by name), `clientName` is the free-text snapshot used when no link
-    // resolves, and `estimatedValueBrl` is integer cents feeding the funil's
-    // financial view. Produtos remain full-edition only.
-    clientId: z.preprocess((value) => (value === '' ? null : value), uuid.nullish()),
-    clientName: z.string().trim().max(200).nullish().transform(blankToNull),
-    estimatedValueBrl: money.default(0),
-  })
-  .strict();
-
-export const CreateContactLeadSchema = ContactLeadFieldsSchema;
-export const UpdateContactLeadSchema = ContactLeadFieldsSchema.partial().strict();
-
-export type CreateContactLeadInput = z.infer<typeof CreateContactLeadSchema>;
-export type UpdateContactLeadInput = z.infer<typeof UpdateContactLeadSchema>;

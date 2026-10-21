@@ -15,13 +15,13 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { AuditActionSchema, CADASTRO_LIFECYCLE_ACTIONS, CadastroEntityTypeSchema } from '../../../audit/service.js';
 import {
-  CreateLeadSchema,
+  LeadPatchSchema,
+  LeadWriteSchema,
   LEADS_DEFAULT_LIMIT,
   LEADS_MAX_LIMIT,
   ListDeletedLeadsQuerySchema,
   ListLeadsQuerySchema,
   MoveLeadSchema,
-  UpdateLeadSchema,
 } from '../lead-schemas.js';
 
 const leadServiceSource = readFileSync(
@@ -51,7 +51,7 @@ describe('lead wire contract', () => {
       { lostReason: 'sem orçamento' },
       { stageChangedAt: new Date().toISOString() },
     ]) {
-      const parsed = UpdateLeadSchema.safeParse({ contactName: 'Ana', ...forbidden });
+      const parsed = LeadPatchSchema.safeParse({ contactName: 'Ana', ...forbidden });
       expect(parsed.success).toBe(false);
       if (parsed.success) continue;
       // zod reports an unrecognized key as ONE form-level issue naming the key,
@@ -62,20 +62,19 @@ describe('lead wire contract', () => {
     }
 
     // The keys it DOES declare still go through.
-    expect(UpdateLeadSchema.safeParse({ contactName: 'Ana' }).success).toBe(true);
-    expect(UpdateLeadSchema.safeParse({}).success).toBe(true);
+    expect(LeadPatchSchema.safeParse({ contactName: 'Ana' }).success).toBe(true);
+    expect(LeadPatchSchema.safeParse({}).success).toBe(true);
   });
 
-  // A lead that is born converted or born lost is not expressible, rather than
-  // merely rejected downstream: a new lead always lands in the first active
-  // normal stage.
-  it('rejects a create body carrying stageId or saleId', () => {
-    const base = { contactName: 'Ana', clientName: 'Empresa Um' };
-    expect(CreateLeadSchema.safeParse(base).success).toBe(true);
-    expect(CreateLeadSchema.safeParse({ ...base, stageId: STAGE_ID }).success).toBe(false);
-    expect(CreateLeadSchema.safeParse({ ...base, saleId: SALE_ID }).success).toBe(false);
-    expect(CreateLeadSchema.safeParse({ ...base, orgId: 'org_smuggled' }).success).toBe(false);
-    expect(CreateLeadSchema.safeParse({ ...base, position: 0 }).success).toBe(false);
+  // A lead that is born converted or born lost is not expressible. The create body MAY name a
+  // pipeline and an open stage now (phase 2), but never a sale, a position or an org.
+  it('rejects a create body carrying saleId, position or orgId, and accepts pipelineId and stageId', () => {
+    const base = { contactName: 'Ana', contactEmail: 'ana@example.com' };
+    expect(LeadWriteSchema.safeParse(base).success).toBe(true);
+    expect(LeadWriteSchema.safeParse({ ...base, stageId: STAGE_ID, pipelineId: SALE_ID }).success).toBe(true);
+    expect(LeadWriteSchema.safeParse({ ...base, saleId: SALE_ID }).success).toBe(false);
+    expect(LeadWriteSchema.safeParse({ ...base, orgId: 'org_smuggled' }).success).toBe(false);
+    expect(LeadWriteSchema.safeParse({ ...base, position: 0 }).success).toBe(false);
   });
 
   it('rejects a cursor that is not <position>:<uuid>', () => {
@@ -123,12 +122,12 @@ describe('lead wire contract', () => {
   });
 
   it('requires a productName on a lead product row that names no produto', () => {
-    const base = { contactName: 'Ana', clientName: 'Empresa Um' };
-    expect(CreateLeadSchema.safeParse({ ...base, products: [{}] }).success).toBe(false);
+    const base = { contactName: 'Ana', contactPhone: '1199' };
+    expect(LeadWriteSchema.safeParse({ ...base, products: [{}] }).success).toBe(false);
     expect(
-      CreateLeadSchema.safeParse({ ...base, products: [{ productName: 'Algo avulso' }] }).success,
+      LeadWriteSchema.safeParse({ ...base, products: [{ productName: 'Algo avulso' }] }).success,
     ).toBe(true);
-    expect(CreateLeadSchema.safeParse({ ...base, products: [{ productId: SALE_ID }] }).success).toBe(
+    expect(LeadWriteSchema.safeParse({ ...base, products: [{ productId: SALE_ID }] }).success).toBe(
       true,
     );
   });
@@ -154,6 +153,8 @@ describe('lead wire contract', () => {
   // a cliente. The import ban is what makes that visible at a glance.
   it('lead-service.ts imports neither sales_ops_clients nor sales_ops_sales as a writer', () => {
     expect(leadServiceSource).not.toMatch(/salesOpsClients/);
+    // Cutover: the old lead tables are never touched by the lead service.
+    expect(leadServiceSource).not.toMatch(/salesOpsLeads\b|salesOpsLeadStages|salesOpsLeadProducts/);
     expect(leadServiceSource).not.toMatch(/insert\(salesOpsSales\)/);
     expect(leadServiceSource).not.toMatch(/getSalesOpsSnapshot|getSalesOpsSummary|computeSaleFinancials/);
   });
@@ -189,7 +190,7 @@ describe('lead wire contract', () => {
   });
 
   it('spells the live predicate once, in lead-service.ts', () => {
-    expect(leadServiceSource.match(/isNull\(salesOpsLeads\.deletedAt\)/g)).toHaveLength(1);
+    expect(leadServiceSource.match(/isNull\(salesOpsCrmLeads\.deletedAt\)/g)).toHaveLength(1);
     expect(leadServiceSource).toMatch(/export function liveLeadCondition\(\): SQL/);
     expect(leadServiceSource).not.toMatch(/from '\.\/lead-trash-service\.js'/);
   });
@@ -200,6 +201,7 @@ describe('lead wire contract', () => {
     expect(leadTrashServiceSource).not.toMatch(/getAdminDb/);
     expect(leadTrashServiceSource).not.toMatch(/claimantFor/);
     expect(leadTrashServiceSource).not.toMatch(/ensureLeadStages/);
+    expect(leadTrashServiceSource).not.toMatch(/salesOpsLeads\b|salesOpsLeadStages|salesOpsLeadProducts/);
   });
 
   it('adds the two lead actions without touching the cadastro lifecycle', () => {

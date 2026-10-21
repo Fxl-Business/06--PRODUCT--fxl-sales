@@ -11,7 +11,7 @@ import type {
   ProductKind,
 } from '../sales-ops/service.js';
 import type { LeadStageInput } from '../sales-ops/leads/schemas.js';
-import type { CreateLeadInput } from '../sales-ops/leads/lead-schemas.js';
+import type { LeadWriteInput } from '../sales-ops/leads/lead-schemas.js';
 
 /** The 13 data sheets, in dependency order. `Leia-me` and `Listas` are not SheetKeys. */
 export type SheetKey =
@@ -161,7 +161,7 @@ export type ImportOperation =
   | {
       op: 'createLead';
       planKey: string;
-      input: Omit<CreateLeadInput, 'clientId' | 'sellerPersonId' | 'products'>;
+      input: Omit<LeadWriteInput, 'clientId' | 'sellerPersonId' | 'products'>;
       clientRef: EntityRef | null;
       sellerRef: EntityRef | null;
       products: Array<{ productRef: EntityRef | null; name: string }>;

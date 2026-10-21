@@ -48,6 +48,7 @@ const SALE_ID = '77777777-7777-4777-8777-777777777777';
 const deletedView = {
   id: LEAD_ID,
   contactName: 'Ana Martins',
+  contactEmail: 'ana@example.test',
   clientName: 'Empresa Um',
   stageName: 'Novo',
   sellerName: '',
@@ -137,15 +138,17 @@ describe('Sales Ops lead routes', () => {
   it('passes the VERIFIED org and never an orgId from the body or the query', async () => {
     const response = await jsonRequest('POST', '/leads?orgId=query-org-must-not-be-used', {
       contactName: 'Ana Martins',
+      contactEmail: 'ana@example.test',
       clientName: 'Empresa Um',
     });
     expect(response.status).toBe(201);
     expect(serviceMocks.createLead).toHaveBeenCalledTimes(1);
     expect(serviceMocks.createLead.mock.calls[0]![1]).toBe('verified-org');
 
-    // The body cannot even carry one: CreateLeadSchema is .strict().
+    // The body cannot even carry one: LeadWriteSchema is .strict().
     const smuggled = await jsonRequest('POST', '/leads', {
       contactName: 'Ana Martins',
+      contactEmail: 'ana@example.test',
       clientName: 'Empresa Um',
       orgId: 'body-org-must-not-be-used',
     });
@@ -157,6 +160,7 @@ describe('Sales Ops lead routes', () => {
     currentRoles = ['seller'];
     await jsonRequest('POST', '/leads', {
       contactName: 'Ana Martins',
+      contactEmail: 'ana@example.test',
       clientName: 'Empresa Um',
     });
     expect(serviceMocks.createLead.mock.calls[0]![3]).toEqual({
@@ -172,6 +176,7 @@ describe('Sales Ops lead routes', () => {
     currentEmail = undefined;
     await jsonRequest('POST', '/leads', {
       contactName: 'Ana Martins',
+      contactEmail: 'ana@example.test',
       clientName: 'Empresa Um',
     });
     expect(serviceMocks.createLead.mock.calls[1]![3]).toEqual({
@@ -255,6 +260,7 @@ describe('Sales Ops lead routes', () => {
     serviceMocks.createLead.mockResolvedValue({ ok: false, reason: 'seller_scope' });
     const response = await jsonRequest('POST', '/leads', {
       contactName: 'Ana Martins',
+      contactEmail: 'ana@example.test',
       clientName: 'Empresa Um',
       sellerPersonId: SALE_ID,
     });

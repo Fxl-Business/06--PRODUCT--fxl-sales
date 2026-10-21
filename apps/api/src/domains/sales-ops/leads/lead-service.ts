@@ -2,28 +2,36 @@ import type { SalesEdition } from '@fxl-sales/shared-utils/sales-edition';
 import { and, asc, eq, isNull, or, sql, type SQL } from 'drizzle-orm';
 import type { getDb } from '../../../db/client.js';
 import {
+  salesOpsCrmLeadEvents,
+  salesOpsCrmLeads,
   salesOpsFuncoes,
-  salesOpsLeadProducts,
-  salesOpsLeadStages,
-  salesOpsLeads,
   salesOpsPeople,
   salesOpsPersonFuncoes,
-  salesOpsProducts,
+  salesOpsPipelineStages,
   salesOpsSales,
 } from '../../../db/schema.js';
+import {
+  applyFieldWrites,
+  projectLegacyFields,
+  readLeadFields,
+  resolveFieldWrites,
+  resolveLegacyFieldWrites,
+  type LeadFieldValue,
+} from '../../crm/lead-fields.js';
+import { LeadInputError } from '../../crm/lead-input-error.js';
+import { defaultPipelineId, pipelineExists } from '../../crm/pipeline-read.js';
 import type {
-  CreateContactLeadInput,
-  CreateLeadInput,
-  LeadProductInput,
+  LeadPatchInput,
   LeadStageSummaryQuery,
+  LeadWriteInput,
   ListLeadsQuery,
   MoveLeadInput,
-  UpdateContactLeadInput,
-  UpdateLeadInput,
 } from './lead-schemas.js';
 import { LEADS_DEFAULT_LIMIT } from './lead-schemas.js';
 import { PersonSchema, createPersonTx } from '../service.js';
 import { withTenant } from './with-tenant.js';
+
+export { LeadInputError };
 
 /**
  * The lead entity's server half.
@@ -67,32 +75,6 @@ export type LeadScope = {
   edition?: SalesEdition;
 };
 
-/**
- * Shape and the `itemIndex: -1` convention are copied verbatim from
- * `SaleInputError`, so `lead-routes.ts` maps it onto the byte-identical 400 body
- * `routes.ts` already returns for a sale input error.
- */
-export class LeadInputError extends Error {
-  constructor(
-    readonly code:
-      | 'seller_not_found'
-      | 'seller_not_a_vendedor'
-      | 'client_not_found'
-      | 'product_not_found'
-      | 'stage_not_found'
-      | 'lost_reason_required'
-      | 'sale_required_for_conversion'
-      | 'sale_not_found'
-      | 'sale_not_allowed'
-      | 'no_open_stage',
-    /** The offending `products[]` index, or -1 when the error names no array row. */
-    readonly itemIndex: number = -1,
-  ) {
-    super(code);
-    this.name = 'LeadInputError';
-  }
-}
-
 export type LeadView = {
   id: string;
   stageId: string;
@@ -117,6 +99,12 @@ export type LeadView = {
   products: Array<{ productId: string | null; productNameSnapshot: string }>;
   createdAt: string;
   updatedAt: string | null;
+  // Phase 2 additive fields (unified CRM). `description`, `contactBirthDate` and `products` above
+  // are PROJECTED from the descricao, nascimento and produtos field values.
+  pipelineId: string;
+  stageType: string;
+  stageExitKind: string | null;
+  fields: LeadFieldValue[];
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -457,55 +445,6 @@ async function resolveClientName(tx: Db, orgId: string, clientId: string): Promi
   return name;
 }
 
-type ResolvedLeadProduct = { productId: string | null; productNameSnapshot: string };
-
-/**
- * A body-supplied `productName` on a row that RESOLVES is discarded: the
- * snapshot is server-authoritative. A row with no `productId` stores NULL plus
- * the body's text, mirroring a free-form sale item.
- *
- * An archived produto resolves fine here. A lead may legitimately reference one,
- * and hiding an archived row belongs to the picker, never to the writer.
- */
-async function resolveLeadProducts(
-  tx: Db,
-  orgId: string,
-  rows: LeadProductInput[],
-): Promise<ResolvedLeadProduct[]> {
-  const resolved: ResolvedLeadProduct[] = [];
-  for (const [index, row] of rows.entries()) {
-    if (!row.productId) {
-      resolved.push({ productId: null, productNameSnapshot: row.productName! });
-      continue;
-    }
-    const [product] = await tx
-      .select({ id: salesOpsProducts.id, name: salesOpsProducts.name })
-      .from(salesOpsProducts)
-      .where(and(eq(salesOpsProducts.orgId, orgId), eq(salesOpsProducts.id, row.productId)))
-      .limit(1);
-    if (!product) throw new LeadInputError('product_not_found', index);
-    resolved.push({ productId: product.id, productNameSnapshot: product.name });
-  }
-  return resolved;
-}
-
-/** Full-set replacement, exactly the `replacePersonFuncoes` shape. */
-async function replaceLeadProducts(
-  tx: Db,
-  orgId: string,
-  leadId: string,
-  rows: LeadProductInput[],
-): Promise<void> {
-  const resolved = await resolveLeadProducts(tx, orgId, rows);
-  await tx
-    .delete(salesOpsLeadProducts)
-    .where(and(eq(salesOpsLeadProducts.orgId, orgId), eq(salesOpsLeadProducts.leadId, leadId)));
-  if (resolved.length === 0) return;
-  await tx
-    .insert(salesOpsLeadProducts)
-    .values(resolved.map((row) => ({ orgId, leadId, ...row })));
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Reads
 // ─────────────────────────────────────────────────────────────────────────────
@@ -520,10 +459,10 @@ async function replaceLeadProducts(
  * hand-written deleted_at predicate anywhere else is a second rule that drifts.
  */
 export function liveLeadCondition(): SQL {
-  return isNull(salesOpsLeads.deletedAt);
+  return isNull(salesOpsCrmLeads.deletedAt);
 }
 
-type LeadRow = typeof salesOpsLeads.$inferSelect;
+type LeadRow = typeof salesOpsCrmLeads.$inferSelect;
 
 function toIso(value: Date | string | null): string | null {
   if (value === null) return null;
@@ -546,65 +485,38 @@ function toIso(value: Date | string | null): string | null {
  */
 export async function readLeadView(tx: Db, orgId: string, leadId: string): Promise<LeadView> {
   const [row] = await tx
-    .select({ lead: salesOpsLeads, saleStatus: salesOpsSales.status, saleCode: salesOpsSales.code })
-    .from(salesOpsLeads)
+    .select({ lead: salesOpsCrmLeads, stage: salesOpsPipelineStages, saleStatus: salesOpsSales.status, saleCode: salesOpsSales.code })
+    .from(salesOpsCrmLeads)
+    .innerJoin(salesOpsPipelineStages, stageJoin())
     .leftJoin(
       salesOpsSales,
-      and(eq(salesOpsSales.orgId, salesOpsLeads.orgId), eq(salesOpsSales.id, salesOpsLeads.saleId)),
+      and(eq(salesOpsSales.orgId, salesOpsCrmLeads.orgId), eq(salesOpsSales.id, salesOpsCrmLeads.saleId)),
     )
-    .where(and(eq(salesOpsLeads.orgId, orgId), eq(salesOpsLeads.id, leadId), liveLeadCondition()))
+    .where(and(eq(salesOpsCrmLeads.orgId, orgId), eq(salesOpsCrmLeads.id, leadId), liveLeadCondition()))
     .limit(1);
   if (!row) throw new Error(`lead ${leadId} disappeared inside its own transaction`);
-  return toLeadView(
-    row.lead,
-    row.saleStatus,
-    row.saleCode,
-    await readLeadProducts(tx, orgId, [leadId]),
-  );
+  const fields = await readLeadFields(tx, orgId, [row.lead]);
+  return toLeadView(row.lead, row.stage, row.saleStatus, row.saleCode, fields.get(leadId) ?? []);
 }
 
-async function readLeadProducts(
-  tx: Db,
-  orgId: string,
-  leadIds: string[],
-): Promise<Map<string, ResolvedLeadProduct[]>> {
-  const byLead = new Map<string, ResolvedLeadProduct[]>();
-  if (leadIds.length === 0) return byLead;
-  const rows = await tx
-    .select({
-      leadId: salesOpsLeadProducts.leadId,
-      productId: salesOpsLeadProducts.productId,
-      productNameSnapshot: salesOpsLeadProducts.productNameSnapshot,
-    })
-    .from(salesOpsLeadProducts)
-    .where(
-      and(
-        eq(salesOpsLeadProducts.orgId, orgId),
-        sql`${salesOpsLeadProducts.leadId} in ${leadIds}`,
-      ),
-    )
-    // Ordered by the SNAPSHOT and not by created_at: a full-set replacement
-    // writes every row in one INSERT, so all of them share one `now()` and the
-    // tiebreaker would be a random uuid - a list whose order changed between two
-    // reads of an unchanged lead. The child table carries no position column
-    // (slice 01 owns the schema and gave it none, exactly as person_funcoes has
-    // none), so this is a SET with a deterministic display order rather than a
-    // list whose order the operator authored.
-    .orderBy(asc(salesOpsLeadProducts.productNameSnapshot), asc(salesOpsLeadProducts.id));
-  for (const row of rows) {
-    const bucket = byLead.get(row.leadId) ?? [];
-    bucket.push({ productId: row.productId, productNameSnapshot: row.productNameSnapshot });
-    byLead.set(row.leadId, bucket);
-  }
-  return byLead;
+/** The lead's stage row: the composite FK guarantees it exists in the same org and pipeline. */
+function stageJoin(): SQL {
+  return and(
+    eq(salesOpsPipelineStages.orgId, salesOpsCrmLeads.orgId),
+    eq(salesOpsPipelineStages.id, salesOpsCrmLeads.stageId),
+  )!;
 }
+
+type StageRow = typeof salesOpsPipelineStages.$inferSelect;
 
 function toLeadView(
   lead: LeadRow,
+  stage: StageRow,
   saleStatus: string | null,
   saleCode: string | null,
-  products: Map<string, ResolvedLeadProduct[]>,
+  fields: LeadFieldValue[],
 ): LeadView {
+  const legacy = projectLegacyFields(fields);
   return {
     id: lead.id,
     stageId: lead.stageId,
@@ -614,10 +526,10 @@ function toLeadView(
     clientId: lead.clientId,
     clientNameSnapshot: lead.clientNameSnapshot,
     estimatedValueBrl: lead.estimatedValueBrl,
-    description: lead.description,
+    description: legacy.description,
     contactPhone: lead.contactPhone,
     contactEmail: lead.contactEmail,
-    contactBirthDate: lead.contactBirthDate,
+    contactBirthDate: legacy.contactBirthDate,
     sellerPersonId: lead.sellerPersonId,
     sellerNameSnapshot: lead.sellerNameSnapshot,
     saleId: lead.saleId,
@@ -627,9 +539,13 @@ function toLeadView(
     // nothing. The board renders this as the card's only proposta identity.
     saleCode: lead.saleId ? saleCode : null,
     lostReason: lead.lostReason,
-    products: products.get(lead.id) ?? [],
+    products: legacy.products,
     createdAt: toIso(lead.createdAt)!,
     updatedAt: toIso(lead.updatedAt),
+    pipelineId: lead.pipelineId,
+    stageType: stage.type,
+    stageExitKind: stage.exitKind,
+    fields,
   };
 }
 
@@ -660,46 +576,49 @@ export async function listLeads(
     // The count below and the page share this one `conditions` array, so `total`
     // counts exactly the rows a page can return.
     const conditions = leadBoardConditions(orgId, gate, query.sellerPersonId);
-    conditions.push(eq(salesOpsLeads.stageId, query.stageId));
+    conditions.push(eq(salesOpsCrmLeads.stageId, query.stageId));
 
     const [{ total }] = (await tx
       .select({ total: sql<number>`count(*)::int` })
-      .from(salesOpsLeads)
+      .from(salesOpsCrmLeads)
       .where(and(...conditions))) as [{ total: number }];
 
     if (query.cursor) {
       const [position, id] = query.cursor.split(':');
       conditions.push(
-        sql`(${salesOpsLeads.position}, ${salesOpsLeads.id}) > (${Number(position)}, ${id}::uuid)`,
+        sql`(${salesOpsCrmLeads.position}, ${salesOpsCrmLeads.id}) > (${Number(position)}, ${id}::uuid)`,
       );
     }
 
     const limit = query.limit ?? LEADS_DEFAULT_LIMIT;
     const rows = await tx
-      .select({ lead: salesOpsLeads, saleStatus: salesOpsSales.status, saleCode: salesOpsSales.code })
-      .from(salesOpsLeads)
+      .select({ lead: salesOpsCrmLeads, stage: salesOpsPipelineStages, saleStatus: salesOpsSales.status, saleCode: salesOpsSales.code })
+      .from(salesOpsCrmLeads)
+      .innerJoin(salesOpsPipelineStages, stageJoin())
       .leftJoin(
         salesOpsSales,
         and(
-          eq(salesOpsSales.orgId, salesOpsLeads.orgId),
-          eq(salesOpsSales.id, salesOpsLeads.saleId),
+          eq(salesOpsSales.orgId, salesOpsCrmLeads.orgId),
+          eq(salesOpsSales.id, salesOpsCrmLeads.saleId),
         ),
       )
       .where(and(...conditions))
-      .orderBy(asc(salesOpsLeads.position), asc(salesOpsLeads.id))
+      .orderBy(asc(salesOpsCrmLeads.position), asc(salesOpsCrmLeads.id))
       .limit(limit + 1);
 
     const hasMore = rows.length > limit;
     const page = hasMore ? rows.slice(0, limit) : rows;
-    const products = await readLeadProducts(
+    const fields = await readLeadFields(
       tx,
       orgId,
-      page.map((row) => row.lead.id),
+      page.map((row) => row.lead),
     );
     const last = page.at(-1);
     return {
       ok: true,
-      leads: page.map((row) => toLeadView(row.lead, row.saleStatus, row.saleCode, products)),
+      leads: page.map((row) =>
+        toLeadView(row.lead, row.stage, row.saleStatus, row.saleCode, fields.get(row.lead.id) ?? []),
+      ),
       nextCursor: hasMore && last ? `${last.lead.position}:${last.lead.id}` : null,
       total,
     } as const;
@@ -741,14 +660,14 @@ export async function summarizeLeadStages(
 
     const rows = await tx
       .select({
-        stageId: salesOpsLeads.stageId,
+        stageId: salesOpsCrmLeads.stageId,
         count: sql<number>`count(*)::int`,
-        estimatedValueBrl: sql<string>`sum(${salesOpsLeads.estimatedValueBrl})::bigint`.mapWith(Number),
+        estimatedValueBrl: sql<string>`sum(${salesOpsCrmLeads.estimatedValueBrl})::bigint`.mapWith(Number),
       })
-      .from(salesOpsLeads)
+      .from(salesOpsCrmLeads)
       .where(and(...leadBoardConditions(orgId, gate, query.sellerPersonId)))
-      .groupBy(salesOpsLeads.stageId)
-      .orderBy(asc(salesOpsLeads.stageId));
+      .groupBy(salesOpsCrmLeads.stageId)
+      .orderBy(asc(salesOpsCrmLeads.stageId));
 
     return {
       ok: true,
@@ -780,8 +699,8 @@ export async function getLead(
     const gate = await resolveLeadScopePredicate(tx, orgId, scope);
     if (!gate.ok) return { ok: false, reason: gate.reason } as const;
     const [row] = await tx
-      .select({ id: salesOpsLeads.id })
-      .from(salesOpsLeads)
+      .select({ id: salesOpsCrmLeads.id })
+      .from(salesOpsCrmLeads)
       .where(and(...leadIdentityConditions(orgId, id, gate)))
       .limit(1);
     if (!row) return { ok: false, reason: 'not_found' } as const;
@@ -800,13 +719,13 @@ export async function getLead(
  * else keeps exactly their own leads.
  */
 function leadSellerCondition(sellerPersonId: string, canClaimUnassigned: boolean): SQL {
-  const own = eq(salesOpsLeads.sellerPersonId, sellerPersonId);
+  const own = eq(salesOpsCrmLeads.sellerPersonId, sellerPersonId);
   if (!canClaimUnassigned) return own;
-  return or(own, isNull(salesOpsLeads.sellerPersonId))!;
+  return or(own, isNull(salesOpsCrmLeads.sellerPersonId))!;
 }
 
 /**
- * `eq(salesOpsLeads.orgId, orgId)` is ALWAYS the first element, and the seller
+ * `eq(salesOpsCrmLeads.orgId, orgId)` is ALWAYS the first element, and the seller
  * predicate is appended only for a non-admin. The admin case is the same
  * expression minus one conjunct. It always carries `liveLeadCondition()`, so a
  * deleted lead is `not_found` to every identity read (get, PATCH, move, delete)
@@ -814,8 +733,8 @@ function leadSellerCondition(sellerPersonId: string, canClaimUnassigned: boolean
  */
 export function leadIdentityConditions(orgId: string, id: string, gate: LeadScopeAllowed): SQL[] {
   const conditions: SQL[] = [
-    eq(salesOpsLeads.orgId, orgId),
-    eq(salesOpsLeads.id, id),
+    eq(salesOpsCrmLeads.orgId, orgId),
+    eq(salesOpsCrmLeads.id, id),
     liveLeadCondition(),
   ];
   if (gate.sellerPersonId) {
@@ -841,11 +760,11 @@ function leadBoardConditions(
   gate: LeadScopeAllowed,
   requestedSellerPersonId: string | undefined,
 ): SQL[] {
-  const conditions: SQL[] = [eq(salesOpsLeads.orgId, orgId), liveLeadCondition()];
+  const conditions: SQL[] = [eq(salesOpsCrmLeads.orgId, orgId), liveLeadCondition()];
   if (gate.sellerPersonId) {
     conditions.push(leadSellerCondition(gate.sellerPersonId, gate.canClaimUnassigned));
   } else if (requestedSellerPersonId) {
-    conditions.push(eq(salesOpsLeads.sellerPersonId, requestedSellerPersonId));
+    conditions.push(eq(salesOpsCrmLeads.sellerPersonId, requestedSellerPersonId));
   }
   return conditions;
 }
@@ -888,89 +807,27 @@ export type WriteLeadResult =
       reason: 'not_found' | 'seller_scope' | 'seller_person_unmapped' | 'already_converted';
     };
 
-/**
- * The one normalized record both create paths insert. Internal: the full and the
- * leads-edition wire shapes are mapped onto it by the two exported wrappers
- * below, so the scope, seller and stage rules exist exactly once.
- */
-type LeadCreateRecord = {
-  contactName: string;
-  clientId: string | null;
-  clientName: string;
-  estimatedValueBrl: number;
-  description: string | null;
-  sellerPersonId: string | null;
-  products: LeadProductInput[];
-  contactPhone: string | null;
-  contactEmail: string | null;
-  contactBirthDate: string | null;
-};
+/** The snapshot name of the actor of a write: the verified token name, else the e-mail, else null. */
+export function scopeActorName(scope: LeadScope): string | null {
+  const name = scope.name?.trim();
+  if (name) return name;
+  const email = scope.email?.trim();
+  return email ? email : null;
+}
 
+/**
+ * The single create path (the full and the contact wire shapes collapsed into `LeadWriteSchema`).
+ * In BOTH editions a non-admin seller who names no vendedor files the lead as their own; an
+ * explicit OTHER id is still `403 seller_scope`.
+ */
 export function createLead(
   db: Db,
   orgId: string,
-  input: CreateLeadInput,
+  input: LeadWriteInput,
   scope: LeadScope,
 ): Promise<WriteLeadResult> {
-  return insertLead(
-    db,
-    orgId,
-    {
-      contactName: input.contactName,
-      clientId: input.clientId ?? null,
-      clientName: input.clientName,
-      estimatedValueBrl: input.estimatedValueBrl,
-      description: input.description ?? null,
-      sellerPersonId: input.sellerPersonId ?? null,
-      products: input.products,
-      contactPhone: null,
-      contactEmail: null,
-      contactBirthDate: null,
-    },
-    scope,
-  );
+  return insertLead(db, orgId, input, scope);
 }
-
-/**
- * The leads-edition create. It carries an optional empresa (`clientId` resolves
- * the snapshot, otherwise the free-text `clientName`) and a valor estimado, but
- * never produtos: that child table stays full-edition only, so `products` is
- * always empty here.
- */
-export function createContactLead(
-  db: Db,
-  orgId: string,
-  input: CreateContactLeadInput,
-  scope: LeadScope,
-): Promise<WriteLeadResult> {
-  return insertLead(
-    db,
-    orgId,
-    {
-      contactName: input.contactName,
-      clientId: input.clientId ?? null,
-      clientName: input.clientName ?? '',
-      estimatedValueBrl: input.estimatedValueBrl ?? 0,
-      description: input.description ?? null,
-      sellerPersonId: input.sellerPersonId ?? null,
-      products: [],
-      contactPhone: input.contactPhone ?? null,
-      contactEmail: input.contactEmail ?? null,
-      contactBirthDate: input.contactBirthDate ?? null,
-    },
-    scope,
-    { defaultSellerToCaller: true },
-  );
-}
-
-type InsertLeadOptions = {
-  /**
-   * Leads edition only (D-07.1a): a scoped seller who names no vendedor files
-   * the lead as their own instead of being refused. The full edition never
-   * passes it, so its `seller_scope` rule stays byte-for-byte.
-   */
-  defaultSellerToCaller?: boolean;
-};
 
 /**
  * The org's lead board lock: the ONE place the lock order of a board write is
@@ -1003,7 +860,7 @@ type InsertLeadOptions = {
  * these services on its own transaction) it passes to the parent when the
  * savepoint is released, so an import holds the board until it commits. The two
  * int4 keys are a namespace and the org; an org hash collision only makes two
- * boards share one queue.
+ * boards share one queue. The key is the one the pre-cutover board used, unchanged.
  */
 export async function lockLeadBoard(tx: Db, orgId: string): Promise<void> {
   await tx.execute(
@@ -1012,27 +869,35 @@ export async function lockLeadBoard(tx: Db, orgId: string): Promise<void> {
 }
 
 /**
- * The first ACTIVE normal stage by board order: where a new lead lands, and
+ * The first ACTIVE normal stage of a pipeline by board order: where a new lead lands, and
  * where a restored lead lands when its own etapa was archived. One spelling of
  * the rule for both. `name` is the tiebreaker, matching the stage list's own
- * (position, name) read order. Null when the org has no open etapa (the leads
- * edition starts with none).
+ * (position, name) read order. Without `pipelineId` it is the org's default pipeline. Null when
+ * the pipeline has no open etapa.
  */
 export async function firstOpenLeadStage(
   tx: Db,
   orgId: string,
-): Promise<{ id: string; name: string } | null> {
+  pipelineId?: string,
+): Promise<{ id: string; name: string; pipelineId: string } | null> {
+  const resolved = pipelineId ?? (await defaultPipelineId(tx, orgId));
+  if (resolved === null) return null;
   const [stage] = await tx
-    .select({ id: salesOpsLeadStages.id, name: salesOpsLeadStages.name })
-    .from(salesOpsLeadStages)
+    .select({
+      id: salesOpsPipelineStages.id,
+      name: salesOpsPipelineStages.name,
+      pipelineId: salesOpsPipelineStages.pipelineId,
+    })
+    .from(salesOpsPipelineStages)
     .where(
       and(
-        eq(salesOpsLeadStages.orgId, orgId),
-        eq(salesOpsLeadStages.status, 'active'),
-        eq(salesOpsLeadStages.kind, 'normal'),
+        eq(salesOpsPipelineStages.orgId, orgId),
+        eq(salesOpsPipelineStages.pipelineId, resolved),
+        eq(salesOpsPipelineStages.status, 'active'),
+        eq(salesOpsPipelineStages.type, 'normal'),
       ),
     )
-    .orderBy(asc(salesOpsLeadStages.position), asc(salesOpsLeadStages.name))
+    .orderBy(asc(salesOpsPipelineStages.position), asc(salesOpsPipelineStages.name))
     .limit(1);
   return stage ?? null;
 }
@@ -1045,20 +910,59 @@ export async function firstOpenLeadStage(
  */
 export async function nextLeadPosition(tx: Db, orgId: string, stageId: string): Promise<number> {
   const [{ next }] = (await tx
-    .select({ next: sql<number>`COALESCE(MAX(${salesOpsLeads.position}), 0) + 1` })
-    .from(salesOpsLeads)
+    .select({ next: sql<number>`COALESCE(MAX(${salesOpsCrmLeads.position}), 0) + 1` })
+    .from(salesOpsCrmLeads)
     .where(
-      and(eq(salesOpsLeads.orgId, orgId), eq(salesOpsLeads.stageId, stageId), liveLeadCondition()),
+      and(eq(salesOpsCrmLeads.orgId, orgId), eq(salesOpsCrmLeads.stageId, stageId), liveLeadCondition()),
     )) as [{ next: number }];
   return next;
+}
+
+/** Resolves where a new lead lands: an explicit open stage of the pipeline, else the pipeline's first open one. */
+async function resolveCreateStage(
+  tx: Db,
+  orgId: string,
+  input: Pick<LeadWriteInput, 'pipelineId' | 'stageId'>,
+): Promise<{ id: string; pipelineId: string }> {
+  let pipelineId: string | null;
+  if (input.pipelineId !== undefined) {
+    if (!(await pipelineExists(tx, orgId, input.pipelineId))) throw new LeadInputError('pipeline_not_found');
+    pipelineId = input.pipelineId;
+  } else {
+    pipelineId = await defaultPipelineId(tx, orgId);
+  }
+  // The edition-independent "no etapa yet" answer: an org with no pipeline, or a pipeline with no
+  // open etapa, cannot take a new lead.
+  if (pipelineId === null) throw new LeadInputError('no_open_stage');
+
+  if (input.stageId !== undefined) {
+    const [stage] = await tx
+      .select({ id: salesOpsPipelineStages.id, type: salesOpsPipelineStages.type })
+      .from(salesOpsPipelineStages)
+      .where(
+        and(
+          eq(salesOpsPipelineStages.orgId, orgId),
+          eq(salesOpsPipelineStages.pipelineId, pipelineId),
+          eq(salesOpsPipelineStages.id, input.stageId),
+          eq(salesOpsPipelineStages.status, 'active'),
+        ),
+      )
+      .limit(1);
+    if (!stage) throw new LeadInputError('stage_not_found');
+    // A card that is converted, won or lost the instant it is born is not expressible.
+    if (stage.type !== 'normal') throw new LeadInputError('stage_not_open');
+    return { id: stage.id, pipelineId };
+  }
+  const first = await firstOpenLeadStage(tx, orgId, pipelineId);
+  if (!first) throw new LeadInputError('no_open_stage');
+  return { id: first.id, pipelineId };
 }
 
 async function insertLead(
   db: Db,
   orgId: string,
-  record: LeadCreateRecord,
+  input: LeadWriteInput,
   scope: LeadScope,
-  options: InsertLeadOptions = {},
 ): Promise<WriteLeadResult> {
   return withTenant(db, orgId, async (tx) => {
     const gate = await resolveLeadScopePredicate(tx, orgId, scope);
@@ -1070,45 +974,42 @@ async function insertLead(
     // A seller may only file their OWN leads, and may not file an unassigned one
     // either - `null !== gate.sellerPersonId` catches that. A loud 403 rather
     // than a 404, because they named the id themselves, so it leaks nothing.
-    // The leads edition defaults an unnamed vendedor to the caller first, so
-    // only an explicit OTHER id is refused there.
-    const requestedSeller =
-      options.defaultSellerToCaller && gate.sellerPersonId && record.sellerPersonId === null
-        ? gate.sellerPersonId
-        : record.sellerPersonId;
+    // An unnamed vendedor defaults to the caller (both editions), so only an
+    // explicit OTHER id is refused.
+    const named = input.sellerPersonId ?? null;
+    const requestedSeller = gate.sellerPersonId && named === null ? gate.sellerPersonId : named;
     if (gate.sellerPersonId && requestedSeller !== gate.sellerPersonId) {
       return { ok: false, reason: 'seller_scope' } as const;
     }
 
     const seller = requestedSeller ? await resolveSellerPersonId(tx, orgId, requestedSeller) : null;
-    const clientName = record.clientId
-      ? await resolveClientName(tx, orgId, record.clientId)
-      : record.clientName;
 
-    // A new lead always lands in the first ACTIVE normal stage by board order.
-    const stage = await firstOpenLeadStage(tx, orgId);
-    // The edition-independent "no etapa yet" answer; the leads edition starts with zero etapas (edicao-leads AC4).
-    if (!stage) throw new LeadInputError('no_open_stage');
+    const dynamic = await resolveFieldWrites(tx, orgId, input.fields ?? []);
+    const legacy = await resolveLegacyFieldWrites(tx, orgId, input);
+    const clientId = pickClientId(input.clientId, dynamic.cliente);
+    const clientName = clientId
+      ? await resolveClientName(tx, orgId, clientId)
+      : (input.clientName ?? '');
 
+    const stage = await resolveCreateStage(tx, orgId, input);
     const next = await nextLeadPosition(tx, orgId, stage.id);
 
     const [lead] = await tx
-      .insert(salesOpsLeads)
+      .insert(salesOpsCrmLeads)
       .values({
         orgId,
+        pipelineId: stage.pipelineId,
         stageId: stage.id,
         position: next,
-        contactName: record.contactName,
-        clientId: record.clientId,
+        contactName: input.contactName,
+        contactPhone: input.contactPhone ?? null,
+        contactEmail: input.contactEmail ?? null,
+        clientId,
         clientNameSnapshot: clientName,
-        estimatedValueBrl: record.estimatedValueBrl,
-        description: record.description,
-        contactPhone: record.contactPhone,
-        contactEmail: record.contactEmail,
-        contactBirthDate: record.contactBirthDate,
+        estimatedValueBrl: input.estimatedValueBrl ?? 0,
         sellerPersonId: seller?.id ?? null,
         sellerNameSnapshot: seller?.displayName ?? '',
-        // Both literal, and both unreachable from CreateLeadSchema: a lead
+        // Both literal, and both unreachable from LeadWriteSchema: a lead
         // cannot be born converted or born lost.
         saleId: null,
         lostReason: null,
@@ -1117,42 +1018,42 @@ async function insertLead(
       })
       .returning();
 
-    await replaceLeadProducts(tx, orgId, lead!.id, record.products);
+    // The one initial history entry of the lead (exactly one per lead, pinned by the partial unique
+    // index): from NULL to its first stage, written by the server in the same transaction.
+    await tx.insert(salesOpsCrmLeadEvents).values({
+      orgId,
+      leadId: lead!.id,
+      kind: 'stage_changed',
+      fromStageId: null,
+      toStageId: stage.id,
+      reason: null,
+      actorUserId: scope.userId,
+      actorNameSnapshot: scopeActorName(scope),
+    });
+
+    await applyFieldWrites(tx, orgId, lead!.id, [...legacy, ...dynamic.writes]);
     return { ok: true, lead: await readLeadView(tx, orgId, lead!.id) } as const;
   });
 }
 
 /**
- * Everything a lead PATCH may carry, across both editions. The full wire schema
- * never produces the three contact keys and the contact schema never produces
- * products, so each edition can only touch its own columns. Empresa
- * (clientId/clientName) and estimatedValueBrl are shared by both editions.
+ * The empresa of a write: the top-level `clientId` wins when the body carries it, the Cliente
+ * field entry of `fields` applies otherwise. Naming both is ambiguous and refused.
  */
-type LeadUpdatePatch = Omit<UpdateLeadInput, 'clientName'> & {
-  // The contact schema clears the empresa with `null`; the full schema's
-  // clientName is `string | undefined`, so the patch widens it to carry both.
-  clientName?: string | null | undefined;
-  contactPhone?: string | null | undefined;
-  contactEmail?: string | null | undefined;
-  contactBirthDate?: string | null | undefined;
-};
+function pickClientId(
+  topLevel: string | null | undefined,
+  cliente: { clientId: string | null; index: number } | null,
+): string | null {
+  if (topLevel !== undefined && cliente !== null) throw new LeadInputError('field_invalid', cliente.index);
+  if (topLevel !== undefined) return topLevel;
+  return cliente?.clientId ?? null;
+}
 
 export function updateLead(
   db: Db,
   orgId: string,
   id: string,
-  input: UpdateLeadInput,
-  scope: LeadScope,
-): Promise<WriteLeadResult> {
-  return applyLeadUpdate(db, orgId, id, input, scope);
-}
-
-/** The leads-edition PATCH. May set empresa and valor; never touches produtos. */
-export function updateContactLead(
-  db: Db,
-  orgId: string,
-  id: string,
-  input: UpdateContactLeadInput,
+  input: LeadPatchInput,
   scope: LeadScope,
 ): Promise<WriteLeadResult> {
   return applyLeadUpdate(db, orgId, id, input, scope);
@@ -1162,7 +1063,7 @@ async function applyLeadUpdate(
   db: Db,
   orgId: string,
   id: string,
-  input: LeadUpdatePatch,
+  input: LeadPatchInput,
   scope: LeadScope,
 ): Promise<WriteLeadResult> {
   return withTenant(db, orgId, async (tx) => {
@@ -1171,7 +1072,7 @@ async function applyLeadUpdate(
 
     const [current] = await tx
       .select()
-      .from(salesOpsLeads)
+      .from(salesOpsCrmLeads)
       .where(and(...leadIdentityConditions(orgId, id, gate)))
       .limit(1)
       .for('update');
@@ -1204,10 +1105,22 @@ async function applyLeadUpdate(
       seller = requested ? await resolveSellerPersonId(tx, orgId, requested) : null;
     }
 
+    // A write that touches the contact must leave at least one of phone and e-mail.
+    if (input.contactPhone !== undefined || input.contactEmail !== undefined) {
+      const phone = input.contactPhone !== undefined ? input.contactPhone : current.contactPhone;
+      const email = input.contactEmail !== undefined ? input.contactEmail : current.contactEmail;
+      if (!phone && !email) throw new LeadInputError('contact_required');
+    }
+
+    const dynamic = await resolveFieldWrites(tx, orgId, input.fields ?? []);
+    const legacy = await resolveLegacyFieldWrites(tx, orgId, input);
+    const clientTouched = input.clientId !== undefined || dynamic.cliente !== null;
+    const nextClientId = clientTouched ? pickClientId(input.clientId, dynamic.cliente) : current.clientId;
+
     let clientNameSnapshot: string | undefined;
-    if (input.clientId !== undefined) {
-      clientNameSnapshot = input.clientId
-        ? await resolveClientName(tx, orgId, input.clientId)
+    if (clientTouched) {
+      clientNameSnapshot = nextClientId
+        ? await resolveClientName(tx, orgId, nextClientId)
         : // The column is NOT NULL, so clearing the LINK can never blank the
           // label: the body's text wins, and the stored snapshot is the floor.
           (input.clientName ?? current.clientNameSnapshot);
@@ -1218,23 +1131,19 @@ async function applyLeadUpdate(
     }
 
     await tx
-      .update(salesOpsLeads)
-      // Built from `input` alone, and `UpdateLeadSchema` is `.strict()` and
+      .update(salesOpsCrmLeads)
+      // Built from `input` alone, and `LeadPatchSchema` is `.strict()` and
       // declares no stageId, position, stageChangedAt, saleId or lostReason - so
       // none of those keys can appear here, ever.
       .set({
         ...(input.contactName !== undefined ? { contactName: input.contactName } : {}),
-        ...(input.clientId !== undefined ? { clientId: input.clientId ?? null } : {}),
+        ...(clientTouched ? { clientId: nextClientId } : {}),
         ...(clientNameSnapshot !== undefined ? { clientNameSnapshot } : {}),
         ...(input.estimatedValueBrl !== undefined
           ? { estimatedValueBrl: input.estimatedValueBrl }
           : {}),
-        ...(input.description !== undefined ? { description: input.description ?? null } : {}),
         ...(input.contactPhone !== undefined ? { contactPhone: input.contactPhone } : {}),
         ...(input.contactEmail !== undefined ? { contactEmail: input.contactEmail } : {}),
-        ...(input.contactBirthDate !== undefined
-          ? { contactBirthDate: input.contactBirthDate }
-          : {}),
         ...(writesSeller
           ? {
               sellerPersonId: seller?.id ?? null,
@@ -1244,11 +1153,11 @@ async function applyLeadUpdate(
         updatedAt: new Date(),
       })
       // Live again here, not only in the identity read: belt and braces under READ COMMITTED, the row lock above already re-checked it.
-      .where(and(eq(salesOpsLeads.orgId, orgId), eq(salesOpsLeads.id, id), liveLeadCondition()));
+      .where(and(eq(salesOpsCrmLeads.orgId, orgId), eq(salesOpsCrmLeads.id, id), liveLeadCondition()));
 
-    // `undefined` leaves the child rows alone; `[]` clears them. The same
+    // A key absent from the body leaves its value rows alone; an empty value clears them. The same
     // distinction `updateProduct` draws for the produto's função costs.
-    if (input.products !== undefined) await replaceLeadProducts(tx, orgId, id, input.products);
+    await applyFieldWrites(tx, orgId, id, [...legacy, ...dynamic.writes]);
 
     return { ok: true, lead: await readLeadView(tx, orgId, id) } as const;
   });
@@ -1273,7 +1182,7 @@ export async function moveLead(
 
     const [current] = await tx
       .select()
-      .from(salesOpsLeads)
+      .from(salesOpsCrmLeads)
       .where(and(...leadIdentityConditions(orgId, id, gate)))
       .limit(1)
       .for('update');
@@ -1285,31 +1194,40 @@ export async function moveLead(
     // proposta there is no lead operation left that could.
     if (current.saleId !== null) return { ok: false, reason: 'already_converted' } as const;
 
-    // An ARCHIVED stage is not a move target.
+    // An ARCHIVED stage is not a move target, and neither is a stage of another pipeline (the
+    // composite FK (org, pipeline, stage) would refuse it anyway).
     const [destination] = await tx
-      .select({ id: salesOpsLeadStages.id, kind: salesOpsLeadStages.kind })
-      .from(salesOpsLeadStages)
+      .select({
+        id: salesOpsPipelineStages.id,
+        type: salesOpsPipelineStages.type,
+        behavior: salesOpsPipelineStages.behavior,
+        exitKind: salesOpsPipelineStages.exitKind,
+        requiresReason: salesOpsPipelineStages.requiresReason,
+      })
+      .from(salesOpsPipelineStages)
       .where(
         and(
-          eq(salesOpsLeadStages.orgId, orgId),
-          eq(salesOpsLeadStages.id, input.stageId),
-          eq(salesOpsLeadStages.status, 'active'),
+          eq(salesOpsPipelineStages.orgId, orgId),
+          eq(salesOpsPipelineStages.pipelineId, current.pipelineId),
+          eq(salesOpsPipelineStages.id, input.stageId),
+          eq(salesOpsPipelineStages.status, 'active'),
         ),
       )
       .limit(1);
     if (!destination) throw new LeadInputError('stage_not_found');
 
     // This cannot be a zod refine: the requirement depends on the DESTINATION
-    // row's kind, which is a database read. So it is the service sentinel 400,
-    // the same shape routes.ts already returns for entrada_mode_value_mismatch.
-    if (destination.kind === 'lost' && input.reason === undefined) {
+    // row, which is a database read. So it is the service sentinel 400, the same
+    // shape routes.ts already returns for entrada_mode_value_mismatch.
+    if (destination.requiresReason && input.reason === undefined) {
       throw new LeadInputError('lost_reason_required');
     }
 
-    if (destination.kind === 'conversion') {
+    const opensOrcamento = destination.type === 'orcamento' && destination.behavior === 'opens_orcamentos';
+    if (opensOrcamento) {
       if (input.saleId === undefined) throw new LeadInputError('sale_required_for_conversion');
       // The in-org SELECT is what produces the designed 400. The composite FK
-      // sales_ops_leads_org_sale_fk is the backstop underneath it: without this
+      // sales_ops_crm_leads_org_sale_fk is the backstop underneath it: without this
       // read a cross-org id would surface as a raw 23503 and an HTTP 500.
       const [sale] = await tx
         .select({ id: salesOpsSales.id })
@@ -1330,7 +1248,7 @@ export async function moveLead(
     const stageChanged = destination.id !== current.stageId;
 
     await tx
-      .update(salesOpsLeads)
+      .update(salesOpsCrmLeads)
       .set({
         stageId: destination.id,
         // KEY OMISSION, never `stageChanged ? now : current.stageChangedAt`. A
@@ -1338,12 +1256,12 @@ export async function moveLead(
         // stage_changed_at key at all, so the column is physically untouchable
         // by a reorder - the rule is not a branch someone can later "simplify".
         ...(stageChanged ? { stageChangedAt: new Date() } : {}),
-        lostReason: destination.kind === 'lost' ? (input.reason ?? null) : null,
-        ...(destination.kind === 'conversion' ? { saleId: input.saleId! } : {}),
+        lostReason: destination.exitKind === 'perdido' ? (input.reason ?? null) : null,
+        ...(opensOrcamento ? { saleId: input.saleId! } : {}),
         ...(claimed ? { sellerPersonId: claimed.id, sellerNameSnapshot: claimed.displayName } : {}),
         updatedAt: new Date(),
       })
-      .where(and(eq(salesOpsLeads.orgId, orgId), eq(salesOpsLeads.id, id), liveLeadCondition()));
+      .where(and(eq(salesOpsCrmLeads.orgId, orgId), eq(salesOpsCrmLeads.id, id), liveLeadCondition()));
 
     await renumberStage(tx, orgId, destination.id, { moved: id, at: input.position });
     if (stageChanged) await renumberStage(tx, orgId, current.stageId, null);
@@ -1373,16 +1291,16 @@ export async function renumberStage(
   placement: { moved: string; at: number } | null,
 ): Promise<void> {
   const rows = await tx
-    .select({ id: salesOpsLeads.id })
-    .from(salesOpsLeads)
+    .select({ id: salesOpsCrmLeads.id })
+    .from(salesOpsCrmLeads)
     .where(
       and(
-        eq(salesOpsLeads.orgId, orgId),
-        eq(salesOpsLeads.stageId, stageId),
+        eq(salesOpsCrmLeads.orgId, orgId),
+        eq(salesOpsCrmLeads.stageId, stageId),
         liveLeadCondition(),
       ),
     )
-    .orderBy(asc(salesOpsLeads.position), asc(salesOpsLeads.id))
+    .orderBy(asc(salesOpsCrmLeads.position), asc(salesOpsCrmLeads.id))
     .for('update');
 
   let ids = rows.map((row) => row.id);
@@ -1399,7 +1317,7 @@ export async function renumberStage(
   // integer column fails to resolve an operator.
   const values = ids.map((id, index) => sql`(${id}::uuid, ${index + 1}::int)`);
   await tx.execute(sql`
-    UPDATE sales_ops_leads AS l SET "position" = v.pos
+    UPDATE sales_ops_crm_leads AS l SET "position" = v.pos
     FROM (VALUES ${sql.join(values, sql`, `)}) AS v(id, pos)
     WHERE l.org_id = ${orgId} AND l.id = v.id AND l."position" IS DISTINCT FROM v.pos
   `);

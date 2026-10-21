@@ -13,6 +13,7 @@ import {
 import { ensureLeadStagesForOrg } from '../../src/domains/sales-ops/leads/stages-seed.js';
 import { firstRow } from './first-row.js';
 import { testDatabaseUrls } from '../../src/db/__tests__/test-database-urls.js';
+import { deleteCrmForOrgs } from '../../src/db/__tests__/settlement-test-cleanup.js';
 
 const { appUrl: APP_DB_URL, adminUrl: ADMIN_DB_URL } = testDatabaseUrls();
 const ADMIN_CONNECTION_OPTIONS = { connection: { 'app.fxl_admin': 'true' } } as const;
@@ -56,9 +57,7 @@ describe('sales operations lead stages persistence and RLS', () => {
 
   afterAll(async () => {
     for (const orgId of orgIds) {
-      await adminClient`DELETE FROM sales_ops_lead_products WHERE org_id = ${orgId}`;
-      await adminClient`DELETE FROM sales_ops_leads WHERE org_id = ${orgId}`;
-      await adminClient`DELETE FROM sales_ops_lead_stages WHERE org_id = ${orgId}`;
+      await deleteCrmForOrgs([orgId]);
     }
     await appClient.end();
     await adminDbClient.end();
@@ -70,7 +69,7 @@ describe('sales operations lead stages persistence and RLS', () => {
     await ensureLeadStagesForOrg(db, orgA);
     await ensureLeadStagesForOrg(db, orgB);
 
-    const stageA = await createLeadStage(db, orgA, LeadStageSchema.parse({ name: 'Qualificação' }));
+    const stageA = await createLeadStage(db, orgA, LeadStageSchema.parse({ name: 'Triagem' }));
     if (typeof stageA === 'string') throw new Error(`unexpected sentinel: ${stageA}`);
     expect(stageA.status).toBe('active');
     expect(stageA.kind).toBe('normal');
@@ -80,11 +79,11 @@ describe('sales operations lead stages persistence and RLS', () => {
     expect((await listLeadStages(db, orgA)).map((row) => row.id)).toContain(stageA.id);
     expect((await listLeadStages(db, orgB)).map((row) => row.id)).not.toContain(stageA.id);
 
-    const renamed = await updateLeadStage(db, orgA, stageA.id, { name: 'Qualificado' });
+    const renamed = await updateLeadStage(db, orgA, stageA.id, { name: 'Triado' });
     if (renamed === null || typeof renamed === 'string') {
       throw new Error(`unexpected sentinel: ${renamed}`);
     }
-    expect(renamed.name).toBe('Qualificado');
+    expect(renamed.name).toBe('Triado');
 
     const archived = await updateLeadStage(db, orgA, stageA.id, { status: 'archived' });
     if (archived === null || typeof archived === 'string') {
@@ -110,14 +109,14 @@ describe('sales operations lead stages persistence and RLS', () => {
 
   it('createLeadStage reports duplicates per org but allows the same name in another org', async () => {
     const [orgA, orgB] = newOrgPair('dup');
-    const first = await createLeadStage(db, orgA, LeadStageSchema.parse({ name: 'Qualificação' }));
+    const first = await createLeadStage(db, orgA, LeadStageSchema.parse({ name: 'Triagem' }));
     if (typeof first === 'string') throw new Error(`unexpected sentinel: ${first}`);
 
-    expect(await createLeadStage(db, orgA, LeadStageSchema.parse({ name: 'Qualificação' }))).toBe(
+    expect(await createLeadStage(db, orgA, LeadStageSchema.parse({ name: 'Triagem' }))).toBe(
       'duplicate',
     );
 
-    const other = await createLeadStage(db, orgB, LeadStageSchema.parse({ name: 'Qualificação' }));
+    const other = await createLeadStage(db, orgB, LeadStageSchema.parse({ name: 'Triagem' }));
     if (typeof other === 'string') throw new Error(`unexpected sentinel: ${other}`);
     expect(other.orgId).toBe(orgB);
   });
@@ -133,6 +132,11 @@ describe('sales operations lead stages persistence and RLS', () => {
     // commits. Planting a committed row instead would be caught by the probe and
     // would prove nothing about the conflict clause.
     const [orgA] = newOrgPair('race');
+    // The pipeline is committed first; only the colliding stage row stays uncommitted.
+    const pipeline = firstRow(await adminClient<{ id: string }[]>`
+      INSERT INTO sales_ops_pipelines (org_id, name, system_key, is_default)
+      VALUES (${orgA}, 'Funil CRM padrão', 'crm-padrao', true) RETURNING id
+    `, 'pipeline');
 
     let release: () => void = () => {};
     let markInserted: () => void = () => {};
@@ -144,8 +148,8 @@ describe('sales operations lead stages persistence and RLS', () => {
     });
     const competitor = adminClient.begin(async (tx) => {
       await tx`
-        INSERT INTO sales_ops_lead_stages (org_id, name, kind, is_system, "position")
-        VALUES (${orgA}, 'Concorrente', 'normal', false, 7)
+        INSERT INTO sales_ops_pipeline_stages (org_id, pipeline_id, name, type, "position")
+        VALUES (${orgA}, ${pipeline.id}, 'Concorrente', 'normal', 7)
       `;
       markInserted();
       await gate;
@@ -164,7 +168,7 @@ describe('sales operations lead stages persistence and RLS', () => {
     expect(await racing).toBe('duplicate');
 
     const { count } = firstRow(await adminClient<{ count: string }[]>`
-      SELECT count(*)::text AS count FROM sales_ops_lead_stages
+      SELECT count(*)::text AS count FROM sales_ops_pipeline_stages
       WHERE org_id = ${orgA} AND name = 'Concorrente'
     `, 'count');
     expect(count).toBe('1');
@@ -218,24 +222,25 @@ describe('sales operations lead stages persistence and RLS', () => {
   it('reorderLeadStages writes a total order in one transaction and refuses a partial set', async () => {
     const [orgA] = newOrgPair('reorder');
     const seeded = await ensureLeadStagesForOrg(db, orgA);
-    expect(seeded).toHaveLength(4);
+    // The default CRM pipeline: Novo, Qualificação, Em negociação, Proposta, Ganho, Perdido, Pausado.
+    expect(seeded).toHaveLength(7);
 
     const reversed = [...seeded].reverse().map((stage) => stage.id);
     const reordered = await reorderLeadStages(db, orgA, reversed);
     if (reordered === 'set_mismatch') throw new Error('unexpected set_mismatch');
     expect(reordered.map((stage) => stage.id)).toEqual(reversed);
-    expect(reordered.map((stage) => stage.position)).toEqual([0, 1, 2, 3]);
+    expect(reordered.map((stage) => stage.position)).toEqual([0, 1, 2, 3, 4, 5, 6]);
 
     // A partial set is refused and, because the whole thing is one transaction,
     // not one position moves.
-    expect(await reorderLeadStages(db, orgA, reversed.slice(0, 3))).toBe('set_mismatch');
+    expect(await reorderLeadStages(db, orgA, reversed.slice(0, 6))).toBe('set_mismatch');
     const afterRejection = await listLeadStages(db, orgA);
     expect(afterRejection.map((stage) => stage.id)).toEqual(reversed);
-    expect(afterRejection.map((stage) => stage.position)).toEqual([0, 1, 2, 3]);
+    expect(afterRejection.map((stage) => stage.position)).toEqual([0, 1, 2, 3, 4, 5, 6]);
 
     // An unknown id of the right cardinality is refused too.
     expect(
-      await reorderLeadStages(db, orgA, [...reversed.slice(0, 3), randomUUID()]),
+      await reorderLeadStages(db, orgA, [...reversed.slice(0, 6), randomUUID()]),
     ).toBe('set_mismatch');
   });
 
@@ -245,8 +250,8 @@ describe('sales operations lead stages persistence and RLS', () => {
     const home = firstRow(seeded, 'a seeded stage');
 
     const lead = firstRow(await adminClient<{ id: string; stage_changed_at: Date }[]>`
-      INSERT INTO sales_ops_leads (org_id, contact_name, client_name_snapshot, stage_id)
-      VALUES (${orgA}, 'Contato Um', 'Empresa Um', ${home.id})
+      INSERT INTO sales_ops_crm_leads (org_id, contact_name, client_name_snapshot, pipeline_id, stage_id)
+      VALUES (${orgA}, 'Contato Um', 'Empresa Um', ${home.pipelineId}, ${home.id})
       RETURNING id, stage_changed_at
     `, 'lead');
 
@@ -258,7 +263,7 @@ describe('sales operations lead stages persistence and RLS', () => {
     if (reordered === 'set_mismatch') throw new Error('unexpected set_mismatch');
 
     const after = firstRow(await adminClient<{ stage_changed_at: Date; updated_at: Date | null }[]>`
-      SELECT stage_changed_at, updated_at FROM sales_ops_leads WHERE id = ${lead.id}
+      SELECT stage_changed_at, updated_at FROM sales_ops_crm_leads WHERE id = ${lead.id}
     `, 'after');
     // Byte-identical, not merely "the lead still exists": this is the sole oracle
     // for "a reorder never touches a lead".
@@ -331,32 +336,39 @@ describe('sales operations lead stages persistence and RLS', () => {
     );
     await adminClient.unsafe(`GRANT USAGE ON SCHEMA public TO ${roleName}`);
     await adminClient.unsafe(
-      `GRANT SELECT, INSERT, UPDATE, DELETE ON sales_ops_lead_stages TO ${roleName}`,
+      `GRANT SELECT, INSERT, UPDATE, DELETE ON sales_ops_pipeline_stages TO ${roleName}`,
     );
 
     const roleClient = postgres(withRole(APP_DB_URL, roleName, rolePassword), { max: 1 });
 
     try {
       const [ORG_A, ORG_B] = newOrgPair('rawrls');
+      const pipelineOf = async (orgId: string) =>
+        firstRow(await adminClient<{ id: string }[]>`
+          INSERT INTO sales_ops_pipelines (org_id, name, system_key, is_default)
+          VALUES (${orgId}, 'Funil CRM padrão', 'crm-padrao', true) RETURNING id
+        `, 'pipeline').id;
+      const pipelineA = await pipelineOf(ORG_A);
+      const pipelineB = await pipelineOf(ORG_B);
 
       const stageId = await roleClient.begin(async (tx) => {
         await tx`SELECT set_config('app.current_org_id', ${ORG_A}, true)`;
         const [stage] = await tx`
-          INSERT INTO sales_ops_lead_stages (org_id, name, kind, is_system, "position")
-          VALUES (${ORG_A}, 'RLS Probe Etapa', 'normal', false, 0) RETURNING id
+          INSERT INTO sales_ops_pipeline_stages (org_id, pipeline_id, name, type, "position")
+          VALUES (${ORG_A}, ${pipelineA}, 'RLS Probe Etapa', 'normal', 0) RETURNING id
         `;
         return (stage as { id: string }).id;
       });
 
       const own = await roleClient.begin(async (tx) => {
         await tx`SELECT set_config('app.current_org_id', ${ORG_A}, true)`;
-        return tx`SELECT id FROM sales_ops_lead_stages WHERE id = ${stageId}`;
+        return tx`SELECT id FROM sales_ops_pipeline_stages WHERE id = ${stageId}`;
       });
       expect(own).toHaveLength(1);
 
       const other = await roleClient.begin(async (tx) => {
         await tx`SELECT set_config('app.current_org_id', ${ORG_B}, true)`;
-        return tx`SELECT id FROM sales_ops_lead_stages WHERE id = ${stageId}`;
+        return tx`SELECT id FROM sales_ops_pipeline_stages WHERE id = ${stageId}`;
       });
       expect(other).toHaveLength(0);
 
@@ -364,15 +376,15 @@ describe('sales operations lead stages persistence and RLS', () => {
         roleClient.begin(async (tx) => {
           await tx`SELECT set_config('app.current_org_id', ${ORG_A}, true)`;
           return tx`
-            INSERT INTO sales_ops_lead_stages (org_id, name, kind, is_system, "position")
-            VALUES (${ORG_B}, 'Etapa Contrabandeada', 'normal', false, 0) RETURNING id
+            INSERT INTO sales_ops_pipeline_stages (org_id, pipeline_id, name, type, "position")
+            VALUES (${ORG_B}, ${pipelineB}, 'Etapa Contrabandeada', 'normal', 0) RETURNING id
           `;
         }),
       ).rejects.toThrow();
 
       const noContext = await roleClient.begin(async (tx) => {
         await tx`SELECT set_config('app.current_org_id', '', true)`;
-        return tx`SELECT id FROM sales_ops_lead_stages WHERE id = ${stageId}`;
+        return tx`SELECT id FROM sales_ops_pipeline_stages WHERE id = ${stageId}`;
       });
       expect(noContext).toHaveLength(0);
     } finally {

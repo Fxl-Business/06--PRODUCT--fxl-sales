@@ -2,7 +2,7 @@
  * Leads sheet planner. Pure and deterministic: no I/O, no clock, no env, no database.
  * A lead never creates a cliente; the executor runs createLead and then moveLead.
  */
-import { CreateLeadSchema } from '../../sales-ops/leads/lead-schemas.js';
+import { LeadWriteBaseSchema, type LeadWriteInput } from '../../sales-ops/leads/lead-schemas.js';
 import { normalizeLabel } from '../cells.js';
 import { cellReader } from '../parse.js';
 import type { ImportRefIndex } from '../refs.js';
@@ -237,7 +237,7 @@ export function planLeads(parsed: ParsedWorkbook, catalog: ImportCatalog, refs: 
     }
 
     // Schema backstop (placeholder ids stand in for refs the executor resolves later)
-    let data: ReturnType<typeof CreateLeadSchema.parse> | null = null;
+    let data: LeadWriteInput | null = null;
     if (contato !== null && empresa !== null && !rowIssues.some((i) => i.severity === 'error')) {
       const candidate = {
         contactName: contato,
@@ -248,7 +248,7 @@ export function planLeads(parsed: ParsedWorkbook, catalog: ImportCatalog, refs: 
         sellerPersonId: sellerRef ? PLACEHOLDER_UUID : null,
         products: products.map((p) => (p.productRef ? { productId: PLACEHOLDER_UUID } : { productName: p.name })),
       };
-      const res = CreateLeadSchema.safeParse(candidate);
+      const res = LeadWriteBaseSchema.safeParse(candidate);
       if (res.success) data = res.data;
       else {
         rowIssues.push(

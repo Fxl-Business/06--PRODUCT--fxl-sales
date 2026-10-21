@@ -12,11 +12,14 @@ import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import * as schema from '../../src/db/schema.js';
-import { CreateLeadSchema, MoveLeadSchema } from '../../src/domains/sales-ops/leads/lead-schemas.js';
 import {
-  type LeadScope,
+  LeadWriteBaseSchema,
+  MoveLeadSchema,
+} from '../../src/domains/sales-ops/leads/lead-schemas.js';
+import {
   createLead,
   moveLead,
+  type LeadScope,
 } from '../../src/domains/sales-ops/leads/lead-service.js';
 import { ensureLeadStagesForOrg } from '../../src/domains/sales-ops/leads/stages-seed.js';
 import {
@@ -34,6 +37,7 @@ import {
 } from '../../src/domains/sales-ops/service.js';
 import { firstRow } from './first-row.js';
 import { testDatabaseUrls } from '../../src/db/__tests__/test-database-urls.js';
+import { deleteCrmForOrgs } from '../../src/db/__tests__/settlement-test-cleanup.js';
 
 const { appUrl: APP_DB_URL, adminUrl: ADMIN_DB_URL } = testDatabaseUrls();
 const ADMIN_CONNECTION_OPTIONS = { connection: { 'app.fxl_admin': 'true' } } as const;
@@ -54,9 +58,7 @@ describe('leads move no existing financial number', () => {
 
   afterAll(async () => {
     for (const orgId of orgIds) {
-      await adminClient`DELETE FROM sales_ops_lead_products WHERE org_id = ${orgId}`;
-      await adminClient`DELETE FROM sales_ops_leads WHERE org_id = ${orgId}`;
-      await adminClient`DELETE FROM sales_ops_lead_stages WHERE org_id = ${orgId}`;
+      await deleteCrmForOrgs([orgId]);
       await adminClient`DELETE FROM sales_ops_payables WHERE org_id = ${orgId}`;
       await adminClient`DELETE FROM sales_ops_receivables WHERE org_id = ${orgId}`;
       await adminClient`DELETE FROM sales_ops_sale_items WHERE org_id = ${orgId}`;
@@ -133,7 +135,7 @@ describe('leads move no existing financial number', () => {
       const lead = await createLead(
         db,
         orgId,
-        CreateLeadSchema.parse({
+        LeadWriteBaseSchema.parse({
           contactName,
           clientName: 'Empresa em negociação',
           estimatedValueBrl: 9_900_000,
@@ -158,7 +160,7 @@ describe('leads move no existing financial number', () => {
 
     // The leads really exist, so the three assertions below are not vacuous.
     const { count } = firstRow(await adminClient<{ count: string }[]>`
-      SELECT count(*)::text AS count FROM sales_ops_leads WHERE org_id = ${orgId}`, 'count');
+      SELECT count(*)::text AS count FROM sales_ops_crm_leads WHERE org_id = ${orgId}`, 'count');
     expect(count).toBe('3');
 
     expect(await getSalesOpsSummary(db, orgId)).toEqual(before.summary);

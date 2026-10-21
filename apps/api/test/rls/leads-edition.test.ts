@@ -14,23 +14,21 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import * as schema from '../../src/db/schema.js';
 import { testDatabaseUrls } from '../../src/db/__tests__/test-database-urls.js';
 import {
-  CreateContactLeadSchema,
-  CreateLeadSchema,
+  LeadPatchSchema,
+  LeadWriteBaseSchema,
   ListLeadsQuerySchema,
   MoveLeadSchema,
-  UpdateContactLeadSchema,
 } from '../../src/domains/sales-ops/leads/lead-schemas.js';
 import {
-  type LeadScope,
-  type LeadView,
-  type WriteLeadResult,
-  createContactLead,
   createLead,
   getLead,
   listLeads,
   moveLead,
   provisionLeadsSellerPerson,
-  updateContactLead,
+  type LeadScope,
+  type LeadView,
+  type WriteLeadResult,
+  updateLead,
 } from '../../src/domains/sales-ops/leads/lead-service.js';
 import { LeadStageSchema } from '../../src/domains/sales-ops/leads/schemas.js';
 import {
@@ -45,6 +43,7 @@ import {
   updatePerson,
   withTenant,
 } from '../../src/domains/sales-ops/service.js';
+import { deleteCrmForOrgs } from '../../src/db/__tests__/settlement-test-cleanup.js';
 
 const { appUrl: APP_DB_URL, adminUrl: ADMIN_DB_URL } = testDatabaseUrls();
 const ADMIN_CONNECTION_OPTIONS = { connection: { 'app.fxl_admin': 'true' } } as const;
@@ -116,9 +115,7 @@ describe('sales operations leads edition: contact leads, vendedor-only pessoas, 
     // depending on which file vitest happens to schedule in between.
     for (const orgId of orgIds) {
       await adminClient`DELETE FROM audit_log WHERE actor_org_id = ${orgId}`;
-      await adminClient`DELETE FROM sales_ops_lead_products WHERE org_id = ${orgId}`;
-      await adminClient`DELETE FROM sales_ops_leads WHERE org_id = ${orgId}`;
-      await adminClient`DELETE FROM sales_ops_lead_stages WHERE org_id = ${orgId}`;
+      await deleteCrmForOrgs([orgId]);
       await adminClient`DELETE FROM sales_ops_payables WHERE org_id = ${orgId}`;
       await adminClient`DELETE FROM sales_ops_receivables WHERE org_id = ${orgId}`;
       await adminClient`DELETE FROM sales_ops_sale_items WHERE org_id = ${orgId}`;
@@ -155,19 +152,19 @@ describe('sales operations leads edition: contact leads, vendedor-only pessoas, 
   }
 
   function contactLead(overrides: Record<string, unknown> = {}) {
-    return CreateContactLeadSchema.parse({ contactName: 'Contato Um', ...overrides });
+    return LeadWriteBaseSchema.parse({ contactName: 'Contato Um', ...overrides });
   }
 
   async function systemStageCount(orgId: string): Promise<number> {
     const [row] = await adminClient<Array<{ n: number }>>`
-      SELECT count(*)::int AS n FROM sales_ops_lead_stages
-      WHERE org_id = ${orgId} AND kind <> 'normal'`;
+      SELECT count(*)::int AS n FROM sales_ops_pipeline_stages
+      WHERE org_id = ${orgId} AND type <> 'normal'`;
     return row!.n;
   }
 
   async function stageIds(orgId: string): Promise<string[]> {
     const rows = await adminClient<Array<{ id: string }>>`
-      SELECT id FROM sales_ops_lead_stages WHERE org_id = ${orgId}`;
+      SELECT id FROM sales_ops_pipeline_stages WHERE org_id = ${orgId}`;
     return rows.map((row) => row.id).sort();
   }
 
@@ -188,7 +185,7 @@ describe('sales operations leads edition: contact leads, vendedor-only pessoas, 
     const orgId = newOrg('create');
     const stage = await normalStage(orgId, 'Contato');
 
-    const lead = okLead(await createContactLead(db, orgId, contactLead(), ADMIN_SCOPE));
+    const lead = okLead(await createLead(db, orgId, contactLead(), ADMIN_SCOPE));
     expect(lead).toMatchObject({
       contactName: 'Contato Um',
       clientId: null,
@@ -204,12 +201,13 @@ describe('sales operations leads edition: contact leads, vendedor-only pessoas, 
     const [row] = await adminClient<
       Array<{ client_id: string | null; client_name_snapshot: string; estimated_value_brl: number }>
     >`
-      SELECT client_id, client_name_snapshot, estimated_value_brl FROM sales_ops_leads
+      SELECT client_id, client_name_snapshot, estimated_value_brl FROM sales_ops_crm_leads
       WHERE org_id = ${orgId} AND id = ${lead.id}`;
     expect(row).toEqual({ client_id: null, client_name_snapshot: '', estimated_value_brl: 0 });
     const [products] = await adminClient<Array<{ n: number }>>`
-      SELECT count(*)::int AS n FROM sales_ops_lead_products
-      WHERE org_id = ${orgId} AND lead_id = ${lead.id}`;
+      SELECT count(*)::int AS n FROM sales_ops_crm_lead_field_values v
+      JOIN sales_ops_field_definitions f ON f.id = v.field_id AND f.key = 'produtos'
+      WHERE v.org_id = ${orgId} AND v.lead_id = ${lead.id}`;
     expect(products!.n).toBe(0);
   });
 
@@ -218,7 +216,7 @@ describe('sales operations leads edition: contact leads, vendedor-only pessoas, 
     await normalStage(orgId, 'Contato');
 
     const lead = okLead(
-      await createContactLead(
+      await createLead(
         db,
         orgId,
         contactLead({
@@ -240,8 +238,11 @@ describe('sales operations leads edition: contact leads, vendedor-only pessoas, 
     const [row] = await adminClient<
       Array<{ contact_phone: string; contact_email: string; birth: string }>
     >`
-      SELECT contact_phone, contact_email, contact_birth_date::text AS birth
-      FROM sales_ops_leads WHERE org_id = ${orgId} AND id = ${lead.id}`;
+      SELECT l.contact_phone, l.contact_email,
+        (SELECT v.value_date::text FROM sales_ops_crm_lead_field_values v
+           JOIN sales_ops_field_definitions f ON f.id = v.field_id AND f.key = 'nascimento'
+          WHERE v.lead_id = l.id) AS birth
+      FROM sales_ops_crm_leads l WHERE l.org_id = ${orgId} AND l.id = ${lead.id}`;
     expect(row).toEqual({
       contact_phone: '(11) 98888-7777',
       contact_email: 'ana@example.com',
@@ -253,7 +254,7 @@ describe('sales operations leads edition: contact leads, vendedor-only pessoas, 
     const orgId = newOrg('update');
     await normalStage(orgId, 'Contato');
     const created = okLead(
-      await createContactLead(
+      await createLead(
         db,
         orgId,
         contactLead({
@@ -266,11 +267,11 @@ describe('sales operations leads edition: contact leads, vendedor-only pessoas, 
     );
 
     const first = okLead(
-      await updateContactLead(
+      await updateLead(
         db,
         orgId,
         created.id,
-        UpdateContactLeadSchema.parse({ contactPhone: '' }),
+        LeadPatchSchema.parse({ contactPhone: '' }),
         ADMIN_SCOPE,
       ),
     );
@@ -282,11 +283,11 @@ describe('sales operations leads edition: contact leads, vendedor-only pessoas, 
     });
 
     const second = okLead(
-      await updateContactLead(
+      await updateLead(
         db,
         orgId,
         created.id,
-        UpdateContactLeadSchema.parse({ contactBirthDate: '1991-01-02', contactName: 'Novo Nome' }),
+        LeadPatchSchema.parse({ contactBirthDate: '1991-01-02', contactName: 'Novo Nome' }),
         ADMIN_SCOPE,
       ),
     );
@@ -307,7 +308,7 @@ describe('sales operations leads edition: contact leads, vendedor-only pessoas, 
     const a = await normalStage(orgId, 'A');
     const b = await normalStage(orgId, 'B');
     const lead = okLead(
-      await createContactLead(db, orgId, contactLead({ contactEmail: 'x@y.co' }), ADMIN_SCOPE),
+      await createLead(db, orgId, contactLead({ contactEmail: 'x@y.co' }), ADMIN_SCOPE),
     );
     expect(lead.stageId).toBe(a.id);
 
@@ -340,7 +341,7 @@ describe('sales operations leads edition: contact leads, vendedor-only pessoas, 
 
   it('refuses a lead when the org has no etapa at all (no_open_stage)', async () => {
     const orgId = newOrg('nostage');
-    await expect(createContactLead(db, orgId, contactLead(), ADMIN_SCOPE)).rejects.toMatchObject({
+    await expect(createLead(db, orgId, contactLead(), ADMIN_SCOPE)).rejects.toMatchObject({
       name: 'LeadInputError',
       code: 'no_open_stage',
     });
@@ -353,7 +354,7 @@ describe('sales operations leads edition: contact leads, vendedor-only pessoas, 
     const stage = await normalStage(orgId, 'Unica');
     const archived = await updateLeadStage(db, orgId, stage.id, { status: 'archived' });
     expect(archived).toMatchObject({ status: 'archived' });
-    await expect(createContactLead(db, orgId, contactLead(), ADMIN_SCOPE)).rejects.toMatchObject({
+    await expect(createLead(db, orgId, contactLead(), ADMIN_SCOPE)).rejects.toMatchObject({
       name: 'LeadInputError',
       code: 'no_open_stage',
     });
@@ -365,14 +366,14 @@ describe('sales operations leads edition: contact leads, vendedor-only pessoas, 
     const b = await normalStage(orgId, 'B');
     const vendedor = await leadsVendedor(orgId, 'Ana');
     const lead = okLead(
-      await createContactLead(db, orgId, contactLead({ sellerPersonId: vendedor.id }), ADMIN_SCOPE),
+      await createLead(db, orgId, contactLead({ sellerPersonId: vendedor.id }), ADMIN_SCOPE),
     );
     okLead(
-      await updateContactLead(
+      await updateLead(
         db,
         orgId,
         lead.id,
-        UpdateContactLeadSchema.parse({ contactPhone: '11 9999' }),
+        LeadPatchSchema.parse({ contactPhone: '11 9999' }),
         ADMIN_SCOPE,
       ),
     );
@@ -411,10 +412,10 @@ describe('sales operations leads edition: contact leads, vendedor-only pessoas, 
       WHERE org_id = ${orgId} AND id = ${ana.id}`;
 
     okLead(
-      await createContactLead(db, orgId, contactLead({ sellerPersonId: ana.id }), ADMIN_SCOPE),
+      await createLead(db, orgId, contactLead({ sellerPersonId: ana.id }), ADMIN_SCOPE),
     );
     okLead(
-      await createContactLead(db, orgId, contactLead({ sellerPersonId: bruno.id }), ADMIN_SCOPE),
+      await createLead(db, orgId, contactLead({ sellerPersonId: bruno.id }), ADMIN_SCOPE),
     );
 
     const anaBoard = await listLeads(
@@ -427,7 +428,7 @@ describe('sales operations leads edition: contact leads, vendedor-only pessoas, 
     expect(anaBoard.leads.map((lead) => lead.sellerPersonId)).toEqual([ana.id]);
 
     expect(
-      await createContactLead(
+      await createLead(
         db,
         orgId,
         contactLead({ sellerPersonId: bruno.id }),
@@ -435,7 +436,7 @@ describe('sales operations leads edition: contact leads, vendedor-only pessoas, 
       ),
     ).toEqual({ ok: false, reason: 'seller_scope' });
     okLead(
-      await createContactLead(
+      await createLead(
         db,
         orgId,
         contactLead({ sellerPersonId: ana.id }),
@@ -471,7 +472,7 @@ describe('sales operations leads edition: contact leads, vendedor-only pessoas, 
       WHERE org_id = ${orgId} AND id = ${ana.id}`;
 
     const absent = okLead(
-      await createContactLead(
+      await createLead(
         db,
         orgId,
         contactLead({ contactName: 'Sem vendedor' }),
@@ -481,7 +482,7 @@ describe('sales operations leads edition: contact leads, vendedor-only pessoas, 
     expect(absent).toMatchObject({ sellerPersonId: ana.id, sellerNameSnapshot: 'Ana' });
 
     const explicitNull = okLead(
-      await createContactLead(
+      await createLead(
         db,
         orgId,
         contactLead({ contactName: 'Vendedor nulo', sellerPersonId: null }),
@@ -491,7 +492,7 @@ describe('sales operations leads edition: contact leads, vendedor-only pessoas, 
     expect(explicitNull.sellerPersonId).toBe(ana.id);
 
     expect(
-      await createContactLead(
+      await createLead(
         db,
         orgId,
         contactLead({ sellerPersonId: bruno.id }),
@@ -512,33 +513,37 @@ describe('sales operations leads edition: contact leads, vendedor-only pessoas, 
     ]);
 
     // An admin naming no vendedor still files an UNASSIGNED lead.
-    const unassigned = okLead(await createContactLead(db, orgId, contactLead(), ADMIN_SCOPE));
+    const unassigned = okLead(await createLead(db, orgId, contactLead(), ADMIN_SCOPE));
     expect(unassigned).toMatchObject({ sellerPersonId: null, sellerNameSnapshot: '' });
   });
 
-  it('FXL oracle: a full-edition seller naming no vendedor still answers seller_scope', async () => {
+  it('W2: a full-edition seller naming no vendedor files the lead as their own; naming another is seller_scope', async () => {
     const orgId = newOrg('fxlscope');
     await ensureLeadStagesForOrg(db, orgId);
     const ana = await leadsVendedor(orgId, 'Ana');
+    const bruno = await leadsVendedor(orgId, 'Bruno');
     await adminClient`
       UPDATE sales_ops_people SET hub_account_id = 'hub_ana'
       WHERE org_id = ${orgId} AND id = ${ana.id}`;
 
+    const body = {
+      contactName: 'Contato Um',
+      clientName: 'Empresa Um',
+      estimatedValueBrl: 1000,
+    };
+    const own = await createLead(db, orgId, LeadWriteBaseSchema.parse(body), sellerScope('hub_ana'));
+    expect(okLead(own)).toMatchObject({ sellerPersonId: ana.id, sellerNameSnapshot: 'Ana' });
     expect(
       await createLead(
         db,
         orgId,
-        CreateLeadSchema.parse({
-          contactName: 'Contato Um',
-          clientName: 'Empresa Um',
-          estimatedValueBrl: 1000,
-        }),
+        LeadWriteBaseSchema.parse({ ...body, sellerPersonId: bruno.id }),
         sellerScope('hub_ana'),
       ),
     ).toEqual({ ok: false, reason: 'seller_scope' });
     const [row] = await adminClient<Array<{ n: number }>>`
-      SELECT count(*)::int AS n FROM sales_ops_leads WHERE org_id = ${orgId}`;
-    expect(row!.n).toBe(0);
+      SELECT count(*)::int AS n FROM sales_ops_crm_leads WHERE org_id = ${orgId}`;
+    expect(row!.n).toBe(1);
   });
 
   it('seeds both system funções and makes a leads-edition pessoa exactly a vendedor', async () => {
@@ -718,7 +723,7 @@ describe('sales operations leads edition: contact leads, vendedor-only pessoas, 
       });
       expect(await funcaoSlugsOfPerson(orgId, people[0]!.id)).toEqual(['vendedor']);
 
-      const own = okLead(await createContactLead(db, orgId, contactLead(), scope));
+      const own = okLead(await createLead(db, orgId, contactLead(), scope));
       expect(own).toMatchObject({
         sellerPersonId: people[0]!.id,
         sellerNameSnapshot: 'João Vendedor',
@@ -886,7 +891,7 @@ describe('sales operations leads edition: contact leads, vendedor-only pessoas, 
           boardOf(orgId, stage.id, scope),
           boardOf(orgId, stage.id, scope),
           boardOf(orgId, stage.id, scope),
-          createContactLead(db, orgId, contactLead(), scope),
+          createLead(db, orgId, contactLead(), scope),
         ]);
         expect({ round, oks: results.map((result) => result.ok) }).toEqual({
           round,
@@ -986,7 +991,7 @@ describe('sales operations leads edition: contact leads, vendedor-only pessoas, 
       await createLead(
         db,
         orgId,
-        CreateLeadSchema.parse({
+        LeadWriteBaseSchema.parse({
           contactName: 'Contato Um',
           clientName: 'Empresa Um',
           estimatedValueBrl: 250000,
