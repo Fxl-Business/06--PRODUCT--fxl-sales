@@ -37,6 +37,10 @@
     "./sales-edition": {
       "types": "./dist/sales-edition.d.ts",
       "import": "./dist/sales-edition.js"
+    },
+    "./default-pipeline": {
+      "types": "./dist/default-pipeline.d.ts",
+      "import": "./dist/default-pipeline.js"
     }
   },
   "scripts": {
