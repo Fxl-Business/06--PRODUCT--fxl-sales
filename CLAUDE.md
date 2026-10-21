@@ -133,8 +133,10 @@ Full reference: `nexo/knowledge/reference/sales-ops-routing.md`.
 - An unknown or other-org id renders `Proposta não encontrada` without the id; closing pops history when opened in-app (`SALE_DETAIL_OPENED_IN_APP`) and otherwise replaces the URL with the list.
 - `cadastros/vendedores` and `cadastros/finders` redirect to `/cadastros/pessoas`; `aliasLegacyView` only fires in `cadastros`.
 - Visibility comes only from `profile.roles` via `getVisibleWorkspaces`: `admin` sees `tatico`, `operacional`, `cadastros`; `seller` or `finder` adds `meus-dados`; no roles keeps `/no-role`. `admin` is synthesized from the Hub workspace `owner`/`admin` flag in `getRolesFromHubClaims`.
-- In the leads edition (`profile.edition === 'leads'`, from `entitlements.modules`) every navigation function takes a trailing `edition`: `admin` sees only `operacional` [`leads` Prospecção, `funil` Funil, `follow-ups` Follow-ups] and `cadastros` [`pessoas` labelled Vendedores, `clientes`, `etapas`, `importacao`, `leads-excluidos`], a non-admin `seller` only `meus-dados` [`leads` Prospecção, `funil` Funil, `follow-ups` Meus follow-ups], and `NoRoleGuard` keys on `getVisibleWorkspaces(roles, edition)`.
-  Oracle: `navigation-edition.test.ts`.
+- Navigation is ONE catalogue filtered by the organization's modules (`org-modules.ts`, `hasModule`): every entry in `navigation.ts` carries `requires`, there are no parallel per-edition lists, and every navigation function takes a trailing `modules` (default every module).
+  With `orcamentos` off (the compact profile, today's leads edition) `admin` sees only `operacional` and `cadastros` (`pessoas` first and labelled Vendedores), a non-admin `seller` only `meus-dados`, and the entries that need a disabled module are absent.
+  A deep link is never rewritten while the bootstrap is loading.
+  Oracles: `navigation-edition.test.ts` (exact equivalence with both former editions), `navigation-modules.test.ts`, `org-modules-shell.test.tsx`.
 - OPEN PRODUCT QUESTION: every admin-bearing claim shape also returns `seller` and `finder`, so "team-only without `meus-dados`" is unreachable. Do not resolve it by changing `claims.ts` without a product decision.
 - `meus-dados` reuses existing panels; `MeuPainelView` is read-only. Pessoa and função editing live only under Cadastros.
 - Keep the legacy trees `/admin/*`, `/finder/*`, `/seller/*`, `/no-role` unchanged. `/no-role` is wrapped in `NoRoleGuard` (inside `<Protected>`), keyed on `getVisibleWorkspaces(roles).length > 0`, never `roles.length > 0`.
@@ -366,9 +368,10 @@ Full reference: `nexo/knowledge/reference/kanban-de-leads.md` (section Edição 
 - An operator toggles a flag without a redeploy through `PUT /api/v1/sales-ops/org-modules` (`requireAdmin` plus the `SALES_MODULE_OPERATOR_ACCOUNT_IDS` allow-list, default deny, not capability gated); `GET` is `requireAdmin` only; `GET /bootstrap` carries `orgModules`.
 - `c.get('salesEdition')` no longer exists: `getSalesEdition(c)` is the PROJECTION (`orcamentos` off => `leads`), awaited in the route and passed to services as an explicit argument; services never read the Hono context.
   An `orcamento` stage opens the wizard / answers `sale_required_for_conversion` only while `orcamentos` is on (`stageActsAsOrcamento`); with it off it is a normal stage (`kind: 'normal'`, `behavior: 'none'` in the projections, the stored `type` is untouched).
-- Web: the shell reads `profile.edition`; leaf components read `useSalesEdition()`.
+- Web: the shell takes the organization's modules from `GET /bootstrap` (`orgModules`) and passes them to every navigation function; `profile.edition` is the token-derived HINT used only until the bootstrap settles, for `NoRoleGuard`, and as the fallback of a hand-written test profile.
+  Leaf components read `useSalesEdition()`, which projects the shell's modules through `OrgModulesContext` (`orcamentos` off => `leads`).
   Every `vi.mock('@/auth/react')` factory exports `useSalesEdition` (`auth-mock-edition-export.test.ts`).
-  The sidebar payables card, the sidebar `Nova proposta` and the period chip render only when the edition has the capability (`hasCapability`); never show full-product chrome in the leads edition.
+  The sidebar payables card, the sidebar `Nova proposta` and the period chip render only when the organization's modules grant the capability; never show full-product chrome in the leads edition.
   The lead board's R$ figures are the lead's own estimated value, not full-product chrome, and render in both editions.
 - The leads-edition board shows R$ exactly like the full edition: column header total, `% do total` and bar, the card value beside the `...` menu, the Lista chips, the footer `TOTAL` and a right-aligned `Valor estimado` column before `Ações`.
   Its card shows Nome, then the Cliente on its own full-width row (`leadClientLabel`, fallback `Sem cliente`, `line-clamp-2` with a `title`), then the birthday, and no `telefone · email`; the Lista keeps `telefone · email` under the name.
