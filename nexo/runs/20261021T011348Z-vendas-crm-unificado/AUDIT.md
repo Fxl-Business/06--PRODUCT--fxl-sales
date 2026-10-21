@@ -55,3 +55,22 @@ Owner-level choices taken under autopilot (also in the Report):
 - The empresa picker prefills only the contact: `sales_ops_clients` has no responsible seller; "responsável da empresa" stays pending.
 - The pipeline is named `Funil CRM padrão` (key `crm-padrao`), not "Padrão"; migrated orgs keep their own etapas inside it.
 - Dynamic field values are typed EAV rows (not JSONB); the Cliente system field is backed by the `client_id` column.
+
+## A9 - Agent-dispatch budget exhausted: slice 14 parked
+
+`max_agent_dispatches` is 64 and autopilot never expands a budget.
+Phases 1 to 3 each needed Codex-driven fix rounds (06.1 twice, 07a, 07b, 08, 09, 10.1 twice, 12.1 twice), each costing an executor and a separate Verify.
+After slice 13 the budget is spent, so slice `14-importacao-mapeamento` (parts 14a-14c, planned and plan-checked) is PARKED with reason `budget`: its plan and addendum are ready in `nexo/plans/vendas-crm-unificado/14-importacao-mapeamento.md` and `parts/14*`.
+The dedicated feature-boundary mutation run and the scribe sub-agent are not dispatched either: every slice Verify already ran mutation probes (recorded in each `verify-*.md`), and the orchestrator writes the capture records inline.
+
+## Runtime budget exhausted
+
+Reason: `max_agent_dispatches:64`.
+
+Unfinished work must be parked and the run must finish without extending the budget.
+
+## A10 - Slice 13 parked after a failed Verify with no budget left
+
+Slice `13-dias-sem-comprar` was built (branch `feat/6q75vnog-13-dias-sem-comprar`, commits 38b581d..bd02a18, every suite green: API unit 1603, API integration 555, web 1987) but its separate Sonnet Verify FAILED on one MAJOR test gap: no test proves that a SOFT-DELETED lead in a `ganho` exit stage does not count (removing `isNull(salesOpsCrmLeads.deletedAt)` in `selectLeadPurchaseWins` stays green), plus a minor (a service-level UTC "today" mutant survives).
+The fix round needs one executor and one Verify dispatch; `nexo-policy.py consume` refuses (the 64-dispatch budget is spent). A red slice never enters the merge queue, so slice 13 is PARKED (reason `budget`), unmerged, its branch and worktree kept.
+To resume: add the soft-deleted ganho case and a `now = 01:00Z` case to `apps/api/test/rls/clients-purchase-recency.test.ts`, re-verify, Codex-review phase 4, land.
