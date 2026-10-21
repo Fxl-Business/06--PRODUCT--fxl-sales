@@ -51,3 +51,36 @@ export function isAfterTodayInSaoPaulo(day: string, now: Date = new Date()): boo
   if (!isIsoDay(day)) throw new RangeError('invalid_iso_day');
   return day > todayInSaoPaulo(now);
 }
+
+/** Brazil has no daylight saving time since 2019, so a Sao Paulo midnight is 03:00Z. */
+const SAO_PAULO_OFFSET_HOURS = 3;
+
+/** The civil day after `day` (`YYYY-MM-DD`), by calendar arithmetic and never through the local timezone. */
+export function addDaysToIsoDay(day: string, days: number): string {
+  if (!isIsoDay(day)) throw new RangeError('invalid_iso_day');
+  const [year, month, date] = day.split('-').map(Number) as [number, number, number];
+  const moved = new Date(Date.UTC(year, month - 1, date + days));
+  return moved.toISOString().slice(0, 10);
+}
+
+/**
+ * A civil-day range in America/Sao_Paulo (both ends inclusive, both optional) as the half-open
+ * instant interval `[start, endExclusive)`: `from` 00:00 -03:00 up to the day AFTER `to` 00:00 -03:00.
+ * A lead created at 02:30Z on day D+1 is 23:30 on day D in Sao Paulo and belongs to day D.
+ * Used for every period filter on a timestamp column; a `date` column compares the civil days directly.
+ */
+export function saoPauloDayRangeToInstants(
+  from?: string | null,
+  to?: string | null,
+): { start: Date | null; endExclusive: Date | null } {
+  const midnight = (day: string) => {
+    const [year, month, date] = day.split('-').map(Number) as [number, number, number];
+    return new Date(Date.UTC(year, month - 1, date, SAO_PAULO_OFFSET_HOURS));
+  };
+  if (from != null && !isIsoDay(from)) throw new RangeError('invalid_iso_day');
+  if (to != null && !isIsoDay(to)) throw new RangeError('invalid_iso_day');
+  return {
+    start: from == null ? null : midnight(from),
+    endExclusive: to == null ? null : midnight(addDaysToIsoDay(to, 1)),
+  };
+}

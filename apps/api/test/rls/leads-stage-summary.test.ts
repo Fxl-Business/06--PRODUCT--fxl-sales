@@ -23,6 +23,7 @@ import { deleteLead } from '../../src/domains/sales-ops/leads/lead-trash-service
 import { ensureLeadStagesForOrg } from '../../src/domains/sales-ops/leads/stages-seed.js';
 import { PersonSchema, createPerson } from '../../src/domains/sales-ops/service.js';
 import { deleteCrmForOrgs } from '../../src/db/__tests__/settlement-test-cleanup.js';
+import { walkToConversionDoor } from './lead-path.js';
 
 // Org assertions are made over `adminDb` (where only the service's own org
 // predicate scopes the read); seller assertions are load-bearing over either
@@ -245,6 +246,7 @@ describe('sales operations leads: per-stage summary', () => {
       if (i === 1) brunoId = lead.id;
     }
     const saleId = await insertSale(w.orgId, 'PROP-LSS-1');
+    await walkToConversionDoor(db, w.orgId, unassignedId, ADMIN_SCOPE);
     okLead(
       await moveLead(
         db,

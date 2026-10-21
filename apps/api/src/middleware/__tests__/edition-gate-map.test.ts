@@ -163,6 +163,15 @@ const OPEN: readonly RouteCase[] = [
   r('salesOps', 'GET', '/leads/summary', `${SO}/leads/summary`),
   r('salesOps', 'POST', '/leads/:id/delete', `${SO}/leads/${ID}/delete`),
   r('salesOps', 'POST', '/leads/:id/restore', `${SO}/leads/${ID}/restore`),
+  // Phase 2b: the CRM reads, the lead history acts and the follow-ups. Ungated like /leads.
+  r('salesOps', 'GET', '/pipelines', `${SO}/pipelines`),
+  r('salesOps', 'GET', '/field-definitions', `${SO}/field-definitions`),
+  r('salesOps', 'GET', '/leads/:id/summary', `${SO}/leads/${ID}/summary`),
+  r('salesOps', 'POST', '/leads/:id/advance', `${SO}/leads/${ID}/advance`),
+  r('salesOps', 'POST', '/leads/:id/notes', `${SO}/leads/${ID}/notes`),
+  r('salesOps', 'POST', '/leads/:id/followups', `${SO}/leads/${ID}/followups`),
+  r('salesOps', 'GET', '/followups', `${SO}/followups`),
+  r('salesOps', 'POST', '/followups/:id/done', `${SO}/followups/${ID}/done`),
 ];
 
 let app: Hono;

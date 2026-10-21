@@ -24,7 +24,11 @@ export type LeadInputErrorCode =
   | 'contact_required'
   | 'field_not_found'
   | 'field_invalid'
-  | 'field_reference_not_found';
+  | 'field_reference_not_found'
+  // Phase 2b (advance, follow-ups)
+  | 'followup_required'
+  | 'reason_required'
+  | 'owner_not_found';
 
 export class LeadInputError extends Error {
   constructor(

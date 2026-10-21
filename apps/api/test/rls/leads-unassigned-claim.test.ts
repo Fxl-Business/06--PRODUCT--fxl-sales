@@ -25,6 +25,7 @@ import { createLeadStage } from '../../src/domains/sales-ops/leads/stage-service
 import { ensureLeadStagesForOrg } from '../../src/domains/sales-ops/leads/stages-seed.js';
 import { PersonSchema, createPerson } from '../../src/domains/sales-ops/service.js';
 import { deleteCrmForOrgs } from '../../src/db/__tests__/settlement-test-cleanup.js';
+import { walkToConversionDoor } from './lead-path.js';
 
 const { appUrl: APP_DB_URL, adminUrl: ADMIN_DB_URL } = testDatabaseUrls();
 const ADMIN_CONNECTION_OPTIONS = { connection: { 'app.fxl_admin': 'true' } } as const;
@@ -664,6 +665,7 @@ describe('sales operations leads: the unassigned pool and claim-on-write', () =>
       VALUES (${w.orgId}, 1, 'PROP-LUC-1', 'Empresa A', 'Vendedor A', 'pix', 'cash', now(),
               100000, 10, 3, 6, 0, 0, 0)
       RETURNING id`;
+    await walkToConversionDoor(db, w.orgId, pool.id, ADMIN_SCOPE);
     expect(
       okLead(
         await moveLead(

@@ -4,6 +4,9 @@ import { getDb } from '../../../db/client.js';
 import { requireAdmin } from '../../../middleware/require-admin.js';
 import { cadastroActor } from '../cadastro-actor.js';
 import {
+  AdvanceLeadSchema,
+  LeadFollowupSchema,
+  LeadNoteSchema,
   LeadPatchSchema,
   LeadStageSummaryQuerySchema,
   LeadWriteSchema,
@@ -22,6 +25,8 @@ import {
   summarizeLeadStages,
   updateLead,
 } from './lead-service.js';
+import { LeadFilterError, parseDynamicFilters } from './lead-filters.js';
+import { addLeadFollowup, addLeadNote, advanceLead, getLeadSummary } from './lead-history-service.js';
 import { type LeadActor, deleteLead, listDeletedLeads, restoreLead } from './lead-trash-service.js';
 
 /**
@@ -62,12 +67,12 @@ const leadIdSchema = z.string().uuid();
  * e-mail, then null, never the account id), taken here because the act is the
  * only moment it is knowable.
  */
-function leadActor(c: Context): LeadActor {
+export function leadActor(c: Context): LeadActor {
   const actor = cadastroActor(c);
   return { userId: actor.userId, name: actor.displayName };
 }
 
-function leadScope(c: Context): LeadScope {
+export function leadScope(c: Context): LeadScope {
   const claims = c.get('hubAuth')?.claims;
   const email = claims?.email;
   const name = claims?.name;
@@ -84,7 +89,12 @@ function leadScope(c: Context): LeadScope {
   };
 }
 
-function validationResponse(c: Context, error: z.ZodError) {
+/** A dynamic filter on an unknown or non-filterable field, or with a value its kind cannot take. */
+function invalidFilterResponse(c: Context, error: LeadFilterError) {
+  return c.json({ error: 'validation_error', reason: 'invalid_filter', filter: error.filter }, 400);
+}
+
+export function validationResponse(c: Context, error: z.ZodError) {
   return c.json({ error: 'validation_error', issues: error.flatten() }, 400);
 }
 
@@ -97,11 +107,22 @@ function validationResponse(c: Context, error: z.ZodError) {
  * An out-of-scope lead is `not_found` and never `forbidden`, because a 403 on a
  * specific uuid confirms the row exists.
  */
-function failureResponse(
+export function failureResponse(
   c: Context,
-  reason: 'not_found' | 'seller_scope' | 'seller_person_unmapped' | 'already_converted',
+  reason:
+    | 'not_found'
+    | 'seller_scope'
+    | 'seller_person_unmapped'
+    | 'already_converted'
+    | 'transition_not_allowed'
+    | 'sale_required_for_conversion',
 ) {
   if (reason === 'not_found') return c.json({ error: 'not_found' }, 404);
+  // The pair is absent from the pipeline graph (or the stage is another pipeline's), or the
+  // destination opens a proposta that only the wizard may create.
+  if (reason === 'transition_not_allowed' || reason === 'sale_required_for_conversion') {
+    return c.json({ error: reason }, 409);
+  }
   if (reason === 'already_converted') {
     return c.json({ error: 'conflict', reason: 'lead_already_converted' }, 409);
   }
@@ -114,7 +135,7 @@ function failureResponse(
  * "does this destination stage require a reason?" - so they cannot be zod
  * refines.
  */
-function leadInputErrorResponse(c: Context, error: LeadInputError) {
+export function leadInputErrorResponse(c: Context, error: LeadInputError) {
   return c.json(
     { error: 'validation_error', reason: error.code, itemIndex: error.itemIndex },
     400,
@@ -127,13 +148,28 @@ leadsRouter.get('/', async (c) => {
     limit: c.req.query('limit'),
     cursor: c.req.query('cursor'),
     sellerPersonId: c.req.query('sellerPersonId'),
+    pipelineId: c.req.query('pipelineId'),
+    from: c.req.query('from'),
+    to: c.req.query('to'),
   });
   if (!parsed.success) {
     return c.json({ error: 'validation_error', issues: parsed.error.flatten() }, 400);
   }
-  const result = await listLeads(getDb(), c.get('orgId'), parsed.data, leadScope(c));
-  if (!result.ok) return failureResponse(c, result.reason);
-  return c.json({ leads: result.leads, nextCursor: result.nextCursor, total: result.total });
+  let filters;
+  try {
+    filters = parseDynamicFilters(c.req.query());
+  } catch (error) {
+    if (error instanceof LeadFilterError) return invalidFilterResponse(c, error);
+    throw error;
+  }
+  try {
+    const result = await listLeads(getDb(), c.get('orgId'), { ...parsed.data, ...(filters.length > 0 ? { filters } : {}) }, leadScope(c));
+    if (!result.ok) return failureResponse(c, result.reason);
+    return c.json({ leads: result.leads, nextCursor: result.nextCursor, total: result.total });
+  } catch (error) {
+    if (error instanceof LeadFilterError) return invalidFilterResponse(c, error);
+    throw error;
+  }
 });
 
 leadsRouter.post('/', async (c) => {
@@ -174,11 +210,20 @@ leadsRouter.get('/deleted', requireAdmin, async (c) => {
 leadsRouter.get('/summary', async (c) => {
   const parsed = LeadStageSummaryQuerySchema.safeParse({
     sellerPersonId: c.req.query('sellerPersonId'),
+    pipelineId: c.req.query('pipelineId'),
+    from: c.req.query('from'),
+    to: c.req.query('to'),
   });
   if (!parsed.success) return validationResponse(c, parsed.error);
-  const result = await summarizeLeadStages(getDb(), c.get('orgId'), parsed.data, leadScope(c));
-  if (!result.ok) return failureResponse(c, result.reason);
-  return c.json({ stages: result.stages });
+  try {
+    const filters = parseDynamicFilters(c.req.query());
+    const result = await summarizeLeadStages(getDb(), c.get('orgId'), { ...parsed.data, ...(filters.length > 0 ? { filters } : {}) }, leadScope(c));
+    if (!result.ok) return failureResponse(c, result.reason);
+    return c.json({ stages: result.stages });
+  } catch (error) {
+    if (error instanceof LeadFilterError) return invalidFilterResponse(c, error);
+    throw error;
+  }
 });
 
 leadsRouter.get('/:id', async (c) => {
@@ -216,6 +261,56 @@ leadsRouter.post('/:id/move', async (c) => {
     const result = await moveLead(getDb(), c.get('orgId'), id.data, parsed.data, leadScope(c));
     if (!result.ok) return failureResponse(c, result.reason);
     return c.json({ lead: result.lead });
+  } catch (error) {
+    if (error instanceof LeadInputError) return leadInputErrorResponse(c, error);
+    throw error;
+  }
+});
+
+/** GET /leads/:id/summary: stage, pipeline, the allowed next stages, the timeline and the follow-ups. */
+leadsRouter.get('/:id/summary', async (c) => {
+  const id = leadIdSchema.safeParse(c.req.param('id'));
+  if (!id.success) return c.json({ error: 'not_found' }, 404);
+  const result = await getLeadSummary(getDb(), c.get('orgId'), id.data, leadScope(c));
+  if (!result.ok) return failureResponse(c, result.reason);
+  return c.json(result.summary);
+});
+
+/** POST /leads/:id/advance: the Avançar act. Same envelope as /move. */
+leadsRouter.post('/:id/advance', async (c) => {
+  const id = leadIdSchema.safeParse(c.req.param('id'));
+  if (!id.success) return c.json({ error: 'not_found' }, 404);
+  const parsed = AdvanceLeadSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) return validationResponse(c, parsed.error);
+  try {
+    const result = await advanceLead(getDb(), c.get('orgId'), id.data, parsed.data, leadScope(c));
+    if (!result.ok) return failureResponse(c, result.reason);
+    return c.json({ lead: result.lead });
+  } catch (error) {
+    if (error instanceof LeadInputError) return leadInputErrorResponse(c, error);
+    throw error;
+  }
+});
+
+leadsRouter.post('/:id/notes', async (c) => {
+  const id = leadIdSchema.safeParse(c.req.param('id'));
+  if (!id.success) return c.json({ error: 'not_found' }, 404);
+  const parsed = LeadNoteSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) return validationResponse(c, parsed.error);
+  const result = await addLeadNote(getDb(), c.get('orgId'), id.data, parsed.data, leadScope(c));
+  if (!result.ok) return failureResponse(c, result.reason);
+  return c.json({ note: result.note }, 201);
+});
+
+leadsRouter.post('/:id/followups', async (c) => {
+  const id = leadIdSchema.safeParse(c.req.param('id'));
+  if (!id.success) return c.json({ error: 'not_found' }, 404);
+  const parsed = LeadFollowupSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) return validationResponse(c, parsed.error);
+  try {
+    const result = await addLeadFollowup(getDb(), c.get('orgId'), id.data, parsed.data, leadScope(c));
+    if (!result.ok) return failureResponse(c, result.reason);
+    return c.json({ followup: result.followup }, 201);
   } catch (error) {
     if (error instanceof LeadInputError) return leadInputErrorResponse(c, error);
     throw error;

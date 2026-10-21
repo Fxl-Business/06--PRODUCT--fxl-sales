@@ -356,3 +356,25 @@ Verified in Chromium (Playwright) at 1440x900, 820x1180 and 390x844: the board s
 Oracles: `leads-board-scroll.test.tsx` (fill root only in the Quadro, a scroller per column under a fixed header, the bar before the columns with `aria-controls`, invisible-not-hidden while everything fits, thumb size and sync, thumb drag by any pointer, track press, keys, and through dnd-kit's REAL sensors: a short mouse drag lifts, a press on the kebab never lifts, a 20px swipe never lifts, a hold lifts), `leads-board-dropzones.test.tsx` (`touch-manipulation`, never `touch-none`), `leads-routing.test.tsx` (the flex-column content area on both lead routes and nowhere else, the rail on a narrow screen and across the breakpoint).
 Each was proven non-vacuous by mutation: touch `distance` instead of a hold, a zero delay, `PointerSensor` only, the kebab guard bypassed, the bar moved below the columns, an inert thumb, no first paint, no flex column, a flex column everywhere, no auto-collapse.
 A gesture oracle must use LITERAL coordinates: the first swipe test computed its movement from `DRAG_ACTIVATION.touch.tolerance`, which went `NaN` (no movement at all) under the very mutation it had to catch.
+
+## CRM unificado, API (2026-10-21, vendas-crm-unificado phase 2)
+
+This section records the server rules that replaced the single-table lead model.
+The tables, the migrations 0029 to 0031 and the decisions are in `nexo/knowledge/decisions/2026-10-21-crm-unificado-modelo.md`.
+
+- The cut-over moved every lead and etapa reader and writer to the unified tables.
+  The three old tables stay as a frozen copy, and migration 0031 resyncs what they received after 0030 (rows changed last in the old table win, removals are not mirrored).
+- One write schema serves both editions.
+  The old "full" and "contact" contracts collapsed into `LeadWriteSchema`; the edition no longer picks a schema, it only travels in the scope for the leads-edition seller auto-provision until the org modules replace it.
+- A non-admin seller who names no vendedor files the lead as their own in both editions (the full edition used to answer `403 seller_scope`).
+- The default pipeline has seven etapas (Novo, Qualificação, Em negociação, Proposta, Ganho, Perdido, Pausado) and 22 transitions.
+  A new etapa created through `POST /lead-stages` is an ordinary open etapa and receives the transitions the shared rule gives it; a reorder never regenerates the graph.
+- Moves: cross-stage moves must be an edge of the graph (`409 transition_not_allowed`), a same-column reorder is free and writes no event.
+  Every stage change writes one history event in the same transaction; the actor name is the token name, then the e-mail, then null.
+- Avançar adds the human layer on top of the move: próximo passo plus date (a follow-up) unless the destination is an exit, a reason where the etapa requires it, an optional note linked to the event.
+- Why `409 sale_required_for_conversion` on Avançar: the proposta wizard owns the conversion, so an etapa of type `orcamento` is entered through `POST /leads/:id/move` with the `saleId` the wizard got from `POST /sales`.
+- A plain `POST /leads/:id/move` into an `orcamento` etapa without a `saleId` stays `400` (`LeadInputError` from slice 07a); the `409 sale_required_for_conversion` is the Avançar answer only.
+- Period filters are civil days in `America/Sao_Paulo`.
+  Brazil has no daylight saving time since 2019, so a Sao Paulo midnight is 03:00Z; the helper is fixed-offset and documents that it is not meant for dates before 2019.
+  The proposta list has no server route (the web filters the bootstrap by `created_at` for open propostas and `won_at` for won ones with the same civil-day rule), so there is no proposta period filter on the API.
+- Oracles: `crm-cutover-resync.test.ts`, `crm-cutover-frozen-tables.test.ts`, `crm-lead-write-fields.test.ts`, `crm-pipeline-history.test.ts`, `lead-write-contract.test.ts`, `frozen-lead-tables.test.ts`.
