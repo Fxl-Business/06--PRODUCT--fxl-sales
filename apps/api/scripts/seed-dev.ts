@@ -36,9 +36,6 @@ import type {
   ClientRow,
   DevSeedPlan,
   FuncaoRow,
-  LeadProductRow,
-  LeadRow,
-  LeadStageRow,
   PayableRow,
   PersonFuncaoRow,
   PersonRow,
@@ -181,15 +178,6 @@ function toProductFuncaoCostInsert(row: ProductFuncaoCostRow) {
   return { ...row, createdAt: new Date(row.createdAt), updatedAt: new Date(row.updatedAt) };
 }
 
-function toLeadStageInsert(row: LeadStageRow) {
-  return {
-    ...row,
-    archivedAt: row.archivedAt ? new Date(row.archivedAt) : null,
-    createdAt: new Date(row.createdAt),
-    updatedAt: new Date(row.updatedAt),
-  };
-}
-
 function toSaleInsert(row: SaleRow) {
   return {
     ...row,
@@ -219,19 +207,6 @@ function toPayableInsert(row: PayableRow) {
 
 function toSettlementInsert(row: SettlementRow) {
   return { ...row, recordedAt: new Date(row.recordedAt) };
-}
-
-function toLeadInsert(row: LeadRow) {
-  return {
-    ...row,
-    stageChangedAt: new Date(row.stageChangedAt),
-    createdAt: new Date(row.createdAt),
-    updatedAt: new Date(row.updatedAt),
-  };
-}
-
-function toLeadProductInsert(row: LeadProductRow) {
-  return { ...row, createdAt: new Date(row.createdAt) };
 }
 
 async function main(): Promise<void> {
@@ -315,6 +290,7 @@ async function main(): Promise<void> {
   const { withTenant } = await import('../src/domains/sales-ops/service.js');
   const schema = await import('../src/db/schema.js');
   const { eq, sql } = await import('drizzle-orm');
+  const { buildCrmSeedRows } = await import('./seed/crm-rows.js');
 
   const db = getDb();
 
@@ -426,11 +402,6 @@ async function main(): Promise<void> {
           .values(orgProductFuncaoCosts.map(toProductFuncaoCostInsert));
       }
 
-      const orgLeadStages = plan.rows.salesOpsLeadStages.filter((row) => row.orgId === orgId);
-      if (orgLeadStages.length > 0) {
-        await tx.insert(schema.salesOpsLeadStages).values(orgLeadStages.map(toLeadStageInsert));
-      }
-
       const orgSales = plan.rows.salesOpsSales.filter((row) => row.orgId === orgId);
       if (orgSales.length > 0) {
         await tx.insert(schema.salesOpsSales).values(orgSales.map(toSaleInsert));
@@ -467,16 +438,24 @@ async function main(): Promise<void> {
           .values(orgSettlements.map(toSettlementInsert));
       }
 
-      const orgLeads = plan.rows.salesOpsLeads.filter((row) => row.orgId === orgId);
-      if (orgLeads.length > 0) {
-        await tx.insert(schema.salesOpsLeads).values(orgLeads.map(toLeadInsert));
-      }
-
-      const orgLeadProducts = plan.rows.salesOpsLeadProducts.filter(
-        (row) => row.orgId === orgId,
+      // The plan still speaks the pre-cutover vocabulary (etapas, leads, lead produtos); since the
+      // phase 2 cutover those rows are written into the UNIFIED CRM tables only, through the pure
+      // adapter. The three old tables are never inserted into. They come after the propostas
+      // because a lead references its proposta.
+      const crm = buildCrmSeedRows(
+        orgId,
+        plan.rows.salesOpsLeadStages,
+        plan.rows.salesOpsLeads,
+        plan.rows.salesOpsLeadProducts,
       );
-      if (orgLeadProducts.length > 0) {
-        await tx.insert(schema.salesOpsLeadProducts).values(orgLeadProducts.map(toLeadProductInsert));
+      if (crm) {
+        await tx.insert(schema.salesOpsPipelines).values(crm.pipeline);
+        await tx.insert(schema.salesOpsPipelineStages).values(crm.stages);
+        await tx.insert(schema.salesOpsPipelineTransitions).values(crm.transitions);
+        await tx.insert(schema.salesOpsFieldDefinitions).values(crm.fields);
+        if (crm.leads.length > 0) await tx.insert(schema.salesOpsCrmLeads).values(crm.leads);
+        if (crm.values.length > 0) await tx.insert(schema.salesOpsCrmLeadFieldValues).values(crm.values);
+        if (crm.events.length > 0) await tx.insert(schema.salesOpsCrmLeadEvents).values(crm.events);
       }
     });
   }
