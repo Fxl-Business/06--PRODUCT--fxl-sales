@@ -255,7 +255,7 @@ export function advanceLead(
       .update(salesOpsCrmLeads)
       .set({
         stageId: destination.id,
-        stageChangedAt: new Date(),
+        stageChangedAt: sql`now()`,
         lostReason: destination.exitKind === 'perdido' ? (input.reason ?? null) : null,
         ...(claimed ? { sellerPersonId: claimed.id, sellerNameSnapshot: claimed.displayName } : {}),
         updatedAt: new Date(),

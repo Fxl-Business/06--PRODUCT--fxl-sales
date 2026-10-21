@@ -203,7 +203,7 @@ export function restoreLead(
         // KEY OMISSION, the moveLead rule: stage_changed_at moves only when the
         // etapa changes. The fallback target is a normal etapa, which carries no
         // lost reason, so the reason is cleared with it.
-        ...(stageChanged ? { stageChangedAt: new Date(), lostReason: null } : {}),
+        ...(stageChanged ? { stageChangedAt: sql`now()`, lostReason: null } : {}),
         updatedAt: new Date(),
       })
       .where(restoreConditions);

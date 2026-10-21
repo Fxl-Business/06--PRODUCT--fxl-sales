@@ -1299,7 +1299,9 @@ export async function moveLead(
         // reorder inside one stage produces an UPDATE whose `set` object has no
         // stage_changed_at key at all, so the column is physically untouchable
         // by a reorder - the rule is not a branch someone can later "simplify".
-        ...(stageChanged ? { stageChangedAt: new Date() } : {}),
+        // A stage change is stamped by the DATABASE clock (`now()`), the clock the
+        // create path's column default uses, never by the Node clock.
+        ...(stageChanged ? { stageChangedAt: sql`now()` } : {}),
         lostReason: destination.exitKind === 'perdido' ? (input.reason ?? null) : null,
         ...(opensOrcamento ? { saleId: input.saleId! } : {}),
         ...(claimed ? { sellerPersonId: claimed.id, sellerNameSnapshot: claimed.displayName } : {}),
