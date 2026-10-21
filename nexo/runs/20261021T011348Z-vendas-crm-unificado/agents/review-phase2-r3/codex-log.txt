@@ -1,0 +1,520 @@
+OpenAI Codex v0.161.0
+--------
+workdir: /Users/cauetpinciara/Documents/fxl/projects/06--PRODUCT--fxl-sales/.worktrees/20261021T011348Z-vendas-crm-unificado/run
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: high
+reasoning summaries: none
+session id: 01a15dd8-329f-7780-bb4e-e6fda806234c
+--------
+user
+# Reviewer agent
+
+## Objective
+
+Review the Builder's diff, run the named commands, and return structured findings.
+
+## Inputs
+
+The diff, the acceptance criteria, the test and command output, and the previous round's findings (empty in round 1).
+
+## Output
+
+Findings JSON validated against [`../agents-findings.schema.json`](../agents-findings.schema.json): `{verdict, round, findings[], checks[]}`. `verdict` is `APPROVED` or `CHANGES_REQUESTED`. Each finding `kind` is `objective` (proven by a command) or `judgment` (a design opinion). A response that does not validate counts as a failed round, repeated once, then plano B.
+On codex you answer the schema's strict variant, where an optional key such as `line` or `suggestion` is present and may be null.
+
+## Writing area (D8)
+
+You are given `FXL_SCRATCH`, a folder inside this run's scratchpad.
+Your sandbox is read-only, so you write no file at all, not even inside `$FXL_SCRATCH`, which only holds inputs this run prepared, such as the diff under review.
+Never redirect a command's output to a file: not to `$FXL_SCRATCH`, NEVER to `/tmp` and NEVER to the repository root; a read-only Reviewer reads command output directly.
+Writing anywhere is a slice failure.
+This rule reproduces the 2026-09-26 incident's fix: an agent that wrote `pnpm -r test > /tmp_pnpm_r_test_check.log` and then blocked 53 h waiting for an approval nobody saw.
+
+Sandbox: `read-only`.
+You never edit code.
+Being read-only, you cannot write even in `$FXL_SCRATCH`: read every command's output directly, and use the oracle and lint output the orchestrator already put in your prompt instead of re-running them.
+
+## No approval, ever (D7)
+
+You run non-interactively. You may never open a host approval prompt. An action that would require approval must fail immediately with a named error, never wait. Codex: approval `never` and an explicit sandbox. Claude: an explicit permission mode and an explicit tool list. If a slice genuinely needs an approval-gated action, park the slice - do not start a prompt that leaves the run idle.
+
+## Resumable rounds
+
+Across rounds you resume the SAME session.
+Driven by the skill scripts, the flow runs `nexo-agent.py run reviewer --resume`, which resumes your recorded session on the same CLI: `codex exec resume` on codex, `claude --resume` on claude-code.
+The session id comes from `agents.jsonl` and never crosses CLIs.
+Driven by the Harness, it is the peer-link delegate session.
+maxRounds is 3.
+After 3, H1 applies and the flow arbitrates.
+
+## Cross-check (D6)
+
+You use a different CLI than the Builder. Default per H7 (codex, inherit, high); plano B claude-code, claude-sonnet-5-5.
+
+## This review
+You are the Nexo REVIEWER (code review of one wave) for run 20261021T011348Z-vendas-crm-unificado of the FXL Vendas repo, round 3.
+Repository (read-only, current directory): the run worktree, HEAD is the integrated wave. Review the diff `git diff c15a0ca...HEAD -- . ':(exclude)nexo/runs'` (also saved at /private/tmp/claude-501/-Users-cauetpinciara-Documents-fxl-projects-06--PRODUCT--fxl-sales/7547107c-ada5-4f38-b18a-0e0045525fad/scratchpad/review/phase2-r3/diff.patch,    30205 lines).
+Binding owner request: /Users/cauetpinciara/Documents/fxl/projects/06--PRODUCT--fxl-sales/.nexo/tmp/vendas-crm-prompt-v1.md. Repo rules: CLAUDE.md. Slice plans: nexo/plans/vendas-crm-unificado/.
+Look for: correctness bugs, security (tenant isolation by org_id, RLS, trusting ids from bodies, secrets), destructive SQL or data loss, renamed technical ids (fxl-sales, @fxl-sales/*, SALES_*, sales_ops_*, fxl-sales.* events and storage keys, domains), tests that are vacuous or weakened, violations of CLAUDE.md rules, concurrency issues, and acceptance criteria not met.
+A finding is blocker or major only when it would ship a real defect or break a stated rule; style preferences are minor or nit. Use verdict CHANGES_REQUESTED only when at least one blocker or major finding exists.
+Do not re-run the full test suites; the orchestrator already ran them (results below). You may run quick read-only commands (grep, git show, cat, small node -e checks) and read output directly; never redirect output to a file.
+
+## Acceptance and gate results
+Phase 2 (waves 6-10) = slices 07a-api-crm-cutover (parts 07a1-07a3), 07b-api-pipeline-historico-followups, 08-web-lead-form-unico (08a-08e), 09-web-lead-resumo (09a-09e), 10-web-kanban-funil-periodo (10a-10b). Plans with binding addenda in nexo/plans/vendas-crm-unificado/ (parts/ for parts), contracts in contracts/SEAM-CONTRACT.md and contracts/SEAM-CONTRACT-PHASE2.md. Base = local master after phase 1 (c15a0ca).
+Request ACs (section 2 items 3,4,5,7,8 and section 4 Fase 2): one lead create/edit component (inline empresa creation by typing, prefill contacts and responsavel when choosing the empresa, dynamic fields by type), lead summary page (current stage, history with notes, Avancar listing only valid transitions, next step + date as follow-up, follow-ups list mine/team with period filter), stage history written by the server; Kanban is a view of the selected pipeline; Proposta x Vendido by stage type; period filter on every list and the Kanban (America/Sao_Paulo); each Propostas submenu item its own route. AC: invalid transition 4xx; advancing writes a history event server-side; follow-up requires a date; Cliente not removable; period filters correct in Sao Paulo; clicking the card opens the summary, not the form. The API cutover moves every lead/etapa read and write to the new sales_ops_crm_* tables (0031 resync of rows written to the old tables after 0030); old tables stay byte-intact.
+Separate Sonnet Verify (Gate 2), all PASS after fix rounds: 07a integration 509/509 (attempt 1 failed on an audit_log leak, fixed); 07b oracle 18/18, integration 527/527 (attempt 1 failed: lock-order case did not bite, fixed, inversion now red 3/3); 08 web 1812/1812 (attempt 1 failed on lost coverage: future-birthday rule, picker Escape; fixed); 09 web 1880/1880 (attempt 1 failed: Avancar picker Escape untested, stale-undo unasserted, docs stale; fixed); 10 web 1923/1923, build and bundle-clean ok.
+Known, documented gaps (not regressions): clientes have no responsible seller, so the empresa prefill fills only the contact (pending owner decision); delete from the lead summary shows no undo notice (restorable in Leads excluidos); Comissoes/Clientes/Leads excluidos lists have no period filter yet; the drag-drop 409 notice is not unit-tested (dnd-kit in happy-dom).
+
+## Previous round findings and builder answers
+Round 2: CHANGES_REQUESTED, R2-01 (major): undo silently kept the first contact added to a contactless legacy lead.
+Builder answer (10.1 round 2, commit a835149, merged; Sonnet Verify PASS, removing the fix turns the new test red): R2-01 corrigido: the summary publishes no undo when an edit gives a contactless lead its first contact (the API cannot clear the only contact); an edit that stays contactless keeps its undo without contact keys; kanban-de-leads.md documents it.
+Re-evaluate the whole phase 2 diff (base c15a0ca).
+
+2026-10-21T10:02:00.047626Z ERROR rmcp::transport::worker: worker quit with fatal: Transport channel closed, when AuthRequired(AuthRequiredError { www_authenticate_header: "Bearer error=\"invalid_token\", error_description=\"Token is not authorized\", resource_metadata=\"https://api.githubcopilot.com/.well-known/oauth-protected-resource/mcp/\"" })
+hook: SessionStart
+hook: SessionStart Completed
+hook: UserPromptSubmit
+hook: UserPromptSubmit Completed
+codex
+Vou conferir a correção de R2-01, o teste de regressão e se houve outras mudanças desde a rodada anterior. Usarei os resultados de Verify fornecidos, sem reexecutar as suítes.
+
+hook: PreToolUse
+hook: PreToolUse
+hook: PreToolUse
+hook: PreToolUse
+hook: PreToolUse Completed
+hook: PreToolUse Completed
+hook: PreToolUse Completed
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc 'git log -6 --oneline' in /Users/cauetpinciara/Documents/fxl/projects/06--PRODUCT--fxl-sales/.worktrees/20261021T011348Z-vendas-crm-unificado/run
+exec
+/bin/zsh -lc "git diff 5eb5b82..HEAD -- . ':(exclude)nexo/runs'" in /Users/cauetpinciara/Documents/fxl/projects/06--PRODUCT--fxl-sales/.worktrees/20261021T011348Z-vendas-crm-unificado/run
+exec
+/bin/zsh -lc "git diff 5eb5b82..HEAD --check -- . ':(exclude)nexo/runs'" in /Users/cauetpinciara/Documents/fxl/projects/06--PRODUCT--fxl-sales/.worktrees/20261021T011348Z-vendas-crm-unificado/run
+ succeeded in 0ms:
+8d92828 Merge branch 'feat/6q75vnog-10.1-fase2-review-fixes' into nexo/20261021T011348Z-vendas-crm-unificado
+a101b85 docs(nexo): run records
+a835149 fix(web): no undo when an edit adds a contactless lead's first contact
+13adbe7 docs(nexo): run records
+5eb5b82 docs: record the phase 2 review fix rules
+aab0df2 Merge branch 'feat/6q75vnog-10.1-fase2-review-fixes' into nexo/20261021T011348Z-vendas-crm-unificado
+
+ succeeded in 0ms:
+diff --git a/apps/web/src/sales-ops/leads/LeadSummaryContainer.tsx b/apps/web/src/sales-ops/leads/LeadSummaryContainer.tsx
+index b2a7db3..8bf5ce7 100644
+--- a/apps/web/src/sales-ops/leads/LeadSummaryContainer.tsx
++++ b/apps/web/src/sales-ops/leads/LeadSummaryContainer.tsx
+@@ -142,6 +142,11 @@ export function LeadSummaryContainer({
+     const added = (result.lead.fields ?? [])
+       .filter((f) => f.key !== CLIENTE_FIELD_KEY && !previousIds.has(f.fieldId))
+       .map((f) => f.fieldId);
++    // The inverse omits the contact keys, so it cannot take a contact away again: an edit that
++    // gives a contactless lead its first contact is not undoable (the API keeps one contact).
++    const addedFirstContact = !previous.contactPhone && !previous.contactEmail
++      && (Boolean(result.lead.contactPhone) || Boolean(result.lead.contactEmail));
++    if (addedFirstContact) return;
+     undo.publish('Lead editado', async () => {
+       await requireUnchangedLead(result.lead);
+       return saveLead.mutateAsync(leadToWriteSeed(previous, added));
+diff --git a/apps/web/src/sales-ops/leads/__tests__/lead-summary-container.test.tsx b/apps/web/src/sales-ops/leads/__tests__/lead-summary-container.test.tsx
+index 9c69ad9..f0d5ab4 100644
+--- a/apps/web/src/sales-ops/leads/__tests__/lead-summary-container.test.tsx
++++ b/apps/web/src/sales-ops/leads/__tests__/lead-summary-container.test.tsx
+@@ -252,6 +252,23 @@ describe('LeadSummaryContainer', () => {
+     expect(inverse).not.toHaveProperty('contactEmail');
+   });
+ 
++  it('an edit that gives a contactless lead its first contact offers no undo', async () => {
++    mocks.summary = summaryOf(lead({ contactPhone: null, contactEmail: null }));
++    await renderAt([`/operacional/leads/${LEAD_ID}`]);
++    await click('[data-summary-edit]');
++    mocks.mutateAsync.mockImplementation(async () => {
++      const updated = lead({ contactName: 'Ana', contactPhone: '11988887777', contactEmail: null });
++      mocks.summary = summaryOf(updated);
++      return { lead: updated };
++    });
++    setInput('lead-phone', '11988887777');
++    await click('[data-lead-save]');
++
++    expect(mocks.mutateAsync).toHaveBeenCalledTimes(1);
++    expect(mocks.mutateAsync.mock.calls[0]?.[0]).toMatchObject({ id: LEAD_ID, contactPhone: '11988887777' });
++    expect(document.querySelector('[data-undo-notice]')).toBeNull();
++  });
++
+   it('refuses the undo when the lead changed since the edit, with no second write', async () => {
+     await renderAt([`/operacional/leads/${LEAD_ID}`]);
+     await click('[data-summary-edit]');
+diff --git a/nexo/knowledge/reference/kanban-de-leads.md b/nexo/knowledge/reference/kanban-de-leads.md
+index b76124a..dde96f0 100644
+--- a/nexo/knowledge/reference/kanban-de-leads.md
++++ b/nexo/knowledge/reference/kanban-de-leads.md
+@@ -428,3 +428,4 @@ The free-text company path of the old dialogs is intentionally gone, because the
+ - `POST /followups/:id/done` is allowed to whoever can access the lead under the seller scope, to an admin, and to the follow-up's own owner pessoa; anyone else gets 404.
+ - The board publishes `Desfazer` for a stage move only when the graph allows the reverse edge (a move to `Perdido` has none).
+ - An edit undo of a lead with no contact omits `contactPhone`/`contactEmail`, like the edit itself.
++- An edit that gives a contactless lead its first contact offers no undo, because the inverse cannot clear the only contact.
+diff --git a/nexo/plans/vendas-crm-unificado/10.1-fase2-review-fixes.md b/nexo/plans/vendas-crm-unificado/10.1-fase2-review-fixes.md
+index 075e955..313d01c 100644
+--- a/nexo/plans/vendas-crm-unificado/10.1-fase2-review-fixes.md
++++ b/nexo/plans/vendas-crm-unificado/10.1-fase2-review-fixes.md
+@@ -27,3 +27,12 @@ Affected tests search: the files above are the only owners; the new tests go in
+ - `pnpm --filter @fxl-sales/api test:integration` (once at the end, serial)
+ - `pnpm --filter @fxl-sales/web exec vitest run src/sales-ops/leads`
+ - `pnpm --filter @fxl-sales/api lint && pnpm --filter @fxl-sales/api type-check && pnpm --filter @fxl-sales/web lint && pnpm --filter @fxl-sales/web type-check`
++
++## Round 2 (Codex review round 2, R2-01)
++
++Evidence: `nexo/runs/20261021T011348Z-vendas-crm-unificado/agents/review-phase2-r2/findings.json`. Editing a contactless legacy lead to ADD its first contact and then clicking Desfazer keeps the added contact, silently, because the undo omits the contact keys and the API cannot clear the only contact (`contact_required`).
++Fix (in `LeadSummaryContainer` / the summary edit-undo path, wherever the undo notice is published for an edit):
++1. Test first (in `apps/web/src/sales-ops/leads/__tests__/lead-summary-container.test.tsx`): edit a lead whose `contactPhone` and `contactEmail` are both null, add a phone, save: NO `Desfazer` notice is offered (the save still succeeds). Keep the existing test where an edit that stays contactless still offers an undo that omits the contact keys.
++2. Code: publish the edit undo only when the inverse is complete: if the previous lead had no contact and the saved lead has one, do not publish the undo notice.
++3. Document it in `nexo/knowledge/reference/kanban-de-leads.md` (section "Phase 2 review fixes"): an edit that gives a contactless lead its first contact offers no undo.
++Commit `fix(web): no undo when an edit adds a contactless lead's first contact`.
+
+ succeeded in 0ms:
+hook: PostToolUse
+hook: PostToolUse
+hook: PostToolUse
+exec
+/bin/zsh -lc "git diff c15a0ca...HEAD --numstat -- . ':(exclude)nexo/runs'" in /Users/cauetpinciara/Documents/fxl/projects/06--PRODUCT--fxl-sales/.worktrees/20261021T011348Z-vendas-crm-unificado/run
+ succeeded in 0ms:
+49	20	CLAUDE.md
+226	0	apps/api/drizzle/0031_crm_cutover_resync.sql
+7773	0	apps/api/drizzle/meta/0031_snapshot.json
+7	0	apps/api/drizzle/meta/_journal.json
+59	0	apps/api/scripts/__tests__/crm-seed-rows.test.ts
+18	39	apps/api/scripts/seed-dev.ts
+0	438	apps/api/scripts/seed-dev.ts.bak2
+217	0	apps/api/scripts/seed/crm-rows.ts
+3	3	apps/api/src/db/__tests__/settlement-test-cleanup.ts
+5	1	apps/api/src/domains/crm/__tests__/crm-seed-callers.test.ts
+43	0	apps/api/src/domains/crm/__tests__/frozen-lead-tables.test.ts
+110	0	apps/api/src/domains/crm/crm-read-service.ts
+453	0	apps/api/src/domains/crm/lead-fields.ts
+42	0	apps/api/src/domains/crm/lead-input-error.ts
+45	0	apps/api/src/domains/crm/pipeline-read.ts
+27	0	apps/api/src/domains/crm/pipeline-write.ts
+69	0	apps/api/src/domains/crm/stage-view.ts
+17	6	apps/api/src/domains/import/__tests__/catalog.integration.test.ts
+36	22	apps/api/src/domains/import/__tests__/executor.integration.test.ts
+22	24	apps/api/src/domains/import/__tests__/import-routes.integration.test.ts
+4	4	apps/api/src/domains/import/__tests__/plan-leads.test.ts
+4	4	apps/api/src/domains/import/__tests__/workbook-schema.test.ts
+14	16	apps/api/src/domains/import/catalog.ts
+4	3	apps/api/src/domains/import/executor.ts
+3	3	apps/api/src/domains/import/plan/leads.ts
+2	2	apps/api/src/domains/import/types.ts
+16	16	apps/api/src/domains/sales-ops/__tests__/lead-stages-routes.test.ts
+51	0	apps/api/src/domains/sales-ops/crm-routes.ts
+0	165	apps/api/src/domains/sales-ops/leads/__tests__/contact-lead-contract.test.ts
+22	20	apps/api/src/domains/sales-ops/leads/__tests__/lead-contract.test.ts
+76	93	apps/api/src/domains/sales-ops/leads/__tests__/lead-routes-edition.test.ts
+7	1	apps/api/src/domains/sales-ops/leads/__tests__/lead-routes.test.ts
+109	0	apps/api/src/domains/sales-ops/leads/__tests__/lead-write-contract.test.ts
+136	0	apps/api/src/domains/sales-ops/leads/lead-filters.ts
+487	0	apps/api/src/domains/sales-ops/leads/lead-history-service.ts
+61	0	apps/api/src/domains/sales-ops/leads/lead-history.ts
+113	51	apps/api/src/domains/sales-ops/leads/lead-routes.ts
+188	113	apps/api/src/domains/sales-ops/leads/lead-schemas.ts
+311	344	apps/api/src/domains/sales-ops/leads/lead-service.ts
+48	35	apps/api/src/domains/sales-ops/leads/lead-trash-service.ts
+4	0	apps/api/src/domains/sales-ops/leads/schemas.ts
+14	7	apps/api/src/domains/sales-ops/leads/stage-routes.ts
+180	58	apps/api/src/domains/sales-ops/leads/stage-service.ts
+20	55	apps/api/src/domains/sales-ops/leads/stages-seed.ts
+4	0	apps/api/src/domains/sales-ops/routes.ts
+9	0	apps/api/src/middleware/__tests__/edition-gate-map.test.ts
+124	0	apps/api/test/rls/crm-cutover-frozen-tables.test.ts
+266	0	apps/api/test/rls/crm-cutover-resync.test.ts
+253	0	apps/api/test/rls/crm-lead-write-fields.test.ts
+570	0	apps/api/test/rls/crm-pipeline-history.test.ts
+29	0	apps/api/test/rls/lead-path.ts
+40	28	apps/api/test/rls/lead-stages-rls.test.ts
+25	19	apps/api/test/rls/lead-stages-seed-on-read.test.ts
+57	52	apps/api/test/rls/leads-edition.test.ts
+21	22	apps/api/test/rls/leads-lixeira.test.ts
+18	16	apps/api/test/rls/leads-move-concurrency.test.ts
+9	7	apps/api/test/rls/leads-no-financial-impact.test.ts
+88	56	apps/api/test/rls/leads-rls.test.ts
+31	27	apps/api/test/rls/leads-seller-scope.test.ts
+10	9	apps/api/test/rls/leads-stage-summary.test.ts
+32	35	apps/api/test/rls/leads-unassigned-claim.test.ts
+9	1	apps/web/src/lib/query-keys.ts
+67	0	apps/web/src/sales-ops/PeriodFilter.tsx
+96	22	apps/web/src/sales-ops/SalesOpsApp.tsx
+78	0	apps/web/src/sales-ops/__tests__/lead-routes.test.ts
+23	13	apps/web/src/sales-ops/__tests__/leads-stage-navigation.test.tsx
+10	10	apps/web/src/sales-ops/__tests__/navigation-edition.test.ts
+59	0	apps/web/src/sales-ops/__tests__/navigation.test.ts
+102	0	apps/web/src/sales-ops/__tests__/period-filter.test.tsx
+98	0	apps/web/src/sales-ops/__tests__/period.test.ts
+369	0	apps/web/src/sales-ops/__tests__/propostas-lists.test.tsx
+92	0	apps/web/src/sales-ops/__tests__/sales-views.test.ts
+219	0	apps/web/src/sales-ops/leads/AdvanceDialog.tsx
+0	361	apps/web/src/sales-ops/leads/ContactLeadDialog.tsx
+58	0	apps/web/src/sales-ops/leads/FollowupsContainer.tsx
+143	0	apps/web/src/sales-ops/leads/FollowupsView.tsx
+3	3	apps/web/src/sales-ops/leads/LeadCard.tsx
+1	1	apps/web/src/sales-ops/leads/LeadDeleteDialog.tsx
+0	405	apps/web/src/sales-ops/leads/LeadDialog.tsx
+336	0	apps/web/src/sales-ops/leads/LeadForm.tsx
+282	0	apps/web/src/sales-ops/leads/LeadFormFields.tsx
+179	0	apps/web/src/sales-ops/leads/LeadSummary.tsx
+248	0	apps/web/src/sales-ops/leads/LeadSummaryContainer.tsx
+75	13	apps/web/src/sales-ops/leads/LeadsBoard.tsx
+91	171	apps/web/src/sales-ops/leads/LeadsBoardContainer.tsx
+27	0	apps/web/src/sales-ops/leads/LeadsFunnelView.tsx
+120	0	apps/web/src/sales-ops/leads/SummaryComposers.tsx
+16	0	apps/web/src/sales-ops/leads/UndoLayer.tsx
+130	0	apps/web/src/sales-ops/leads/__tests__/advance-dialog-inline-layer.test.tsx
+153	0	apps/web/src/sales-ops/leads/__tests__/advance-dialog.test.tsx
+96	0	apps/web/src/sales-ops/leads/__tests__/advance.test.ts
+14	0	apps/web/src/sales-ops/leads/__tests__/board-move.test.ts
+26	0	apps/web/src/sales-ops/leads/__tests__/board-ui.test.ts
+11	2	apps/web/src/sales-ops/leads/__tests__/board-write-surface.test.ts
+0	600	apps/web/src/sales-ops/leads/__tests__/contact-lead-dialog.test.tsx
+7	229	apps/web/src/sales-ops/leads/__tests__/contact-lead.test.ts
+108	0	apps/web/src/sales-ops/leads/__tests__/crm-api-contract.test.ts
+91	0	apps/web/src/sales-ops/leads/__tests__/crm-pipeline.test.ts
+108	0	apps/web/src/sales-ops/leads/__tests__/followups-container.test.tsx
+98	0	apps/web/src/sales-ops/leads/__tests__/followups-view.test.tsx
+26	0	apps/web/src/sales-ops/leads/__tests__/followups.test.ts
+120	0	apps/web/src/sales-ops/leads/__tests__/kanban-pipeline.test.tsx
+5	2	apps/web/src/sales-ops/leads/__tests__/lead-board-totals.test.tsx
+2	0	apps/web/src/sales-ops/leads/__tests__/lead-conversion.test.tsx
+26	106	apps/web/src/sales-ops/leads/__tests__/lead-delete.test.tsx
+0	358	apps/web/src/sales-ops/leads/__tests__/lead-dialog.test.tsx
+347	0	apps/web/src/sales-ops/leads/__tests__/lead-form.test.ts
+595	0	apps/web/src/sales-ops/leads/__tests__/lead-form.test.tsx
+69	0	apps/web/src/sales-ops/leads/__tests__/lead-funnel.test.tsx
+446	0	apps/web/src/sales-ops/leads/__tests__/lead-summary-container.test.tsx
+129	0	apps/web/src/sales-ops/leads/__tests__/lead-summary.test.tsx
+1	1	apps/web/src/sales-ops/leads/__tests__/lead-unassigned-marker.test.tsx
+60	47	apps/web/src/sales-ops/leads/__tests__/lead-undo.test.tsx
+40	9	apps/web/src/sales-ops/leads/__tests__/leads-api-contract.test.ts
+3	3	apps/web/src/sales-ops/leads/__tests__/leads-board-dropzones.test.tsx
+11	11	apps/web/src/sales-ops/leads/__tests__/leads-board-keyboard.test.tsx
+9	9	apps/web/src/sales-ops/leads/__tests__/leads-contact-board.test.tsx
+78	17	apps/web/src/sales-ops/leads/__tests__/leads-contact-container.test.tsx
+20	5	apps/web/src/sales-ops/leads/__tests__/leads-full-edition.test.tsx
+7	7	apps/web/src/sales-ops/leads/__tests__/leads-list-view.test.tsx
+195	0	apps/web/src/sales-ops/leads/__tests__/leads-period.test.tsx
+197	0	apps/web/src/sales-ops/leads/__tests__/leads-pipeline-container.test.tsx
+5	4	apps/web/src/sales-ops/leads/__tests__/move-dialog-inline-layer.test.tsx
+31	0	apps/web/src/sales-ops/leads/__tests__/pipeline-fixture.ts
+80	0	apps/web/src/sales-ops/leads/__tests__/summary-format.test.ts
+107	0	apps/web/src/sales-ops/leads/__tests__/use-undo-notice.test.tsx
+104	0	apps/web/src/sales-ops/leads/advance.ts
+24	49	apps/web/src/sales-ops/leads/api.ts
+4	1	apps/web/src/sales-ops/leads/board-labels.ts
+10	1	apps/web/src/sales-ops/leads/board-move.ts
+24	9	apps/web/src/sales-ops/leads/board-ui.ts
+25	2	apps/web/src/sales-ops/leads/calculations.ts
+4	5	apps/web/src/sales-ops/leads/client-picker-copy.ts
+3	142	apps/web/src/sales-ops/leads/contact-lead.ts
+62	0	apps/web/src/sales-ops/leads/crm-api.ts
+120	0	apps/web/src/sales-ops/leads/crm-hooks.ts
+68	0	apps/web/src/sales-ops/leads/crm-pipeline.ts
+91	0	apps/web/src/sales-ops/leads/crm-types.ts
+54	0	apps/web/src/sales-ops/leads/followups.ts
+10	5	apps/web/src/sales-ops/leads/hooks.ts
+275	0	apps/web/src/sales-ops/leads/lead-form.ts
+11	0	apps/web/src/sales-ops/leads/lead-summary-nav.ts
+111	0	apps/web/src/sales-ops/leads/summary-format.ts
+15	1	apps/web/src/sales-ops/leads/types.ts
+7	0	apps/web/src/sales-ops/leads/undo-conflict.ts
+69	0	apps/web/src/sales-ops/leads/use-undo-notice.ts
+9	0	apps/web/src/sales-ops/mutation-error-copy.ts
+50	12	apps/web/src/sales-ops/navigation.ts
+118	0	apps/web/src/sales-ops/period.ts
+60	0	apps/web/src/sales-ops/sales-views.ts
+75	2	nexo/knowledge/reference/kanban-de-leads.md
+6	0	nexo/knowledge/reference/propostas.md
+23	2	nexo/knowledge/reference/sales-ops-routing.md
+1	1	nexo/plans/vendas-crm-unificado/09-web-lead-resumo.md
+1	1	nexo/plans/vendas-crm-unificado/10-web-kanban-funil-periodo.md
+38	0	nexo/plans/vendas-crm-unificado/10.1-fase2-review-fixes.md
+1	0	nexo/plans/vendas-crm-unificado/parts/09e-web-followups.md
+31	0	packages/shared-utils/src/__tests__/sao-paulo-range.test.ts
+33	0	packages/shared-utils/src/sao-paulo-day.ts
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PostToolUse Completed
+hook: PostToolUse Completed
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+hook: PostToolUse
+hook: PostToolUse Completed
+2026-10-21T10:02:12.142196Z ERROR rmcp::transport::worker: worker quit with fatal: Transport channel closed, when AuthRequired(AuthRequiredError { www_authenticate_header: "Bearer error=\"invalid_token\", error_description=\"Token is not authorized\", resource_metadata=\"https://api.githubcopilot.com/.well-known/oauth-protected-resource/mcp/\"" })
+hook: PreToolUse
+hook: PreToolUse Completed
+hook: PostToolUse
+hook: PostToolUse Completed
+2026-10-21T10:02:17.118134Z ERROR rmcp::transport::worker: worker quit with fatal: Transport channel closed, when AuthRequired(AuthRequiredError { www_authenticate_header: "Bearer error=\"invalid_token\", error_description=\"Token is not authorized\", resource_metadata=\"https://api.githubcopilot.com/.well-known/oauth-protected-resource/mcp/\"" })
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "node -e 'const fs=require(\"node:fs\"),ts=require(\"typescript\"),vm=require(\"node:vm\"),assert=require(\"node:assert/strict\");
+const source=fs.readFileSync(\"apps/web/src/sales-ops/leads/LeadSummaryContainer.tsx\",\"utf8\");
+const start=source.indexOf(\"  async function saveWithUndo\");
+const body=source.slice(start,source.indexOf(\"  /** Resolves\",start));
+const js=ts.transpileModule(body,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
+(async()=>{for(const [label,before,after,expected] of [
+[\"first phone\",[null,null],[\"11988887777\",null],0],
+[\"first email\",[null,null],[null,\"ana@example.com\"],0],
+[\"stays contactless\",[null,null],[null,null],1],
+[\"changes existing contact\",[\"11988887777\",null],[\"11999999999\",null],1]
+]){let publishes=0,saves=0;const ctx={lead:{contactPhone:before[0],contactEmail:before[1],fields:[]},saveLead:{mutateAsync:async()=>{saves++;return {lead:{contactPhone:after[0],contactEmail:after[1],fields:[]}}}},CLIENTE_FIELD_KEY:\"cliente\",undo:{publish:()=>publishes++}};
+vm.runInNewContext(js,ctx);await ctx.saveWithUndo({});assert.equal(saves,1);assert.equal(publishes,expected);console.log(label+\": save=1 undo=\"+publishes)}})().catch(e=>{console.error(e);process.exitCode=1});'" in /Users/cauetpinciara/Documents/fxl/projects/06--PRODUCT--fxl-sales/.worktrees/20261021T011348Z-vendas-crm-unificado/run
+ succeeded in 0ms:
+first phone: save=1 undo=0
+first email: save=1 undo=0
+stays contactless: save=1 undo=1
+changes existing contact: save=1 undo=1
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc 'git diff 5eb5b82..HEAD --name-only -- apps/api packages CLAUDE.md' in /Users/cauetpinciara/Documents/fxl/projects/06--PRODUCT--fxl-sales/.worktrees/20261021T011348Z-vendas-crm-unificado/run
+ succeeded in 0ms:
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "sed -n '228,291p' apps/web/src/sales-ops/leads/__tests__/lead-summary-container.test.tsx" in /Users/cauetpinciara/Documents/fxl/projects/06--PRODUCT--fxl-sales/.worktrees/20261021T011348Z-vendas-crm-unificado/run
+ succeeded in 0ms:
+    expect(inverse.fields.some((entry) => entry.fieldId === 'f-cli')).toBe(false);
+  });
+
+  it('the undo of an edit to a contactless legacy lead sends no contact keys', async () => {
+    mocks.summary = summaryOf(lead({ contactPhone: null, contactEmail: null }));
+    await renderAt([`/operacional/leads/${LEAD_ID}`]);
+    await click('[data-summary-edit]');
+    mocks.mutateAsync.mockImplementation(async () => {
+      const updated = lead({ contactName: 'Ana Nova', contactPhone: null, contactEmail: null });
+      mocks.summary = summaryOf(updated);
+      return { lead: updated };
+    });
+    setInput('lead-contact-name', 'Ana Nova');
+    await click('[data-lead-save]');
+    expect(mocks.mutateAsync.mock.calls[0]?.[0]).not.toHaveProperty('contactPhone');
+
+    mocks.mutateAsync.mockClear();
+    mocks.mutateAsync.mockResolvedValue({ lead: lead({ contactPhone: null, contactEmail: null }) });
+    await click('[data-undo-action]');
+
+    expect(mocks.mutateAsync).toHaveBeenCalledTimes(1);
+    const inverse = mocks.mutateAsync.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(inverse).toMatchObject({ id: LEAD_ID, contactName: 'Ana' });
+    expect(inverse).not.toHaveProperty('contactPhone');
+    expect(inverse).not.toHaveProperty('contactEmail');
+  });
+
+  it('an edit that gives a contactless lead its first contact offers no undo', async () => {
+    mocks.summary = summaryOf(lead({ contactPhone: null, contactEmail: null }));
+    await renderAt([`/operacional/leads/${LEAD_ID}`]);
+    await click('[data-summary-edit]');
+    mocks.mutateAsync.mockImplementation(async () => {
+      const updated = lead({ contactName: 'Ana', contactPhone: '11988887777', contactEmail: null });
+      mocks.summary = summaryOf(updated);
+      return { lead: updated };
+    });
+    setInput('lead-phone', '11988887777');
+    await click('[data-lead-save]');
+
+    expect(mocks.mutateAsync).toHaveBeenCalledTimes(1);
+    expect(mocks.mutateAsync.mock.calls[0]?.[0]).toMatchObject({ id: LEAD_ID, contactPhone: '11988887777' });
+    expect(document.querySelector('[data-undo-notice]')).toBeNull();
+  });
+
+  it('refuses the undo when the lead changed since the edit, with no second write', async () => {
+    await renderAt([`/operacional/leads/${LEAD_ID}`]);
+    await click('[data-summary-edit]');
+    mocks.mutateAsync.mockImplementation(async () => {
+      const updated = lead({ contactName: 'Ana Nova' });
+      mocks.summary = summaryOf(updated);
+      return { lead: updated };
+    });
+    setInput('lead-contact-name', 'Ana Nova');
+    await click('[data-lead-save]');
+    expect(mocks.mutateAsync).toHaveBeenCalledTimes(1);
+
+    // Another actor edits the lead before the operator clicks Desfazer.
+    mocks.summary = summaryOf(lead({ contactName: 'Outro ator' }));
+    mocks.mutateAsync.mockClear();
+    await click('[data-undo-action]');
+
+    expect(mocks.mutateAsync).not.toHaveBeenCalled();
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain('alterado');
+  });
+
+hook: PostToolUse
+hook: PostToolUse Completed
+codex
+{
+  "verdict": "APPROVED",
+  "round": 3,
+  "findings": [],
+  "checks": [
+    {
+      "command": "git diff 5eb5b82..HEAD -- . ':(exclude)nexo/runs'",
+      "exit": 0,
+      "summary": "R2-01 resolved. First-contact edits suppress undo; existing contactless-edit undo remains covered."
+    },
+    {
+      "command": "git diff c15a0ca...HEAD --numstat -- . ':(exclude)nexo/runs'",
+      "exit": 0,
+      "summary": "Reconciled the integrated scope with prior reviews. No unresolved major findings remain."
+    },
+    {
+      "command": "git diff 5eb5b82..HEAD --name-only -- apps/api packages CLAUDE.md",
+      "exit": 0,
+      "summary": "No changes affecting prior API, security or migration conclusions."
+    },
+    {
+      "command": "git diff 5eb5b82..HEAD --check -- . ':(exclude)nexo/runs'",
+      "exit": 0,
+      "summary": "No whitespace errors. Supplied Verify PASS results accepted; suites were not rerun."
+    }
+  ]
+}
+hook: Stop
+hook: Stop Completed
+tokens used
+159.941
+{
+  "verdict": "APPROVED",
+  "round": 3,
+  "findings": [],
+  "checks": [
+    {
+      "command": "git diff 5eb5b82..HEAD -- . ':(exclude)nexo/runs'",
+      "exit": 0,
+      "summary": "R2-01 resolved. First-contact edits suppress undo; existing contactless-edit undo remains covered."
+    },
+    {
+      "command": "git diff c15a0ca...HEAD --numstat -- . ':(exclude)nexo/runs'",
+      "exit": 0,
+      "summary": "Reconciled the integrated scope with prior reviews. No unresolved major findings remain."
+    },
+    {
+      "command": "git diff 5eb5b82..HEAD --name-only -- apps/api packages CLAUDE.md",
+      "exit": 0,
+      "summary": "No changes affecting prior API, security or migration conclusions."
+    },
+    {
+      "command": "git diff 5eb5b82..HEAD --check -- . ':(exclude)nexo/runs'",
+      "exit": 0,
+      "summary": "No whitespace errors. Supplied Verify PASS results accepted; suites were not rerun."
+    }
+  ]
+}
