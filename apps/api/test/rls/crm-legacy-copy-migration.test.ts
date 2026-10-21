@@ -122,6 +122,13 @@ INSERT INTO sales_ops_lead_stages (id, org_id, name, kind, is_system, position, 
  ('d0000000-0000-4000-8000-000000000106','orgD','Perdido','lost',true,6,'active',NULL);
 INSERT INTO sales_ops_leads (id, org_id, contact_name, client_name_snapshot, estimated_value_brl, description, stage_id, stage_changed_at, position) VALUES
  ('d0000000-0000-4000-8000-000000000301','orgD','Lead descrição longa','',1000,'${LONG_DESCRIPTION}','d0000000-0000-4000-8000-000000000101','2026-09-06T10:00:00Z',0);
+-- orgE: 102 archived legacy etapas occupy Ganho, Ganho (saída) and Ganho (saída 2) through Ganho (saída 101),
+-- so every candidate name the exit search used to try is taken.
+INSERT INTO sales_ops_lead_stages (id, org_id, name, kind, is_system, position, status, archived_at)
+SELECT ('e0000000-0000-4000-8000-' || lpad(g.k::text, 12, '0'))::uuid, 'orgE',
+  CASE WHEN g.k = 0 THEN 'Ganho' WHEN g.k = 1 THEN 'Ganho (saída)' ELSE 'Ganho (saída ' || g.k || ')' END,
+  'normal', false, g.k + 1, 'archived', now()
+FROM generate_series(0, 101) AS g(k);
 `;
 
 type Fingerprint = Record<string, { n: number; hash: string }>;
@@ -322,6 +329,17 @@ describe('migration 0030 on a database populated at 0029', () => {
     expect(kept.map((r) => r.name)).toEqual(['Ganho', 'Ganho (saída)', 'Pausado', 'Pausado (saída)', 'Proposta']);
   });
 
+  it('finds a free exit name even when 102 legacy etapas already hold every candidate up to Ganho (saída 101)', async () => {
+    const [ganho] = await rows<{ name: string; type: string; exit_kind: string }>(
+      `SELECT name, type, exit_kind FROM sales_ops_pipeline_stages WHERE org_id = 'orgE' AND exit_kind = 'ganho'`,
+    );
+    expect(ganho).toEqual({ name: 'Ganho (saída 102)', type: 'saida', exit_kind: 'ganho' });
+    const [legacy] = await rows<{ n: number }>(
+      `SELECT count(*)::int n FROM sales_ops_pipeline_stages WHERE org_id = 'orgE' AND exit_kind IS NULL`,
+    );
+    expect(legacy!.n).toBe(102);
+  });
+
   it('gives an org with no etapa the pure default pipeline, equal to DEFAULT_PIPELINE_STAGES and its transitions', async () => {
     const stages = await rows<{ id: string; name: string; position: number; type: string; behavior: string; exit_kind: string | null; requires_reason: boolean }>(
       `SELECT id, name, position, type, behavior, exit_kind, requires_reason FROM sales_ops_pipeline_stages WHERE org_id = 'orgC' ORDER BY position`,
@@ -358,7 +376,7 @@ describe('migration 0030 on a database populated at 0029', () => {
       `SELECT org_id, name, system_key, is_default FROM sales_ops_pipelines ORDER BY org_id`,
     );
     expect(pipelines).toEqual(
-      ['orgA', 'orgB', 'orgC', 'orgD'].map((org_id) => ({ org_id, name: 'Funil CRM padrão', system_key: 'crm-padrao', is_default: true })),
+      ['orgA', 'orgB', 'orgC', 'orgD', 'orgE'].map((org_id) => ({ org_id, name: 'Funil CRM padrão', system_key: 'crm-padrao', is_default: true })),
     );
     expect((await fingerprint(['sales_ops_org_modules']))['sales_ops_org_modules']!.n).toBe(0);
   });
