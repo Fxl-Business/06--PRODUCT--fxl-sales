@@ -89,6 +89,14 @@ test('i18n JSON values and index.html carry the new brand', () => {
   assert.ok(read('apps/api/src/domains/import/template.ts').includes("wb.creator = 'FXL Vendas'"));
 });
 
+test('download filenames carry the FXL Vendas brand', () => {
+  for (const f of ['apps/web/src/sales-ops/import/types.ts', 'apps/api/src/domains/import/routes.ts']) {
+    const src = read(f);
+    assert.ok(src.includes('fxl-vendas-importacao'), `${f} lost the fxl-vendas-importacao filename`);
+    assert.ok(!src.includes('fxl-sales-importacao'), `${f} reverted to the fxl-sales-importacao filename`);
+  }
+});
+
 // ---- Half B: technical ids stay unchanged (each pin is its own test) ----
 const PINS = [
   ['package.json', '"name": "fxl-sales"'],

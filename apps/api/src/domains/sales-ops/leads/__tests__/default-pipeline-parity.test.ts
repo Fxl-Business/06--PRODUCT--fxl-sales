@@ -50,6 +50,26 @@ const LEGACY_TO_DEFAULT_KIND: Record<string, DefaultPipelineStage['type']> = {
 
 const byKey = new Map(DEFAULT_PIPELINE_STAGES.map((s) => [s.key, s] as const));
 
+/**
+ * Asserts every seed row maps to its default-pipeline counterpart: label, legacy kind mapping,
+ * the lost exit kind, and a strictly increasing pipeline order along the legacy position.
+ */
+function expectRowsMatchPipeline(rows: SeedRow[], source: string): void {
+  const sorted = [...rows].sort((a, b) => a.position - b.position);
+  let previousOrder = 0;
+  for (const row of sorted) {
+    const key = LEGACY_LEAD_STAGE_COUNTERPART[row.name as keyof typeof LEGACY_LEAD_STAGE_COUNTERPART];
+    expect(key, `${source}: no counterpart for ${row.name}`).toBeDefined();
+    const stage = byKey.get(key!);
+    expect(stage, `${source}: pipeline stage ${key} missing`).toBeDefined();
+    expect(stage!.label, `${source}: label of ${row.name}`).toBe(row.name);
+    expect(stage!.type, `${source}: kind of ${row.name}`).toBe(LEGACY_TO_DEFAULT_KIND[row.kind]);
+    if (row.kind === 'lost') expect(stage!.exitKind, `${source}: exit of ${row.name}`).toBe('perdido');
+    expect(stage!.order, `${source}: order of ${row.name}`).toBeGreaterThan(previousOrder);
+    previousOrder = stage!.order;
+  }
+}
+
 describe('default pipeline parity with the legacy lead stage seed', () => {
   const rows0022 = extractSeedRows(readMigration('0022'));
 
@@ -68,19 +88,7 @@ describe('default pipeline parity with the legacy lead stage seed', () => {
   });
 
   it('each 0022 seed row maps to its default-pipeline counterpart', () => {
-    const sorted = [...rows0022].sort((a, b) => a.position - b.position);
-    let previousOrder = 0;
-    for (const row of sorted) {
-      const key = LEGACY_LEAD_STAGE_COUNTERPART[row.name as keyof typeof LEGACY_LEAD_STAGE_COUNTERPART];
-      expect(key, `no counterpart for ${row.name}`).toBeDefined();
-      const stage = byKey.get(key!);
-      expect(stage, `pipeline stage ${key} missing`).toBeDefined();
-      expect(stage!.label).toBe(row.name);
-      expect(stage!.type).toBe(LEGACY_TO_DEFAULT_KIND[row.kind]);
-      if (row.kind === 'lost') expect(stage!.exitKind).toBe('perdido');
-      expect(stage!.order).toBeGreaterThan(previousOrder);
-      previousOrder = stage!.order;
-    }
+    expectRowsMatchPipeline(rows0022, '0022');
   });
 
   it('the default stages without a legacy counterpart are qualificacao, ganho and pausado', () => {
@@ -94,6 +102,7 @@ describe('default pipeline parity with the legacy lead stage seed', () => {
     for (const entry of MIGRATION_SEED_COMPARISONS) {
       const rows = entry.extractRows(readMigration(entry.filePattern));
       expect(rows.length, `migration ${entry.id} has no seed rows`).toBeGreaterThan(0);
+      expectRowsMatchPipeline(rows, `migration ${entry.id}`);
     }
   });
 });
