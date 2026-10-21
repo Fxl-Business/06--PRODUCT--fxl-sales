@@ -367,7 +367,7 @@ Full reference: `nexo/knowledge/reference/kanban-de-leads.md` (section Edição 
   `GET /lead-stages` (inside `listLeadStages`, same transaction) and `GET /bootstrap` (before the snapshot, via `ensureLeadStagesForOrg`) seed the four default etapas when the org has NO stage row at all.
   The guard is "any row", never "each of the four", so a renamed or archived etapa is never reinserted.
   The INSERT is a bare `ON CONFLICT DO NOTHING` plus a re-read, so two concurrent first reads never 500.
-  Nothing else on a request path seeds (oracles `leads/__tests__/stages-seed-callers.test.ts` and `test/rls/lead-stages-seed-on-read.test.ts`).
+  Only `GET /lead-stages`, the bootstrap route, the import routes (`apps/api/src/domains/import/routes.ts`) and the seed module itself may seed on a request path (oracles `leads/__tests__/stages-seed-callers.test.ts` and `test/rls/lead-stages-seed-on-read.test.ts`).
   Creating a lead when every `normal` etapa is archived still answers the existing `400` `reason: 'no_open_stage'`; the web keys on status 400 plus `ApiError.reason`.
   The board shows `[data-no-stages]` in that case and never receives `onRequestConversion` / `onOpenSale`.
 - In the leads edition `POST/PATCH /people` force exactly `[vendedor]` (seeding the system funções in the same transaction) before `planPersonFuncoes`; a status-only PATCH leaves funções untouched.
