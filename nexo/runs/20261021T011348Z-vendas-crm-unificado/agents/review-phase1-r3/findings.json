@@ -1,0 +1,22 @@
+{
+  "verdict": "APPROVED",
+  "round": 3,
+  "findings": [],
+  "checks": [
+    {
+      "command": "git diff 3f1f56f...HEAD -- . ':(exclude)nexo/runs'",
+      "exit": 0,
+      "summary": "R2 resolvido: N etapas geram N+2 candidatos distintos, garantindo nome disponível. Novo teste cobre 102 nomes ocupados, incluindo arquivados."
+    },
+    {
+      "command": "sed -n '29,147p' apps/api/drizzle/0030_crm_legacy_copy.sql",
+      "exit": 0,
+      "summary": "Cópia aditiva preservada. R1 permanece corrigido; nenhum novo defeito bloqueante identificado na fase 1."
+    },
+    {
+      "command": "Gate 2 fornecido pelo orquestrador, sem reexecução",
+      "exit": 0,
+      "summary": "Oráculo 22/22; regressão detectada com SQL anterior; segunda execução sem alterações; guard aditivo verde. Revisão somente leitura, sem gravações."
+    }
+  ]
+}
