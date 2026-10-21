@@ -1,0 +1,1 @@
+{"agent":"verify","slice":"06-migracao-dados-crm","status":"PASS","report":"nexo/runs/20261021T011348Z-vendas-crm-unificado/agents/verify-06-migracao-dados-crm.md","summary":"oracle 19/19 · parity+seed+db 164/164 · integration suite 485/485 · lint 0 · type-check 0","done":true,"ts":"2026-10-21T07:37:20Z"}
