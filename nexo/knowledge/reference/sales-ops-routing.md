@@ -57,3 +57,12 @@ Moved verbatim from `CLAUDE.md` on 2026-09-22 so the standing context stays shor
   The scope is `team` only for an admin under `operacional` (the API answers team to an admin alone); everywhere else it is `mine`.
   The period defaults to the next seven days, the agenda's forward view, and every preset is a São Paulo civil day.
   Oracles: `followups.test.ts`, `followups-view.test.tsx`, `followups-container.test.tsx`, `navigation-edition.test.ts`.
+
+## Propostas em listas próprias (10-web-kanban-funil-periodo, v4.8.0)
+
+- Cada lista de Propostas é uma rota própria: `operacional/vendas-abertas` (Proposta, `draft` e `open`), `operacional/vendas-ganhas` (Vendido, `won`) e `operacional/vendas-encerradas` (`lost` e `cancelled`).
+  `operacional/vendas` continua com todos os status e segue como rota de entrada.
+- O id da proposta aberta vale em qualquer lista de Propostas (`isSalesListView`), e o detalhe fecha de volta para a mesma lista (`salesView` em `SalesOpsApp.tsx`).
+  O link de Finanças `/operacional/vendas/<id>` continua igual.
+- Os grupos de status e o filtro ficam em `sales-views.ts`, e a rota de uma lista só entra no menu `operacional` (vendedor e finder não ganham listas de propostas).
+- O período das Propostas é estado de componente (`salesPeriod`, `PeriodFilter`), e cada proposta entra pelo dia civil de São Paulo: `won` pelo dia de `wonAt`, as demais pela criação (`filterSalesByPeriod`).

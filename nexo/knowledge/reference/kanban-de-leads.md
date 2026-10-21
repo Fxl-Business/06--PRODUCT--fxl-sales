@@ -413,7 +413,10 @@ The free-text company path of the old dialogs is intentionally gone, because the
 
 - O Quadro é a visão do pipeline SELECIONADO: as colunas vêm de `GET /pipelines` por `pipelineStagesAsBoardStages`, e o `kind` legado é derivado por lookup.
 - O seletor `Funil` aparece só com mais de um pipeline ativo; a escolha é estado de componente (não URL), e uma etapa roteada (`?etapa=`) abre o pipeline que a contém.
-- O filtro de período (`PeriodFilter`, dias civis de São Paulo) é compartilhado por Quadro, Lista e Funil. Leitura do quadro, resumo e movimento recebem o MESMO objeto de filtros (`pipelineId`, `from`, `to`, `sellerPersonId`).
-- Movimento fora do grafo de transições do pipeline não é oferecido no `Mover para` (`moveTargetsFor` com `allowedTargetIds`). Um arrasto sem aresta mostra `MOVE_NOT_ALLOWED_COPY`, e o `409 transition_not_allowed` da API mostra o mesmo texto pelo `MutationErrorBanner`.
-- O funil `Acumulado` tira da progressão as saídas `perdido` e `pausado` (`NON_PROGRESSION_EXIT`) e as reporta em separado (`[data-funnel-lost]`, `[data-funnel-parked]`). A saída `ganho` continua na progressão, porque é o fim do caminho de venda.
+- O filtro de período (`PeriodFilter`, dias civis de São Paulo) é compartilhado por Quadro, Lista e Funil.
+  Leitura do quadro, resumo e movimento recebem o MESMO objeto de filtros (`pipelineId`, `from`, `to`, `sellerPersonId`).
+- Movimento fora do grafo de transições do pipeline não é oferecido no `Mover para` (`moveTargetsFor` com `allowedTargetIds`).
+  Um arrasto sem aresta mostra `MOVE_NOT_ALLOWED_COPY`, e o `409 transition_not_allowed` da API mostra o mesmo texto pelo `MutationErrorBanner`.
+- O funil `Acumulado` tira da progressão as saídas `perdido` e `pausado` (`NON_PROGRESSION_EXIT`) e as reporta em separado (`[data-funnel-lost]`, `[data-funnel-parked]`).
+  A saída `ganho` continua na progressão, porque é o fim do caminho de venda.
 - Os totais do rodapé do funil continuam lendo todos os leads, inclusive perdidos e pausados.

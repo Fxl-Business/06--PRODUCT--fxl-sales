@@ -414,3 +414,36 @@ describe('buildCumulativeFunnel parks a pausado stage like the lost stage', () =
     expect(buildLeadFunnel(aggregatesFromLeads(ONE_EACH), PIPELINE_STAGES).totalCount).toBe(5);
   });
 });
+
+describe('LeadsFunnelView parks a paused stage apart from the taper', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(() => {
+    (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    container = document.createElement('div');
+    document.body.append(container);
+    root = createRoot(container);
+  });
+
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it('shows the Pausado count in its own aside, not as a taper row', async () => {
+    const PAUSADO = 'cccccccc-0000-4000-8000-000000000016';
+    const stages: SalesOpsLeadStage[] = [
+      stage(NOVO_ID, 'Novo', 'normal', 1),
+      { ...stage(PAUSADO, 'Pausado', 'normal', 2), exitKind: 'pausado' },
+    ];
+    const paused = [lead('z', PAUSADO, 100_000)];
+    await act(async () =>
+      root.render(<LeadsFunnelView aggregates={aggregatesFromLeads(paused)} stages={stages} />),
+    );
+    const parked = container.querySelector('[data-funnel-parked]');
+    expect(parked?.textContent).toContain('Pausado');
+    expect(parked?.textContent).toContain('1 lead');
+    expect(container.querySelector(`[data-funnel-row="${PAUSADO}"]`)).toBeNull();
+  });
+});

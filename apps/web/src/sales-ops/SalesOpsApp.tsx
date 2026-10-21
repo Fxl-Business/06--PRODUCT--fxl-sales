@@ -137,6 +137,15 @@ import { ForbiddenPanel } from './ForbiddenPanel';
 import { AccountAvatar } from './AccountAvatar';
 import { MissingEntitlementPanel } from './MissingEntitlementPanel';
 import { MutationErrorBanner } from './MutationErrorBanner';
+import { PeriodFilter } from './PeriodFilter';
+import { PERIOD_ALL_SELECTION, selectionToRange, type PeriodSelection } from './period';
+import {
+  effectiveSalesStatus,
+  filterSalesList,
+  isSalesListView,
+  salesStatusOptionsForView,
+  type SalesListView,
+} from './sales-views';
 import { lockedRowLines } from './settlements/settlement-errors';
 import {
   buildTargetDescriptions,
@@ -447,6 +456,11 @@ const recurringModeOptions: ComboboxOption[] = [
 ];
 
 
+/** The Propostas list a route names, or null. Keeps the route check in one place. */
+function salesListViewOf(view: SalesOpsView): SalesListView | null {
+  return isSalesListView(view) ? view : null;
+}
+
 function titleForView(view: SalesOpsView, workspace: SalesOpsWorkspace) {
   const personal = workspace === 'meus-dados';
   const map: Record<SalesOpsView, { title: string; subtitle: string }> = {
@@ -459,6 +473,18 @@ function titleForView(view: SalesOpsView, workspace: SalesOpsWorkspace) {
       subtitle: personal
         ? 'Registro operacional com código, cliente, produto, responsável e status'
         : 'Propostas com código, cliente, áreas, responsáveis, status e ciclo de vida',
+    },
+    'vendas-abertas': {
+      title: 'Propostas em aberto',
+      subtitle: 'Rascunhos e propostas abertas aguardando decisão',
+    },
+    'vendas-ganhas': {
+      title: 'Vendas ganhas',
+      subtitle: 'Propostas ganhas, com recebíveis e baixas',
+    },
+    'vendas-encerradas': {
+      title: 'Perdidas e canceladas',
+      subtitle: 'Propostas encerradas sem venda',
     },
     /**
      * `vendedores` and `finders` only ever render under `meus-dados` now that
@@ -1347,6 +1373,8 @@ export function SalesOpsApp() {
    */
   const saleWizardRef = useRef<SaleWizardRequest | null>(null);
   const [salesFilters, setSalesFilters] = useState<SalesFilters>({ status: 'all', areaId: 'all' });
+  /** The Propostas period, component state: it survives moving between the sales lists. */
+  const [salesPeriod, setSalesPeriod] = useState<PeriodSelection>(PERIOD_ALL_SELECTION);
   /**
    * Which bucket of `cadastros/produtos` is on screen. Component state, not URL
    * state: the URL is the source of truth for the workspace and the page, and this
@@ -1371,8 +1399,12 @@ export function SalesOpsApp() {
   /** The open proposta detail. URL state only (`/:workspace/vendas/:saleId`). */
   const detailSaleId = resolution.route.saleId ?? null;
 
+  // The detail id rides the list it was opened from, so a sale opened from a
+  // `vendas-*` list closes back onto that same list.
+  const salesView: SalesListView = isSalesListView(view) ? view : 'vendas';
+
   function openSaleDetail(saleId: string) {
-    navigate(buildSalesOpsPath({ workspace, view: 'vendas', saleId }), {
+    navigate(buildSalesOpsPath({ workspace, view: salesView, saleId }), {
       state: SALE_DETAIL_OPENED_IN_APP,
     });
   }
@@ -1381,7 +1413,7 @@ export function SalesOpsApp() {
     // Popping an in-app entry means Back never reopens the closed detail; a detail
     // entered from outside has no list entry behind it, so it is replaced instead.
     if (isSaleDetailOpenedInApp(location.state)) navigate(-1);
-    else navigate(buildSalesOpsPath({ workspace, view: 'vendas' }), { replace: true });
+    else navigate(buildSalesOpsPath({ workspace, view: salesView }), { replace: true });
   }
   // A refused financial mutation (PC23 403, or a 409 lock) is shown on the screen
   // it happened on and nowhere else. Scoped to the view so navigating away drops
@@ -1445,18 +1477,30 @@ export function SalesOpsApp() {
         .map((person) => ({ value: person.id, label: person.displayName })),
     [persistedBootstrap.people],
   );
-  const filteredSales = useMemo(() => {
-    return bootstrap.sales.filter((sale) => {
-      if (salesFilters.status !== 'all' && sale.status !== salesFilters.status) return false;
-      if (salesFilters.areaId !== 'all') {
-        const match = bootstrap.saleItems.some(
-          (item) => item.saleId === sale.id && item.areaId === salesFilters.areaId,
-        );
-        if (!match) return false;
-      }
-      return true;
-    });
-  }, [bootstrap.sales, bootstrap.saleItems, salesFilters]);
+  // Not memoised: the list's route (`view`) is read here, and a manual memo over
+  // it is one the React Compiler cannot preserve (`preserve-manual-memoization`).
+  // The filter is a linear pass over the bootstrap's sales, so recomputing it per
+  // render costs less than the lint rule would need to hold.
+  const salesListView = salesListViewOf(view);
+  const filteredSales = salesListView !== null
+    ? filterSalesList({
+        sales: bootstrap.sales,
+        saleItems: bootstrap.saleItems,
+        view: salesListView,
+        status: salesFilters.status,
+        areaId: salesFilters.areaId,
+        range: selectionToRange(salesPeriod, todayInSaoPaulo()),
+      })
+    : bootstrap.sales.filter((sale) => {
+        if (salesFilters.status !== 'all' && sale.status !== salesFilters.status) return false;
+        if (salesFilters.areaId !== 'all') {
+          const match = bootstrap.saleItems.some(
+            (item) => item.saleId === sale.id && item.areaId === salesFilters.areaId,
+          );
+          if (!match) return false;
+        }
+        return true;
+      });
   const navItems = getSalesOpsNavigation(workspace, profile.roles, edition);
   /*
     The leads edition renames the people cadastro to Vendedores. Overridden here
@@ -2120,14 +2164,16 @@ export function SalesOpsApp() {
                 {headerAction}
               </AccentButton>
             ) : null}
-            {(view === 'vendas' || view === 'comissoes') ? (
+            {(isSalesListView(view) || view === 'comissoes') ? (
               <SecondaryButton onClick={() => setFiltersOpen((open) => !open)}>
                 <Filter className="h-[15px] w-[15px]" />
                 Filtros
               </SecondaryButton>
             ) : null}
             {/* A static period chip of the full product; nothing in the leads edition is period-scoped. */}
-            {edition === 'leads' ? null : (
+            {edition === 'leads' ? null : isSalesListView(view) ? (
+              <PeriodFilter aria-label="Período das propostas" onChange={setSalesPeriod} value={salesPeriod} />
+            ) : (
               <div className="hidden items-center gap-2 rounded-xl border border-[#dcdce2] bg-white px-[14px] py-[9px] text-sm font-semibold text-[#57575f] xl:flex">
                 <CalendarDays className="h-[15px] w-[15px] text-[#9c7210]" />
                 Julho 2026
@@ -2138,7 +2184,7 @@ export function SalesOpsApp() {
         </header>
 
         <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-b-2xl border border-t-0 border-[#e5e5ea] bg-[#fafafb]">
-          {filtersOpen && view === 'vendas' ? (
+          {filtersOpen && isSalesListView(view) ? (
             <div className="flex flex-none flex-wrap items-center gap-3 border-b border-[#ececf1] bg-white px-[22px] py-[13px]">
               <span className="text-xs font-bold uppercase tracking-[0.08em] text-[#9b9ba3]">
                 Filtros
@@ -2153,9 +2199,9 @@ export function SalesOpsApp() {
                       status: value as SalesFilters['status'],
                     }))
                   }
-                  options={salesStatusFilterOptions}
+                  options={salesStatusOptionsForView(isSalesListView(view) ? view : 'vendas', salesStatusFilterOptions)}
                   searchPlaceholder="Buscar status..."
-                  value={salesFilters.status}
+                  value={effectiveSalesStatus(isSalesListView(view) ? view : 'vendas', salesFilters.status)}
                 />
               </div>
               <div className="w-[190px]">
@@ -2281,7 +2327,7 @@ export function SalesOpsApp() {
                 {view === 'dashboard' ? (
                   <DashboardView bootstrap={persistedBootstrap} dashboard={dashboard} go={go} />
                 ) : null}
-                {view === 'vendas' ? (
+                {isSalesListView(view) ? (
                   <SalesView
                     bootstrap={persistedBootstrap}
                     canManage={workspace === 'operacional' && profile.roles.includes('admin')}

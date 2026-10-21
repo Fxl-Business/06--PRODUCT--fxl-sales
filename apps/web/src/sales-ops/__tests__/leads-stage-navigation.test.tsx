@@ -110,7 +110,7 @@ describe('routed lead stages', () => {
     expect(resolveSalesOpsRoute({ workspace: 'meus-dados', view: 'leads', etapa: 'stage-2' }, ['seller']).route).toEqual({ workspace: 'meus-dados', view: 'leads', stageId: 'stage-2' });
     expect(resolveSalesOpsRoute({ workspace: 'meus-dados', view: 'funil' }, ['finder']).route.view).not.toBe('funil');
     expect(resolveSalesOpsRoute({ workspace: 'operacional', view: 'vendas', saleId: 'sale-1' }, ['admin']).route.saleId).toBe('sale-1');
-    expect(getSalesOpsNavigation('operacional', ['admin']).map((item) => item.id)).toEqual(['vendas', 'comissoes', 'leads', 'funil', 'follow-ups']);
+    expect(getSalesOpsNavigation('operacional', ['admin']).map((item) => item.id)).toEqual(['vendas', 'vendas-abertas', 'vendas-ganhas', 'vendas-encerradas', 'comissoes', 'leads', 'funil', 'follow-ups']);
     expect(getSalesOpsNavigation('operacional', ['admin'], 'leads').map((item) => item.id)).toEqual(['leads', 'funil', 'follow-ups']);
   });
 

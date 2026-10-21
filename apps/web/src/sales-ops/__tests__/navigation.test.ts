@@ -49,6 +49,9 @@ describe('sales operations navigation', () => {
     expect(getSalesOpsNavigation('tatico', team).map((item) => item.id)).toEqual(['dashboard']);
     expect(getSalesOpsNavigation('operacional', team).map((item) => item.id)).toEqual([
       'vendas',
+      'vendas-abertas',
+      'vendas-ganhas',
+      'vendas-encerradas',
       'comissoes',
       'leads',
       'funil',
@@ -56,6 +59,9 @@ describe('sales operations navigation', () => {
     ]);
     expect(getSalesOpsNavigation('operacional', team).map((item) => item.label)).toEqual([
       'Propostas',
+      'Em aberto',
+      'Vendidas',
+      'Perdidas e canceladas',
       'Comissões',
       'Prospecção',
       'Funil',
@@ -578,5 +584,36 @@ describe('follow-ups navigation', () => {
     expect(resolveSalesOpsRoute({ workspace: 'operacional', view: 'follow-ups' }, ['admin']).route).toStrictEqual({ workspace: 'operacional', view: 'follow-ups' });
     expect(resolveSalesOpsRoute({ workspace: 'meus-dados', view: 'follow-ups' }, ['seller']).route).toStrictEqual({ workspace: 'meus-dados', view: 'follow-ups' });
     expect(resolveSalesOpsRoute({ workspace: 'meus-dados', view: 'follow-ups' }, ['finder']).route.view).not.toBe('follow-ups');
+  });
+});
+
+describe('Propostas list routes', () => {
+  const team = ['admin'] as const;
+  const seller = ['seller'] as const;
+
+  it('keeps the proposta id on each list route, so the detail opens on the list it came from', () => {
+    expect(resolveSalesOpsRoute({ workspace: 'operacional', view: 'vendas-ganhas', saleId: 'S1' }, team)).toEqual({
+      route: { workspace: 'operacional', view: 'vendas-ganhas', saleId: 'S1' },
+      path: '/operacional/vendas-ganhas/S1',
+      redirect: false,
+    });
+  });
+
+  it('still honours the proposta id on the plain vendas list (the Finance deep link)', () => {
+    expect(resolveSalesOpsRoute({ workspace: 'operacional', view: 'vendas', saleId: 'S1' }, team)).toEqual({
+      route: { workspace: 'operacional', view: 'vendas', saleId: 'S1' },
+      path: '/operacional/vendas/S1',
+      redirect: false,
+    });
+  });
+
+  it('keeps the Finance deep link path for a proposta', () => {
+    expect(buildSaleDetailPath('S1')).toBe('/operacional/vendas/S1');
+  });
+
+  it('sends a seller-only operator away from the team Propostas lists', () => {
+    const resolution = resolveSalesOpsRoute({ workspace: 'operacional', view: 'vendas-ganhas' }, seller);
+    expect(resolution.redirect).toBe(true);
+    expect(resolution.route.view).not.toMatch(/^vendas/);
   });
 });
