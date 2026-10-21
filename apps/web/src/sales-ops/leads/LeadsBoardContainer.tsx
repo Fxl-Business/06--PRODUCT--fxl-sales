@@ -4,6 +4,9 @@ import { type LeadFieldSet, leadFieldSet } from '@fxl-sales/shared-utils/sales-e
 import { useAuthProfile, useSalesEdition } from '@/auth/react';
 import type { ComboboxOption } from '@/components/ui/combobox';
 import { Skeleton } from '@/components/ui/skeleton';
+import { todayInSaoPaulo } from '@fxl-sales/shared-utils/sao-paulo-day';
+import { MutationErrorBanner } from '../MutationErrorBanner';
+import { PERIOD_ALL_SELECTION, periodQuery, selectionToRange, type PeriodSelection } from '../period';
 import { buildLeadStagePath, buildLeadSummaryPath, buildSalesOpsPath, type SalesOpsWorkspace } from '../navigation';
 import type { SalesOpsClient, SalesOpsPerson, SalesOpsProduct } from '../types';
 import type { MoveLeadPayload } from './api';
@@ -11,7 +14,8 @@ import { buildLabelLookups } from './board-labels';
 import { stageOpensConversion } from './board-move';
 import { mutedStateClass } from './board-ui';
 import { boardStages } from './calculations';
-import { useFieldDefinitions } from './crm-hooks';
+import { useFieldDefinitions, usePipelines } from './crm-hooks';
+import { pickPipeline, pipelineStagesAsBoardStages } from './crm-pipeline';
 import { LeadDeleteDialog } from './LeadDeleteDialog';
 import { LeadForm } from './LeadForm';
 import { LeadsBoard, type LeadConversionRequest } from './LeadsBoard';
@@ -23,7 +27,6 @@ import {
   useDeleteLead,
   useLeadsBoard,
   useLeadStageSummary,
-  useLeadStages,
   useMoveLead,
   useSaveLead,
 } from './hooks';
@@ -131,10 +134,31 @@ export function LeadsBoardContainer({
   const navigate = useNavigate();
   const [sellerPersonId, setSellerPersonId] = React.useState<string | null>(null);
   // The columns are resolved FIRST: the board query fans out one request per
-  // stage and the API requires a `stageId`, so without the stage list there is
-  // nothing to ask for.
-  const stagesQuery = useLeadStages();
-  const stages = React.useMemo(() => stagesQuery.data ?? [], [stagesQuery.data]);
+  // stage and the API requires a `stageId`, so without the pipeline there is
+  // nothing to ask for. The Quadro is a view of ONE pipeline: its columns are
+  // that pipeline's stages, and the choice is component state (not URL state).
+  const pipelinesQuery = usePipelines();
+  const pipelines = React.useMemo(() => pipelinesQuery.data ?? [], [pipelinesQuery.data]);
+  const [pipelineChoice, setPipelineChoice] = React.useState<string | null>(null);
+  const [period, setPeriod] = React.useState<PeriodSelection>(PERIOD_ALL_SELECTION);
+  const [moveError, setMoveError] = React.useState<unknown>(null);
+  // A routed stage belongs to exactly one pipeline, so an `?etapa=` link lands on it.
+  const owningPipelineId = selectedStageId
+    ? pipelines.find((candidate) => candidate.stages.some((stage) => stage.id === selectedStageId))?.id
+    : undefined;
+  const pipeline = pickPipeline(pipelines, owningPipelineId ?? pipelineChoice);
+  const pipelineId = pipeline?.id ?? null;
+  const stages = React.useMemo(() => pipelineStagesAsBoardStages(pipeline), [pipeline]);
+  const pipelineOptions = React.useMemo(
+    () =>
+      pipelines
+        .filter((candidate) => candidate.status === 'active')
+        .sort((a, b) => a.position - b.position)
+        .map((candidate) => ({ value: candidate.id, label: candidate.name })),
+    [pipelines],
+  );
+  const range = React.useMemo(() => selectionToRange(period, todayInSaoPaulo()), [period]);
+  const { from: periodFrom, to: periodTo } = range;
 
   // A filter that is not OFFERED can never narrow: an operator who filters under
   // `operacional` and then opens their own board must not carry that narrowing
@@ -146,13 +170,17 @@ export function LeadsBoardContainer({
     the board renders, so a mismatch would silently degrade to no optimistic
     write at all.
   */
-  const filters = React.useMemo<LeadBoardFilters>(
-    () => (sellerFilterValue ? { sellerPersonId: sellerFilterValue } : undefined),
-    [sellerFilterValue],
-  );
+  const filters = React.useMemo<LeadBoardFilters>(() => {
+    const next = {
+      ...(sellerFilterValue ? { sellerPersonId: sellerFilterValue } : {}),
+      ...(pipelineId ? { pipelineId } : {}),
+      ...periodQuery({ from: periodFrom, to: periodTo }),
+    };
+    return Object.keys(next).length > 0 ? next : undefined;
+  }, [sellerFilterValue, pipelineId, periodFrom, periodTo]);
 
   const boardQuery = useLeadsBoard(stages, filters);
-  const summaryQuery = useLeadStageSummary(filters);
+  const summaryQuery = useLeadStageSummary(filters, pipelinesQuery.isSuccess);
   const moveLead = useMoveLead(filters);
   const saveLead = useSaveLead();
   const deleteLead = useDeleteLead();
@@ -215,11 +243,11 @@ export function LeadsBoardContainer({
   // stays pending forever; waiting on it would leave a fresh leads-edition org
   // on the Skeleton instead of its empty-state. FXL always has stage rows, so
   // its behaviour is unchanged.
-  if (stagesQuery.isPending || (stages.length > 0 && boardQuery.isPending)) {
+  if (pipelinesQuery.isPending || (stages.length > 0 && boardQuery.isPending)) {
     return <Skeleton className="h-[420px] w-full" />;
   }
 
-  if (stagesQuery.isError || boardQuery.isError) {
+  if (pipelinesQuery.isError || boardQuery.isError) {
     const copy = boardQuery.isError
       ? boardLoadErrorCopy(boardQuery.error, fieldSet)
       : BOARD_LOAD_FAILED;
@@ -234,7 +262,15 @@ export function LeadsBoardContainer({
 
   return (
     <>
+      <MutationErrorBanner error={moveError} onDismiss={() => setMoveError(null)} />
       <LeadsBoard
+        pipeline={pipeline}
+        pipelineSelector={{
+          value: pipelineId,
+          options: pipelineOptions,
+          onChange: (id) => setPipelineChoice(id),
+        }}
+        periodFilter={{ value: period, onChange: setPeriod }}
         routedMode={routedMode}
         selectedStageId={selectedStageId}
         onOpenStage={workspace ? (stageId) => navigate(buildLeadStagePath(workspace, stageId)) : undefined}
@@ -256,7 +292,10 @@ export function LeadsBoardContainer({
         onLoadMore={() => {
           void boardQuery.fetchNextPage();
         }}
-        onMoveLead={(payload) => { void moveWithUndo(payload).catch(() => undefined); }}
+        onMoveLead={(payload) => {
+          setMoveError(null);
+          void moveWithUndo(payload).catch((error: unknown) => setMoveError(error));
+        }}
         // The leads edition has no proposta, so the board is never handed the
         // conversion door, even if a conversion-kind etapa somehow exists:
         // `moveTargetsFor` then excludes it and `emitMove` returns early.
@@ -295,6 +334,7 @@ export function LeadsBoardContainer({
           onSubmit={saveLead.mutateAsync}
           open
           pending={saveLead.isPending}
+          pipelineId={pipelineId ?? undefined}
           products={products}
           sellers={sellers}
           showSellerPicker={isAdmin}

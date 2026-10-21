@@ -91,6 +91,11 @@ export type ListLeadsParams = {
   stageId: string;
   cursor?: string | null;
   sellerPersonId?: string;
+  /** The pipeline whose stages the columns are; the API defaults to the org's default one. */
+  pipelineId?: string;
+  /** Inclusive Sao Paulo civil days, forwarded only when set. */
+  from?: string;
+  to?: string;
   limit?: number;
 };
 
@@ -104,6 +109,9 @@ function listLeadsQuery(params: ListLeadsParams): string {
   search.set('limit', String(params.limit ?? LEADS_PAGE_SIZE));
   if (params.cursor) search.set('cursor', params.cursor);
   if (params.sellerPersonId) search.set('sellerPersonId', params.sellerPersonId);
+  if (params.pipelineId) search.set('pipelineId', params.pipelineId);
+  if (params.from) search.set('from', params.from);
+  if (params.to) search.set('to', params.to);
   return search.toString();
 }
 
@@ -123,6 +131,9 @@ export const leadsApi = {
   stageSummary: (filters: LeadBoardFilters, token: Token) => {
     const search = new URLSearchParams();
     if (filters?.sellerPersonId) search.set('sellerPersonId', filters.sellerPersonId);
+    if (filters?.pipelineId) search.set('pipelineId', filters.pipelineId);
+    if (filters?.from) search.set('from', filters.from);
+    if (filters?.to) search.set('to', filters.to);
     const query = search.toString();
     return apiFetch<LeadStageSummary>(`${LEADS_PATH}/summary${query ? `?${query}` : ''}`, {
       method: 'GET',

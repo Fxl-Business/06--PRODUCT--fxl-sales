@@ -84,7 +84,7 @@ const PREFERRED_PATH_FULL: Record<ComboName, [string, string, string, string]> =
 /** Role-independent team workspaces: the role set is ignored for these three. */
 const TEAM_NAV_FULL: Record<'tatico' | 'operacional' | 'cadastros', Array<[SalesOpsView, string]>> = {
   'tatico': [['dashboard', 'Visão geral']],
-  'operacional': [['vendas', 'Propostas'], ['comissoes', 'Comissões'], ['leads', 'Prospecção'], ['funil', 'Funil'], ['follow-ups', 'Follow-ups']],
+  'operacional': [['vendas', 'Propostas'], ['vendas-abertas', 'Em aberto'], ['vendas-ganhas', 'Vendidas'], ['vendas-encerradas', 'Perdidas e canceladas'], ['comissoes', 'Comissões'], ['leads', 'Prospecção'], ['funil', 'Funil'], ['follow-ups', 'Follow-ups']],
   'cadastros': [['produtos', 'Produtos & Serviços'], ['areas', 'Áreas'], ['clientes', 'Clientes'], ['pessoas', 'Pessoas'], ['funcoes', 'Funções'], ['etapas', 'Etapas do funil'], ['importacao', 'Importação'], ['leads-excluidos', 'Leads excluídos'], ['geral', 'Geral']],
 };
 

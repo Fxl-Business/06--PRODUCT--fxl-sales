@@ -10,12 +10,14 @@ import {
   Layers,
   LayoutGrid,
   ListChecks,
+  Archive,
   Search,
   Tags,
   Trash2,
   UsersRound,
   type LucideIcon,
 } from 'lucide-react';
+import { isSalesListView } from './sales-views';
 import type { AppRole } from '@/auth/claims';
 import type { SalesEdition } from '@fxl-sales/shared-utils/sales-edition';
 
@@ -27,6 +29,9 @@ export type SalesOpsWorkspace = 'tatico' | 'operacional' | 'cadastros' | 'meus-d
 export type SalesOpsView =
   | 'dashboard'
   | 'vendas'
+  | 'vendas-abertas'
+  | 'vendas-ganhas'
+  | 'vendas-encerradas'
   | 'vendedores'
   | 'finders'
   | 'comissoes'
@@ -87,6 +92,11 @@ const tacticalTeam: SalesOpsNavigationItem[] = [
 
 const operational: SalesOpsNavigationItem[] = [
   { id: 'vendas', label: 'Propostas', icon: BriefcaseBusiness },
+  // One route per Propostas list (see `sales-views.ts`). Only the team sees them:
+  // the seller and finder lists have no propostas to split.
+  { id: 'vendas-abertas', label: 'Em aberto', icon: BriefcaseBusiness },
+  { id: 'vendas-ganhas', label: 'Vendidas', icon: BadgeDollarSign },
+  { id: 'vendas-encerradas', label: 'Perdidas e canceladas', icon: Archive },
   { id: 'comissoes', label: 'Comissões', icon: BadgeDollarSign },
   /*
     APPENDED, never prepended. `getDefaultSalesOpsRoute` lands on `[0]` of this
@@ -369,7 +379,7 @@ export function resolveSalesOpsRoute(
     // The third segment is the proposta id on `vendas` and the lead id on `leads`.
     // The `?etapa=` query is the stage selection, on `leads` only. Never write a key
     // as `undefined`: a present-but-undefined key trips `toStrictEqual`.
-    const saleId = view === 'vendas' && params.saleId ? params.saleId : undefined;
+    const saleId = isSalesListView(view) && params.saleId ? params.saleId : undefined;
     const leadId = view === 'leads' && params.saleId ? params.saleId : undefined;
     const stageId = view === 'leads' && !leadId && params.etapa ? params.etapa : undefined;
     const route: SalesOpsRoute = {

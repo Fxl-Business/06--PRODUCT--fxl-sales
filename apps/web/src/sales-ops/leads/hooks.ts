@@ -124,6 +124,9 @@ export function useLeadsBoard(
               stageId: stage.id,
               cursor: cursors?.[stage.id] ?? null,
               sellerPersonId: filters?.sellerPersonId,
+              pipelineId: filters?.pipelineId,
+              from: filters?.from,
+              to: filters?.to,
             },
             token,
           ),
@@ -166,11 +169,14 @@ export function leadStageSummaryKey(filters?: LeadBoardFilters) {
  * lead write invalidates (create, update, move, delete, restore, stage writes,
  * import, conversion). `lead-board-totals.test.tsx` pins that for each one.
  */
-export function useLeadStageSummary(filters?: LeadBoardFilters) {
+export function useLeadStageSummary(filters?: LeadBoardFilters, enabled = true) {
   const { getToken } = useAccessToken();
   return useQuery({
     queryKey: leadStageSummaryKey(filters),
     queryFn: async () => leadsApi.stageSummary(filters, await requireToken(getToken)),
+    // The container waits for the pipeline, so the summary is asked once, for the
+    // selected pipeline, and never once for the unscoped default first.
+    enabled,
   });
 }
 
@@ -181,7 +187,7 @@ type SummarySnapshot = { key: QueryKey; previous: LeadStageSummary };
 function boardFiltersOf(boardKey: QueryKey): LeadBoardFilters {
   const segment = boardKey[2];
   return segment && typeof segment === 'object'
-    ? (segment as { sellerPersonId?: string })
+    ? (segment as NonNullable<LeadBoardFilters>)
     : undefined;
 }
 

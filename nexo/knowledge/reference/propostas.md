@@ -238,3 +238,9 @@ Moved verbatim from `CLAUDE.md` on 2026-09-22 so the standing context stays shor
   Both `Contas a pagar` in the sale detail and the `operacional/comissoes` list use `comparePayables`, so the two views always agree.
 - A sale pays the same beneficiary once per parcela, so `describePayable` names the linked receivable (`· Parcela 1/3`, `· Recorrência 2/12`) or, for a one-shot cost, the due day; the blocking-row lines, the history and the dialog titles all read the same distinguishable description.
 - Oracles: `settlements/__tests__/mark-paid-dialog.test.tsx`, `reverse-settlement-dialog.test.tsx`, `settlement-row-actions.test.tsx`, `settlement-history.test.tsx`, `settlements-api.test.ts`, `sale-action-error.test.tsx`, `settlement-format.test.ts`, and `__tests__/sales-settlement-visibility.test.tsx`.
+
+## Listas de Propostas e período (10-web-kanban-funil-periodo, v4.8.0)
+
+- Proposta (`draft` e `open`) e Vendido (`won`) são grupos de exibição, não status novos: a regra está em `SALES_VIEW_STATUSES` (`sales-views.ts`).
+- O filtro de período usa o dia civil de São Paulo, e uma proposta `won` entra pelo dia de `wonAt` (sem `wonAt`, pelo dia de criação, como em `saleReferenceInstant`).
+- A lista lê `bootstrap.sales`, então o filtro roda no cliente com o helper compartilhado, sem endpoint novo.

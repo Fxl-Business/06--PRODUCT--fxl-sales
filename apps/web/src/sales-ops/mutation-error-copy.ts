@@ -11,6 +11,7 @@ import { isForbiddenFailure } from '@/lib/require-token';
 export const MUTATION_ERROR_COPY = {
   adminRequired:
     'Somente administradores da Organização podem fazer esta alteração. Peça a quem administra a Organização no FXL Hub.',
+  moveNotAllowed: 'Esse movimento não é permitido neste funil.',
   saleHasActiveSettlements:
     'Esta proposta tem pagamentos registrados. Estorne os pagamentos antes de mudar o status.',
   generic: 'Não foi possível concluir a ação. Tente novamente.',
@@ -24,6 +25,14 @@ export const MUTATION_ERROR_COPY = {
  */
 export function salesOpsMutationErrorMessage(error: unknown): string {
   if (isForbiddenFailure(error)) return MUTATION_ERROR_COPY.adminRequired;
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as { status?: unknown }).status === 409 &&
+    (error as { error?: unknown }).error === 'transition_not_allowed'
+  ) {
+    return MUTATION_ERROR_COPY.moveNotAllowed;
+  }
   if (
     typeof error === 'object' &&
     error !== null &&
