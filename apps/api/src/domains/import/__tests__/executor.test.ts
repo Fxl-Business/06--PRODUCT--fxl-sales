@@ -4,6 +4,7 @@
  *
  * Run: pnpm --filter @fxl-sales/api exec vitest run src/domains/import/__tests__/executor.test.ts
  */
+import { ALL_MODULES_ENABLED } from '@fxl-sales/shared-utils/crm-model';
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
@@ -250,14 +251,14 @@ describe('executeImportPlan before the database', () => {
         { severity: 'error', sheet: 'areas', row: 2, column: null, code: 'x', message: 'x' },
       ],
     };
-    await expect(executeImportPlan(untouchableTx, 'org', bad, ACTOR, NOW)).rejects.toThrow(
+    await expect(executeImportPlan(untouchableTx, 'org', bad, ACTOR, NOW, ALL_MODULES_ENABLED)).rejects.toThrow(
       'import_plan_has_errors',
     );
   });
 
   it('refuses a won proposta in a producer-live org before touching the transaction', async () => {
     registerProducerFlowGate(() => true);
-    const error = await executeImportPlan(untouchableTx, 'org', plan([area, wonSale]), ACTOR, NOW).catch(
+    const error = await executeImportPlan(untouchableTx, 'org', plan([area, wonSale]), ACTOR, NOW, ALL_MODULES_ENABLED).catch(
       (e: unknown) => e,
     );
     expect(error).toBeInstanceOf(ImportExecutionError);
@@ -267,7 +268,7 @@ describe('executeImportPlan before the database', () => {
 
   it('refuses a settlement in a producer-live org before touching the transaction', async () => {
     registerProducerFlowGate(() => true);
-    const error = await executeImportPlan(untouchableTx, 'org', plan([openSale, settle]), ACTOR, NOW).catch(
+    const error = await executeImportPlan(untouchableTx, 'org', plan([openSale, settle]), ACTOR, NOW, ALL_MODULES_ENABLED).catch(
       (e: unknown) => e,
     );
     expect(error).toBeInstanceOf(ImportExecutionError);

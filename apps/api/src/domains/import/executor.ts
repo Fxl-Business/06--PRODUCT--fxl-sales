@@ -19,6 +19,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { and, asc, eq, ne } from 'drizzle-orm';
+import type { OrgModules } from '@fxl-sales/shared-utils/crm-model';
 import { isIsoDay, todayInSaoPaulo } from '@fxl-sales/shared-utils/sao-paulo-day';
 import { salesOpsPayables, salesOpsReceivables } from '../../db/schema.js';
 import { writeAuditEntry } from '../audit/service.js';
@@ -209,6 +210,7 @@ export async function executeImportPlan(
   plan: ImportPlan,
   actor: ImportActor,
   now: Date,
+  modules: OrgModules,
 ): Promise<ImportExecutionResult> {
   // Programmer error, not a user error: the route checks `ok` before executing.
   if (plan.issues.some((issue) => issue.severity === 'error')) {
@@ -224,7 +226,9 @@ export async function executeImportPlan(
 
   const ids = new Map<string, string>();
   const today = todayInSaoPaulo(now);
-  const scope: LeadScope = { userId: actor.userId, email: null, isAdmin: true };
+  // The same modules the catalog was read with: a move into a conversion etapa is refused
+  // by moveLead only while `orcamentos` is on (the planner refuses it first).
+  const scope: LeadScope = { userId: actor.userId, email: null, isAdmin: true, modules };
 
   const resolve = (ref: EntityRef, operation: ImportOperation): string => {
     if ('existingId' in ref) return ref.existingId;

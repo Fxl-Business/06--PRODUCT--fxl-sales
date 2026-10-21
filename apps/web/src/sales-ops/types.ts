@@ -1,3 +1,5 @@
+import type { OrgModules } from '@fxl-sales/shared-utils/crm-model';
+
 export type SalesOpsStatus = 'draft' | 'open' | 'won' | 'lost' | 'cancelled';
 export type PaymentMethod = 'pix' | 'card' | 'boleto' | 'transfer';
 export type PaymentCondition = 'cash' | 'installments' | 'recurring';
@@ -318,6 +320,8 @@ export type SalesOpsSettings = {
 };
 
 export type SalesOpsBootstrap = {
+  /** The organization's module flags (additive: hand-written fixtures have none). */
+  orgModules?: OrgModules;
   sales: SalesOpsSale[];
   products: SalesOpsProduct[];
   productFuncaoCosts: SalesOpsProductFuncaoCost[];

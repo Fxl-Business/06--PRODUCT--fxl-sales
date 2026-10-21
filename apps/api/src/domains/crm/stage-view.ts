@@ -1,3 +1,4 @@
+import { effectiveStageBehavior, stageActsAsOrcamento, type OrgModules } from '@fxl-sales/shared-utils/crm-model';
 import type { salesOpsPipelineStages } from '../../db/schema.js';
 
 /**
@@ -65,5 +66,27 @@ export function toLeadStageView(row: PipelineStageRow): LeadStageView {
     behavior: row.behavior,
     exitKind: row.exitKind,
     requiresReason: row.requiresReason,
+  };
+}
+
+/**
+ * The projection of an `orcamento` stage for ONE organization (per-org modules, phase 3).
+ * A stage opens a proposta only while `orcamentos` is on; with it off the stage is an
+ * ordinary stage in every projection. The STORED `type` and `behavior` are never rewritten,
+ * so turning the module back on restores the stage exactly.
+ */
+export function legacyStageKindFor(stage: KindInput & { behavior: string }, modules: OrgModules): LegacyStageKind {
+  const acts = stageActsAsOrcamento({ type: stage.type, behavior: stage.behavior }, modules);
+  return legacyStageKind({ type: acts ? stage.type : 'normal', exitKind: stage.exitKind });
+}
+
+/** `GET /lead-stages` row as this organization's modules let the stage act. */
+export function leadStageViewFor(view: LeadStageView, modules: OrgModules): LeadStageView {
+  const kind = legacyStageKindFor(view, modules);
+  return {
+    ...view,
+    kind,
+    isSystem: kind !== 'normal',
+    behavior: effectiveStageBehavior({ type: view.type, behavior: view.behavior }, modules),
   };
 }

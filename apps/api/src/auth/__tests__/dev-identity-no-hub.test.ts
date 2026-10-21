@@ -17,6 +17,23 @@ vi.stubGlobal('fetch', () => {
   throw new Error('dev-identity-no-hub: no code path under SALES_AUTH_FAKE may contact a Hub');
 });
 
+// The module loader is the first database use for a never-seen org. It is mocked
+// with the one-time token backfill it performs, so the probe proves the dev
+// identity's module claim reaches the backfill without a database.
+vi.mock('../../domains/org-modules/service.js', async () => {
+  const { CRM_MODULE_KEYS, modulesForEdition } = await import('@fxl-sales/shared-utils/crm-model');
+  const { resolveSalesEdition } = await import('@fxl-sales/shared-utils/sales-edition');
+  return {
+    loadOrgModules: async (_orgId: string, tokenModules: readonly unknown[] | undefined) => {
+      const modules = modulesForEdition(resolveSalesEdition(tokenModules));
+      return {
+        modules,
+        sources: Object.fromEntries(CRM_MODULE_KEYS.map((key) => [key, 'token_backfill'])),
+      };
+    },
+  };
+});
+
 /** Hand-crafts a token carrying arbitrary claims, bypassing the package's own
  *  minter and its membership rail, to simulate a tampered bearer whose
  *  workspaceId names an Organization the identity is not a member of. Never
@@ -61,16 +78,17 @@ beforeAll(async () => {
   expect(await installFakeAuthIfRequested()).toBe(true);
 
   const appAuth = await import('../../middleware/app-auth.js');
+  const { getSalesEdition } = await import('../../domains/org-modules/context.js');
 
   app = new Hono();
   app.use('/probe', appAuth.appAuthMiddleware);
-  app.all('/probe', (c) =>
+  app.all('/probe', async (c) =>
     c.json({
       userId: c.get('userId'),
       orgId: c.get('orgId'),
       userRole: c.get('userRole'),
       userRoles: c.get('userRoles'),
-      salesEdition: c.get('salesEdition'),
+      salesEdition: await getSalesEdition(c),
       actorName: appAuth.getHubActorDisplayName(c.get('hubAuth')),
       // The value `leadScope` in domains/sales-ops/leads/lead-routes.ts reads.
       email: c.get('hubAuth')?.claims?.email ?? null,

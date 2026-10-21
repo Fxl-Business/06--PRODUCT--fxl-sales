@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { ALL_MODULES_ENABLED } from '@fxl-sales/shared-utils/crm-model';
 import type { CrmPipeline } from '../crm-types';
 import {
   allowedTargetIds,
@@ -7,6 +8,7 @@ import {
   pickPipeline,
   pipelineStagesAsBoardStages,
   stageOpensOrcamentos,
+  summaryStageKind,
 } from '../crm-pipeline';
 
 function pipeline(overrides: Partial<CrmPipeline> = {}): CrmPipeline {
@@ -23,12 +25,34 @@ function pipeline(overrides: Partial<CrmPipeline> = {}): CrmPipeline {
 }
 
 describe('crm-pipeline', () => {
-  it('derives the legacy kind from type and exit kind by lookup', () => {
-    expect(legacyKindOf({ type: 'orcamento', exitKind: null })).toBe('conversion');
-    expect(legacyKindOf({ type: 'saida', exitKind: 'perdido' })).toBe('lost');
-    expect(legacyKindOf({ type: 'saida', exitKind: 'ganho' })).toBe('normal');
-    expect(legacyKindOf({ type: 'saida', exitKind: 'pausado' })).toBe('normal');
-    expect(legacyKindOf({ type: 'normal', exitKind: null })).toBe('normal');
+  it('derives the legacy kind from the EFFECTIVE behavior and the exit kind by lookup', () => {
+    expect(legacyKindOf({ behavior: 'opens_orcamentos', exitKind: null })).toBe('conversion');
+    expect(legacyKindOf({ behavior: 'none', exitKind: null })).toBe('normal');
+    expect(legacyKindOf({ behavior: 'opens_orcamentos', exitKind: 'perdido' })).toBe('lost');
+    expect(legacyKindOf({ behavior: 'none', exitKind: 'ganho' })).toBe('normal');
+    expect(legacyKindOf({ behavior: 'none', exitKind: 'pausado' })).toBe('normal');
+  });
+
+  it('summaryStageKind reads the modules: the summary carries no behavior, so the seeded rule applies per organization', () => {
+    const orcamento = { type: 'orcamento' as const, exitKind: null };
+    const orcamentosOff = { ...ALL_MODULES_ENABLED, orcamentos: false };
+    expect(summaryStageKind(orcamento, ALL_MODULES_ENABLED)).toBe('conversion');
+    expect(summaryStageKind(orcamento, orcamentosOff)).toBe('normal');
+    // Outside the shell (no modules in context) the whole product applies.
+    expect(summaryStageKind(orcamento, null)).toBe('conversion');
+    expect(summaryStageKind({ type: 'saida', exitKind: 'perdido' }, orcamentosOff)).toBe('lost');
+  });
+
+  it('an orcamento stage with behavior none (orcamentos off) maps to kind normal', () => {
+    // The API projects the EFFECTIVE behavior: with orcamentos off the stored type stays
+    // 'orcamento', but the stage is an ordinary board stage, never the proposta wizard.
+    const p = pipeline({
+      stages: [
+        { id: 'S-o', name: 'Proposta', position: 1, type: 'orcamento', behavior: 'none', exitKind: null, requiresReason: false, status: 'active' },
+      ],
+    });
+    const [stage] = pipelineStagesAsBoardStages(p);
+    expect(stage).toMatchObject({ kind: 'normal', type: 'orcamento', behavior: 'none' });
   });
 
   it('pipelineStagesAsBoardStages keeps active stages in position order and fills the additive fields', () => {

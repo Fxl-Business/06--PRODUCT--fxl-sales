@@ -7,6 +7,7 @@
  *
  * Run: pnpm --filter @fxl-sales/api test:integration src/domains/import/__tests__/import-routes.integration.test.ts
  */
+import { modulesForEdition } from '@fxl-sales/shared-utils/crm-model';
 import { randomUUID } from 'node:crypto';
 import { saoPauloDayOf, todayInSaoPaulo } from '@fxl-sales/shared-utils/sao-paulo-day';
 import { and, asc, count, eq, isNotNull, notInArray, notLike, sql, type SQL } from 'drizzle-orm';
@@ -112,7 +113,7 @@ function createTestApp(edition?: 'leads') {
     c.set('userRole', 'admin');
     c.set('userRoles', ['admin', 'seller', 'finder']);
     c.set('hubAuth', hubAuthContext({ accountId: ACCOUNT_ID, workspaceId: currentOrgId, name: 'Equipe FXL' }));
-    if (edition) c.set('salesEdition', edition);
+    c.set('orgModules', modulesForEdition(edition ?? 'full'));
     await next();
   });
   app.route('/', salesOpsRouter);

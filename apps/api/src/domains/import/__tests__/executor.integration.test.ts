@@ -7,6 +7,7 @@
  *
  * Run: pnpm --filter @fxl-sales/api test:integration src/domains/import/__tests__/executor.integration.test.ts
  */
+import { ALL_MODULES_ENABLED } from '@fxl-sales/shared-utils/crm-model';
 import { randomUUID } from 'node:crypto';
 import { and, eq, sql } from 'drizzle-orm';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
@@ -83,7 +84,7 @@ function newOrg(tag: string): string {
 }
 
 const run = (orgId: string, plan: ImportPlan) =>
-  withTenant(getDb(), orgId, (tx) => executeImportPlan(tx, orgId, plan, ACTOR, NOW));
+  withTenant(getDb(), orgId, (tx) => executeImportPlan(tx, orgId, plan, ACTOR, NOW, ALL_MODULES_ENABLED));
 
 async function countOf(query: ReturnType<typeof sql>): Promise<number> {
   const result = (await getAdminDb().execute(query)) as unknown as Array<{ n: number }>;

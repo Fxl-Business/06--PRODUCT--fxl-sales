@@ -6,6 +6,7 @@
  * absent edition, must keep today's exact call arity (3 args for create, 5 for
  * update), which is what keeps the existing toHaveBeenCalledWith oracles green.
  */
+import { modulesForEdition } from '@fxl-sales/shared-utils/crm-model';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { hubAuthContext as sharedHubAuthContext } from '../../../auth/__tests__/hub-auth-context-fixture.js';
@@ -63,7 +64,7 @@ function createTestApp() {
         name: 'Ana Verificada',
       }),
     );
-    if (currentEdition !== undefined) c.set('salesEdition', currentEdition);
+    c.set('orgModules', modulesForEdition(currentEdition ?? 'full'));
     await next();
   });
   app.route('/', salesOpsRouter);

@@ -1,0 +1,63 @@
+{
+  "verdict": "CHANGES_REQUESTED",
+  "round": 1,
+  "findings": [
+    {
+      "id": "R1-1",
+      "severity": "major",
+      "kind": "objective",
+      "file": "apps/web/src/sales-ops/SalesOpsApp.tsx",
+      "line": 1811,
+      "claim": "Comissões exposes an unusable proposal-creation action when Orçamentos is disabled.",
+      "evidence": "An in-memory Node evaluation of the actual navigation and header code with orcamentos=false, comissoes=true returned a valid /operacional/comissoes route, header='Nova proposta', and clickedHeader={mode:'create'}, while modulesAllowCapability(modules,'proposals') returned false. The header renders this button without another capability check. Users can therefore enter the wizard but cannot save because POST /sales returns 403 edition_capability.",
+      "suggestion": "Gate the proposal header action on the orcamentos module. Add a shell regression case for comissoes=true and orcamentos=false."
+    },
+    {
+      "id": "R1-2",
+      "severity": "minor",
+      "kind": "objective",
+      "file": "apps/web/src/sales-ops/SalesOpsApp.tsx",
+      "line": 2069,
+      "claim": "The commission balance card follows Orçamentos instead of Comissões.",
+      "evidence": "The card uses hasCapability(edition,'commissions'), but editionFromModules depends only on orcamentos. The Node probe confirmed the card is hidden with orcamentos=false/comissoes=true and visible with orcamentos=true/comissoes=false.",
+      "suggestion": "Use modulesAllowCapability(modules,'commissions') for this card."
+    },
+    {
+      "id": "R1-3",
+      "severity": "minor",
+      "kind": "objective",
+      "file": "apps/web/src/sales-ops/__tests__/org-modules-shell.test.tsx",
+      "line": 104,
+      "claim": "The binding D6 shell-level drop regression test is missing.",
+      "evidence": "The test replaces LeadsBoardContainer with an empty div and never exercises dropping onto Proposta with orcamentos disabled. Slice 12's binding addendum explicitly requires proving that this interaction moves the lead without requesting conversion. The pure mapper test covers only part of that path.",
+      "suggestion": "Add the required interaction test through the shell and board wiring."
+    }
+  ],
+  "checks": [
+    {
+      "command": "git diff 60c57fd...HEAD -- . ':(exclude)nexo/runs'",
+      "exit": 0,
+      "summary": "Reviewed implementation, tests, repository rules, and binding plans. No tenant-isolation, destructive SQL, or technical-identifier defect found."
+    },
+    {
+      "command": "git diff --check 60c57fd...HEAD -- . ':(exclude)nexo/runs'",
+      "exit": 0,
+      "summary": "Passed."
+    },
+    {
+      "command": "node -e '<in-memory TypeScript navigation, header-action, and capability probe>'",
+      "exit": 0,
+      "summary": "Confirmed the disabled proposal action and commission-card flag mismatch. No files written."
+    },
+    {
+      "command": "node <<'NODE' ... NODE",
+      "exit": 1,
+      "summary": "Shell rejected heredoc temporary-file creation under read-only permissions. Retried successfully with node -e."
+    },
+    {
+      "command": "Orchestrator-supplied Gate 2 results; not rerun",
+      "exit": 0,
+      "summary": "Reported PASS: slice 11 integration 549, API unit 1603, web 1926, guards 112; slice 12 web 1961, build and bundle-clean. Mutation checks reported red as expected."
+    }
+  ]
+}

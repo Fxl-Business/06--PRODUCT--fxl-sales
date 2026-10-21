@@ -19,7 +19,14 @@ import {
 } from 'lucide-react';
 import { isSalesListView } from './sales-views';
 import type { AppRole } from '@/auth/claims';
-import type { SalesEdition } from '@fxl-sales/shared-utils/sales-edition';
+import type { CrmModuleKey, OrgModules } from '@fxl-sales/shared-utils/crm-model';
+import {
+  ALL_MODULES_ENABLED,
+  hasEveryModule,
+  hasModule,
+  isCompactProfile,
+  modulesCacheKey,
+} from './org-modules';
 
 export type SalesOpsWorkspace = 'tatico' | 'operacional' | 'cadastros' | 'meus-dados';
 /**
@@ -86,99 +93,86 @@ export type SalesOpsRouteResolution = Readonly<{
   redirect: boolean;
 }>;
 
-const tacticalTeam: SalesOpsNavigationItem[] = [
-  { id: 'dashboard', label: 'Visão geral', icon: BarChart3 },
-];
-
-const operational: SalesOpsNavigationItem[] = [
-  { id: 'vendas', label: 'Propostas', icon: BriefcaseBusiness },
-  // One route per Propostas list (see `sales-views.ts`). Only the team sees them:
-  // the seller and finder lists have no propostas to split.
-  { id: 'vendas-abertas', label: 'Em aberto', icon: BriefcaseBusiness },
-  { id: 'vendas-ganhas', label: 'Vendidas', icon: BadgeDollarSign },
-  { id: 'vendas-encerradas', label: 'Perdidas e canceladas', icon: Archive },
-  { id: 'comissoes', label: 'Comissões', icon: BadgeDollarSign },
-  /*
-    APPENDED, never prepended. `getDefaultSalesOpsRoute` lands on `[0]` of this
-    list, so the first entry is the `operacional` landing ROUTE: moving it
-    rewrites where every `Trocar painel` click arrives.
-  */
-  { id: 'leads', label: 'Prospecção', icon: LayoutGrid },
-  { id: 'funil', label: 'Funil', icon: LayoutGrid },
-  // Appended with the follow-ups list (09e): the team's agenda of next steps.
-  { id: 'follow-ups', label: 'Follow-ups', icon: CalendarClock },
-];
-
-const cadastros: SalesOpsNavigationItem[] = [
-  { id: 'produtos', label: 'Produtos & Serviços', icon: Database },
-  { id: 'areas', label: 'Áreas', icon: Layers },
-  { id: 'clientes', label: 'Clientes', icon: ContactRound },
-  { id: 'pessoas', label: 'Pessoas', icon: UsersRound },
-  { id: 'funcoes', label: 'Funções', icon: Tags },
-  /*
-    Before `geral`, which is the settings-and-history catch-all and stays last.
-    `produtos` remains `[0]`, so the Cadastros landing route does not move.
-    `importacao` goes before `geral` too, and so does `leads-excluidos` (the lead
-    lixeira), appended after it.
-  */
-  { id: 'etapas', label: 'Etapas do funil', icon: ListChecks },
-  { id: 'importacao', label: 'Importação', icon: FileSpreadsheet },
-  { id: 'leads-excluidos', label: 'Leads excluídos', icon: Trash2 },
-  { id: 'geral', label: 'Geral', icon: Cog },
-];
-
-const meusDadosSeller: SalesOpsNavigationItem[] = [
-  { id: 'vendedores', label: 'Meu painel', icon: UsersRound },
-  { id: 'comissoes', label: 'Comissões', icon: BadgeDollarSign },
-  /*
-    APPENDED: `[0]` here is where EVERY seller's session starts.
-    Seller only - a finder gains no personal lead scope, so `meusDadosFinder`
-    is deliberately byte-unchanged.
-  */
-  { id: 'leads', label: 'Minha prospecção', icon: LayoutGrid },
-  { id: 'funil', label: 'Funil', icon: LayoutGrid },
-  // Appended with the follow-ups list (09e): the seller's own agenda.
-  { id: 'follow-ups', label: 'Meus follow-ups', icon: CalendarClock },
-];
-
-const meusDadosFinder: SalesOpsNavigationItem[] = [
-  { id: 'finders', label: 'Meu painel', icon: Search },
-  { id: 'vendas', label: 'Indicações', icon: BriefcaseBusiness },
-];
+type NavEntry = SalesOpsNavigationItem & {
+  /** Every module here must be enabled for the entry to show. Empty means always. */
+  requires: readonly CrmModuleKey[];
+  /** The label in the compact profile (`orcamentos` off). */
+  compactLabel?: string;
+  /** Moved to the front, stably, in the compact profile (its landing entry). */
+  compactFirst?: true;
+};
 
 /*
-  THE LEADS EDITION (Construbom). Three short lists, never a filter over the full ones:
-  a filter would make every full-edition label and order depend on the leads rules, and
-  the full edition must stay byte-identical (oracle: navigation-edition.test.ts).
-  Prospecção is first in the sidebar; `getDefaultSalesOpsRoute` lands on Funil
-  because the group itself has no stage to display.
+  THE navigation catalogue. One list per workspace, in the FULL order. An entry shows
+  iff every module in `requires` is enabled; the only other variance is the compact
+  profile (`orcamentos` off): `compactLabel` and `compactFirst`. Entries are APPENDED,
+  never prepended: `getDefaultSalesOpsRoute` lands on `[0]` of the visible list.
+  Oracles: navigation-edition.test.ts (exact equivalence with both former editions) and
+  navigation-modules.test.ts.
 */
-const leadsEditionOperational: SalesOpsNavigationItem[] = [
-  { id: 'leads', label: 'Prospecção', icon: LayoutGrid },
-  { id: 'funil', label: 'Funil', icon: LayoutGrid },
-  { id: 'follow-ups', label: 'Follow-ups', icon: CalendarClock },
+const tacticalTeam: NavEntry[] = [
+  { id: 'dashboard', label: 'Visão geral', icon: BarChart3, requires: ['orcamentos'] },
 ];
 
-/**
- * A pessoa is always a vendedor in this edition, so the screen is labelled for it.
- * Clientes and Importação are granted to this edition too (the `clients` and
- * `import` capabilities): the gestor manages clients and imports vendedores/leads
- * by planilha. `pessoas` stays `[0]`, the landing route; the rest are appended.
- */
-const leadsEditionCadastros: SalesOpsNavigationItem[] = [
-  { id: 'pessoas', label: 'Vendedores', icon: UsersRound },
-  { id: 'clientes', label: 'Clientes', icon: ContactRound },
-  { id: 'etapas', label: 'Etapas do funil', icon: ListChecks },
-  { id: 'importacao', label: 'Importação', icon: FileSpreadsheet },
-  // The lead lixeira (AC9): the gestor restores a deleted lead here. Appended.
-  { id: 'leads-excluidos', label: 'Leads excluídos', icon: Trash2 },
+const operational: NavEntry[] = [
+  // One route per Propostas list (see `sales-views.ts`). The team only: the seller and
+  // finder lists have no propostas to split. All of them need the `orcamentos` module.
+  { id: 'vendas', label: 'Propostas', icon: BriefcaseBusiness, requires: ['orcamentos'] },
+  { id: 'vendas-abertas', label: 'Em aberto', icon: BriefcaseBusiness, requires: ['orcamentos'] },
+  { id: 'vendas-ganhas', label: 'Vendidas', icon: BadgeDollarSign, requires: ['orcamentos'] },
+  { id: 'vendas-encerradas', label: 'Perdidas e canceladas', icon: Archive, requires: ['orcamentos'] },
+  { id: 'comissoes', label: 'Comissões', icon: BadgeDollarSign, requires: ['comissoes'] },
+  // `leads` is the landing ROUTE of the compact profile (first visible entry there).
+  { id: 'leads', label: 'Prospecção', icon: LayoutGrid, requires: [] },
+  { id: 'funil', label: 'Funil', icon: LayoutGrid, requires: [] },
+  // The team's agenda of next steps (09e): needs no module.
+  { id: 'follow-ups', label: 'Follow-ups', icon: CalendarClock, requires: [] },
 ];
 
-const leadsEditionMeusDadosSeller: SalesOpsNavigationItem[] = [
-  { id: 'leads', label: 'Prospecção', icon: LayoutGrid },
-  { id: 'funil', label: 'Funil', icon: LayoutGrid },
-  { id: 'follow-ups', label: 'Meus follow-ups', icon: CalendarClock },
+const cadastros: NavEntry[] = [
+  { id: 'produtos', label: 'Produtos & Serviços', icon: Database, requires: ['catalogo'] },
+  { id: 'areas', label: 'Áreas', icon: Layers, requires: ['catalogo'] },
+  { id: 'clientes', label: 'Clientes', icon: ContactRound, requires: ['clientes'] },
+  // Pessoas is the compact profile's landing: labelled Vendedores and moved first there.
+  {
+    id: 'pessoas',
+    label: 'Pessoas',
+    icon: UsersRound,
+    requires: [],
+    compactLabel: 'Vendedores',
+    compactFirst: true,
+  },
+  { id: 'funcoes', label: 'Funções', icon: Tags, requires: ['catalogo'] },
+  { id: 'etapas', label: 'Etapas do funil', icon: ListChecks, requires: [] },
+  { id: 'importacao', label: 'Importação', icon: FileSpreadsheet, requires: ['importacao'] },
+  // The lead lixeira (AC9): the gestor restores a deleted lead here.
+  { id: 'leads-excluidos', label: 'Leads excluídos', icon: Trash2, requires: [] },
+  // The settings-and-history catch-all stays last.
+  { id: 'geral', label: 'Geral', icon: Cog, requires: ['financeiro'] },
 ];
+
+const meusDadosSeller: NavEntry[] = [
+  { id: 'vendedores', label: 'Meu painel', icon: UsersRound, requires: ['orcamentos'] },
+  { id: 'comissoes', label: 'Comissões', icon: BadgeDollarSign, requires: ['comissoes'] },
+  // `[0]` here is where a seller's session starts in the compact profile.
+  { id: 'leads', label: 'Minha prospecção', icon: LayoutGrid, requires: [], compactLabel: 'Prospecção' },
+  { id: 'funil', label: 'Funil', icon: LayoutGrid, requires: [] },
+  { id: 'follow-ups', label: 'Meus follow-ups', icon: CalendarClock, requires: [] },
+];
+
+const meusDadosFinder: NavEntry[] = [
+  { id: 'finders', label: 'Meu painel', icon: Search, requires: ['finders'] },
+  { id: 'vendas', label: 'Indicações', icon: BriefcaseBusiness, requires: ['finders'] },
+];
+
+/** The catalogue, exported for the coverage test (every view classified, every requires known). */
+export const NAVIGATION_CATALOGUE = {
+  tatico: tacticalTeam,
+  operacional: operational,
+  cadastros,
+  meusDadosSeller,
+  meusDadosFinder,
+} as const;
 
 export const salesOpsWorkspaces: Array<{
   id: SalesOpsWorkspace;
@@ -191,7 +185,8 @@ export const salesOpsWorkspaces: Array<{
   { id: 'meus-dados', label: 'Meus dados', description: 'Painel e comissões pessoais' },
 ];
 
-const leadsEditionWorkspaces: ReadonlyArray<{
+/** The compact profile's workspace catalogue: Operacional is described as Prospecção. Built once. */
+const compactWorkspaces: ReadonlyArray<{
   id: SalesOpsWorkspace;
   label: string;
   description: string;
@@ -199,86 +194,91 @@ const leadsEditionWorkspaces: ReadonlyArray<{
   item.id === 'operacional' ? { ...item, description: 'Prospecção' } : item,
 );
 
-/**
- * The workspace catalogue for an edition. The full edition gets the SAME
- * `salesOpsWorkspaces` array object, so nothing about it can drift.
- */
+/** The workspace catalogue for a module set. Every module on gives the SAME `salesOpsWorkspaces` object. */
 export function getSalesOpsWorkspaces(
-  edition: SalesEdition = 'full',
+  modules: OrgModules = ALL_MODULES_ENABLED,
 ): ReadonlyArray<{ id: SalesOpsWorkspace; label: string; description: string }> {
-  return edition === 'leads' ? leadsEditionWorkspaces : salesOpsWorkspaces;
+  return isCompactProfile(modules) ? compactWorkspaces : salesOpsWorkspaces;
+}
+
+function visibleEntries(entries: readonly NavEntry[], modules: OrgModules): SalesOpsNavigationItem[] {
+  const compact = isCompactProfile(modules);
+  const shown = entries.filter((entry) => hasEveryModule(modules, entry.requires));
+  const ordered = compact
+    ? [...shown.filter((entry) => entry.compactFirst), ...shown.filter((entry) => !entry.compactFirst)]
+    : shown;
+  return ordered.map(({ id, label, icon, compactLabel }) => ({
+    id,
+    icon,
+    label: compact && compactLabel ? compactLabel : label,
+  }));
+}
+
+/** Memo of the navigation lists: the shell calls these on every render and must get the same arrays back. */
+const navigationCache = new Map<string, SalesOpsNavigationItem[]>();
+
+export function getSalesOpsNavigation(
+  workspace: SalesOpsWorkspace,
+  roles: readonly AppRole[],
+  modules: OrgModules = ALL_MODULES_ENABLED,
+): SalesOpsNavigationItem[] {
+  const seller = roles.includes('seller');
+  const finder = roles.includes('finder');
+  const flags = workspace === 'meus-dados' ? `${seller ? 1 : 0}${finder ? 1 : 0}` : '-';
+  const key = `${workspace}|${flags}|${modulesCacheKey(modules)}`;
+  const cached = navigationCache.get(key);
+  if (cached) return cached;
+  let items: SalesOpsNavigationItem[];
+  switch (workspace) {
+    case 'tatico':
+      items = visibleEntries(tacticalTeam, modules);
+      break;
+    case 'operacional':
+      items = visibleEntries(operational, modules);
+      break;
+    case 'cadastros':
+      items = visibleEntries(cadastros, modules);
+      break;
+    case 'meus-dados':
+      items = [
+        ...(seller ? visibleEntries(meusDadosSeller, modules) : []),
+        ...(finder ? visibleEntries(meusDadosFinder, modules) : []),
+      ];
+      break;
+  }
+  navigationCache.set(key, items);
+  return items;
 }
 
 export function getVisibleWorkspaces(
   roles: readonly AppRole[],
-  edition: SalesEdition = 'full',
+  modules: OrgModules = ALL_MODULES_ENABLED,
 ): SalesOpsWorkspace[] {
   const roleSet = new Set(roles);
-  if (edition === 'leads') {
-    // The gestor always also holds `seller` (getRolesFromHubClaims), and AC2 gives the
-    // gestor exactly Prospecção, Vendedores and Etapas, so `admin` wins outright here.
-    // `finder` grants nothing: this edition has no finder screen.
-    if (roleSet.has('admin')) return ['operacional', 'cadastros'];
-    if (roleSet.has('seller')) return ['meus-dados'];
-    return [];
+  const admin = roleSet.has('admin');
+  const candidates: SalesOpsWorkspace[] = [];
+  if (admin) candidates.push('tatico', 'operacional', 'cadastros');
+  // In the compact profile the admin wins outright: the gestor is also a seller, and
+  // the seller's own panel is not part of the compact product (the leads-edition rule).
+  if ((roleSet.has('seller') || roleSet.has('finder')) && !(admin && isCompactProfile(modules))) {
+    candidates.push('meus-dados');
   }
-  const visible: SalesOpsWorkspace[] = [];
-  if (roleSet.has('admin')) {
-    visible.push('tatico', 'operacional', 'cadastros');
-  }
-  if (roleSet.has('seller') || roleSet.has('finder')) {
-    visible.push('meus-dados');
-  }
-  return visible;
+  // A workspace whose every entry is hidden by the modules is not offered.
+  return candidates.filter((id) => getSalesOpsNavigation(id, roles, modules).length > 0);
 }
 
 /**
  * Baixa and estorno are admin actions of the `operacional` workspace only:
  * `meus-dados` reuses the same views and stays read-only for everyone. Both terms
  * are load-bearing; the admin one is belt and braces today because only an admin
- * can stand in `operacional`.
- * The leads edition has no proposta, so it never settles.
+ * can stand in `operacional`. Settling needs the `orcamentos` module (a proposta).
  */
 export function canSettleInWorkspace(
   workspace: SalesOpsWorkspace,
   roles: readonly AppRole[],
-  edition: SalesEdition = 'full',
+  modules: OrgModules = ALL_MODULES_ENABLED,
 ): boolean {
-  return edition !== 'leads' && workspace === 'operacional' && roles.includes('admin');
-}
-
-export function getSalesOpsNavigation(
-  workspace: SalesOpsWorkspace,
-  roles: readonly AppRole[],
-  edition: SalesEdition = 'full',
-): SalesOpsNavigationItem[] {
-  if (edition === 'leads') {
-    switch (workspace) {
-      case 'tatico':
-        return [];
-      case 'operacional':
-        return leadsEditionOperational;
-      case 'cadastros':
-        return leadsEditionCadastros;
-      case 'meus-dados':
-        return roles.includes('seller') ? leadsEditionMeusDadosSeller : [];
-    }
-  }
-  switch (workspace) {
-    case 'tatico':
-      return tacticalTeam;
-    case 'operacional':
-      return operational;
-    case 'cadastros':
-      return cadastros;
-    case 'meus-dados': {
-      const roleSet = new Set(roles);
-      const items: SalesOpsNavigationItem[] = [];
-      if (roleSet.has('seller')) items.push(...meusDadosSeller);
-      if (roleSet.has('finder')) items.push(...meusDadosFinder);
-      return items;
-    }
-  }
+  return hasModule(modules, 'orcamentos') && workspace === 'operacional' && roles.includes('admin');
 }
 
 export function buildSalesOpsPath(route: SalesOpsRoute): string {
@@ -310,14 +310,14 @@ export function buildSaleDetailPath(saleId: string): string {
 export function getDefaultSalesOpsRoute(
   roles: readonly AppRole[],
   preferredWorkspace?: SalesOpsWorkspace,
-  edition: SalesEdition = 'full',
+  modules: OrgModules = ALL_MODULES_ENABLED,
 ): SalesOpsRoute {
-  const visible = getVisibleWorkspaces(roles, edition);
+  const visible = getVisibleWorkspaces(roles, modules);
 
   // Prospecção leads the sidebar, while Funil remains the landing page because
   // a bare leads URL has no stage to show and redirects there.
   const landingView = (target: SalesOpsWorkspace) => {
-    const items = getSalesOpsNavigation(target, roles, edition);
+    const items = getSalesOpsNavigation(target, roles, modules);
     return items[0]?.id === 'leads' && items.some((item) => item.id === 'funil')
       ? 'funil'
       : items[0]?.id;
@@ -363,12 +363,12 @@ function aliasLegacyView(
 export function resolveSalesOpsRoute(
   params: SalesOpsRouteParams,
   roles: readonly AppRole[],
-  edition: SalesEdition = 'full',
+  modules: OrgModules = ALL_MODULES_ENABLED,
 ): SalesOpsRouteResolution {
-  const workspace = getVisibleWorkspaces(roles, edition).find((id) => id === params.workspace);
+  const workspace = getVisibleWorkspaces(roles, modules).find((id) => id === params.workspace);
   const requestedView = workspace ? aliasLegacyView(workspace, params.view) : params.view;
   const view = workspace
-    ? getSalesOpsNavigation(workspace, roles, edition).find((item) => item.id === requestedView)?.id
+    ? getSalesOpsNavigation(workspace, roles, modules).find((item) => item.id === requestedView)?.id
     : undefined;
 
   if (workspace && view) {
@@ -400,19 +400,19 @@ export function resolveSalesOpsRoute(
     };
   }
 
-  const route = getDefaultSalesOpsRoute(roles, undefined, edition);
+  const route = getDefaultSalesOpsRoute(roles, undefined, modules);
   return { route, path: buildSalesOpsPath(route), redirect: true };
 }
 
 export function workspaceForView(
   view: SalesOpsView,
   roles: readonly AppRole[],
-  edition: SalesEdition = 'full',
+  modules: OrgModules = ALL_MODULES_ENABLED,
 ): SalesOpsWorkspace {
-  for (const workspace of getVisibleWorkspaces(roles, edition)) {
-    if (getSalesOpsNavigation(workspace, roles, edition).some((item) => item.id === view)) {
+  for (const workspace of getVisibleWorkspaces(roles, modules)) {
+    if (getSalesOpsNavigation(workspace, roles, modules).some((item) => item.id === view)) {
       return workspace;
     }
   }
-  return getDefaultSalesOpsRoute(roles, undefined, edition).workspace;
+  return getDefaultSalesOpsRoute(roles, undefined, modules).workspace;
 }

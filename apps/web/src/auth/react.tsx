@@ -20,6 +20,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { isOrgLabelFallback, orgLabel } from '@/lib/displayNames';
 import { getRoleFromHubClaims, getRolesFromHubClaims, parseJwtPayload, type AppRole } from './claims';
 import { resolveSalesEdition, type SalesEdition } from '@fxl-sales/shared-utils/sales-edition';
+import { editionFromModules } from '@fxl-sales/shared-utils/crm-model';
+import { OrgModulesContext } from './org-modules-context';
 import { getDevIdentitySession } from '../dev/dev-identity-registry';
 import { getHubBffBasePath, loadHubBrowserConfig } from './provider';
 import { requestHubAccessToken, TRANSIENT_TOKEN_RESULT, type HubTokenResult } from './refresh';
@@ -1028,12 +1030,16 @@ function useHubProfile(): AuthProfile {
 }
 
 /**
- * The ONE read of the Sales edition for components (slices 06 and 07). Shell code that
+ * The ONE read of the Sales edition for components. The shell publishes the organization's
+ * modules through `OrgModulesContext`; this projects them to the legacy edition (`orcamentos`
+ * off => `leads`), and falls back to the token-derived hint outside the shell. Shell code that
  * already holds `useAuthProfile()` reads `profile.edition` instead, so the many test files
  * that mock this module with a hand-written profile keep working unchanged.
  */
 function useHubSalesEdition(): SalesEdition {
-  return useHubAuthContext().edition;
+  const modules = useContext(OrgModulesContext);
+  const hub = useHubAuthContext().edition;
+  return modules ? editionFromModules(modules) : hub;
 }
 
 function useHubLogout(): () => Promise<void> {

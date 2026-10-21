@@ -2,6 +2,7 @@ import { Navigate } from 'react-router-dom';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAuthProfile } from '@/auth/react';
 import { getVisibleWorkspaces } from '@/sales-ops/navigation';
+import { modulesHintFromEdition } from '@/sales-ops/org-modules';
 
 type Role = 'admin' | 'finder' | 'seller';
 
@@ -62,7 +63,7 @@ export function NoRoleGuard({ children }: { children: React.ReactNode }) {
   // `/` is `SalesOpsApp`, which resolves this operator's default workspace from these
   // same roles, so the landing decision stays in one place. `replace` so Back cannot
   // walk into the dead end again.
-  if (getVisibleWorkspaces(roles, edition).length > 0) {
+  if (getVisibleWorkspaces(roles, modulesHintFromEdition(edition)).length > 0) {
     return <Navigate to="/" replace />;
   }
 

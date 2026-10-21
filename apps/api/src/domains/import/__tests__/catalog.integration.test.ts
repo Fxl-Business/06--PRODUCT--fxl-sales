@@ -4,6 +4,7 @@
  *
  * Run: VITEST_INTEGRATION=1 pnpm exec vitest run src/domains/import/__tests__/catalog.integration.test.ts
  */
+import { ALL_MODULES_ENABLED } from '@fxl-sales/shared-utils/crm-model';
 import { eq } from 'drizzle-orm';
 import { deleteCrmForOrgs } from '../../../db/__tests__/settlement-test-cleanup.js';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
@@ -39,7 +40,7 @@ function must<T>(v: T | undefined): T {
 }
 
 const catalogOf = (orgId: string, now = NOW) =>
-  withTenant(getDb(), orgId, (tx) => readImportCatalog(tx, orgId, now));
+  withTenant(getDb(), orgId, (tx) => readImportCatalog(tx, orgId, now, ALL_MODULES_ENABLED));
 
 async function counts(orgId: string) {
   const admin = getAdminDb();
@@ -179,7 +180,7 @@ describe('readImportCatalog', () => {
       await ensureLeadStages(tx, orgId);
       await ensureSystemFuncoes(tx, orgId);
       await ensureSystemFuncoes(tx, orgId);
-      return readImportCatalog(tx, orgId, NOW);
+      return readImportCatalog(tx, orgId, NOW, ALL_MODULES_ENABLED);
     });
     expect(catalog.funcoes.map((f) => [f.name, f.isSystem]).sort()).toEqual([['Finder', true], ['Vendedor', true]]);
     // The default CRM pipeline; kind is the derived legacy vocabulary (orcamento -> conversion, perdido -> lost).
