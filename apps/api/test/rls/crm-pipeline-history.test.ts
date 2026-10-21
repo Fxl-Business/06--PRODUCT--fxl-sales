@@ -445,18 +445,30 @@ describe('lead write responses carry the dynamic fields', () => {
 });
 
 describe('the board lock order', () => {
-  it('advance, move and create on the same org run concurrently without deadlock and keep positions dense', async () => {
+  it('advance and cross-stage moves on the SAME lead run concurrently for 15 rounds without deadlock and keep positions dense', async () => {
     const w = await world('concurrent');
-    const a = await w.create({ contactName: 'A' });
-    const b = await w.create({ contactName: 'B' });
-    const [advanced, moved, created] = await Promise.all([
-      call(w.app, 'POST', `/leads/${a.id}/advance`, { toStageId: w.stage('Qualificação'), nextStep: 'x', dueOn: '2026-10-26' }),
-      call(w.app, 'POST', `/leads/${b.id}/move`, { stageId: b.stageId, position: 0 }),
-      call(w.app, 'POST', '/leads', { contactName: 'C', contactEmail: 'c@x.com' }),
-    ]);
-    expect(advanced.status).toBe(200);
-    expect(moved.status).toBe(200);
-    expect(created.status).toBe(201);
+    const lead = await w.create({ contactName: 'Mesmo lead' });
+    // Novo, Qualificação and Pausado are pairwise connected in both directions by the default graph,
+    // so the lead can keep moving among them and every round has two valid cross-stage targets.
+    const cycle = ['Novo', 'Qualificação', 'Pausado'].map((name) => w.stage(name));
+    const answersAllowed = (res: { status: number; json: Record<string, any> }) =>
+      (res.status === 200) || (res.status === 409 && res.json.error === 'transition_not_allowed');
+    for (let round = 0; round < 15; round++) {
+      const [current] = await sql<{ stage_id: string }[]>`SELECT stage_id FROM sales_ops_crm_leads WHERE org_id = ${w.orgId} AND id = ${lead.id}`;
+      const [first, second] = cycle.filter((stageId) => stageId !== current!.stage_id);
+      const [advanced, movedFirst, movedSecond, movedAgain, created] = await Promise.all([
+        call(w.app, 'POST', `/leads/${lead.id}/advance`, { toStageId: first, nextStep: 'Retornar', dueOn: '2026-10-26' }),
+        call(w.app, 'POST', `/leads/${lead.id}/move`, { stageId: first, position: 0 }),
+        call(w.app, 'POST', `/leads/${lead.id}/move`, { stageId: second, position: 0 }),
+        call(w.app, 'POST', `/leads/${lead.id}/move`, { stageId: first, position: 0 }),
+        call(w.app, 'POST', '/leads', { contactName: `Lateral ${round}`, contactEmail: `lateral${round}@x.com` }),
+      ]);
+      for (const res of [advanced, movedFirst, movedSecond, movedAgain]) {
+        expect(res.status, JSON.stringify(res.json)).not.toBe(500);
+        expect(answersAllowed(res), JSON.stringify(res.json)).toBe(true);
+      }
+      expect(created.status, JSON.stringify(created.json)).toBe(201);
+    }
     const columns = await sql<{ stage_id: string; positions: number[] }[]>`
       SELECT stage_id, array_agg(position ORDER BY position) AS positions
       FROM sales_ops_crm_leads WHERE org_id = ${w.orgId} AND deleted_at IS NULL
