@@ -15,7 +15,7 @@ import { stageOpensConversion } from './board-move';
 import { mutedStateClass } from './board-ui';
 import { boardStages } from './calculations';
 import { useFieldDefinitions, usePipelines } from './crm-hooks';
-import { pickPipeline, pipelineStagesAsBoardStages } from './crm-pipeline';
+import { isTransitionAllowed, pickPipeline, pipelineStagesAsBoardStages } from './crm-pipeline';
 import { LeadDeleteDialog } from './LeadDeleteDialog';
 import { LeadForm } from './LeadForm';
 import { LeadsBoard, type LeadConversionRequest } from './LeadsBoard';
@@ -201,8 +201,10 @@ export function LeadsBoardContainer({
       : [];
     const sourceIndex = sourceColumn.findIndex((row) => row.id === payload.leadId);
     const result = await moveLead.mutateAsync(payload);
+    // The inverse is a move back along the graph, so it is offered only when the graph allows it.
     if (!previous || sourceIndex < 0 || payload.saleId ||
-      stageOpensConversion(stages.find((stage) => stage.id === payload.toStageId))) return;
+      stageOpensConversion(stages.find((stage) => stage.id === payload.toStageId)) ||
+      !isTransitionAllowed(pipeline, payload.toStageId, previous.stageId)) return;
     undo.publish('Lead movido', async () => {
       await requireUnchangedLead(result.lead);
       return moveLead.mutateAsync({
