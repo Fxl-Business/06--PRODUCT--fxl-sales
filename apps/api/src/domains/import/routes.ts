@@ -1,7 +1,9 @@
+import type { OrgModules } from '@fxl-sales/shared-utils/crm-model';
 import { Hono, type Context } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { getDb } from '../../db/client.js';
 import { requireAdmin } from '../../middleware/require-admin.js';
+import { getOrgModules } from '../org-modules/context.js';
 import { cadastroActor } from '../sales-ops/cadastro-actor.js';
 import { ensureLeadStages } from '../sales-ops/leads/stages-seed.js';
 import { ensureSystemFuncoes, withTenant, type Db } from '../sales-ops/service.js';
@@ -48,10 +50,10 @@ async function readOnlyTenant<T>(orgId: string, fn: (tx: Db) => Promise<T>): Pro
 }
 
 /** D11 and D11b: the default etapas and the system funcoes exist before the catalog is read, in EVERY import route. */
-async function seededCatalog(tx: Db, orgId: string, now: Date): Promise<ImportCatalog> {
+async function seededCatalog(tx: Db, orgId: string, now: Date, modules: OrgModules): Promise<ImportCatalog> {
   await ensureLeadStages(tx, orgId);
   await ensureSystemFuncoes(tx, orgId);
-  return readImportCatalog(tx, orgId, now);
+  return readImportCatalog(tx, orgId, now, modules);
 }
 
 /** Thrown out of the commit transaction so a plan with errors rolls back whatever the catalog read did. */
@@ -93,7 +95,8 @@ importRouter.get('/template', requireAdmin, async (c) => {
   const orgId = c.get('orgId');
   const now = new Date();
   // Rolled back: the dropdowns list the default etapas without persisting them.
-  const catalog = await readOnlyTenant(orgId, (tx) => seededCatalog(tx, orgId, now));
+  const modules = await getOrgModules(c);
+  const catalog = await readOnlyTenant(orgId, (tx) => seededCatalog(tx, orgId, now, modules));
   const bytes = await buildTemplateWorkbook(catalog, { example });
   return c.body(new Uint8Array(bytes), 200, {
     'Content-Type': XLSX_CONTENT_TYPE,
@@ -107,9 +110,10 @@ importRouter.post('/preview', requireAdmin, uploadBodyLimit, async (c) => {
   if (!upload.ok) return refusal(c, upload.status);
   const orgId = c.get('orgId');
   const now = new Date();
+  const modules = await getOrgModules(c);
   // Seed, read and plan in one transaction, then roll it back: preview writes nothing.
   const plan = await readOnlyTenant(orgId, async (tx) =>
-    planImport(upload.parsed, await seededCatalog(tx, orgId, now)),
+    planImport(upload.parsed, await seededCatalog(tx, orgId, now, modules)),
   );
   return c.json(toPreviewBody(plan), 200);
 });
@@ -120,12 +124,13 @@ importRouter.post('/commit', requireAdmin, uploadBodyLimit, async (c) => {
   const orgId = c.get('orgId');
   const actor = cadastroActor(c);
   const now = new Date();
+  const modules = await getOrgModules(c);
   try {
     const result = await withTenant(getDb(), orgId, async (tx) => {
       // The seed is part of the committed transaction (and rolls back with it on any failure).
-      const plan = planImport(upload.parsed, await seededCatalog(tx, orgId, now));
+      const plan = planImport(upload.parsed, await seededCatalog(tx, orgId, now, modules));
       if (!isPlanOk(plan)) throw new ImportPlanRejected(plan);
-      return executeImportPlan(tx, orgId, plan, actor, now);
+      return executeImportPlan(tx, orgId, plan, actor, now, modules);
     });
     const body: ImportCommitBody = { counts: result.counts, recognized: result.recognized };
     return c.json(body, 201);

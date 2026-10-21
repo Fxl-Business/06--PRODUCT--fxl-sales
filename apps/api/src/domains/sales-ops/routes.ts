@@ -1,4 +1,5 @@
-import { Hono } from 'hono';
+import { CRM_MODULE_KEYS } from '@fxl-sales/shared-utils/crm-model';
+import { type Context, Hono } from 'hono';
 import { z } from 'zod';
 import { getDb } from '../../db/client.js';
 import {
@@ -7,9 +8,12 @@ import {
   requireAdmin,
 } from '../../middleware/require-admin.js';
 import { requireCapability } from '../../middleware/require-capability.js';
+import { requireModuleOperator } from '../../middleware/require-module-operator.js';
 import { HISTORY_MAX_LIMIT, listOrgAuditHistory } from '../audit/history-service.js';
 import { importRouter } from '../import/routes.js';
 import { cadastroActor } from './cadastro-actor.js';
+import { getOrgModules } from '../org-modules/context.js';
+import { loadOrgModules, updateOrgModules } from '../org-modules/service.js';
 import { crmRouter } from './crm-routes.js';
 import { leadsRouter } from './leads/lead-routes.js';
 import { leadStagesRouter } from './leads/stage-routes.js';
@@ -66,6 +70,7 @@ import {
   recordSettlement,
   reverseSettlement,
 } from './settlements.js';
+import { getSalesEdition } from '../org-modules/context.js';
 
 const saleIdSchema = z.string().uuid();
 
@@ -76,8 +81,9 @@ export const salesOpsRouter = new Hono();
 // this file: Hono runs matched handlers in registration order, so a gate
 // registered below a handler never runs before it. `/x/*` also matches `/x`.
 // Open in every edition, deliberately: /bootstrap, GET /settings, /people,
-// /lead-stages and /leads. The capability set per edition lives in
-// `@fxl-sales/shared-utils/sales-edition`; the full edition passes every gate.
+// /lead-stages and /leads. The capability set per organization lives in
+// `sales_ops_org_modules`; `CAPABILITY_MODULES` in `@fxl-sales/shared-utils/crm-model`
+// maps each capability to its modules, and the full product passes every gate.
 // PUT /settings is gated inline on its route below because GET /settings stays open.
 // ─────────────────────────────────────────────────────────────────────────────
 salesOpsRouter.use('/summary/*', requireCapability('proposals'));
@@ -92,12 +98,46 @@ salesOpsRouter.use('/funcoes/*', requireCapability('catalog'));
 salesOpsRouter.use('/import/*', requireCapability('import'));
 salesOpsRouter.use('/history/*', requireCapability('history'));
 
+/**
+ * The organization's module flags. Every key is present and every value is a boolean, so
+ * the body is a complete picture for the web's navigation. Never capability gated: an
+ * admin must always be able to read and change them.
+ */
+const OrgModulesPatchSchema = z
+  .object({
+    modules: z
+      .object(Object.fromEntries(CRM_MODULE_KEYS.map((key) => [key, z.boolean().optional()])))
+      .strict()
+      .refine((value) => Object.keys(value).length > 0, { message: 'at_least_one_module' }),
+  })
+  .strict();
+
+function orgTokenModules(c: Context): readonly unknown[] | undefined {
+  return c.get('hubAuth')?.entitlements?.modules;
+}
+
+salesOpsRouter.get('/org-modules', requireAdmin, async (c) => {
+  const state = await loadOrgModules(c.get('orgId'), orgTokenModules(c));
+  return c.json({ modules: state.modules, sources: state.sources });
+});
+
+// A tenant admin cannot enable a module for their own organization: the write is a
+// platform-operator action (requireModuleOperator, SALES_MODULE_OPERATOR_ACCOUNT_IDS).
+salesOpsRouter.put('/org-modules', requireAdmin, requireModuleOperator, async (c) => {
+  const parsed = OrgModulesPatchSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) {
+    return c.json({ error: 'validation_error', issues: parsed.error.flatten() }, 400);
+  }
+  const state = await updateOrgModules(c.get('orgId'), orgTokenModules(c), parsed.data.modules);
+  return c.json({ modules: state.modules, sources: state.sources });
+});
+
 salesOpsRouter.get('/bootstrap', async (c) => {
   const orgId = c.get('orgId');
   // ECV bug: an org created after migration 0022 has no etapas until something seeds them.
   await ensureLeadStagesForOrg(getDb(), orgId);
   const snapshot = await getSalesOpsSnapshot(getDb(), orgId);
-  return c.json(snapshot);
+  return c.json({ ...snapshot, orgModules: await getOrgModules(c) });
 });
 
 salesOpsRouter.get('/summary', async (c) => {
@@ -127,7 +167,7 @@ salesOpsRouter.post('/people', requireAdmin, async (c) => {
   }
   // The leads edition forces the função set to exactly [vendedor] in the service.
   // The full edition keeps today's exact three-argument call.
-  const edition = c.get('salesEdition') ?? 'full';
+  const edition = await getSalesEdition(c);
   const person =
     edition === 'leads'
       ? await createPerson(getDb(), c.get('orgId'), parsed.data, { edition })
@@ -143,7 +183,7 @@ salesOpsRouter.patch('/people/:id', requireAdmin, async (c) => {
   if (!parsed.success) {
     return c.json({ error: 'validation_error', issues: parsed.error.flatten() }, 400);
   }
-  const edition = c.get('salesEdition') ?? 'full';
+  const edition = await getSalesEdition(c);
   const person =
     edition === 'leads'
       ? await updatePerson(getDb(), c.get('orgId'), c.req.param('id'), parsed.data, cadastroActor(c), {

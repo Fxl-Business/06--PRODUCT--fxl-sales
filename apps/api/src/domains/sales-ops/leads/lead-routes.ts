@@ -1,6 +1,8 @@
 import { type Context, Hono } from 'hono';
 import { z } from 'zod';
+import { editionFromModules } from '@fxl-sales/shared-utils/crm-model';
 import { getDb } from '../../../db/client.js';
+import { getOrgModules } from '../../org-modules/context.js';
 import { requireAdmin } from '../../../middleware/require-admin.js';
 import { cadastroActor } from '../cadastro-actor.js';
 import {
@@ -72,7 +74,8 @@ export function leadActor(c: Context): LeadActor {
   return { userId: actor.userId, name: actor.displayName };
 }
 
-export function leadScope(c: Context): LeadScope {
+export async function leadScope(c: Context): Promise<LeadScope> {
+  const modules = await getOrgModules(c);
   const claims = c.get('hubAuth')?.claims;
   const email = claims?.email;
   const name = claims?.name;
@@ -85,7 +88,8 @@ export function leadScope(c: Context): LeadScope {
     // never reaches it (see resolveLeadScopePredicate).
     name: typeof name === 'string' && name.trim() !== '' ? name : null,
     hasSellerRole: roles.includes('seller'),
-    edition: c.get('salesEdition') ?? 'full',
+    edition: editionFromModules(modules),
+    modules,
   };
 }
 
@@ -163,7 +167,7 @@ leadsRouter.get('/', async (c) => {
     throw error;
   }
   try {
-    const result = await listLeads(getDb(), c.get('orgId'), { ...parsed.data, ...(filters.length > 0 ? { filters } : {}) }, leadScope(c));
+    const result = await listLeads(getDb(), c.get('orgId'), { ...parsed.data, ...(filters.length > 0 ? { filters } : {}) }, await leadScope(c));
     if (!result.ok) return failureResponse(c, result.reason);
     return c.json({ leads: result.leads, nextCursor: result.nextCursor, total: result.total });
   } catch (error) {
@@ -178,7 +182,7 @@ leadsRouter.post('/', async (c) => {
   if (!parsed.success) return validationResponse(c, parsed.error);
   let result: WriteLeadResult;
   try {
-    result = await createLead(getDb(), c.get('orgId'), parsed.data, leadScope(c));
+    result = await createLead(getDb(), c.get('orgId'), parsed.data, await leadScope(c));
   } catch (error) {
     if (error instanceof LeadInputError) return leadInputErrorResponse(c, error);
     throw error;
@@ -217,7 +221,7 @@ leadsRouter.get('/summary', async (c) => {
   if (!parsed.success) return validationResponse(c, parsed.error);
   try {
     const filters = parseDynamicFilters(c.req.query());
-    const result = await summarizeLeadStages(getDb(), c.get('orgId'), { ...parsed.data, ...(filters.length > 0 ? { filters } : {}) }, leadScope(c));
+    const result = await summarizeLeadStages(getDb(), c.get('orgId'), { ...parsed.data, ...(filters.length > 0 ? { filters } : {}) }, await leadScope(c));
     if (!result.ok) return failureResponse(c, result.reason);
     return c.json({ stages: result.stages });
   } catch (error) {
@@ -229,7 +233,7 @@ leadsRouter.get('/summary', async (c) => {
 leadsRouter.get('/:id', async (c) => {
   const id = leadIdSchema.safeParse(c.req.param('id'));
   if (!id.success) return c.json({ error: 'not_found' }, 404);
-  const result = await getLead(getDb(), c.get('orgId'), id.data, leadScope(c));
+  const result = await getLead(getDb(), c.get('orgId'), id.data, await leadScope(c));
   if (!result.ok) return failureResponse(c, result.reason);
   return c.json({ lead: result.lead });
 });
@@ -241,7 +245,7 @@ leadsRouter.patch('/:id', async (c) => {
   if (!parsed.success) return validationResponse(c, parsed.error);
   let result: WriteLeadResult;
   try {
-    result = await updateLead(getDb(), c.get('orgId'), id.data, parsed.data, leadScope(c));
+    result = await updateLead(getDb(), c.get('orgId'), id.data, parsed.data, await leadScope(c));
   } catch (error) {
     if (error instanceof LeadInputError) return leadInputErrorResponse(c, error);
     throw error;
@@ -258,7 +262,7 @@ leadsRouter.post('/:id/move', async (c) => {
     return c.json({ error: 'validation_error', issues: parsed.error.flatten() }, 400);
   }
   try {
-    const result = await moveLead(getDb(), c.get('orgId'), id.data, parsed.data, leadScope(c));
+    const result = await moveLead(getDb(), c.get('orgId'), id.data, parsed.data, await leadScope(c));
     if (!result.ok) return failureResponse(c, result.reason);
     return c.json({ lead: result.lead });
   } catch (error) {
@@ -271,7 +275,7 @@ leadsRouter.post('/:id/move', async (c) => {
 leadsRouter.get('/:id/summary', async (c) => {
   const id = leadIdSchema.safeParse(c.req.param('id'));
   if (!id.success) return c.json({ error: 'not_found' }, 404);
-  const result = await getLeadSummary(getDb(), c.get('orgId'), id.data, leadScope(c));
+  const result = await getLeadSummary(getDb(), c.get('orgId'), id.data, await leadScope(c));
   if (!result.ok) return failureResponse(c, result.reason);
   return c.json(result.summary);
 });
@@ -283,7 +287,7 @@ leadsRouter.post('/:id/advance', async (c) => {
   const parsed = AdvanceLeadSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return validationResponse(c, parsed.error);
   try {
-    const result = await advanceLead(getDb(), c.get('orgId'), id.data, parsed.data, leadScope(c));
+    const result = await advanceLead(getDb(), c.get('orgId'), id.data, parsed.data, await leadScope(c));
     if (!result.ok) return failureResponse(c, result.reason);
     return c.json({ lead: result.lead });
   } catch (error) {
@@ -297,7 +301,7 @@ leadsRouter.post('/:id/notes', async (c) => {
   if (!id.success) return c.json({ error: 'not_found' }, 404);
   const parsed = LeadNoteSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return validationResponse(c, parsed.error);
-  const result = await addLeadNote(getDb(), c.get('orgId'), id.data, parsed.data, leadScope(c));
+  const result = await addLeadNote(getDb(), c.get('orgId'), id.data, parsed.data, await leadScope(c));
   if (!result.ok) return failureResponse(c, result.reason);
   return c.json({ note: result.note }, 201);
 });
@@ -308,7 +312,7 @@ leadsRouter.post('/:id/followups', async (c) => {
   const parsed = LeadFollowupSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return validationResponse(c, parsed.error);
   try {
-    const result = await addLeadFollowup(getDb(), c.get('orgId'), id.data, parsed.data, leadScope(c));
+    const result = await addLeadFollowup(getDb(), c.get('orgId'), id.data, parsed.data, await leadScope(c));
     if (!result.ok) return failureResponse(c, result.reason);
     return c.json({ followup: result.followup }, 201);
   } catch (error) {
@@ -322,7 +326,7 @@ leadsRouter.post('/:id/followups', async (c) => {
 leadsRouter.post('/:id/delete', async (c) => {
   const id = leadIdSchema.safeParse(c.req.param('id'));
   if (!id.success) return c.json({ error: 'not_found' }, 404);
-  const result = await deleteLead(getDb(), c.get('orgId'), id.data, leadScope(c), leadActor(c));
+  const result = await deleteLead(getDb(), c.get('orgId'), id.data, await leadScope(c), leadActor(c));
   if (!result.ok) return failureResponse(c, result.reason);
   return c.body(null, 204);
 });
@@ -333,7 +337,7 @@ leadsRouter.post('/:id/restore', async (c) => {
   const id = leadIdSchema.safeParse(c.req.param('id'));
   if (!id.success) return c.json({ error: 'not_found' }, 404);
   try {
-    const result = await restoreLead(getDb(), c.get('orgId'), id.data, leadScope(c).isAdmin, leadActor(c));
+    const result = await restoreLead(getDb(), c.get('orgId'), id.data, (await leadScope(c)).isAdmin, leadActor(c));
     if (!result.ok) return failureResponse(c, result.reason);
     return c.json({ lead: result.lead });
   } catch (error) {

@@ -1,3 +1,4 @@
+import { ALL_MODULES_ENABLED } from '@fxl-sales/shared-utils/crm-model';
 import { Hono } from 'hono';
 import { hubAuthContext as sharedHubAuthContext } from '../../../auth/__tests__/hub-auth-context-fixture.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -95,6 +96,7 @@ function createTestApp() {
   app.use('*', async (c, next) => {
     c.set('userId', 'verified-account');
     c.set('orgId', 'verified-org');
+    c.set('orgModules', ALL_MODULES_ENABLED);
     c.set('userRole', currentRole);
     c.set('userRoles', currentRole ? [currentRole] : []);
     c.set('hubAuth', hubAuthContext());

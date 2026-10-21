@@ -1,3 +1,4 @@
+import { ALL_MODULES_ENABLED, stageActsAsOrcamento } from '@fxl-sales/shared-utils/crm-model';
 import { and, asc, eq, isNull, or, sql, type SQL } from 'drizzle-orm';
 import type { getDb } from '../../../db/client.js';
 import {
@@ -237,7 +238,7 @@ export function advanceLead(
     ) {
       return { ok: false, reason: 'transition_not_allowed' } as const;
     }
-    if (destination.type === 'orcamento' && destination.behavior === 'opens_orcamentos') {
+    if (stageActsAsOrcamento(destination, scope.modules ?? ALL_MODULES_ENABLED)) {
       return { ok: false, reason: 'sale_required_for_conversion' } as const;
     }
 

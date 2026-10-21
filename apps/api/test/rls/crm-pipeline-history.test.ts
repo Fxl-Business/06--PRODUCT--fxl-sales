@@ -5,6 +5,7 @@
  *
  * Run: pnpm --filter @fxl-sales/api exec env VITEST_INTEGRATION=1 vitest run test/rls/crm-pipeline-history.test.ts
  */
+import { modulesForEdition } from '@fxl-sales/shared-utils/crm-model';
 import { randomUUID } from 'node:crypto';
 import { Hono } from 'hono';
 import postgres from 'postgres';
@@ -39,7 +40,7 @@ function appFor(orgId: string, who: Who): Hono {
     c.set('orgId', orgId);
     c.set('userRole', who.role);
     c.set('userRoles', (who.role === 'admin' ? ['admin', 'seller'] : ['seller']) as never);
-    c.set('salesEdition', 'full' as never);
+    c.set('orgModules', modulesForEdition('full'));
     c.set('hubAuth', hubAuthContext({ accountId: who.userId, workspaceId: orgId, ...(who.name ? { name: who.name } : {}), email: `${who.userId}@x.test` }));
     await next();
   });

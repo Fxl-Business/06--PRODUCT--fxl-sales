@@ -10,7 +10,6 @@ import {
 } from '../auth/hub-session-store.js';
 import { hubEnvBag, tryLoadHubAuthConfig } from '../config/auth-provider.js';
 import { env } from '../env.js';
-import { resolveSalesEdition } from '@fxl-sales/shared-utils/sales-edition';
 
 type EnvLike = Record<string, string | undefined>;
 
@@ -253,13 +252,12 @@ const hubAuthMiddleware = hubSdkConfig ? requireHubAuth(hubSdkConfig) : null;
  * on this path reads an org, an account or a workspace off a request body or
  * a query string.
  *
- * It is also the ONE place the Sales edition is resolved. `entitlements.modules`
- * is read here for an ADD-ON capability set, never for access: baseline access
- * is `entitlements.access`, decided by `requireHubAuth` (or the development
- * adapter's mirror of it) BEFORE this function runs, and nothing here can turn
- * a denied request into an allowed one. Absent, empty or unknown modules
- * resolve to 'full', which is today's product, so an organization the Hub never
- * marked keeps every capability. `requireCapability` reads the value this sets.
+ * It resolves NO edition and NO modules. `entitlements.modules` is read only by
+ * `loadOrgModules` (domains/org-modules/service.ts), once per organization, to seed
+ * `sales_ops_org_modules`; after that the database decides. Baseline access is still
+ * `entitlements.access`, decided by `requireHubAuth` (or the development adapter's
+ * mirror of it) BEFORE this function runs, and nothing here can turn a denied request
+ * into an allowed one.
  */
 export async function applyHubAuthContext(
   c: Context,
@@ -273,7 +271,6 @@ export async function applyHubAuthContext(
   c.set('orgId', legacy.orgId);
   c.set('userRole', legacy.userRole);
   c.set('userRoles', legacy.userRoles);
-  c.set('salesEdition', resolveSalesEdition(auth.entitlements?.modules));
   await next();
 }
 
