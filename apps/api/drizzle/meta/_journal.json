@@ -218,6 +218,13 @@
       "when": 1792567747520,
       "tag": "0030_crm_legacy_copy",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1792569511070,
+      "tag": "0031_crm_cutover_resync",
+      "breakpoints": true
     }
   ]
 }
