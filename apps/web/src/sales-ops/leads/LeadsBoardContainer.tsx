@@ -6,15 +6,15 @@ import type { ComboboxOption } from '@/components/ui/combobox';
 import { Skeleton } from '@/components/ui/skeleton';
 import { buildLeadStagePath, buildSalesOpsPath, type SalesOpsWorkspace } from '../navigation';
 import type { SalesOpsClient, SalesOpsPerson, SalesOpsProduct } from '../types';
-import type { MoveLeadPayload, SaveContactLeadPayload, SaveLeadPayload } from './api';
+import type { LeadWritePayload, MoveLeadPayload } from './api';
 import { buildLabelLookups } from './board-labels';
 import { stageOpensConversion } from './board-move';
 import { mutedStateClass } from './board-ui';
 import { boardStages, leadIsConverted } from './calculations';
-import { ContactLeadDialog } from './ContactLeadDialog';
-import { leadToContactSeed } from './contact-lead';
+import { useFieldDefinitions } from './crm-hooks';
 import { LeadDeleteDialog } from './LeadDeleteDialog';
-import { LeadDialog } from './LeadDialog';
+import { LeadForm } from './LeadForm';
+import { CLIENTE_FIELD_KEY, leadToWriteSeed } from './lead-form';
 import { LeadsBoard, type LeadConversionRequest } from './LeadsBoard';
 import { RestoreUndoNotice, UndoNotice } from './UndoNotice';
 import {
@@ -29,7 +29,7 @@ import type { LeadBoardFilters, SalesOpsLead } from './types';
 
 /**
  * The ONLY file in this slice that names a hook. Everything above it -
- * `LeadsBoard`, `LeadCard`, `MoveLeadDialog`, `LeadDialog` - is pure props in,
+ * `LeadsBoard`, `LeadCard`, `MoveLeadDialog`, `LeadForm` - is pure props in,
  * callbacks out, which is what lets every board oracle drive the real components
  * with no query client at all.
  *
@@ -102,28 +102,12 @@ export type LeadsBoardContainerProps = {
   /** Opens the proposta a converted lead became. Forwarded verbatim. */
   onOpenSale?: (saleId: string) => void;
   /**
-   * Leads edition only: create a client by name inline from the contact dialog's
-   * empresa picker. Owned by `SalesOpsApp` (the one client-create seam), so this
+   * Create a client by name inline from the LeadForm's empresa picker, in both
+   * editions. Owned by `SalesOpsApp` (the one client-create seam), so this
    * container keeps naming only leads hooks. Absent means the Criar row is hidden.
    */
   onCreateClient?: (name: string) => Promise<ComboboxOption | null>;
 };
-
-/** The edit path maps a rendered lead back into the write payload the dialog seeds from. */
-function leadToSeed(lead: SalesOpsLead): SaveLeadPayload {
-  return {
-    id: lead.id,
-    contactName: lead.contactName,
-    clientId: lead.clientId,
-    clientName: lead.clientNameSnapshot,
-    estimatedValueBrl: lead.estimatedValueBrl,
-    description: lead.description,
-    sellerPersonId: lead.sellerPersonId,
-    products: lead.products.map((row) =>
-      row.productId ? { productId: row.productId } : { productName: row.productNameSnapshot },
-    ),
-  };
-}
 
 export function LeadsBoardContainer({
   routedMode,
@@ -147,7 +131,6 @@ export function LeadsBoardContainer({
   const isAdmin = useAuthProfile().roles.includes('admin');
   const canManageStages = isAdmin;
   const navigate = useNavigate();
-  const [contactSeed, setContactSeed] = React.useState<SaveContactLeadPayload | null>(null);
   const [sellerPersonId, setSellerPersonId] = React.useState<string | null>(null);
   // The columns are resolved FIRST: the board query fans out one request per
   // stage and the API requires a `stageId`, so without the stage list there is
@@ -254,15 +237,20 @@ export function LeadsBoardContainer({
     });
   }
 
-  async function saveWithUndo(payload: SaveLeadPayload | SaveContactLeadPayload) {
+  async function saveWithUndo(payload: LeadWritePayload) {
     const previous = editingLead?.id === payload.id ? editingLead : null;
     const result = await saveLead.mutateAsync(payload);
-    if (previous) publishUndo('Lead editado', async () => {
-      await requireUnchangedLead(result.lead);
-      return saveLead.mutateAsync(
-        fieldSet === 'contact' ? leadToContactSeed(previous) : leadToSeed(previous),
-      );
-    });
+    if (previous) {
+      // The Cliente is never a field entry (it travels as clientId), so it never counts as "added".
+      const previousIds = new Set((previous.fields ?? []).map((f) => f.fieldId));
+      const added = (result.lead.fields ?? [])
+        .filter((f) => f.key !== CLIENTE_FIELD_KEY && !previousIds.has(f.fieldId))
+        .map((f) => f.fieldId);
+      publishUndo('Lead editado', async () => {
+        await requireUnchangedLead(result.lead);
+        return saveLead.mutateAsync(leadToWriteSeed(previous, added));
+      });
+    }
   }
 
   const lookups = React.useMemo(
@@ -279,7 +267,6 @@ export function LeadsBoardContainer({
   const now = React.useMemo(() => new Date(), []);
 
   const [dialogOpen, setDialogOpen] = React.useState(false);
-  const [dialogSeed, setDialogSeed] = React.useState<SaveLeadPayload | null>(null);
   /** The lead the open edit form is editing; null while creating. */
   const [editingLead, setEditingLead] = React.useState<SalesOpsLead | null>(null);
   /** The lead whose delete confirmation is open; null when none is. */
@@ -302,14 +289,8 @@ export function LeadsBoardContainer({
     if (editingLead?.id === lead.id) setDialogOpen(false);
   }
 
-  const clientOptions = React.useMemo(
-    () => clients.map((row) => ({ value: row.id, label: row.name })),
-    [clients],
-  );
-  const productOptions = React.useMemo(
-    () => products.map((row) => ({ value: row.id, label: row.name })),
-    [products],
-  );
+  const definitionsQuery = useFieldDefinitions();
+  const definitions = definitionsQuery.data ?? [];
 
   // `useLeadsBoard` is disabled while there are zero stage rows, so its query
   // stays pending forever; waiting on it would leave a fresh leads-edition org
@@ -347,15 +328,11 @@ export function LeadsBoardContainer({
         movePending={moveLead.isPending}
         now={now}
         onCreateLead={() => {
-          setDialogSeed(null);
-          setContactSeed(null);
           setEditingLead(null);
           setDialogOpen(true);
         }}
         onDeleteLead={setDeleteTarget}
         onEditLead={(lead) => {
-          setDialogSeed(leadToSeed(lead));
-          setContactSeed(leadToContactSeed(lead));
           setEditingLead(lead);
           setDialogOpen(true);
         }}
@@ -384,37 +361,24 @@ export function LeadsBoardContainer({
         stages={stages}
       />
 
-      {dialogOpen && fieldSet === 'full' ? (
-        <LeadDialog
-          clients={clientOptions}
-          initial={dialogSeed}
-          // `LeadDialog` seeds its fields at MOUNT, so the identity of what is
-          // being edited has to be the identity of the component.
-          key={dialogSeed?.id ?? 'novo'}
-          onDelete={requestDeleteFromForm}
-          onOpenChange={setDialogOpen}
-          onSubmit={saveWithUndo}
-          open
-          pending={saveLead.isPending}
-          products={productOptions}
-          sellers={sellers}
-        />
-      ) : null}
-
-      {dialogOpen && fieldSet === 'contact' ? (
-        <ContactLeadDialog
-          clients={clientOptions}
-          initial={contactSeed}
-          key={contactSeed?.id ?? 'novo'}
+      {dialogOpen && !definitionsQuery.isPending ? (
+        // One mount for both editions. It seeds at MOUNT, so it waits for the field
+        // definitions to settle (success or error) and is keyed by the lead it edits.
+        <LeadForm
+          clients={clients}
+          definitions={definitions}
+          initial={editingLead}
+          key={editingLead?.id ?? 'novo'}
           onCreateClient={onCreateClient}
           onDelete={requestDeleteFromForm}
           onOpenChange={setDialogOpen}
-          // The dialog awaits the save: it closes on success and, on a rejection
-          // (400 no_open_stage included), stays open with the typed values and
-          // the mapped error inline (D-07.1c).
+          // The form awaits the save: it closes on success and, on a rejection
+          // (400 no_open_stage included), stays open with the typed values and the
+          // mapped error inline.
           onSubmit={saveWithUndo}
           open
           pending={saveLead.isPending}
+          products={products}
           sellers={sellers}
           showSellerPicker={isAdmin}
         />

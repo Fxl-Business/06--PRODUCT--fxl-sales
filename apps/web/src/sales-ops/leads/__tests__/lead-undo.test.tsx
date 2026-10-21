@@ -19,9 +19,18 @@ const stage = (id: string, kind: SalesOpsLeadStage['kind'], position: number): S
   archivedAt: null, createdAt: '2026-01-01T00:00:00Z', updatedAt: null,
 });
 const stages = [stage('new', 'normal', 0), stage('next', 'normal', 1), stage('lost', 'lost', 2), stage('converted', 'conversion', 3)];
+const FIELD_DEFINITIONS = [
+  { id: 'f-cli', key: 'cliente', label: 'Cliente', kind: 'reference', referenceTarget: 'cliente', multiple: false, options: null, filterable: true, isSystem: true, removable: false, position: 0 },
+  { id: 'f-desc', key: 'descricao', label: 'Descrição', kind: 'text', referenceTarget: null, multiple: false, options: null, filterable: true, isSystem: false, removable: true, position: 1 },
+];
+// The fixture carries the Cliente as a field entry, as the read model does: the undo must not send it back.
 const original: SalesOpsLead = {
-  id: 'lead-1', stageId: 'new', position: 0, contactName: 'Ana', clientId: null,
+  id: 'lead-1', stageId: 'new', position: 0, contactName: 'Ana', clientId: 'c1',
   clientNameSnapshot: 'Acme', estimatedValueBrl: 100, description: 'Antes',
+  fields: [
+    { fieldId: 'f-cli', key: 'cliente', value: [{ id: 'c1', name: 'Acme' }] },
+    { fieldId: 'f-desc', key: 'descricao', value: 'Antes' },
+  ],
   contactPhone: '123', contactEmail: 'ana@example.com', contactBirthDate: null,
   sellerPersonId: null, sellerNameSnapshot: '', lostReason: null,
   stageChangedAt: '2026-01-01T00:00:00Z', saleId: null, saleStatus: null,
@@ -49,6 +58,7 @@ const fetcher = async (input: string, init?: RequestInit) => {
     })),
   });
   if (method === 'GET' && path.endsWith('/leads')) return response(200, { leads: rows.filter((row) => row.stageId === url.searchParams.get('stageId')), nextCursor: null });
+  if (method === 'GET' && path.endsWith('/field-definitions')) return response(200, { fields: FIELD_DEFINITIONS });
   calls.push({ path, method, body });
   if (failNext) { failNext = false; return response(500, { error: 'internal' }); }
   if (path.endsWith('/move')) {
@@ -57,15 +67,21 @@ const fetcher = async (input: string, init?: RequestInit) => {
     return response(200, { lead: rows.find((row) => row.id === original.id) });
   }
   if (method === 'PATCH') {
+    const writtenFields = Array.isArray(body?.fields) ? body.fields as Array<{ fieldId: string; value: unknown }> : [];
+    // The API refuses clientId together with a Cliente entry of fields (400 field_invalid).
+    if (body?.clientId !== undefined && writtenFields.some((f) => f.fieldId === 'f-cli')) {
+      return response(400, { error: 'validation_error', reason: 'field_invalid' });
+    }
     rows = rows.map((row) => row.id === original.id ? {
-      ...row, contactName: String(body?.contactName), description: body?.description as string | null,
+      ...row, contactName: String(body?.contactName), clientId: (body?.clientId ?? row.clientId) as string | null,
       contactPhone: (body?.contactPhone ?? row.contactPhone) as string | null,
-      products: Array.isArray(body?.products)
-        ? body.products.map((product: { productId?: string; productName?: string }) => ({
-            productId: product.productId ?? null,
-            productNameSnapshot: product.productName ?? 'Original item',
-          }))
-        : row.products,
+      contactEmail: (body?.contactEmail ?? row.contactEmail) as string | null,
+      fields: [
+        ...(row.fields ?? []).filter((f) => !writtenFields.some((w) => w.fieldId === f.fieldId)),
+        ...writtenFields
+          .filter((w) => w.value !== null)
+          .map((w) => ({ fieldId: w.fieldId, key: 'descricao', value: w.value as string })),
+      ],
     } : row);
     return response(200, { lead: rows.find((row) => row.id === original.id) });
   }
@@ -176,8 +192,7 @@ it('restores the original lost reason through the inverse move', async () => {
   expect(calls[1]?.body).toMatchObject({ stageId: 'lost', reason: 'Sem orçamento' });
 });
 
-it.each(['full', 'leads'] as const)('restores prior %s edition fields by inverse PATCH', async (mode) => {
-  edition.value = mode;
+it('restores the prior fields by inverse PATCH and the API accepts it', async () => {
   await render();
   await click('[data-view-option="list"]');
   await click('[data-edit-lead="lead-1"]');
@@ -188,18 +203,19 @@ it.each(['full', 'leads'] as const)('restores prior %s edition fields by inverse
     setter?.call(input, 'Ana Nova');
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
-  if (mode === 'full') await click('[aria-label="Remover Original item"]');
   await click('[data-lead-save]');
   expect(calls[0]?.method).toBe('PATCH');
   expect(document.querySelector('[data-undo-notice]')?.textContent).toContain('Lead editado');
   await click('[data-undo-action]');
-  expect(calls[1]?.body).toMatchObject({ contactName: 'Ana', description: 'Antes' });
-  if (mode === 'leads') expect(calls[1]?.body).toMatchObject({ contactPhone: '123', contactEmail: 'ana@example.com' });
-  else {
-    expect(calls[0]?.body).toMatchObject({ products: [] });
-    expect(calls[1]?.body).toMatchObject({ products: [{ productName: 'Original item' }] });
-    expect(rows[0]?.products).toEqual(original.products);
-  }
+  expect(calls[1]?.body).toMatchObject({
+    contactName: 'Ana',
+    contactPhone: '123',
+    contactEmail: 'ana@example.com',
+    fields: [{ fieldId: 'f-desc', value: 'Antes' }],
+  });
+  expect(calls[1]?.body?.fields).not.toContainEqual(expect.objectContaining({ fieldId: 'f-cli' }));
+  expect(document.querySelector('[role="alert"]')?.textContent ?? '').not.toContain('desfazer');
+  expect(rows[0]?.contactName).toBe('Ana');
 });
 
 it('reports an inverse failure without claiming restoration or sending a duplicate', async () => {

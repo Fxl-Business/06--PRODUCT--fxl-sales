@@ -12,10 +12,9 @@ import { requireToken } from '@/lib/require-token';
 import {
   deleteLead,
   leadsApi,
+  type LeadWritePayload,
   type MoveLeadPayload,
   type ReorderLeadStagesPayload,
-  type SaveContactLeadPayload,
-  type SaveLeadPayload,
   type SaveLeadStagePayload,
   type SetLeadStageStatusPayload,
 } from './api';
@@ -218,7 +217,7 @@ function restoreSummaries(queryClient: QueryClient, snapshots: readonly SummaryS
  */
 export function useSaveLead() {
   const { getToken } = useAccessToken();
-  return useAppMutation<LeadResponse, Error, SaveLeadPayload | SaveContactLeadPayload>({
+  return useAppMutation<LeadResponse, Error, LeadWritePayload>({
     mutationFn: async (payload) => leadsApi.saveLead(payload, await requireToken(getToken)),
     invalidates: [queryKeys.leads.all],
   });

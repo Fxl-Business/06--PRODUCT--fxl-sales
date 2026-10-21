@@ -3,7 +3,7 @@
 import * as React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { LeadDialog } from '../LeadDialog';
+import { LeadForm } from '../LeadForm';
 import { MoveLeadDialog } from '../MoveLeadDialog';
 import type { SalesOpsLead, SalesOpsLeadStage } from '../types';
 
@@ -186,12 +186,13 @@ describe('Escape closes the innermost inline layer, never the lead dialog under 
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
-  it('keeps the lead dialog open when Escape puts away the vendedor picker', async () => {
+  it('keeps the lead form open when Escape puts away the vendedor picker', async () => {
     const onOpenChange = vi.fn();
     await act(async () => {
       root.render(
-        <LeadDialog
-          clients={[{ value: 'c1', label: 'Acme' }]}
+        <LeadForm
+          clients={[]}
+          definitions={[]}
           initial={null}
           onOpenChange={onOpenChange}
           onSubmit={vi.fn()}

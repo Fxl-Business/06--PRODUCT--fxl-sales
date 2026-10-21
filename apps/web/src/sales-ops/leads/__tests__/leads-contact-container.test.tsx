@@ -32,6 +32,8 @@ const mocks = vi.hoisted(() => ({
   summaryFilters: [] as unknown[],
   mutate: vi.fn(),
   mutateAsync: vi.fn(),
+  definitions: [] as unknown[],
+  definitionsPending: false,
 }));
 
 vi.mock('@/auth/react', () => ({
@@ -73,8 +75,14 @@ vi.mock('../hooks', () => ({
     mutateAsync: mocks.mutateAsync,
     isPending: false,
   }),
+  // The CRM read hooks (`crm-hooks.ts`) are mocked here: the form mounts only once they settle.
   // The delete flow has its own oracle (`lead-delete.test.tsx`); here it is inert.
   useDeleteLead: () => ({ mutateAsync: vi.fn(), isPending: false }),
+}));
+
+vi.mock('../crm-hooks', () => ({
+  useFieldDefinitions: () => ({ isPending: mocks.definitionsPending, data: mocks.definitions }),
+  usePipelines: () => ({ isPending: false, data: [] }),
 }));
 
 vi.mock('../LeadsBoard', async () => {
@@ -179,6 +187,8 @@ beforeEach(() => {
   mocks.boardFilters = [];
   mocks.moveFilters = [];
   mocks.summaryFilters = [];
+  mocks.definitions = [];
+  mocks.definitionsPending = false;
   mocks.mutate.mockReset();
   mocks.mutateAsync.mockReset();
   mocks.mutateAsync.mockResolvedValue({ lead: leadRow() });
@@ -310,11 +320,55 @@ describe('LeadsBoardContainer, leads edition', () => {
     expect(lastBoardProps().canManageStages).toBe(false);
   });
 
-  it('Novo lead mounts the contact dialog', async () => {
+  it('Novo lead mounts the LeadForm in the leads edition', async () => {
     await renderContainer();
     await clickSelector('[data-stub="create"]');
-    expect(document.getElementById('lead-birth-date')).not.toBeNull();
+    expect(document.getElementById('lead-estimated-value')).not.toBeNull();
+    expect(document.getElementById('lead-phone')).not.toBeNull();
     expect(document.getElementById('lead-company-text')).toBeNull();
+    expect(document.getElementById('lead-birth-date')).toBeNull();
+  });
+
+  it('waits for the field definitions before mounting the form', async () => {
+    mocks.definitionsPending = true;
+    await renderContainer();
+    await clickSelector('[data-stub="create"]');
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    mocks.definitionsPending = false;
+    await renderContainer();
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+  });
+
+  it('a dynamic field value reaches the save payload', async () => {
+    mocks.definitions = [
+      {
+        id: 'f-desc',
+        key: 'descricao',
+        label: 'Descrição',
+        kind: 'text',
+        referenceTarget: null,
+        multiple: false,
+        options: null,
+        filterable: true,
+        isSystem: false,
+        removable: true,
+        position: 1,
+      },
+    ];
+    await renderContainer();
+    await clickSelector('[data-stub="create"]');
+    await typeInto('lead-contact-name', 'Ana');
+    await typeInto('lead-phone', '11999990000');
+    const description = document.getElementById('lead-field-f-desc') as HTMLTextAreaElement | null;
+    if (!description) throw new Error('descricao not rendered');
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(description, 'Texto');
+      description.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await settle();
+    await clickSelector('[data-lead-save]');
+    const payload = mocks.mutateAsync.mock.calls[0]?.[0] as { fields: unknown[] };
+    expect(payload.fields).toContainEqual({ fieldId: 'f-desc', value: 'Texto' });
   });
 
   it('editing seeds the contact dialog and saves with the lead id', async () => {
@@ -342,6 +396,7 @@ describe('LeadsBoardContainer, leads edition', () => {
     await renderContainer();
     await clickSelector('[data-stub="create"]');
     await typeInto('lead-contact-name', 'Ana');
+    await typeInto('lead-phone', '11999990000');
     await clickSelector('[data-lead-save]');
 
     expect(saveErrorText()).toBe('Nenhuma etapa ativa no funil. O lead não foi salvo.');
@@ -356,6 +411,7 @@ describe('LeadsBoardContainer, leads edition', () => {
     await renderContainer();
     await clickSelector('[data-stub="create"]');
     await typeInto('lead-contact-name', 'Ana');
+    await typeInto('lead-phone', '11999990000');
     await clickSelector('[data-lead-save]');
     expect(saveErrorText()).toBe('Não foi possível salvar o lead. Tente novamente.');
     expect((document.getElementById('lead-contact-name') as HTMLInputElement).value).toBe('Ana');
@@ -379,6 +435,7 @@ describe('LeadsBoardContainer, leads edition', () => {
     await renderContainer();
     await clickSelector('[data-stub="create"]');
     await typeInto('lead-contact-name', 'Ana');
+    await typeInto('lead-phone', '11999990000');
     await clickSelector('[data-lead-save]');
     expect(mocks.mutateAsync).toHaveBeenCalledTimes(1);
     expect(document.querySelector('[role="dialog"]')).toBeNull();
@@ -395,6 +452,8 @@ describe('LeadsBoardContainer, leads edition', () => {
     ).toBeNull();
 
     await typeInto('lead-contact-name', 'Ana');
+
+    await typeInto('lead-phone', '11999990000');
     await clickSelector('[data-lead-save]');
     expect(mocks.mutateAsync).toHaveBeenCalledTimes(1);
     const payload = mocks.mutateAsync.mock.calls[0]?.[0] as Record<string, unknown>;
@@ -433,6 +492,8 @@ describe('LeadsBoardContainer, leads edition', () => {
     expect(document.querySelector('[role="dialog"] [role="combobox"]')).not.toBeNull();
 
     await typeInto('lead-contact-name', 'Ana');
+
+    await typeInto('lead-phone', '11999990000');
     await clickSelector('[data-lead-save]');
     const payload = mocks.mutateAsync.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(payload).toHaveProperty('sellerPersonId', null);
@@ -452,10 +513,13 @@ describe('LeadsBoardContainer, full edition', () => {
     expect(props.onOpenSale).toBe(onOpenSale);
   });
 
-  it('Novo lead mounts LeadDialog', async () => {
+  it('Novo lead mounts the same LeadForm in the full edition', async () => {
     await renderContainer();
     await clickSelector('[data-stub="create"]');
-    expect(document.getElementById('lead-company-text')).not.toBeNull();
+    expect(document.getElementById('lead-estimated-value')).not.toBeNull();
+    expect(document.getElementById('lead-phone')).not.toBeNull();
+    expect(document.getElementById('lead-client-label')).not.toBeNull();
+    expect(document.getElementById('lead-company-text')).toBeNull();
     expect(document.getElementById('lead-birth-date')).toBeNull();
   });
 
@@ -470,7 +534,8 @@ describe('LeadsBoardContainer, full edition', () => {
     await renderContainer();
     await clickSelector('[data-stub="create"]');
     await typeInto('lead-contact-name', 'Ana');
-    await typeInto('lead-company-text', 'Acme');
+    await typeInto('lead-phone', '11999990000');
+    await typeInto('lead-phone', '11999990000');
     await clickSelector('[data-lead-save]');
 
     expect(mocks.mutateAsync).toHaveBeenCalledTimes(1);
