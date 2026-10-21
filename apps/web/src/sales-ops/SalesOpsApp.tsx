@@ -2411,6 +2411,7 @@ export function SalesOpsApp() {
                       return client ? { value: client.id, label: client.name } : null;
                     }}
                     onOpenSale={openSaleFromBoard}
+                    onRequestConversion={requestLeadConversion}
                     products={persistedBootstrap.products}
                     sellers={leadSellerOptions}
                     workspace={workspace}
