@@ -143,3 +143,56 @@ export const SYSTEM_FIELD_CLIENTE = {
   backingColumn: 'client_id',
   position: 1,
 } as const;
+
+// ---------------------------------------------------------------------------
+// Phase 3 (per-organization modules). Pure; shared by the API and the web.
+// ---------------------------------------------------------------------------
+
+/** The module flags of one organization. Every key is present. */
+export type OrgModules = Record<CrmModuleKey, boolean>;
+
+/** The fail-to-full value: a context that never resolved modules is the whole product. */
+export const ALL_MODULES_ENABLED: Readonly<OrgModules> = Object.freeze(
+  Object.fromEntries(CRM_MODULE_KEYS.map((key) => [key, true])) as OrgModules,
+);
+
+/** A capability is granted iff EVERY module mapped to it is enabled. */
+export function modulesAllowCapability(modules: OrgModules, capability: SalesCapability): boolean {
+  return CAPABILITY_MODULES[capability].every((key) => modules[key] === true);
+}
+
+/**
+ * The legacy two-value projection. 'full' while `orcamentos` is on, 'leads' while it
+ * is off. It exists so every service argument and web conditional that still takes an
+ * edition keeps working; it never decides a capability (modulesAllowCapability does).
+ */
+export function editionFromModules(modules: OrgModules): SalesEdition {
+  return modules.orcamentos === true ? 'full' : 'leads';
+}
+
+/** True only for an object with every module key present as a boolean. */
+export function isOrgModules(value: unknown): value is OrgModules {
+  if (typeof value !== 'object' || value === null) return false;
+  const record = value as Record<string, unknown>;
+  return CRM_MODULE_KEYS.every((key) => typeof record[key] === 'boolean');
+}
+
+/**
+ * An `orcamento` stage with the `opens_orcamentos` behaviour opens the proposta
+ * wizard / answers sale_required_for_conversion ONLY while the organization has the
+ * `orcamentos` module. With it off the stage is an ordinary stage.
+ */
+export function stageActsAsOrcamento(
+  stage: { type: string; behavior: string },
+  modules: OrgModules,
+): boolean {
+  return modules.orcamentos === true && stage.type === 'orcamento' && stage.behavior === 'opens_orcamentos';
+}
+
+/** The behaviour a stage really has for this organization (`none` when it cannot act). */
+export function effectiveStageBehavior(
+  stage: { type: string; behavior: string },
+  modules: OrgModules,
+): StageBehavior {
+  return stageActsAsOrcamento(stage, modules) ? 'opens_orcamentos' : 'none';
+}
