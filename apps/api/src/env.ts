@@ -77,6 +77,10 @@ const schema = z.object({
   // the SDK never sees this variable. emptyToUndefined is load-bearing: the
   // examples ship it blank and `??` does not catch ''.
   SALES_SESSION_ENCRYPTION_IKM: emptyToUndefined,
+  // Comma-separated Hub account ids allowed to toggle an organization's modules
+  // (PUT /sales-ops/org-modules). Empty or absent means nobody: default deny. Read
+  // only through requireModuleOperator, never from a request body.
+  SALES_MODULE_OPERATOR_ACCOUNT_IDS: emptyToUndefined,
   SENTRY_DSN: emptyToUndefinedUrl,
   // Public origin used to build referral full URLs.
   PUBLIC_LINK_BASE_URL: emptyToUndefinedUrl,

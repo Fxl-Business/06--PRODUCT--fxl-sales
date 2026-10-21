@@ -1,3 +1,4 @@
+import { ALL_MODULES_ENABLED } from '@fxl-sales/shared-utils/crm-model';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { hubAuthContext as sharedHubAuthContext } from '../../../auth/__tests__/hub-auth-context-fixture.js';
@@ -37,6 +38,7 @@ const stageResult = {
   orgId: 'verified-org',
   name: 'Qualificação',
   kind: 'normal',
+  behavior: 'none',
   isSystem: false,
   position: 4,
   status: 'active',
@@ -50,6 +52,7 @@ function createTestApp() {
   app.use('*', async (c, next) => {
     c.set('userId', 'verified-account');
     c.set('orgId', 'verified-org');
+    c.set('orgModules', ALL_MODULES_ENABLED);
     c.set('userRole', currentRole);
     c.set('userRoles', currentRole ? [currentRole] : []);
     c.set(

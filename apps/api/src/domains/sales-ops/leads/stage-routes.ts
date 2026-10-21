@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { getDb } from '../../../db/client.js';
+import { leadStageViewFor } from '../../crm/stage-view.js';
+import { getOrgModules } from '../../org-modules/context.js';
 import { requireAdmin } from '../../../middleware/require-admin.js';
 import { CreateLeadStageSchema, ReorderLeadStagesSchema, UpdateLeadStageSchema } from './schemas.js';
 import {
@@ -36,8 +38,9 @@ leadStagesRouter.get('/lead-stages', async (c) => {
   if (pipelineId !== undefined && !z.string().uuid().safeParse(pipelineId).success) {
     return c.json({ error: 'validation_error', reason: 'invalid_pipeline_id' }, 400);
   }
+  const modules = await getOrgModules(c);
   const stages = await listLeadStages(getDb(), c.get('orgId'), pipelineId);
-  return c.json({ stages });
+  return c.json({ stages: stages.map((stage) => leadStageViewFor(stage, modules)) });
 });
 
 // Registered before POST /lead-stages for readability only; there is no

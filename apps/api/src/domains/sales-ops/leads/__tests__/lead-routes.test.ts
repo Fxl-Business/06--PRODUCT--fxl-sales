@@ -172,6 +172,7 @@ describe('Sales Ops lead routes', () => {
       name: null,
       hasSellerRole: true,
       edition: 'full',
+      modules: ALL_MODULES_ENABLED,
     });
 
     currentRoles = ['admin', 'seller', 'finder'];
@@ -188,6 +189,7 @@ describe('Sales Ops lead routes', () => {
       name: null,
       hasSellerRole: true,
       edition: 'full',
+      modules: ALL_MODULES_ENABLED,
     });
   });
 
@@ -300,6 +302,7 @@ describe('Sales Ops lead routes', () => {
       name: null,
       hasSellerRole: true,
       edition: 'full',
+      modules: ALL_MODULES_ENABLED,
     });
     expect(serviceMocks.getLead).not.toHaveBeenCalled();
   });
@@ -353,6 +356,7 @@ describe('Sales Ops lead routes', () => {
         name: null,
         hasSellerRole: true,
         edition: 'full',
+        modules: ALL_MODULES_ENABLED,
       },
       // The fixture carries no name, so the snapshot falls back to the e-mail.
       { userId: 'verified-account', name: 'ana@example.test' },

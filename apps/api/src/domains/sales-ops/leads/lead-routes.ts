@@ -1,7 +1,8 @@
 import { type Context, Hono } from 'hono';
 import { z } from 'zod';
+import { editionFromModules } from '@fxl-sales/shared-utils/crm-model';
 import { getDb } from '../../../db/client.js';
-import { getSalesEdition } from '../../org-modules/context.js';
+import { getOrgModules } from '../../org-modules/context.js';
 import { requireAdmin } from '../../../middleware/require-admin.js';
 import { cadastroActor } from '../cadastro-actor.js';
 import {
@@ -74,6 +75,7 @@ export function leadActor(c: Context): LeadActor {
 }
 
 export async function leadScope(c: Context): Promise<LeadScope> {
+  const modules = await getOrgModules(c);
   const claims = c.get('hubAuth')?.claims;
   const email = claims?.email;
   const name = claims?.name;
@@ -86,7 +88,8 @@ export async function leadScope(c: Context): Promise<LeadScope> {
     // never reaches it (see resolveLeadScopePredicate).
     name: typeof name === 'string' && name.trim() !== '' ? name : null,
     hasSellerRole: roles.includes('seller'),
-    edition: await getSalesEdition(c),
+    edition: editionFromModules(modules),
+    modules,
   };
 }
 

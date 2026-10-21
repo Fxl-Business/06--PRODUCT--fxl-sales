@@ -124,6 +124,7 @@ describe('Sales Ops lead routes per sales edition', () => {
         name: null,
         hasSellerRole: false,
         edition: 'leads',
+        modules: modulesForEdition('leads'),
       },
     ]);
   });
@@ -234,6 +235,7 @@ describe('Sales Ops lead routes per sales edition', () => {
       name: null,
       hasSellerRole: true,
       edition: 'leads',
+      modules: modulesForEdition('leads'),
     });
   });
 
@@ -251,6 +253,7 @@ describe('Sales Ops lead routes per sales edition', () => {
       name: 'Ana Martins',
       hasSellerRole: true,
       edition: 'leads',
+      modules: modulesForEdition('leads'),
     });
 
     const smuggled = await jsonRequest('POST', '/leads', {
@@ -258,6 +261,7 @@ describe('Sales Ops lead routes per sales edition', () => {
       contactPhone: '1',
       name: 'Outro',
       edition: 'leads',
+      modules: modulesForEdition('leads'),
       hasSellerRole: true,
     });
     expect(smuggled.status).toBe(400);

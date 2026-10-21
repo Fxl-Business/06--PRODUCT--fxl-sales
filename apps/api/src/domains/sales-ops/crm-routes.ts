@@ -1,8 +1,10 @@
+import { effectiveStageBehavior } from '@fxl-sales/shared-utils/crm-model';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { getDb } from '../../db/client.js';
 import { ADMIN_ROLE_REQUIRED_BODY, hasAdminRole } from '../../middleware/require-admin.js';
 import { listFieldDefinitions, listPipelines } from '../crm/crm-read-service.js';
+import { getOrgModules } from '../org-modules/context.js';
 import { listFollowups, markFollowupDone } from './leads/lead-history-service.js';
 import { ListFollowupsQuerySchema } from './leads/lead-schemas.js';
 import { failureResponse, leadScope, validationResponse } from './leads/lead-routes.js';
@@ -17,8 +19,18 @@ import { failureResponse, leadScope, validationResponse } from './leads/lead-rou
 export const crmRouter = new Hono();
 
 crmRouter.get('/pipelines', async (c) => {
+  const modules = await getOrgModules(c);
   const pipelines = await listPipelines(getDb(), c.get('orgId'));
-  return c.json({ pipelines });
+  // The stored behaviour is shown as this organization's modules let it act (see 11c).
+  return c.json({
+    pipelines: pipelines.map((pipeline) => ({
+      ...pipeline,
+      stages: pipeline.stages.map((stage) => ({
+        ...stage,
+        behavior: effectiveStageBehavior(stage, modules),
+      })),
+    })),
+  });
 });
 
 crmRouter.get('/field-definitions', async (c) => {

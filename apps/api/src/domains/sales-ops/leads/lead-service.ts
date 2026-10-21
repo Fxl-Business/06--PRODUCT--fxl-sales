@@ -1,3 +1,4 @@
+import { ALL_MODULES_ENABLED, stageActsAsOrcamento, type OrgModules } from '@fxl-sales/shared-utils/crm-model';
 import type { SalesEdition } from '@fxl-sales/shared-utils/sales-edition';
 import { and, asc, eq, isNull, or, sql, type SQL } from 'drizzle-orm';
 import type { getDb } from '../../../db/client.js';
@@ -75,6 +76,12 @@ export type LeadScope = {
    * the FXL routes before this field existed) keeps today's behaviour.
    */
   edition?: SalesEdition;
+  /**
+   * The organization's module flags. Absent means every module (the full product), so a
+   * caller that does not pass it keeps today's behaviour. The stage rule reads it: a
+   * destination of type `orcamento` needs a proposta only while `orcamentos` is on.
+   */
+  modules?: OrgModules;
 };
 
 export type LeadView = {
@@ -1262,7 +1269,7 @@ export async function moveLead(
       throw new LeadInputError('lost_reason_required');
     }
 
-    const opensOrcamento = destination.type === 'orcamento' && destination.behavior === 'opens_orcamentos';
+    const opensOrcamento = stageActsAsOrcamento(destination, scope.modules ?? ALL_MODULES_ENABLED);
     if (opensOrcamento) {
       if (input.saleId === undefined) throw new LeadInputError('sale_required_for_conversion');
       // The in-org SELECT is what produces the designed 400. The composite FK

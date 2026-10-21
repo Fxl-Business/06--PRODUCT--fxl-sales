@@ -164,8 +164,12 @@ const LEADS_GRANTED: readonly RouteCase[] = [
   r('salesOps', 'POST', '/import/commit', `${SO}/import/commit`),
 ];
 
+// PUT /org-modules is OPEN to the edition gate only: it is admin-gated and then operator-gated
+// (`module_operator_required`), and it answers before any store call for a body of `{}`.
 const OPEN: readonly RouteCase[] = [
   r('salesOps', 'GET', '/bootstrap', `${SO}/bootstrap`),
+  r('salesOps', 'GET', '/org-modules', `${SO}/org-modules`),
+  r('salesOps', 'PUT', '/org-modules', `${SO}/org-modules`),
   r('salesOps', 'GET', '/settings', `${SO}/settings`),
   r('salesOps', 'GET', '/people', `${SO}/people`),
   r('salesOps', 'POST', '/people', `${SO}/people`),

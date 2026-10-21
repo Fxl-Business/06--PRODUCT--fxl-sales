@@ -3,6 +3,7 @@
  * (`ensureSystemFuncoes`) in the same transaction BEFORE calling this (Amendment D11/D11b).
  */
 import { and, asc, eq } from 'drizzle-orm';
+import type { OrgModules } from '@fxl-sales/shared-utils/crm-model';
 import { todayInSaoPaulo } from '@fxl-sales/shared-utils/sao-paulo-day';
 import {
   salesOpsAreas,
@@ -15,7 +16,7 @@ import {
   salesOpsSettings,
 } from '../../db/schema.js';
 import { defaultPipelineId, listPipelineStages } from '../crm/pipeline-read.js';
-import { legacyStageKind } from '../crm/stage-view.js';
+import { legacyStageKindFor } from '../crm/stage-view.js';
 import { isProducerFlowLive } from '../integration/producer-gate.js';
 import {
   ProductEntradaModeSchema,
@@ -48,7 +49,16 @@ function commissionType(value: string): 'pct' | 'fix' {
   return value === 'fix' ? 'fix' : 'pct';
 }
 
-export async function readImportCatalog(tx: Db, orgId: string, now: Date): Promise<ImportCatalog> {
+/**
+ * `modules` is the organization's module flags (required, no default): a stage of type
+ * `orcamento` is the conversion etapa only while `orcamentos` is on.
+ */
+export async function readImportCatalog(
+  tx: Db,
+  orgId: string,
+  now: Date,
+  modules: OrgModules,
+): Promise<ImportCatalog> {
   const areas = await tx
     .select({ id: salesOpsAreas.id, name: salesOpsAreas.name, status: salesOpsAreas.status })
     .from(salesOpsAreas)
@@ -174,7 +184,7 @@ export async function readImportCatalog(tx: Db, orgId: string, now: Date): Promi
     (row) => ({
       id: row.id,
       name: row.name,
-      kind: legacyStageKind(row),
+      kind: legacyStageKindFor(row, modules),
       status: row.status,
       position: row.position,
     }),
