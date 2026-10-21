@@ -383,6 +383,7 @@ The tables, the migrations 0029 to 0031 and the decisions are in `nexo/knowledge
 
 - `LeadForm` (`apps/web/src/sales-ops/leads/LeadForm.tsx`, dynamic fields in `LeadFormFields.tsx`, logic in `lead-form.ts`) replaces `LeadDialog` and `ContactLeadDialog`, which are deleted.
 - Nome and one contact (telefone or e-mail) are required; the Cliente picker is always present and is not removable.
+The free-text company path of the old dialogs is intentionally gone, because the empresa is now chosen from the cadastro or created inline by name through `onCreateClient`.
 - The write body is the single `LeadWritePayload` (`api.ts`), which mirrors the phase 2 `LeadWriteSchema`.
 - Wire assumptions W1 (`fields: [{fieldId, value}]`, `null` clears, an omitted field stays) and W2 (a non-admin create sends no `sellerPersonId`) are isolated in `lead-form.ts` and `api.ts`.
 - The Cliente is carried only by the top-level `clientId`/`clientName`, never as a `fields` entry, because the API refuses both together with `400 field_invalid`; the edit undo (`leadToWriteSeed`) drops the Cliente entry for that reason.
