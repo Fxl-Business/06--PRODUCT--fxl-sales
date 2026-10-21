@@ -524,6 +524,10 @@ function titleForView(view: SalesOpsView, workspace: SalesOpsWorkspace) {
       title: DELETED_LEADS_COPY.title,
       subtitle: DELETED_LEADS_COPY.subtitle,
     },
+    'follow-ups': {
+      title: personal ? 'Meus follow-ups' : 'Follow-ups',
+      subtitle: 'Próximos passos combinados com cada lead',
+    },
   };
   return map[view];
 }
@@ -1355,7 +1359,12 @@ export function SalesOpsApp() {
     () => getVisibleWorkspaces(profile.roles, edition),
     [profile.roles, edition],
   );
-  const resolution = resolveSalesOpsRoute(routeParams, profile.roles, edition);
+  const etapaParam = new URLSearchParams(location.search).get('etapa') ?? undefined;
+  const resolution = resolveSalesOpsRoute(
+    etapaParam === undefined ? routeParams : { ...routeParams, etapa: etapaParam },
+    profile.roles,
+    edition,
+  );
   const { workspace, view } = resolution.route;
   /** The open proposta detail. URL state only (`/:workspace/vendas/:saleId`). */
   const detailSaleId = resolution.route.saleId ?? null;
@@ -1721,6 +1730,7 @@ export function SalesOpsApp() {
     view === 'geral' ||
     view === 'leads' ||
     view === 'funil' ||
+    view === 'follow-ups' ||
     view === 'etapas' ||
     view === 'importacao' ||
     view === 'leads-excluidos'
@@ -2362,7 +2372,7 @@ export function SalesOpsApp() {
                     onEdit={(funcao) => setModal({ kind: 'funcao', funcao })}
                   />
                 ) : null}
-                {(view === 'leads' || view === 'funil') ? (
+                {(view === 'funil' || (view === 'leads' && !resolution.route.leadId)) ? (
                   /*
                     ONE component for both routes. The difference between the team
                     board and a seller's board is NOT this boolean - the scope is

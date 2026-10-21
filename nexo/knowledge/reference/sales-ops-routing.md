@@ -45,3 +45,11 @@ Moved verbatim from `CLAUDE.md` on 2026-09-22 so the standing context stays shor
   `SalesOpsApp` and `NoRoleGuard` read `profile.edition` from `useAuthProfile()`, never `useSalesEdition()`, so the shell harnesses that mock `@/auth/react` keep working.
   The shell chrome follows the capabilities too: the sidebar `A pagar este mês` card renders only with `commissions`, the sidebar `Nova proposta` only with `proposals` (both through `hasCapability`), and the static period chip only in the full edition.
   The 2026-10-05 browser walk found all three on the leads gestor's screens, where the card always read R$ 0 and the proposta wizard could only fail; oracle `vendedores-routing.test.tsx` pins both editions.
+
+- Lead routes (slice 09a, v4.8.0). The one route pattern has one optional segment, and the stage selection and the lead summary both wanted it.
+  The SEGMENT belongs to the lead summary (`leadId`), a permalink-worthy identity that other screens and bookmarks point at.
+  The stage selection is a view filter, the same class as the `Quadro`/`Lista` toggle, so it moved to the query `?etapa=<stageId>` on `leads`.
+  The single route object stays, so `SalesOpsApp` never remounts, and no second route pattern is added.
+  Old stage URLs `/operacional/leads/<stageId>` now parse as a lead id and the summary answers `Lead não encontrado`; that is accepted because the sidebar of the prior release was the only producer and it now writes the query form.
+  Stray `?etapa=` on another view is dropped with a `redirect`, so the address bar is rewritten through `replace`.
+  Oracles: `lead-routes.test.ts`, `leads-stage-navigation.test.tsx`, `navigation.test.ts` (round trip case).

@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import * as React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { MemoryRouter, Navigate, Route, Routes, useLocation, useParams } from 'react-router-dom';
+import { MemoryRouter, Navigate, Route, Routes, useLocation, useParams, useSearchParams } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LeadSidebarNavigation } from '../leads/LeadSidebarNavigation';
 import { LeadsBoardContainer } from '../leads/LeadsBoardContainer';
@@ -38,11 +38,14 @@ const act = (React as typeof React & { act: typeof import('react-dom/test-utils'
 let container: HTMLDivElement;
 let root: Root | null;
 function LocationProbe() {
-  return <output data-path>{useLocation().pathname}</output>;
+  const location = useLocation();
+  return <output data-path>{location.pathname + location.search}</output>;
 }
 function RoutedLeads() {
   const params = useParams();
-  const resolution = resolveSalesOpsRoute(params, roles);
+  const [search] = useSearchParams();
+  const etapa = search.get('etapa');
+  const resolution = resolveSalesOpsRoute({ ...params, ...(etapa ? { etapa } : {}) }, roles);
   if (resolution.redirect) return <Navigate replace to={resolution.path} />;
   const { route } = resolution;
   if (route.view !== 'leads' && route.view !== 'funil') return <div data-other-view />;
@@ -99,10 +102,10 @@ afterEach(async () => {
 
 describe('routed lead stages', () => {
   it('uses stable stage ids and redirects legacy lead URLs to the full Kanban', () => {
-    expect(buildLeadStagePath('operacional', 'stage/a')).toBe('/operacional/leads/stage%2Fa');
+    expect(buildLeadStagePath('operacional', 'stage/a')).toBe('/operacional/leads?etapa=stage%2Fa');
     expect(buildLeadFunnelPath('meus-dados')).toBe('/meus-dados/funil');
     expect(resolveSalesOpsRoute({ workspace: 'operacional', view: 'leads' }, ['admin']).path).toBe('/operacional/funil');
-    expect(resolveSalesOpsRoute({ workspace: 'meus-dados', view: 'leads', saleId: 'stage-2' }, ['seller']).route).toEqual({ workspace: 'meus-dados', view: 'leads', stageId: 'stage-2' });
+    expect(resolveSalesOpsRoute({ workspace: 'meus-dados', view: 'leads', etapa: 'stage-2' }, ['seller']).route).toEqual({ workspace: 'meus-dados', view: 'leads', stageId: 'stage-2' });
     expect(resolveSalesOpsRoute({ workspace: 'meus-dados', view: 'funil' }, ['finder']).route.view).not.toBe('funil');
     expect(resolveSalesOpsRoute({ workspace: 'operacional', view: 'vendas', saleId: 'sale-1' }, ['admin']).route.saleId).toBe('sale-1');
     expect(getSalesOpsNavigation('operacional', ['admin']).map((item) => item.id)).toEqual(['vendas', 'comissoes', 'leads', 'funil']);
@@ -115,7 +118,7 @@ describe('routed lead stages', () => {
     expect(stageLinks().map((link) => link.textContent)).toEqual(['Contato', 'Convertido', 'Perdido']);
     expect(stageLinks()[0]?.getAttribute('aria-current')).toBe('page');
     await act(async () => stageLinks()[1]?.click());
-    expect(container.querySelector('[data-path]')?.textContent).toBe('/operacional/leads/won');
+    expect(container.querySelector('[data-path]')?.textContent).toBe('/operacional/leads?etapa=won');
   });
 
   it('keeps bookmarks stable after renaming a stage', async () => {
@@ -123,7 +126,7 @@ describe('routed lead stages', () => {
     await renderSidebar('draft');
     expect(stageLinks()[0]?.textContent).toBe('Primeiro contato');
     await act(async () => stageLinks()[0]?.click());
-    expect(container.querySelector('[data-path]')?.textContent).toBe('/operacional/leads/draft');
+    expect(container.querySelector('[data-path]')?.textContent).toBe('/operacional/leads?etapa=draft');
   });
 
   it.each(['loading', 'empty', 'error'] as const)('shows the %s state inside the expanded group', async (state) => {
@@ -140,7 +143,7 @@ describe('routed lead stages', () => {
 
   it.each([['operacional', ['admin']], ['meus-dados', ['seller']]] as const)('filters real list rows for %s and keeps Funil as the board', async (workspace, nextRoles) => {
     if (workspace === 'meus-dados') query.leads = query.leads.filter((lead) => lead.id === 'a');
-    await renderRouted(`/${workspace}/leads/draft`, [...nextRoles]);
+    await renderRouted(`/${workspace}/leads?etapa=draft`, [...nextRoles]);
     expect(container.querySelector('[data-leads-list]')).not.toBeNull();
     expect([...container.querySelectorAll('[data-list-row]')].map((row) => row.getAttribute('data-list-row'))).toEqual(['a']);
     expect(container.querySelector('[data-view-toggle]')).toBeNull();
@@ -165,17 +168,17 @@ describe('routed lead stages', () => {
     lost?.focus();
     expect(document.activeElement).toBe(lost);
     await act(async () => lost?.click());
-    expect(container.querySelector('[data-path]')?.textContent).toBe('/operacional/leads/lost');
+    expect(container.querySelector('[data-path]')?.textContent).toBe('/operacional/leads?etapa=lost');
     expect([...container.querySelectorAll('[data-list-row]')].map((row) => row.getAttribute('data-list-row'))).toEqual(['b']);
   });
 
   it('does not show all leads when the stage is archived', async () => {
-    await renderRouted('/operacional/leads/archived', ['admin']);
+    await renderRouted('/operacional/leads?etapa=archived', ['admin']);
     expect(container.textContent).toContain('Esta etapa não está disponível.');
     expect(container.querySelector('[data-list-row]')).toBeNull();
   });
 
-  it.each(['/meus-dados/leads/draft', '/meus-dados/funil'])('denies finder access to %s', async (path) => {
+  it.each(['/meus-dados/leads?etapa=draft', '/meus-dados/funil'])('denies finder access to %s', async (path) => {
     await renderRouted(path, ['finder']);
     expect(container.querySelector('[data-path]')?.textContent).toBe('/meus-dados/finders');
     expect(container.querySelector('[data-leads-board]')).toBeNull();
