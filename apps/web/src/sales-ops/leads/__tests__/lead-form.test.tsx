@@ -441,6 +441,25 @@ describe('LeadForm', () => {
     expect(onOpenChange).not.toHaveBeenCalled();
   });
 
+  it('Escape on the open vendedor picker closes only the picker', async () => {
+    const { onOpenChange } = await renderForm();
+    await click(sellerTrigger());
+    expect(document.querySelector('[role="listbox"]')).not.toBeNull();
+
+    await escape(comboboxSearch());
+    expect(document.querySelector('[role="listbox"]')).toBeNull();
+    expect(onOpenChange).not.toHaveBeenCalled();
+
+    // Positive control: the real Radix dialog does close on a bare Escape.
+    await escape(sellerTrigger());
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it('titles a new lead Novo lead', async () => {
+    await renderForm();
+    expect(dialogNode().querySelector('h2')?.textContent).toBe('Novo lead');
+  });
+
   it('the birth date input is capped at today, and no other date field is', async () => {
     await renderForm({ definitions: [...DEFS, field('f-nasc', 'date', 7, { key: 'nascimento', label: 'Nascimento' })] });
     expect(input('lead-field-f-nasc').getAttribute('type')).toBe('date');
