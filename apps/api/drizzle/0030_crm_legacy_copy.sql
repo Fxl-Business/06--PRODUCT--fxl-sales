@@ -67,7 +67,7 @@ INSERT INTO "sales_ops_pipeline_stages" ("org_id", "pipeline_id", "name", "posit
 SELECT p."org_id", p."id",
   (SELECT c."nm" FROM (
      SELECT g.k, CASE WHEN g.k = 0 THEN e."label" WHEN g.k = 1 THEN e."label" || ' (saída)' ELSE e."label" || ' (saída ' || g.k || ')' END AS "nm"
-     FROM generate_series(0, 100) AS g(k)
+     FROM generate_series(0, (SELECT count(*)::int FROM "sales_ops_pipeline_stages" w WHERE w."pipeline_id" = p."id") + 1) AS g(k)
    ) c
    WHERE NOT EXISTS (SELECT 1 FROM "sales_ops_pipeline_stages" y WHERE y."pipeline_id" = p."id" AND y."name" = c."nm")
    ORDER BY c.k LIMIT 1),
