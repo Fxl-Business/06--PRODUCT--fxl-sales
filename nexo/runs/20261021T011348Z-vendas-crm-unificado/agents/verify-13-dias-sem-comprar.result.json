@@ -1,0 +1,1 @@
+{"agent":"verify","slice":"13-dias-sem-comprar","status":"FAIL","report":"nexo/runs/20261021T011348Z-vendas-crm-unificado/agents/verify-13-dias-sem-comprar.md","summary":"all suites green (shared 213, api unit 1603, integ 555, web 1987, lint 0, type-check 0) · FAIL: soft-deleted ganho lead untested (mutant survives)","done":true,"ts":"2026-10-21T12:15:00Z"}

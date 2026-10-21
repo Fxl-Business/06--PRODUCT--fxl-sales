@@ -200,3 +200,27 @@ Leads isso permitiria importar dados de produto que a edição normalmente supri
 org-escopada, então não corrompe, mas foge ao escopo da edição). Conserto: o preview/commit recusar
 as abas full-product quando `leadFieldSet(edition) === 'contact'`, com oráculo em
 `import-routes.integration.test.ts`.
+
+## FXL Vendas CRM unificado (run 20261021T011348Z-vendas-crm-unificado): pendências
+
+Fases 0 a 3 entraram no `master` local (73a009a, c15a0ca, 60c57fd, 3dc3739); nada foi para staging nem produção.
+
+Não feito nesta run:
+- Slice 13 "dias sem comprar": construída e com todas as suítes verdes no branch `feat/6q75vnog-13-dias-sem-comprar`, mas o Verify separado reprovou por falta de um teste (lead `ganho` soft-deletado não pode contar); o orçamento de 64 dispatches acabou antes da rodada de correção. Retomar: adicionar o caso em `apps/api/test/rls/clients-purchase-recency.test.ts`, re-verificar, review Codex, merge.
+- Slice 14 importação com mapeamento de colunas para campos e etapas: planejada e com plan-check (plano e partes prontos), não executada por orçamento.
+- Filtro de período ainda ausente em Comissões, Clientes e Leads excluídos (a regra pede "todas as listas").
+- "Responsável da empresa": `sales_ops_clients` não tem vendedor responsável; o formulário pré-preenche só o contato. Precisa de decisão de produto (campo novo no cliente?).
+- Excluir um lead pela página de resumo volta ao funil sem aviso de desfazer (restaurável em Leads excluídos); decisão de produto.
+- Editar uma etapa `orcamento` com Orçamentos desligado ainda é recusado como etapa de sistema (falha fechada).
+
+Risco alto, deliberadamente intocado (levantamento, seção 4):
+- Unificar `leads` (legado de finder) com o CRM; eventos `fxl-sales.obligation.*`/`settlement.*`; `sales_ops_payables`/`receivables`/`settlements`; `sales_ops_sales` e itens; módulo de afiliados.
+
+Dados reais (nada executado):
+- Migrações 0029 (schema), 0030 (cópia) e 0031 (cópia + resync) rodam no deploy da API; medir volumes reais e tempo antes; a ordem é API (migração) antes do web novo; rollback para o código antigo deixa as tabelas novas sem uso e as antigas congeladas desde o deploy (os escritos novos não voltam para as antigas).
+- Módulos por organização: o backfill a partir do token acontece no primeiro request de cada org; nenhuma flag é trocável até configurar `SALES_MODULE_OPERATOR_ACCOUNT_IDS` com as contas de operador FXL.
+- Validar com Construbom (Orçamentos desligado) e ECV Control (etapas e funil padrão no primeiro acesso) em staging.
+- Limpeza futura das tabelas antigas (`sales_ops_leads`, `sales_ops_lead_products`, `sales_ops_lead_stages`) só com decisão do Cauê.
+- `CLAUDE.md` passa de 70 KB (já passava do teto de 32 KB antes desta run): mover histórico para `nexo/knowledge/architecture-history.md`.
+
+Futuro (fora do escopo pedido): onboarding de funis, campos e módulos; agente de IA; conexão de agenda.

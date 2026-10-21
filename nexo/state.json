@@ -193,5 +193,12 @@
     "decision": "approved-cut-staging-production",
     "decided_at": "2026-10-15",
     "note": "Owner approved in chat ('O Cauet autorizou subir para PRODUCAO o ajuste do Kanban (branch fix/kanban-scroll, commit be1ffa9)', with the instruction to confirm the production confirmation), which is explicit approval of the cut, the staging promotion and the production promotion. PATCH over v4.7.0: fix(leads) be1ffa9. The Quadro fills the page height instead of growing with its longest column (31 cards made it 4144px tall on a 900px screen); each column scrolls its own cards under a fixed header; a hand-drawn, touch-sized horizontal scrollbar sits above the columns (thumb drag, track press, keyboard) with the scroller as the only source of truth; drag runs MouseSensor plus a 250ms press-and-hold TouchSensor with touch-manipulation on the card instead of PointerSensor plus touch-none, so a swipe scrolls and a hold drags; below lg the sidebar starts on its icon rail and below md the shell paddings shrink and a column fits the phone width. Web only: no migration, no env var, no dependency, no deploy-config change, the API is unchanged. Release-verify PASS by a SEPARATE agent on the exact release commit be1ffa9: deploy-shaped web build plus bundle-clean, deploy-shaped API build, cold full build, lint 0, type-check 0, CI=true pnpm test 0 (237 files, 3453 tests, plus 91 guard tests), integration 403 across 51 files, audit 0 high 0 critical (12 moderate, 1 low, pre-existing), 0 secret patterns. The cut step accepted 1 unanswered Revisao (20261008T114022Z-construbom-leads-ajustes). Rollback: code revert; nothing persisted changes shape. Tag v4.7.1 placed on this gate-3 record commit; master, staging and production fast-forwarded to it with plain non-force pushes."
+  },
+  "gate1_vendas_crm_unificado": {
+    "feature": "vendas-crm-unificado",
+    "run": "20261021T011348Z-vendas-crm-unificado",
+    "decision": "skipped-autopilot",
+    "decided_at": "2026-10-21",
+    "note": "Owner prompt .nexo/tmp/vendas-crm-prompt-v1.md invoked /nexo-feature --autopilot. Phases 0-3 landed on local master (73a009a, c15a0ca, 60c57fd, 3dc3739) after a separate Sonnet Verify per slice and a Codex gpt-6-astra high review per phase; slice 13 parked after a failed Verify with the 64-dispatch budget spent; slice 14 parked (budget). No push, no staging, no production; Gate 3 untouched."
   }
 }
