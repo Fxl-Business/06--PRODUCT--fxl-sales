@@ -1,0 +1,1553 @@
+OpenAI Codex v0.161.0
+--------
+workdir: /Users/cauetpinciara/Documents/fxl/projects/06--PRODUCT--fxl-sales/.worktrees/20261021T011348Z-vendas-crm-unificado/run
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: high
+reasoning summaries: none
+session id: 01a15e0c-3c51-7080-ba9f-40d0b0141b18
+--------
+user
+# Reviewer agent
+
+## Objective
+
+Review the Builder's diff, run the named commands, and return structured findings.
+
+## Inputs
+
+The diff, the acceptance criteria, the test and command output, and the previous round's findings (empty in round 1).
+
+## Output
+
+Findings JSON validated against [`../agents-findings.schema.json`](../agents-findings.schema.json): `{verdict, round, findings[], checks[]}`. `verdict` is `APPROVED` or `CHANGES_REQUESTED`. Each finding `kind` is `objective` (proven by a command) or `judgment` (a design opinion). A response that does not validate counts as a failed round, repeated once, then plano B.
+On codex you answer the schema's strict variant, where an optional key such as `line` or `suggestion` is present and may be null.
+
+## Writing area (D8)
+
+You are given `FXL_SCRATCH`, a folder inside this run's scratchpad.
+Your sandbox is read-only, so you write no file at all, not even inside `$FXL_SCRATCH`, which only holds inputs this run prepared, such as the diff under review.
+Never redirect a command's output to a file: not to `$FXL_SCRATCH`, NEVER to `/tmp` and NEVER to the repository root; a read-only Reviewer reads command output directly.
+Writing anywhere is a slice failure.
+This rule reproduces the 2026-09-26 incident's fix: an agent that wrote `pnpm -r test > /tmp_pnpm_r_test_check.log` and then blocked 53 h waiting for an approval nobody saw.
+
+Sandbox: `read-only`.
+You never edit code.
+Being read-only, you cannot write even in `$FXL_SCRATCH`: read every command's output directly, and use the oracle and lint output the orchestrator already put in your prompt instead of re-running them.
+
+## No approval, ever (D7)
+
+You run non-interactively. You may never open a host approval prompt. An action that would require approval must fail immediately with a named error, never wait. Codex: approval `never` and an explicit sandbox. Claude: an explicit permission mode and an explicit tool list. If a slice genuinely needs an approval-gated action, park the slice - do not start a prompt that leaves the run idle.
+
+## Resumable rounds
+
+Across rounds you resume the SAME session.
+Driven by the skill scripts, the flow runs `nexo-agent.py run reviewer --resume`, which resumes your recorded session on the same CLI: `codex exec resume` on codex, `claude --resume` on claude-code.
+The session id comes from `agents.jsonl` and never crosses CLIs.
+Driven by the Harness, it is the peer-link delegate session.
+maxRounds is 3.
+After 3, H1 applies and the flow arbitrates.
+
+## Cross-check (D6)
+
+You use a different CLI than the Builder. Default per H7 (codex, inherit, high); plano B claude-code, claude-sonnet-5-5.
+
+## This review
+You are the Nexo REVIEWER (code review of one wave) for run 20261021T011348Z-vendas-crm-unificado of the FXL Vendas repo, round 2.
+Repository (read-only, current directory): the run worktree, HEAD is the integrated wave. Review the diff `git diff 60c57fd...HEAD -- . ':(exclude)nexo/runs'` (also saved at /private/tmp/claude-501/-Users-cauetpinciara-Documents-fxl-projects-06--PRODUCT--fxl-sales/7547107c-ada5-4f38-b18a-0e0045525fad/scratchpad/review/phase3-r2/diff.patch,     6157 lines).
+Binding owner request: /Users/cauetpinciara/Documents/fxl/projects/06--PRODUCT--fxl-sales/.nexo/tmp/vendas-crm-prompt-v1.md. Repo rules: CLAUDE.md. Slice plans: nexo/plans/vendas-crm-unificado/.
+Look for: correctness bugs, security (tenant isolation by org_id, RLS, trusting ids from bodies, secrets), destructive SQL or data loss, renamed technical ids (fxl-sales, @fxl-sales/*, SALES_*, sales_ops_*, fxl-sales.* events and storage keys, domains), tests that are vacuous or weakened, violations of CLAUDE.md rules, concurrency issues, and acceptance criteria not met.
+A finding is blocker or major only when it would ship a real defect or break a stated rule; style preferences are minor or nit. Use verdict CHANGES_REQUESTED only when at least one blocker or major finding exists.
+Do not re-run the full test suites; the orchestrator already ran them (results below). You may run quick read-only commands (grep, git show, cat, small node -e checks) and read output directly; never redirect output to a file.
+
+## Acceptance and gate results
+Phase 3 (waves 11-12) = slices 11-api-modulos-org (parts 11a-11c) and 12-web-modulos-navegacao (parts 12a-12b); plans with binding addenda in nexo/plans/vendas-crm-unificado/. Base = local master after phase 2 (60c57fd).
+Request (section 2 item 2, section 4 Fase 3): one app, no editions: per-org modules in the DB (plan + flags: orcamentos, comissoes, financeiro, finders, catalogo, importacao, clientes) replace sales.edition.leads from the token; Construbom = an org with orcamentos (and dependents) off; transition: a one-time compat backfill reads the token once and writes the flags (documented, no Hub change). require-capability reads the DB (per-request cache); resolveSalesEdition/SALES_EDITION_LEADS_MODULE stop deciding the product except the backfill; navigation filtered by module instead of leadsEdition* lists; an orcamento stage only appears/acts when orcamentos is on. AC: an org with orcamentos off (Construbom) sees exactly what it sees today plus phase 2 additions; a full org has no regression; toggling a flag changes navigation and the 403 edition_capability without redeploy; no guard (no-legacy-*, hub-sdk-pin, fxl-contracts-pin) broken.
+Orchestrator decision (autopilot, conservative): PUT /org-modules requires admin AND the platform-operator allow-list SALES_MODULE_OPERATOR_ACCOUNT_IDS (empty by default = nobody can toggle until an FXL operator is configured), so a tenant admin cannot switch on paid modules for their own org.
+Separate Sonnet Verify (Gate 2): 11 PASS (integration 549/549, api unit 1603, web 1926, guards 112, mutations red; minor: PATCH of an orcamento stage is still refused as system with orcamentos off, fails closed); 12 PASS (web 1961/1961, build and bundle-clean, navigation-edition literal tables untouched, mutations red; minor: no shell-level test of a drop on Proposta with orcamentos off).
+
+## Previous round findings and builder answers
+Round 1: CHANGES_REQUESTED: R1-1 (major) Nova proposta shown with orcamentos off; R1-2 (minor) commission card followed orcamentos; R1-3 (minor) missing D6 drop test.
+Builder answers (fix slice 12.1-fase3-review-fixes, merged; Sonnet Verify PASS: web 1968/1968, API integration 549/549, API unit 1603/1603, each fix reverted turns its test red):
+- R1-1 corrigido: header Nova proposta and the sidebar shortcut use modulesAllowCapability(modules,'proposals').
+- R1-2 corrigido: commission card uses modulesAllowCapability(modules,'commissions').
+- R1-3 corrigido: proposta-stage-modules.test.tsx drives the REAL LeadsBoardContainer (Lista Mover, MoveLeadDialog, Combobox; only API hooks mocked): onto Proposta with orcamentos off moves without conversion, with it on requests conversion.
+- Also: the wave suite exposed a clock flake; every stage_changed_at written on a stage change now uses the database now() (move, advance, restore); leads-move-concurrency 10/10 runs green.
+Re-evaluate the whole phase 3 diff (base 60c57fd).
+
+2026-10-21T11:52:44.338927Z ERROR rmcp::transport::worker: worker quit with fatal: Transport channel closed, when AuthRequired(AuthRequiredError { www_authenticate_header: "Bearer error=\"invalid_token\", error_description=\"Token is not authorized\", resource_metadata=\"https://api.githubcopilot.com/.well-known/oauth-protected-resource/mcp/\"" })
+hook: SessionStart
+hook: SessionStart Completed
+hook: UserPromptSubmit
+hook: UserPromptSubmit Completed
+codex
+I’ll continue the code-review skill review, verify all three fixes, and examine the timestamp change for concurrency regressions. I’ll use the supplied test results and keep checks read-only.
+
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "git log 36bb54f..HEAD --oneline; git diff --stat 36bb54f...HEAD -- . ':(exclude)nexo/runs'; git diff 36bb54f...HEAD -- . ':(exclude)nexo/runs'" in /Users/cauetpinciara/Documents/fxl/projects/06--PRODUCT--fxl-sales/.worktrees/20261021T011348Z-vendas-crm-unificado/run
+ succeeded in 0ms:
+4362da7 Merge branch 'feat/6q75vnog-12.1-fase3-review-fixes' into nexo/20261021T011348Z-vendas-crm-unificado
+d1cbe30 docs(nexo): run records
+adf5b8a test(leads): pin the database-clock stage_changed_at spread
+0bc5b27 docs(nexo): run records
+c8af778 fix(crm): stamp stage_changed_at with the database clock
+aed48f7 test(web): moving onto Proposta with orcamentos off never converts
+210f44a fix(web): commission card follows the comissoes module
+988bf68 fix(web): gate the Nova proposta action on orcamentos
+ac012c8 docs(nexo): run records
+ .../leads/__tests__/lead-contract.test.ts          |   2 +-
+ .../sales-ops/leads/lead-history-service.ts        |   2 +-
+ .../src/domains/sales-ops/leads/lead-service.ts    |   4 +-
+ .../domains/sales-ops/leads/lead-trash-service.ts  |   2 +-
+ apps/web/src/sales-ops/SalesOpsApp.tsx             |  15 +-
+ .../sales-ops/__tests__/org-modules-shell.test.tsx |  39 ++++
+ .../__tests__/proposta-stage-modules.test.tsx      | 230 +++++++++++++++++++++
+ .../12.1-fase3-review-fixes.md                     |  27 +++
+ 8 files changed, 312 insertions(+), 9 deletions(-)
+diff --git a/apps/api/src/domains/sales-ops/leads/__tests__/lead-contract.test.ts b/apps/api/src/domains/sales-ops/leads/__tests__/lead-contract.test.ts
+index 6d4b78a..50a26fd 100644
+--- a/apps/api/src/domains/sales-ops/leads/__tests__/lead-contract.test.ts
++++ b/apps/api/src/domains/sales-ops/leads/__tests__/lead-contract.test.ts
+@@ -164,7 +164,7 @@ describe('lead wire contract', () => {
+   // key AT ALL, never a conditional VALUE.
+   it('writes stageChangedAt by key omission and never as a conditional value', () => {
+     expect(leadServiceSource).toMatch(
+-      /\.\.\.\(stageChanged \? \{ stageChangedAt: new Date\(\) \} : \{\}\),/,
++      /\.\.\.\(stageChanged \? \{ stageChangedAt: sql`now\(\)` \} : \{\}\),/,
+     );
+     expect(leadServiceSource).not.toMatch(/stageChangedAt: stageChanged \?/);
+   });
+diff --git a/apps/api/src/domains/sales-ops/leads/lead-history-service.ts b/apps/api/src/domains/sales-ops/leads/lead-history-service.ts
+index c8fbc6d..6777cc7 100644
+--- a/apps/api/src/domains/sales-ops/leads/lead-history-service.ts
++++ b/apps/api/src/domains/sales-ops/leads/lead-history-service.ts
+@@ -255,7 +255,7 @@ export function advanceLead(
+       .update(salesOpsCrmLeads)
+       .set({
+         stageId: destination.id,
+-        stageChangedAt: new Date(),
++        stageChangedAt: sql`now()`,
+         lostReason: destination.exitKind === 'perdido' ? (input.reason ?? null) : null,
+         ...(claimed ? { sellerPersonId: claimed.id, sellerNameSnapshot: claimed.displayName } : {}),
+         updatedAt: new Date(),
+diff --git a/apps/api/src/domains/sales-ops/leads/lead-service.ts b/apps/api/src/domains/sales-ops/leads/lead-service.ts
+index 066e167..9703190 100644
+--- a/apps/api/src/domains/sales-ops/leads/lead-service.ts
++++ b/apps/api/src/domains/sales-ops/leads/lead-service.ts
+@@ -1299,7 +1299,9 @@ export async function moveLead(
+         // reorder inside one stage produces an UPDATE whose `set` object has no
+         // stage_changed_at key at all, so the column is physically untouchable
+         // by a reorder - the rule is not a branch someone can later "simplify".
+-        ...(stageChanged ? { stageChangedAt: new Date() } : {}),
++        // A stage change is stamped by the DATABASE clock (`now()`), the clock the
++        // create path's column default uses, never by the Node clock.
++        ...(stageChanged ? { stageChangedAt: sql`now()` } : {}),
+         lostReason: destination.exitKind === 'perdido' ? (input.reason ?? null) : null,
+         ...(opensOrcamento ? { saleId: input.saleId! } : {}),
+         ...(claimed ? { sellerPersonId: claimed.id, sellerNameSnapshot: claimed.displayName } : {}),
+diff --git a/apps/api/src/domains/sales-ops/leads/lead-trash-service.ts b/apps/api/src/domains/sales-ops/leads/lead-trash-service.ts
+index 1326b48..f72c775 100644
+--- a/apps/api/src/domains/sales-ops/leads/lead-trash-service.ts
++++ b/apps/api/src/domains/sales-ops/leads/lead-trash-service.ts
+@@ -203,7 +203,7 @@ export function restoreLead(
+         // KEY OMISSION, the moveLead rule: stage_changed_at moves only when the
+         // etapa changes. The fallback target is a normal etapa, which carries no
+         // lost reason, so the reason is cleared with it.
+-        ...(stageChanged ? { stageChangedAt: new Date(), lostReason: null } : {}),
++        ...(stageChanged ? { stageChangedAt: sql`now()`, lostReason: null } : {}),
+         updatedAt: new Date(),
+       })
+       .where(restoreConditions);
+diff --git a/apps/web/src/sales-ops/SalesOpsApp.tsx b/apps/web/src/sales-ops/SalesOpsApp.tsx
+index d77f2e4..57f2d6e 100644
+--- a/apps/web/src/sales-ops/SalesOpsApp.tsx
++++ b/apps/web/src/sales-ops/SalesOpsApp.tsx
+@@ -132,8 +132,11 @@ import { computeSaleFinancials } from '@fxl-sales/shared-utils/sale-financials';
+ */
+ import { SPLIT_BP_TOTAL } from '@fxl-sales/shared-utils/professional-split';
+ import { todayInSaoPaulo } from '@fxl-sales/shared-utils/sao-paulo-day';
+-import { hasCapability } from '@fxl-sales/shared-utils/sales-edition';
+-import { editionFromModules, isOrgModules } from '@fxl-sales/shared-utils/crm-model';
++import {
++  editionFromModules,
++  isOrgModules,
++  modulesAllowCapability,
++} from '@fxl-sales/shared-utils/crm-model';
+ import { OrgModulesContext } from '@/auth/org-modules-context';
+ import { CadastroHistorySection } from './CadastroHistoryPanel';
+ import { ForbiddenPanel } from './ForbiddenPanel';
+@@ -1808,7 +1811,9 @@ export function SalesOpsApp() {
+                   : null
+                 : view === 'vendedores' || view === 'finders'
+                   ? null
+-                  : 'Nova proposta';
++                  : modulesAllowCapability(modules, 'proposals')
++                    ? 'Nova proposta'
++                    : null;
+   const workspaceCatalogue = getSalesOpsWorkspaces(modules);
+   const availableWorkspaces = workspaceCatalogue.filter((item) =>
+     visibleWorkspaceIds.includes(item.id),
+@@ -2066,7 +2071,7 @@ export function SalesOpsApp() {
+               in the leads edition the `commissions` and `proposals` capabilities are
+               off, so the card would always read R$ 0 and the wizard could only fail.
+             */}
+-            {!sidebarCollapsed && hasCapability(edition ?? 'full', 'commissions') ? (
++            {!sidebarCollapsed && modulesAllowCapability(modules, 'commissions') ? (
+               <div className="rounded-2xl border border-[#343439] bg-[#242428] p-4">
+                 <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[#7c7c85]">
+                   A pagar este mês
+@@ -2079,7 +2084,7 @@ export function SalesOpsApp() {
+                 </div>
+               </div>
+             ) : null}
+-            {hasCapability(edition ?? 'full', 'proposals') ? (
++            {modulesAllowCapability(modules, 'proposals') ? (
+               <AccentButton onClick={() => setSaleWizard({ mode: 'create' })}>
+                 <Plus className="h-4 w-4" />
+                 {!sidebarCollapsed ? <span>Nova proposta</span> : null}
+diff --git a/apps/web/src/sales-ops/__tests__/org-modules-shell.test.tsx b/apps/web/src/sales-ops/__tests__/org-modules-shell.test.tsx
+index 1ef42ea..9bd430c 100644
+--- a/apps/web/src/sales-ops/__tests__/org-modules-shell.test.tsx
++++ b/apps/web/src/sales-ops/__tests__/org-modules-shell.test.tsx
+@@ -292,3 +292,42 @@ describe('the shell reads the organization modules from the bootstrap', () => {
+     expect(locationPath()).toBe('/operacional/funil');
+   });
+ });
++
++/** Every button whose visible text is exactly `label` (the header and the sidebar both carry one). */
++function buttonsLabelled(label: string): HTMLButtonElement[] {
++  return [...container.querySelectorAll('button')].filter(
++    (button) => button.textContent?.trim() === label,
++  );
++}
++
++describe('the proposta and commission chrome follows the modules, not the edition hint', () => {
++  it('orcamentos off: Comissoes shows no Nova proposta action', async () => {
++    settled({ ...LEADS_MODULES, comissoes: true });
++    await render('/operacional/comissoes', ['admin']);
++
++    expect(locationPath()).toBe('/operacional/comissoes');
++    expect(buttonsLabelled('Nova proposta')).toHaveLength(0);
++  });
++
++  it('orcamentos on: Comissoes keeps the Nova proposta action', async () => {
++    settled(FULL_MODULES);
++    await render('/operacional/comissoes', ['admin']);
++
++    expect(locationPath()).toBe('/operacional/comissoes');
++    expect(buttonsLabelled('Nova proposta').length).toBeGreaterThan(0);
++  });
++
++  it('comissoes on with orcamentos off: the commission balance card shows', async () => {
++    settled({ ...LEADS_MODULES, comissoes: true });
++    await render('/operacional/funil', ['admin']);
++
++    expect(container.textContent).toContain('A pagar este mês');
++  });
++
++  it('comissoes off with orcamentos on: the commission balance card is hidden', async () => {
++    settled({ ...FULL_MODULES, comissoes: false });
++    await render('/operacional/funil', ['admin']);
++
++    expect(container.textContent).not.toContain('A pagar este mês');
++  });
++});
+diff --git a/apps/web/src/sales-ops/__tests__/proposta-stage-modules.test.tsx b/apps/web/src/sales-ops/__tests__/proposta-stage-modules.test.tsx
+new file mode 100644
+index 0000000..d11604d
+--- /dev/null
++++ b/apps/web/src/sales-ops/__tests__/proposta-stage-modules.test.tsx
+@@ -0,0 +1,230 @@
++// @vitest-environment happy-dom
++import * as React from 'react';
++import { createRoot, type Root } from 'react-dom/client';
++import { MemoryRouter } from 'react-router-dom';
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
++import {
++  effectiveStageBehavior,
++  modulesForEdition,
++  type OrgModules,
++} from '@fxl-sales/shared-utils/crm-model';
++import { OrgModulesContext } from '@/auth/org-modules-context';
++import { LeadsBoardContainer } from '../leads/LeadsBoardContainer';
++import type { SalesOpsLead, SalesOpsLeadStage } from '../leads/types';
++import { pipelineFixtureFor } from '../leads/__tests__/pipeline-fixture';
++
++/**
++ * R1-3: moving a lead onto the Proposta stage through the non-drag path (`Mover`
++ * in the Lista view) never requests a conversion while `orcamentos` is off, and
++ * does while it is on.
++ *
++ * The board is driven for real: the Lista, the REAL `MoveLeadDialog` and the REAL
++ * `Combobox`. Only the API layer is mocked. The org's modules are handed the way
++ * the shell hands them (`OrgModulesContext`), and the stage behaviour is projected
++ * the way the API projects it (`effectiveStageBehavior`), so the board sees exactly
++ * what the server would send for that organization.
++ */
++
++const act = (React as typeof React & { act: typeof import('react-dom/test-utils').act }).act;
++
++const modulesState = vi.hoisted(() => ({ current: null as OrgModules | null }));
++const mutation = vi.hoisted(() => ({ isPending: false, mutate: vi.fn(), mutateAsync: vi.fn(async () => ({})) }));
++const query = vi.hoisted(() => ({ data: [] as SalesOpsLeadStage[], leads: [] as SalesOpsLead[] }));
++
++vi.mock('../leads/crm-hooks', () => ({
++  useFieldDefinitions: () => ({ isPending: false, data: [] }),
++  usePipelines: () => {
++    const fixture = pipelineFixtureFor(query.data);
++    const modules = modulesState.current!;
++    return {
++      isPending: false,
++      isError: false,
++      isSuccess: true,
++      data: fixture.pipelines.map((pipeline) => ({
++        ...pipeline,
++        stages: pipeline.stages.map((stage) => ({
++          ...stage,
++          behavior: effectiveStageBehavior({ type: stage.type, behavior: stage.behavior }, modules),
++        })),
++      })),
++    };
++  },
++}));
++vi.mock('../leads/hooks', () => ({
++  useLeadStages: () => ({ data: query.data, isPending: false, isError: false }),
++  useLeadsBoard: () => ({
++    data: { leads: query.leads, hasMore: false },
++    isPending: false,
++    isError: false,
++    isFetchingNextPage: false,
++    fetchNextPage: vi.fn(),
++  }),
++  useLeadStageSummary: () => ({ data: undefined }),
++  useMoveLead: () => mutation,
++  useSaveLead: () => mutation,
++  useDeleteLead: () => mutation,
++}));
++vi.mock('@/auth/react', async () => {
++  const { editionFromModules: toEdition } = await import('@fxl-sales/shared-utils/crm-model');
++  return {
++    useAuthProfile: () => ({ roles: ['admin'] }),
++    // The real `useSalesEdition` projects the shell's modules; mirror that projection.
++    useSalesEdition: () => toEdition(modulesState.current!),
++  };
++});
++
++let container: HTMLDivElement;
++let root: Root;
++
++const PROPOSTA_ID = 'proposta';
++const DRAFT_ID = 'draft';
++
++function stage(
++  id: string,
++  name: string,
++  position: number,
++  kind: SalesOpsLeadStage['kind'],
++): SalesOpsLeadStage {
++  return {
++    id,
++    name,
++    position,
++    kind,
++    isSystem: kind !== 'normal',
++    status: 'active',
++    archivedAt: null,
++    orgId: 'org-1',
++    createdAt: '2026-09-01T00:00:00.000Z',
++    updatedAt: null,
++  };
++}
++
++const lead: SalesOpsLead = {
++  id: 'lead-a',
++  stageId: DRAFT_ID,
++  position: 1,
++  contactName: 'Ana',
++  clientId: null,
++  clientNameSnapshot: 'Acme',
++  estimatedValueBrl: 100_000,
++  description: null,
++  contactPhone: null,
++  contactEmail: null,
++  contactBirthDate: null,
++  sellerPersonId: null,
++  sellerNameSnapshot: 'Marina',
++  lostReason: null,
++  stageChangedAt: '2026-09-15T00:00:00.000Z',
++  saleId: null,
++  saleStatus: null,
++  saleCode: null,
++  products: [],
++  createdAt: '2026-09-01T00:00:00.000Z',
++  updatedAt: null,
++};
++
++const FULL: OrgModules = modulesForEdition('full');
++const LEADS: OrgModules = modulesForEdition('leads');
++
++beforeEach(() => {
++  (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
++  container = document.createElement('div');
++  document.body.append(container);
++  root = createRoot(container);
++  query.data = [
++    stage(DRAFT_ID, 'Contato', 1, 'normal'),
++    stage(PROPOSTA_ID, 'Proposta', 2, 'conversion'),
++  ];
++  query.leads = [lead];
++  mutation.mutateAsync.mockClear();
++});
++
++afterEach(async () => {
++  await act(async () => root.unmount());
++  container.remove();
++  document.body.querySelectorAll('[role="dialog"]').forEach((node) => node.remove());
++  vi.restoreAllMocks();
++});
++
++async function settle() {
++  await act(async () => {
++    await new Promise((resolve) => {
++      setTimeout(resolve, 5);
++    });
++  });
++}
++
++async function click(element: Element) {
++  await act(async () => {
++    element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
++  });
++  await settle();
++}
++
++async function renderBoard(modules: OrgModules, onRequestConversion: ReturnType<typeof vi.fn>) {
++  modulesState.current = modules;
++  await act(async () => {
++    root.render(
++      <MemoryRouter future={{ v7_relativeSplatPath: true, v7_startTransition: true }}>
++        <OrgModulesContext.Provider value={modules}>
++          <LeadsBoardContainer
++            clients={[]}
++            onRequestConversion={onRequestConversion}
++            people={[]}
++            products={[]}
++            routedMode="stage"
++            selectedStageId={DRAFT_ID}
++            sellers={[]}
++            showSellerFilter={false}
++            workspace="operacional"
++          />
++        </OrgModulesContext.Provider>
++      </MemoryRouter>,
++    );
++  });
++  await settle();
++}
++
++/** Moves the lead through the Lista `Mover` action and the real dialog. */
++async function moveLeadTo(stageName: string) {
++  await click(container.querySelector(`[data-move-trigger="${lead.id}"]`)!);
++  const dialog = document.querySelector('[role="dialog"]');
++  if (!dialog) throw new Error('move dialog not rendered');
++  await click(dialog.querySelector('[role="combobox"]')!);
++  const option = [...document.querySelectorAll('[role="listbox"] [role="option"]')].find(
++    (node) => node.textContent?.trim() === stageName,
++  );
++  if (!option) throw new Error(`stage "${stageName}" not offered`);
++  await click(option);
++  const confirm = dialog.querySelector<HTMLButtonElement>('[data-move-confirm]');
++  if (!confirm) throw new Error('confirm button not found');
++  await click(confirm);
++}
++
++describe('moving onto Proposta follows orcamentos', () => {
++  it('orcamentos off: the lead moves and no conversion is requested', async () => {
++    const onRequestConversion = vi.fn(async () => 'sale-1');
++    await renderBoard(LEADS, onRequestConversion);
++
++    await moveLeadTo('Proposta');
++
++    expect(mutation.mutateAsync).toHaveBeenCalledWith(
++      expect.objectContaining({ leadId: lead.id, toStageId: PROPOSTA_ID }),
++    );
++    expect(onRequestConversion).not.toHaveBeenCalled();
++  });
++
++  it('orcamentos on: the same move requests the conversion and rides the resolved sale id', async () => {
++    const onRequestConversion = vi.fn(async () => 'sale-1');
++    await renderBoard(FULL, onRequestConversion);
++
++    await moveLeadTo('Proposta');
++
++    expect(onRequestConversion).toHaveBeenCalledWith(
++      expect.objectContaining({ lead: expect.objectContaining({ id: lead.id }), toStageId: PROPOSTA_ID }),
++    );
++    expect(mutation.mutateAsync).toHaveBeenCalledWith(
++      expect.objectContaining({ leadId: lead.id, toStageId: PROPOSTA_ID, saleId: 'sale-1' }),
++    );
++  });
++});
+diff --git a/nexo/plans/vendas-crm-unificado/12.1-fase3-review-fixes.md b/nexo/plans/vendas-crm-unificado/12.1-fase3-review-fixes.md
+new file mode 100644
+index 0000000..214bb26
+--- /dev/null
++++ b/nexo/plans/vendas-crm-unificado/12.1-fase3-review-fixes.md
+@@ -0,0 +1,27 @@
++---
++id: 12.1-fase3-review-fixes
++milestone: v4.8.0
++status: todo
++depends_on: ["12-web-modulos-navegacao"]
++files_modified: ["apps/web/src/sales-ops/SalesOpsApp.tsx", "apps/web/src/sales-ops/__tests__/org-modules-shell.test.tsx", "apps/api/src/domains/sales-ops/leads/lead-service.ts", "apps/api/src/domains/crm/lead-history-service.ts", "apps/api/src/domains/sales-ops/leads/lead-trash-service.ts", "apps/api/test/rls/leads-move-concurrency.test.ts"]
++affected_tests: []
++acceptance: "given orcamentos off and comissoes on, when Comissoes renders, then no Nova proposta action is shown and the commission balance card follows comissoes; a move onto the Proposta stage with orcamentos off moves the lead and never requests conversion; and every stage_changed_at written on a stage change uses the database clock, so leads-move-concurrency passes 10 runs in a row"
++goal: "Close Codex phase 3 review findings and the wave-suite clock flake"
++oracle: "apps/web/src/sales-ops/__tests__/org-modules-shell.test.tsx"
++---
++
++# 12.1 Phase 3 review fixes and the stage_changed_at clock flake
++
++Sources: `nexo/runs/20261021T011348Z-vendas-crm-unificado/agents/review-phase3-r1/findings.json` (R1-1 major, R1-2 minor, R1-3 minor) and the phase 3 wave suite failure.
++Affected tests search: the shell oracle and `leads-move-concurrency.test.ts` are the owners; no other test asserts these behaviours.
++
++1. R1-1 (`SalesOpsApp.tsx` ~1811): gate the header "Nova proposta" action (and any other create-proposta entry on non-proposta views) on the `orcamentos` module (`modulesAllowCapability(modules, 'proposals')`). Test in `org-modules-shell.test.tsx`: modules `orcamentos=false, comissoes=true`, route `/operacional/comissoes`: no `Nova proposta` button; with orcamentos on it is there.
++2. R1-2 (`SalesOpsApp.tsx` ~2069): the commission balance card uses `modulesAllowCapability(modules, 'commissions')` instead of `hasCapability(edition, 'commissions')`. Test both combinations.
++3. R1-3: add the shell/board-level test: with `orcamentos` off, moving a lead onto the `Proposta` (type `orcamento`) stage through the non-drag path (`Mover` in the Lista view or the `MoveLeadDialog`) calls the lead move mutation and never requests conversion (no proposta wizard); with `orcamentos` on the same action requests conversion. Do not mock `LeadsBoardContainer` away in this test (mock only the API layer, like `leads-stage-navigation.test.tsx` does). If driving the real container is impossible in happy-dom, test the container (`LeadsBoardContainer`) directly with the modules context provider and say so.
++4. Clock flake: `apps/api/test/rls/leads-move-concurrency.test.ts:245` fails intermittently because a stage change writes `stage_changed_at` from the Node clock (`new Date()`, millisecond precision, e.g. `...857000` µs) while lead creation uses the database `now()`; when the database clock is ahead of Node's the later move stamps an EARLIER instant. Fix the product code: every write of `stage_changed_at` on a stage change (lead-service move, advance in `lead-history-service.ts`, restore in `lead-trash-service.ts`, and any other writer you find with `grep -rn "stageChangedAt" apps/api/src`) uses the database clock (`sql\`now()\``) like the create path. Do not touch the test's assertion. Prove it: run `pnpm --filter @fxl-sales/api exec env VITEST_INTEGRATION=1 vitest run test/rls/leads-move-concurrency.test.ts` 10 times in a row, all green; also run the history oracle `test/rls/crm-pipeline-history.test.ts`.
++5. Commits: `fix(web): gate the Nova proposta action on orcamentos`, `fix(web): commission card follows the comissoes module`, `test(web): moving onto Proposta with orcamentos off never converts`, `fix(crm): stamp stage_changed_at with the database clock`.
++
++## Commands
++- `pnpm --filter @fxl-sales/web exec vitest run src/sales-ops/__tests__/org-modules-shell.test.tsx`, then the whole web suite
++- the concurrency test x10, then the full API integration suite once (serial)
++- api and web lint and type-check
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+hook: PostToolUse
+hook: PostToolUse Completed
+2026-10-21T11:53:01.755438Z ERROR rmcp::transport::worker: worker quit with fatal: Transport channel closed, when AuthRequired(AuthRequiredError { www_authenticate_header: "Bearer error=\"invalid_token\", error_description=\"Token is not authorized\", resource_metadata=\"https://api.githubcopilot.com/.well-known/oauth-protected-resource/mcp/\"" })
+hook: PreToolUse
+hook: PreToolUse Completed
+hook: PostToolUse
+hook: PostToolUse Completed
+2026-10-21T11:53:05.040668Z ERROR rmcp::transport::worker: worker quit with fatal: Transport channel closed, when AuthRequired(AuthRequiredError { www_authenticate_header: "Bearer error=\"invalid_token\", error_description=\"Token is not authorized\", resource_metadata=\"https://api.githubcopilot.com/.well-known/oauth-protected-resource/mcp/\"" })
+hook: PreToolUse
+hook: PreToolUse
+hook: PreToolUse Completed
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "sed -n '1100,1355p' apps/api/src/domains/sales-ops/leads/lead-service.ts; sed -n '185,300p' apps/api/src/domains/sales-ops/leads/lead-history-service.ts; sed -n '100,250p' apps/api/src/domains/sales-ops/leads/lead-trash-service.ts; cat apps/api/src/domains/sales-ops/leads/with-tenant.ts" in /Users/cauetpinciara/Documents/fxl/projects/06--PRODUCT--fxl-sales/.worktrees/20261021T011348Z-vendas-crm-unificado/run
+ succeeded in 0ms:
+      .limit(1)
+      .for('update');
+    if (!current) return { ok: false, reason: 'not_found' } as const;
+    // A converted card is read-only: its data now lives on the proposta.
+    if (current.saleId !== null) return { ok: false, reason: 'already_converted' } as const;
+
+    const claimant = claimantFor(gate, current);
+    // Whether this UPDATE writes the seller pair at all: a claim always does,
+    // otherwise only a body that names the key.
+    const writesSeller = claimant !== null || input.sellerPersonId !== undefined;
+
+    let seller: ResolvedSeller | null = null;
+    if (claimant !== null) {
+      // On an unassigned lead the caller may leave the vendedor out, clear it or
+      // name themselves, and all three mean "mine": the web form of a pool lead
+      // carries an empty vendedor. Any other id would hand the lead to a
+      // colleague, which only a gestor may do, so it is refused before anything
+      // is written. The snapshot is the pessoa's own display name, read here.
+      const requested = input.sellerPersonId ?? null;
+      if (requested !== null && requested !== claimant) {
+        return { ok: false, reason: 'seller_scope' } as const;
+      }
+      seller = await resolveSellerPersonId(tx, orgId, claimant);
+    } else if (input.sellerPersonId !== undefined) {
+      const requested = input.sellerPersonId ?? null;
+      if (gate.sellerPersonId && requested !== gate.sellerPersonId) {
+        return { ok: false, reason: 'seller_scope' } as const;
+      }
+      seller = requested ? await resolveSellerPersonId(tx, orgId, requested) : null;
+    }
+
+    // A write that touches the contact must leave at least one of phone and e-mail.
+    if (input.contactPhone !== undefined || input.contactEmail !== undefined) {
+      const phone = input.contactPhone !== undefined ? input.contactPhone : current.contactPhone;
+      const email = input.contactEmail !== undefined ? input.contactEmail : current.contactEmail;
+      if (!phone && !email) throw new LeadInputError('contact_required');
+    }
+
+    const dynamic = await resolveFieldWrites(tx, orgId, input.fields ?? []);
+    const legacy = await resolveLegacyFieldWrites(tx, orgId, input);
+    const clientTouched = input.clientId !== undefined || dynamic.cliente !== null;
+    const nextClientId = clientTouched ? pickClientId(input.clientId, dynamic.cliente) : current.clientId;
+
+    let clientNameSnapshot: string | undefined;
+    if (clientTouched) {
+      clientNameSnapshot = nextClientId
+        ? await resolveClientName(tx, orgId, nextClientId)
+        : // The column is NOT NULL, so clearing the LINK can never blank the
+          // label: the body's text wins, and the stored snapshot is the floor.
+          (input.clientName ?? current.clientNameSnapshot);
+    } else if (input.clientName !== undefined) {
+      // NOT NULL floor: a null clear keeps the stored snapshot, matching the
+      // clientId branch above.
+      clientNameSnapshot = input.clientName ?? current.clientNameSnapshot;
+    }
+
+    await tx
+      .update(salesOpsCrmLeads)
+      // Built from `input` alone, and `LeadPatchSchema` is `.strict()` and
+      // declares no stageId, position, stageChangedAt, saleId or lostReason - so
+      // none of those keys can appear here, ever.
+      .set({
+        ...(input.contactName !== undefined ? { contactName: input.contactName } : {}),
+        ...(clientTouched ? { clientId: nextClientId } : {}),
+        ...(clientNameSnapshot !== undefined ? { clientNameSnapshot } : {}),
+        ...(input.estimatedValueBrl !== undefined
+          ? { estimatedValueBrl: input.estimatedValueBrl }
+          : {}),
+        ...(input.contactPhone !== undefined ? { contactPhone: input.contactPhone } : {}),
+        ...(input.contactEmail !== undefined ? { contactEmail: input.contactEmail } : {}),
+        ...(writesSeller
+          ? {
+              sellerPersonId: seller?.id ?? null,
+              sellerNameSnapshot: seller?.displayName ?? '',
+            }
+          : {}),
+        updatedAt: new Date(),
+      })
+      // Live again here, not only in the identity read: belt and braces under READ COMMITTED, the row lock above already re-checked it.
+      .where(and(eq(salesOpsCrmLeads.orgId, orgId), eq(salesOpsCrmLeads.id, id), liveLeadCondition()));
+
+    // A key absent from the body leaves its value rows alone; an empty value clears them. The same
+    // distinction `updateProduct` draws for the produto's função costs.
+    await applyFieldWrites(tx, orgId, id, [...legacy, ...dynamic.writes]);
+
+    return { ok: true, lead: await readLeadView(tx, orgId, id) } as const;
+  });
+}
+
+export type MoveLeadOptions = {
+  /**
+   * The spreadsheet import places a historical lead straight into its etapa; there is no path to
+   * walk. Only the import executor passes it. Every other caller is held to the transition graph.
+   */
+  skipTransitionGraph?: boolean;
+};
+
+/**
+ * The writer of `stage_id`, `position`, `stage_changed_at`, `lost_reason` and `sale_id` for the
+ * board (`advanceLead` in lead-history-service.ts is the other one, sharing the lock order, the
+ * transition rule and the history event).
+ */
+export async function moveLead(
+  db: Db,
+  orgId: string,
+  id: string,
+  input: MoveLeadInput,
+  scope: LeadScope,
+  options: MoveLeadOptions = {},
+): Promise<WriteLeadResult> {
+  return withTenant(db, orgId, async (tx) => {
+    const gate = await resolveLeadScopePredicate(tx, orgId, scope);
+    if (!gate.ok) return { ok: false, reason: gate.reason } as const;
+    // Before the card's row lock, never after it: see lockLeadBoard.
+    await lockLeadBoard(tx, orgId);
+
+    const [current] = await tx
+      .select()
+      .from(salesOpsCrmLeads)
+      .where(and(...leadIdentityConditions(orgId, id, gate)))
+      .limit(1)
+      .for('update');
+    if (!current) return { ok: false, reason: 'not_found' } as const;
+
+    // The read-only final column, enforced on the server and not merely
+    // un-draggable in the UI. It is also what makes "no board action reaches
+    // POST /sales/:id/transition" true by construction: once a lead carries a
+    // proposta there is no lead operation left that could.
+    if (current.saleId !== null) return { ok: false, reason: 'already_converted' } as const;
+
+    // An ARCHIVED stage is not a move target, and neither is a stage of another pipeline (the
+    // composite FK (org, pipeline, stage) would refuse it anyway).
+    const [destination] = await tx
+      .select({
+        id: salesOpsPipelineStages.id,
+        pipelineId: salesOpsPipelineStages.pipelineId,
+        type: salesOpsPipelineStages.type,
+        behavior: salesOpsPipelineStages.behavior,
+        exitKind: salesOpsPipelineStages.exitKind,
+        requiresReason: salesOpsPipelineStages.requiresReason,
+      })
+      .from(salesOpsPipelineStages)
+      .where(
+        and(
+          eq(salesOpsPipelineStages.orgId, orgId),
+          eq(salesOpsPipelineStages.id, input.stageId),
+          eq(salesOpsPipelineStages.status, 'active'),
+        ),
+      )
+      .limit(1);
+    if (!destination) throw new LeadInputError('stage_not_found');
+
+    const stageChanged = destination.id !== current.stageId;
+    // A reorder inside one column is always allowed. A cross-stage move must be an edge of the
+    // pipeline's explicit transition graph (a stage of another pipeline is never reachable).
+    if (stageChanged && !options.skipTransitionGraph) {
+      const allowed =
+        destination.pipelineId === current.pipelineId &&
+        (await stageTransitionAllowed(tx, orgId, current.pipelineId, current.stageId, destination.id));
+      if (!allowed) return { ok: false, reason: 'transition_not_allowed' } as const;
+    } else if (destination.pipelineId !== current.pipelineId) {
+      // Only the import can get here (graph skipped); the composite FK would refuse it anyway.
+      throw new LeadInputError('stage_not_found');
+    }
+
+    // This cannot be a zod refine: the requirement depends on the DESTINATION
+    // row, which is a database read. So it is the service sentinel 400, the same
+    // shape routes.ts already returns for entrada_mode_value_mismatch.
+    if (destination.requiresReason && input.reason === undefined) {
+      throw new LeadInputError('lost_reason_required');
+    }
+
+    const opensOrcamento = stageActsAsOrcamento(destination, scope.modules ?? ALL_MODULES_ENABLED);
+    if (opensOrcamento) {
+      if (input.saleId === undefined) throw new LeadInputError('sale_required_for_conversion');
+      // The in-org SELECT is what produces the designed 400. The composite FK
+      // sales_ops_crm_leads_org_sale_fk is the backstop underneath it: without this
+      // read a cross-org id would surface as a raw 23503 and an HTTP 500.
+      const [sale] = await tx
+        .select({ id: salesOpsSales.id })
+        .from(salesOpsSales)
+        .where(and(eq(salesOpsSales.orgId, orgId), eq(salesOpsSales.id, input.saleId)))
+        .limit(1);
+      if (!sale) throw new LeadInputError('sale_not_found');
+    } else if (input.saleId !== undefined) {
+      // sale_id and "is in the conversion column" can never diverge.
+      throw new LeadInputError('sale_not_allowed');
+    }
+
+    // The claim (leads-sem-vendedor), resolved after every validation above so a
+    // refused move never claims, and written by the same UPDATE as the move.
+    const claimant = claimantFor(gate, current);
+    const claimed = claimant !== null ? await resolveSellerPersonId(tx, orgId, claimant) : null;
+
+    await tx
+      .update(salesOpsCrmLeads)
+      .set({
+        stageId: destination.id,
+        // KEY OMISSION, never `stageChanged ? now : current.stageChangedAt`. A
+        // reorder inside one stage produces an UPDATE whose `set` object has no
+        // stage_changed_at key at all, so the column is physically untouchable
+        // by a reorder - the rule is not a branch someone can later "simplify".
+        // A stage change is stamped by the DATABASE clock (`now()`), the clock the
+        // create path's column default uses, never by the Node clock.
+        ...(stageChanged ? { stageChangedAt: sql`now()` } : {}),
+        lostReason: destination.exitKind === 'perdido' ? (input.reason ?? null) : null,
+        ...(opensOrcamento ? { saleId: input.saleId! } : {}),
+        ...(claimed ? { sellerPersonId: claimed.id, sellerNameSnapshot: claimed.displayName } : {}),
+        updatedAt: new Date(),
+      })
+      .where(and(eq(salesOpsCrmLeads.orgId, orgId), eq(salesOpsCrmLeads.id, id), liveLeadCondition()));
+
+    await renumberStage(tx, orgId, destination.id, { moved: id, at: input.position });
+    if (stageChanged) {
+      await renumberStage(tx, orgId, current.stageId, null);
+      // Exactly one history event per stage change, written by the server in this transaction.
+      await recordStageChange(tx, {
+        orgId,
+        leadId: id,
+        fromStageId: current.stageId,
+        toStageId: destination.id,
+        reason: destination.exitKind === 'perdido' ? (input.reason ?? null) : null,
+        actorUserId: scope.userId,
+        actorName: scopeActorName(scope),
+      });
+    }
+
+    return { ok: true, lead: await readLeadView(tx, orgId, id) } as const;
+  });
+}
+
+/**
+ * Writes dense 1..N over one column, in ONE statement.
+ *
+ * Every caller holds the board lock (`lockLeadBoard`), and THAT is what
+ * serializes two drags: no other writer of a position can touch this column until
+ * the caller's transaction ends, so the read below already sees every committed
+ * move. The `FOR UPDATE` is no longer the guard. It stays because it is harmless:
+ * it can only wait on a card a concurrent PATCH holds, and a PATCH never asks for
+ * the board, so the wait cannot close a cycle.
+ *
+ * Over LIVE cards only. A deleted card keeps its stale position untouched (it is
+ * irrelevant while deleted, and a restore appends at the end), and the raw UPDATE
+ * below can only reach ids this live read returned.
+ */
+export async function renumberStage(
+  tx: Db,
+  orgId: string,
+  stageId: string,
+  placement: { moved: string; at: number } | null,
+): Promise<void> {
+  const rows = await tx
+    .select({ id: salesOpsCrmLeads.id })
+    .from(salesOpsCrmLeads)
+    .where(
+      and(
+// ─────────────────────────────────────────────────────────────────────────────
+// Avançar
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Moves a lead along an edge of its pipeline graph and records why, in ONE transaction:
+ *  - the move (end of the destination column, `stage_changed_at = now()`, the claim of a pool lead),
+ *  - exactly one `stage_changed` event (actor name from the token),
+ *  - the note (linked to that event) and the follow-up, when given.
+ * Same lock order as `moveLead`: scope gate, board lock, then the card row.
+ *
+ * Refusals: `409 transition_not_allowed` (pair absent, or a stage of another pipeline);
+ * `409 sale_required_for_conversion` (the destination opens a proposta, owned by the wizard);
+ * `400 followup_required` (a non-exit destination without próximo passo AND data, or only one of the two);
+ * `400 reason_required` (the destination requires a reason).
+ */
+export function advanceLead(
+  db: Db,
+  orgId: string,
+  id: string,
+  input: AdvanceLeadInput,
+  scope: LeadScope,
+): Promise<WriteLeadResult> {
+  return withTenant(db, orgId, async (tx) => {
+    const gate = await resolveLeadScopePredicate(tx, orgId, scope);
+    if (!gate.ok) return { ok: false, reason: gate.reason } as const;
+    await lockLeadBoard(tx, orgId);
+
+    const [current] = await tx
+      .select()
+      .from(salesOpsCrmLeads)
+      .where(and(...leadIdentityConditions(orgId, id, gate)))
+      .limit(1)
+      .for('update');
+    if (!current) return { ok: false, reason: 'not_found' } as const;
+    if (current.saleId !== null) return { ok: false, reason: 'already_converted' } as const;
+
+    const [destination] = await tx
+      .select()
+      .from(salesOpsPipelineStages)
+      .where(
+        and(
+          eq(salesOpsPipelineStages.orgId, orgId),
+          eq(salesOpsPipelineStages.id, input.toStageId),
+          eq(salesOpsPipelineStages.status, 'active'),
+        ),
+      )
+      .limit(1);
+    if (
+      !destination ||
+      destination.pipelineId !== current.pipelineId ||
+      destination.id === current.stageId ||
+      !(await stageTransitionAllowed(tx, orgId, current.pipelineId, current.stageId, destination.id))
+    ) {
+      return { ok: false, reason: 'transition_not_allowed' } as const;
+    }
+    if (stageActsAsOrcamento(destination, scope.modules ?? ALL_MODULES_ENABLED)) {
+      return { ok: false, reason: 'sale_required_for_conversion' } as const;
+    }
+
+    const isExit = destination.type === 'saida';
+    const hasStep = input.nextStep !== undefined;
+    const hasDay = input.dueOn !== undefined;
+    if ((!isExit && !(hasStep && hasDay)) || hasStep !== hasDay) throw new LeadInputError('followup_required');
+    if (destination.requiresReason && input.reason === undefined) throw new LeadInputError('reason_required');
+
+    const claimant = claimantFor(gate, current);
+    const claimed = claimant !== null ? await resolveSellerPersonId(tx, orgId, claimant) : null;
+
+    await tx
+      .update(salesOpsCrmLeads)
+      .set({
+        stageId: destination.id,
+        stageChangedAt: sql`now()`,
+        lostReason: destination.exitKind === 'perdido' ? (input.reason ?? null) : null,
+        ...(claimed ? { sellerPersonId: claimed.id, sellerNameSnapshot: claimed.displayName } : {}),
+        updatedAt: new Date(),
+      })
+      .where(and(eq(salesOpsCrmLeads.orgId, orgId), eq(salesOpsCrmLeads.id, id), liveLeadCondition()));
+    await renumberStage(tx, orgId, destination.id, { moved: id, at: APPEND });
+    await renumberStage(tx, orgId, current.stageId, null);
+
+    const actorName = scopeActorName(scope);
+    const eventId = await recordStageChange(tx, {
+      orgId,
+      leadId: id,
+      fromStageId: current.stageId,
+      toStageId: destination.id,
+      reason: input.reason ?? null,
+      actorUserId: scope.userId,
+      actorName,
+    });
+    if (input.note !== undefined) {
+      await tx.insert(salesOpsCrmLeadNotes).values({
+        orgId,
+        leadId: id,
+        eventId,
+        body: input.note,
+        authorUserId: scope.userId,
+        authorNameSnapshot: actorName,
+      });
+    }
+    if (hasStep && hasDay) {
+      await tx.insert(salesOpsCrmLeadFollowups).values({
+        orgId,
+        leadId: id,
+        nextStep: input.nextStep!,
+        dueOn: input.dueOn!,
+        ownerPersonId: claimed?.id ?? current.sellerPersonId,
+        ownerNameSnapshot: claimed?.displayName ?? (current.sellerNameSnapshot || null),
+        createdByUserId: scope.userId,
+        createdByName: actorName,
+      });
+    }
+    return { ok: true, lead: await readLeadView(tx, orgId, id) } as const;
+  });
+      .for('update');
+    // Already deleted is not_found too: leadIdentityConditions carries the live predicate.
+    if (!current) return { ok: false, reason: 'not_found' } as const;
+    // A converted card belongs to its proposta; deleting it would orphan the link.
+    if (current.saleId !== null) return { ok: false, reason: 'already_converted' } as const;
+
+    const fromStage = await stageName(tx, orgId, current.stageId);
+    const deletedAt = new Date();
+    // No seller column, no stage_id, no position: a delete never claims a pool
+    // lead and keeps the etapa a restore returns it to.
+    await tx
+      .update(salesOpsCrmLeads)
+      .set({
+        deletedAt,
+        deletedByUserId: actor.userId,
+        deletedByName: actor.name,
+        updatedAt: deletedAt,
+      })
+      .where(and(eq(salesOpsCrmLeads.orgId, orgId), eq(salesOpsCrmLeads.id, id), liveLeadCondition()));
+
+    // The column closes the gap at once, so it stays 1..N over live cards.
+    await renumberStage(tx, orgId, current.stageId, null);
+
+    // LAST: the ledger tail lock is global and held until COMMIT.
+    await writeAuditEntry(tx, {
+      actorUserId: actor.userId,
+      // Never null: the org-scoped history read filters on actor_org_id.
+      actorOrgId: orgId,
+      action: 'lead.deleted',
+      entityType: 'lead',
+      entityId: id,
+      beforeJsonb: { deleted: false },
+      afterJsonb: {
+        deleted: true,
+        label: current.contactName,
+        actorLabel: actor.name,
+        metadata: {
+          contactName: current.contactName,
+          clientName: current.clientNameSnapshot,
+          stageName: fromStage,
+          sellerName: current.sellerNameSnapshot,
+        },
+      },
+    });
+    return { ok: true } as const;
+  });
+}
+
+/** Admins restore any org lead; others restore only their own deletion. */
+export function restoreLead(
+  db: Db,
+  orgId: string,
+  id: string,
+  isAdmin: boolean,
+  actor: LeadActor,
+): Promise<RestoreLeadResult> {
+  return withTenant(db, orgId, async (tx) => {
+    const restoreConditions = and(
+      eq(salesOpsCrmLeads.orgId, orgId),
+      eq(salesOpsCrmLeads.id, id),
+      deletedLeadCondition(),
+      ...(isAdmin ? [] : [eq(salesOpsCrmLeads.deletedByUserId, actor.userId)]),
+    );
+    // A restore writes stage_id and position: same lock order as every board writer.
+    await lockLeadBoard(tx, orgId);
+
+    const [current] = await tx
+      .select()
+      .from(salesOpsCrmLeads)
+      .where(restoreConditions)
+      .limit(1)
+      .for('update');
+    // A live, unknown or other-org id: there is nothing to restore.
+    if (!current) return { ok: false, reason: 'not_found' } as const;
+
+    const [own] = await tx
+      .select({
+        id: salesOpsPipelineStages.id,
+        name: salesOpsPipelineStages.name,
+        status: salesOpsPipelineStages.status,
+      })
+      .from(salesOpsPipelineStages)
+      .where(and(eq(salesOpsPipelineStages.orgId, orgId), eq(salesOpsPipelineStages.id, current.stageId)))
+      .limit(1);
+    // Its own etapa when it is still on the board; an archived etapa is not a
+    // move target, so the lead goes where a new lead would. Never seeds one: the
+    // leads edition may have none, and that is the existing 400.
+    const target =
+      own && own.status === 'active'
+        ? { id: own.id, name: own.name }
+        : await firstOpenLeadStage(tx, orgId, current.pipelineId);
+    if (!target) throw new LeadInputError('no_open_stage');
+
+    const stageChanged = target.id !== current.stageId;
+    const position = await nextLeadPosition(tx, orgId, target.id);
+    await tx
+      .update(salesOpsCrmLeads)
+      .set({
+        deletedAt: null,
+        deletedByUserId: null,
+        deletedByName: null,
+        stageId: target.id,
+        position,
+        // KEY OMISSION, the moveLead rule: stage_changed_at moves only when the
+        // etapa changes. The fallback target is a normal etapa, which carries no
+        // lost reason, so the reason is cleared with it.
+        ...(stageChanged ? { stageChangedAt: sql`now()`, lostReason: null } : {}),
+        updatedAt: new Date(),
+      })
+      .where(restoreConditions);
+    // Appended at the end; the renumber keeps the column dense even if it was not.
+    await renumberStage(tx, orgId, target.id, null);
+    // A restore that lands in another etapa is a stage change like any other: one history event.
+    if (stageChanged) {
+      await recordStageChange(tx, {
+        orgId,
+        leadId: id,
+        fromStageId: current.stageId,
+        toStageId: target.id,
+        reason: null,
+        actorUserId: actor.userId,
+        actorName: actor.name,
+      });
+    }
+
+    const lead = await readLeadView(tx, orgId, id);
+    // LAST: the ledger tail lock is global and held until COMMIT. A restore is a
+    // NEW entry, never an undo of the delete entry.
+    await writeAuditEntry(tx, {
+      actorUserId: actor.userId,
+      actorOrgId: orgId,
+      action: 'lead.restored',
+      entityType: 'lead',
+      entityId: id,
+      beforeJsonb: { deleted: true, stageName: own?.name ?? '' },
+      afterJsonb: {
+        deleted: false,
+        label: current.contactName,
+        actorLabel: actor.name,
+        metadata: {
+          contactName: current.contactName,
+          clientName: current.clientNameSnapshot,
+          stageName: target.name,
+          sellerName: current.sellerNameSnapshot,
+        },
+      },
+    });
+    return { ok: true, lead } as const;
+  });
+}
+
+/**
+ * The ONE door from `leads/` into the tenant-scoped transaction.
+ *
+ * `setTenantContext` must be a transaction body's FIRST statement, and a
+ * transaction-local `set_config` is invisible outside its own transaction. Three
+ * hand-maintained copies of that rule would be three places for it to rot, and
+ * the failure mode is SILENT: RLS matches nothing and the query returns zero
+ * rows rather than raising. So there is exactly one implementation, in
+ * `service.ts`, and this module is how every file under `leads/` reaches it
+ * without importing the 2800-line service directly.
+ *
+ * It re-exports and adds nothing. A wrapper here would be a second place for the
+ * ordering rule to live.
+ */
+export { withTenant } from '../service.js';
+
+hook: PostToolUse
+exec
+/bin/zsh -lc "git diff --check 60c57fd...HEAD -- . ':(exclude)nexo/runs'; git diff --name-only 60c57fd...HEAD -- . ':(exclude)nexo/runs'; rg -n 'stageChangedAt|createdAt|for\\(.update|advisory' apps/api/test/rls/leads-move-concurrency.test.ts apps/api/src/domains/sales-ops/leads/lead-history-service.ts" in /Users/cauetpinciara/Documents/fxl/projects/06--PRODUCT--fxl-sales/.worktrees/20261021T011348Z-vendas-crm-unificado/run
+ succeeded in 0ms:
+CLAUDE.md
+apps/api/.env.dev.example
+apps/api/src/auth/__tests__/dev-identity-no-hub.test.ts
+apps/api/src/domains/crm/stage-view.ts
+apps/api/src/domains/import/__tests__/catalog.integration.test.ts
+apps/api/src/domains/import/__tests__/executor.integration.test.ts
+apps/api/src/domains/import/__tests__/executor.test.ts
+apps/api/src/domains/import/__tests__/import-routes.integration.test.ts
+apps/api/src/domains/import/__tests__/import-routes.test.ts
+apps/api/src/domains/import/catalog.ts
+apps/api/src/domains/import/executor.ts
+apps/api/src/domains/import/routes.ts
+apps/api/src/domains/org-modules/__tests__/org-modules-routes.integration.test.ts
+apps/api/src/domains/org-modules/__tests__/org-modules-routes.test.ts
+apps/api/src/domains/org-modules/context.ts
+apps/api/src/domains/org-modules/service.ts
+apps/api/src/domains/sales-ops/__tests__/financial-admin-gate.test.ts
+apps/api/src/domains/sales-ops/__tests__/history-route.test.ts
+apps/api/src/domains/sales-ops/__tests__/lead-stages-routes.test.ts
+apps/api/src/domains/sales-ops/__tests__/people-routes-edition.test.ts
+apps/api/src/domains/sales-ops/__tests__/routes.test.ts
+apps/api/src/domains/sales-ops/crm-routes.ts
+apps/api/src/domains/sales-ops/leads/__tests__/lead-contract.test.ts
+apps/api/src/domains/sales-ops/leads/__tests__/lead-routes-edition.test.ts
+apps/api/src/domains/sales-ops/leads/__tests__/lead-routes.test.ts
+apps/api/src/domains/sales-ops/leads/lead-history-service.ts
+apps/api/src/domains/sales-ops/leads/lead-routes.ts
+apps/api/src/domains/sales-ops/leads/lead-service.ts
+apps/api/src/domains/sales-ops/leads/lead-trash-service.ts
+apps/api/src/domains/sales-ops/leads/stage-routes.ts
+apps/api/src/domains/sales-ops/routes.ts
+apps/api/src/env.ts
+apps/api/src/middleware/__tests__/app-auth.test.ts
+apps/api/src/middleware/__tests__/edition-gate-map.test.ts
+apps/api/src/middleware/__tests__/require-capability.test.ts
+apps/api/src/middleware/__tests__/require-module-operator.test.ts
+apps/api/src/middleware/app-auth.ts
+apps/api/src/middleware/auth.ts
+apps/api/src/middleware/require-capability.ts
+apps/api/src/middleware/require-module-operator.ts
+apps/api/test/rls/crm-pipeline-history.test.ts
+apps/api/test/rls/lead-stages-seed-on-read.test.ts
+apps/api/test/rls/org-modules.test.ts
+apps/web/src/__tests__/no-role-redirect.test.tsx
+apps/web/src/auth/__tests__/react.test.tsx
+apps/web/src/auth/org-modules-context.ts
+apps/web/src/auth/react.tsx
+apps/web/src/components/auth/RoleGuard.tsx
+apps/web/src/dev/__tests__/dev-identity-roles.test.tsx
+apps/web/src/sales-ops/SalesOpsApp.tsx
+apps/web/src/sales-ops/__tests__/leads-stage-navigation.test.tsx
+apps/web/src/sales-ops/__tests__/navigation-edition.test.ts
+apps/web/src/sales-ops/__tests__/navigation-modules.test.ts
+apps/web/src/sales-ops/__tests__/org-modules-shell.test.tsx
+apps/web/src/sales-ops/__tests__/proposta-stage-modules.test.tsx
+apps/web/src/sales-ops/leads/LeadSummary.tsx
+apps/web/src/sales-ops/leads/__tests__/crm-pipeline.test.ts
+apps/web/src/sales-ops/leads/crm-pipeline.ts
+apps/web/src/sales-ops/navigation.ts
+apps/web/src/sales-ops/org-modules.ts
+apps/web/src/sales-ops/types.ts
+nexo/knowledge/reference/auth-model.md
+nexo/knowledge/reference/kanban-de-leads.md
+nexo/knowledge/reference/modulos-por-organizacao.md
+nexo/knowledge/reference/sales-ops-routing.md
+nexo/plans/vendas-crm-unificado/12.1-fase3-review-fixes.md
+packages/shared-utils/src/__tests__/crm-model.test.ts
+packages/shared-utils/src/crm-model.ts
+apps/api/src/domains/sales-ops/leads/lead-history-service.ts:151:        at: note.createdAt.toISOString(),
+apps/api/src/domains/sales-ops/leads/lead-history-service.ts:157:        at: followup.createdAt.toISOString(),
+apps/api/src/domains/sales-ops/leads/lead-history-service.ts:218:      .for('update');
+apps/api/src/domains/sales-ops/leads/lead-history-service.ts:258:        stageChangedAt: sql`now()`,
+apps/api/src/domains/sales-ops/leads/lead-history-service.ts:307:export type LeadNoteView = { id: string; body: string; authorName: string | null; createdAt: string };
+apps/api/src/domains/sales-ops/leads/lead-history-service.ts:335:      note: { id: note!.id, body: note!.body, authorName: note!.authorNameSnapshot, createdAt: note!.createdAt.toISOString() },
+apps/api/src/domains/sales-ops/leads/lead-history-service.ts:421:      .for('update', { of: salesOpsCrmLeadFollowups });
+
+hook: PostToolUse Completed
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "node -e '
+const fs = require('\\''node:fs'\\'');
+const path = require('\\''node:path'\\'');
+const ts = require('\\''typescript'\\'');
+const cache = new Map();
+function load(file) {
+  file = path.resolve(file);
+  if (cache.has(file)) return cache.get(file);
+  const out = {};
+  cache.set(file, out);
+  const code = ts.transpileModule(fs.readFileSync(file, '\\''utf8'\\''), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+  const req = (id) => {
+    if (id === '\\''lucide-react'\\'') return new Proxy({}, { get: (_, k) => String(k) });
+    if (id.startsWith('\\''@fxl-sales/shared-utils/'\\'')) return load('\\''packages/shared-utils/src/'\\'' + id.split('\\''/'\\'').pop() + '\\''.ts'\\'');
+    if (id.startsWith('\\''.'\\'')) return load(path.resolve(path.dirname(file), id.replace(/\\.js"'$/, '"'\\'''\\'').replace(/\\.ts"'$/, '"'\\'''\\'') + '\\''.ts'\\''));
+    return require(id);
+  };
+  new Function('\\''require'\\'', '\\''exports'\\'', code)(req, out);
+  return out;
+}
+const model = load('\\''packages/shared-utils/src/crm-model.ts'\\'');
+const nav = load('\\''apps/web/src/sales-ops/navigation.ts'\\'');
+const src = fs.readFileSync('\\''apps/web/src/sales-ops/SalesOpsApp.tsx'\\'', '\\''utf8'\\'');
+const header = src.slice(src.indexOf('\\''  const headerAction ='\\''), src.indexOf('\\''  const workspaceCatalogue ='\\''));
+const evaluate = new Function('\\''view'\\'','\\''productKind'\\'','\\''canManagePeople'\\'','\\''canManageFuncoes'\\'','\\''edition'\\'','\\''VENDEDORES_COPY'\\'','\\''modules'\\'','\\''modulesAllowCapability'\\'', header + '\\'';return headerAction;'\\'');
+const assert = require('\\''node:assert/strict'\\'');
+for (const modules of [{...model.modulesForEdition('\\''leads'\\''), comissoes:true}, {...model.ALL_MODULES_ENABLED, comissoes:false}, model.ALL_MODULES_ENABLED]) {
+  const label = evaluate('\\''comissoes'\\'','\\''product'\\'',false,false,model.editionFromModules(modules),{},modules,model.modulesAllowCapability);
+  assert.equal(label, modules.orcamentos ? '\\''Nova proposta'\\'' : null);
+  console.log(JSON.stringify({orcamentos:modules.orcamentos,comissoes:modules.comissoes,header:label,commissionsRoute:nav.resolveSalesOpsRoute({workspace:'\\''operacional'\\'',view:'\\''comissoes'\\''},['\\''admin'\\''],modules).path,card:model.modulesAllowCapability(modules,'\\''commissions'\\'')}));
+}
+assert.ok(src.includes(\""'!sidebarCollapsed && modulesAllowCapability(modules, '"'\\''commissions'\\'')\"));
+assert.ok(src.includes(\"{modulesAllowCapability(modules, '\\''proposals'\\'') ? (\"));
+console.log('\\''R1-1 and R1-2 checks passed'\\'');
+'" in /Users/cauetpinciara/Documents/fxl/projects/06--PRODUCT--fxl-sales/.worktrees/20261021T011348Z-vendas-crm-unificado/run
+ succeeded in 31ms:
+{"orcamentos":false,"comissoes":true,"header":null,"commissionsRoute":"/operacional/comissoes","card":true}
+{"orcamentos":true,"comissoes":false,"header":"Nova proposta","commissionsRoute":"/tatico/dashboard","card":false}
+{"orcamentos":true,"comissoes":true,"header":"Nova proposta","commissionsRoute":"/operacional/comissoes","card":true}
+R1-1 and R1-2 checks passed
+
+hook: PostToolUse
+hook: PostToolUse Completed
+hook: PreToolUse
+hook: PreToolUse Completed
+exec
+/bin/zsh -lc "cat apps/api/src/domains/org-modules/context.ts apps/api/src/domains/org-modules/service.ts apps/api/src/middleware/require-module-operator.ts; sed -n '90,151p' apps/api/src/domains/sales-ops/routes.ts; rg -n 'stageChangedAt:' apps/api/src/domains/sales-ops/leads --glob '"'!**/__tests__/**'"'; git diff --check 60c57fd...HEAD -- . ':(exclude)nexo/runs'" in /Users/cauetpinciara/Documents/fxl/projects/06--PRODUCT--fxl-sales/.worktrees/20261021T011348Z-vendas-crm-unificado/run
+ succeeded in 0ms:
+/**
+ * The organization's modules for THIS request: one query, memoized on the Hono context.
+ * Services never call this; routes resolve it and pass the value down as an argument.
+ */
+import {
+  ALL_MODULES_ENABLED,
+  editionFromModules,
+  type OrgModules,
+} from '@fxl-sales/shared-utils/crm-model';
+import type { SalesEdition } from '@fxl-sales/shared-utils/sales-edition';
+import type { Context } from 'hono';
+import { loadOrgModules } from './service.js';
+
+const KEY = 'orgModules';
+
+type Loose = { get(key: string): unknown; set(key: string, value: unknown): void };
+
+/**
+ * A value already on the context wins (tests inject it; the first call stores it).
+ * A context with neither modules nor a verified Hub context is the whole product -
+ * the same fail-to-full rule requireCapability always had. A store failure THROWS.
+ */
+export async function getOrgModules(c: Context): Promise<OrgModules> {
+  const loose = c as unknown as Loose;
+  const preset = loose.get(KEY) as OrgModules | undefined;
+  if (preset) return preset;
+  const hubAuth = loose.get('hubAuth') as { entitlements?: { modules?: readonly unknown[] } } | undefined;
+  const orgId = loose.get('orgId') as string | undefined;
+  if (!hubAuth || !orgId) return ALL_MODULES_ENABLED;
+  const state = await loadOrgModules(orgId, hubAuth.entitlements?.modules);
+  loose.set(KEY, state.modules);
+  return state.modules;
+}
+
+/** The legacy two-value projection of the request's modules (orcamentos off => 'leads'). */
+export async function getSalesEdition(c: Context): Promise<SalesEdition> {
+  return editionFromModules(await getOrgModules(c));
+}
+/**
+ * The per-organization module flags (`sales_ops_org_modules`).
+ *
+ * The token's `entitlements.modules` is consulted ONLY here, and only for an
+ * organization with no row at all: that one-time backfill reproduces the edition the
+ * organization had before modules existed. After it, the database decides.
+ */
+import {
+  CRM_MODULE_KEYS,
+  CRM_MODULE_SOURCES,
+  isCrmModuleKey,
+  modulesForEdition,
+  type CrmModuleKey,
+  type CrmModuleSource,
+  type OrgModules,
+} from '@fxl-sales/shared-utils/crm-model';
+import { resolveSalesEdition } from '@fxl-sales/shared-utils/sales-edition';
+import { eq, sql } from 'drizzle-orm';
+import { getDb } from '../../db/client.js';
+import { salesOpsOrgModules } from '../../db/schema.js';
+import { withTenant } from '../sales-ops/leads/with-tenant.js';
+
+type Db = ReturnType<typeof getDb>;
+
+export type OrgModuleSources = Record<CrmModuleKey, CrmModuleSource>;
+export interface OrgModulesState {
+  modules: OrgModules;
+  sources: OrgModuleSources;
+}
+export type OrgModulesPatch = Partial<Record<CrmModuleKey, boolean>>;
+
+type ModuleRow = typeof salesOpsOrgModules.$inferSelect;
+
+function isModuleSource(value: string): value is CrmModuleSource {
+  return (CRM_MODULE_SOURCES as readonly string[]).includes(value);
+}
+
+function stateFromRows(rows: readonly ModuleRow[]): OrgModulesState {
+  const modules = {} as OrgModules;
+  const sources = {} as OrgModuleSources;
+  for (const key of CRM_MODULE_KEYS) {
+    modules[key] = false;
+    sources[key] = 'default';
+  }
+  for (const row of rows) {
+    if (!isCrmModuleKey(row.moduleKey)) continue;
+    modules[row.moduleKey] = row.enabled;
+    sources[row.moduleKey] = isModuleSource(row.source) ? row.source : 'default';
+  }
+  return { modules, sources };
+}
+
+async function readRows(tx: Db, orgId: string): Promise<ModuleRow[]> {
+  return tx.select().from(salesOpsOrgModules).where(eq(salesOpsOrgModules.orgId, orgId));
+}
+
+/**
+ * Returns the org's rows, writing the one-time compat backfill first when it has none.
+ * MUST run inside a tenant transaction.
+ */
+async function ensureRows(
+  tx: Db,
+  orgId: string,
+  tokenModules: readonly unknown[] | null | undefined,
+): Promise<ModuleRow[]> {
+  const existing = await readRows(tx, orgId);
+  if (existing.length > 0) return existing;
+
+  // Serialize first backfills of the same org: the loser blocks here, then re-reads.
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${`org-modules:${orgId}`}, 0))`);
+  const again = await readRows(tx, orgId);
+  if (again.length > 0) return again;
+
+  const seed = modulesForEdition(resolveSalesEdition(tokenModules));
+  await tx
+    .insert(salesOpsOrgModules)
+    .values(
+      CRM_MODULE_KEYS.map((moduleKey) => ({
+        orgId,
+        moduleKey,
+        enabled: seed[moduleKey],
+        source: 'token_backfill' as const,
+      })),
+    )
+    .onConflictDoNothing({ target: [salesOpsOrgModules.orgId, salesOpsOrgModules.moduleKey] });
+  return readRows(tx, orgId);
+}
+
+/** The org's modules, backfilled from the token on first sight. One transaction. */
+export async function loadOrgModules(
+  orgId: string,
+  tokenModules: readonly unknown[] | null | undefined,
+  db: Db = getDb(),
+): Promise<OrgModulesState> {
+  return withTenant(db, orgId, async (tx) => stateFromRows(await ensureRows(tx, orgId, tokenModules)));
+}
+
+/** Admin toggle: ensure the backfill, then upsert the patched keys as source 'admin'. */
+export async function updateOrgModules(
+  orgId: string,
+  tokenModules: readonly unknown[] | null | undefined,
+  patch: OrgModulesPatch,
+  db: Db = getDb(),
+): Promise<OrgModulesState> {
+  return withTenant(db, orgId, async (tx) => {
+    await ensureRows(tx, orgId, tokenModules);
+    for (const key of CRM_MODULE_KEYS) {
+      const enabled = patch[key];
+      if (enabled === undefined) continue;
+      await tx
+        .insert(salesOpsOrgModules)
+        .values({ orgId, moduleKey: key, enabled, source: 'admin', updatedAt: new Date() })
+        .onConflictDoUpdate({
+          target: [salesOpsOrgModules.orgId, salesOpsOrgModules.moduleKey],
+          set: { enabled, source: 'admin', updatedAt: new Date() },
+        });
+    }
+    return stateFromRows(await readRows(tx, orgId));
+  });
+}
+import type { MiddlewareHandler } from 'hono';
+import { env } from '../env.js';
+
+/**
+ * The 403 an organization's module write answers to an admin who is not a platform
+ * operator. Distinct from `ADMIN_ROLE_REQUIRED_BODY` so a log line can tell "you lack
+ * the tenant admin role" from "your account may not change modules".
+ */
+export const MODULE_OPERATOR_REQUIRED_BODY = { error: 'forbidden', code: 'module_operator_required' } as const;
+
+/**
+ * The platform-operator allow-list, parsed from the validated env on every call. Empty
+ * or absent means nobody: default deny.
+ */
+export function moduleOperatorAccountIds(
+  raw: string | undefined = env.SALES_MODULE_OPERATOR_ACCOUNT_IDS,
+): ReadonlySet<string> {
+  return new Set(
+    (raw ?? '')
+      .split(',')
+      .map((id) => id.trim())
+      .filter((id) => id !== ''),
+  );
+}
+
+/**
+ * A tenant admin cannot enable a module for their own organization: a module write is a
+ * platform-operator action. It runs AFTER `requireAdmin`, and it reads only the verified
+ * account id (`c.get('userId')`), never the body and never the org.
+ */
+export const requireModuleOperator: MiddlewareHandler = async (c, next) => {
+  if (!moduleOperatorAccountIds().has(c.get('userId'))) {
+    return c.json(MODULE_OPERATOR_REQUIRED_BODY, 403);
+  }
+  return next();
+};
+salesOpsRouter.use('/sales/*', requireCapability('proposals'));
+salesOpsRouter.use('/settlements/*', requireCapability('proposals'));
+salesOpsRouter.use('/products/*', requireCapability('catalog'));
+// Clients are a capability of their own: the leads edition grants `clients` but
+// not `catalog`, so the Clientes cadastro works there while produtos/areas/funcoes stay out.
+salesOpsRouter.use('/clients/*', requireCapability('clients'));
+salesOpsRouter.use('/areas/*', requireCapability('catalog'));
+salesOpsRouter.use('/funcoes/*', requireCapability('catalog'));
+salesOpsRouter.use('/import/*', requireCapability('import'));
+salesOpsRouter.use('/history/*', requireCapability('history'));
+
+/**
+ * The organization's module flags. Every key is present and every value is a boolean, so
+ * the body is a complete picture for the web's navigation. Never capability gated: an
+ * admin must always be able to read and change them.
+ */
+const OrgModulesPatchSchema = z
+  .object({
+    modules: z
+      .object(Object.fromEntries(CRM_MODULE_KEYS.map((key) => [key, z.boolean().optional()])))
+      .strict()
+      .refine((value) => Object.keys(value).length > 0, { message: 'at_least_one_module' }),
+  })
+  .strict();
+
+function orgTokenModules(c: Context): readonly unknown[] | undefined {
+  return c.get('hubAuth')?.entitlements?.modules;
+}
+
+salesOpsRouter.get('/org-modules', requireAdmin, async (c) => {
+  const state = await loadOrgModules(c.get('orgId'), orgTokenModules(c));
+  return c.json({ modules: state.modules, sources: state.sources });
+});
+
+// A tenant admin cannot enable a module for their own organization: the write is a
+// platform-operator action (requireModuleOperator, SALES_MODULE_OPERATOR_ACCOUNT_IDS).
+salesOpsRouter.put('/org-modules', requireAdmin, requireModuleOperator, async (c) => {
+  const parsed = OrgModulesPatchSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) {
+    return c.json({ error: 'validation_error', issues: parsed.error.flatten() }, 400);
+  }
+  const state = await updateOrgModules(c.get('orgId'), orgTokenModules(c), parsed.data.modules);
+  return c.json({ modules: state.modules, sources: state.sources });
+});
+
+salesOpsRouter.get('/bootstrap', async (c) => {
+  const orgId = c.get('orgId');
+  // ECV bug: an org created after migration 0022 has no etapas until something seeds them.
+  await ensureLeadStagesForOrg(getDb(), orgId);
+  const snapshot = await getSalesOpsSnapshot(getDb(), orgId);
+  return c.json({ ...snapshot, orgModules: await getOrgModules(c) });
+});
+
+salesOpsRouter.get('/summary', async (c) => {
+  const summary = await getSalesOpsSummary(getDb(), c.get('orgId'));
+  return c.json({ summary });
+});
+
+salesOpsRouter.get('/people', async (c) => {
+  const people = await listPeople(getDb(), c.get('orgId'));
+  return c.json({ people });
+});
+apps/api/src/domains/sales-ops/leads/lead-service.ts:90:  stageChangedAt: string;
+apps/api/src/domains/sales-ops/leads/lead-service.ts:532:    stageChangedAt: toIso(lead.stageChangedAt)!,
+apps/api/src/domains/sales-ops/leads/lead-service.ts:1304:        ...(stageChanged ? { stageChangedAt: sql`now()` } : {}),
+apps/api/src/domains/sales-ops/leads/lead-trash-service.ts:206:        ...(stageChanged ? { stageChangedAt: sql`now()`, lostReason: null } : {}),
+apps/api/src/domains/sales-ops/leads/lead-history-service.ts:258:        stageChangedAt: sql`now()`,
+
+hook: PostToolUse
+hook: PostToolUse Completed
+codex
+{
+  "verdict": "APPROVED",
+  "round": 2,
+  "findings": [],
+  "checks": [
+    {
+      "command": "git diff 60c57fd...HEAD -- . ':(exclude)nexo/runs'",
+      "exit": 0,
+      "summary": "Phase 3 review completed. All three previous findings are resolved; no additional actionable defects found."
+    },
+    {
+      "command": "git diff 36bb54f...HEAD -- . ':(exclude)nexo/runs'",
+      "exit": 0,
+      "summary": "Reviewed fixes, real board interaction coverage, and database-clock timestamp changes. Reorders still omit stageChangedAt."
+    },
+    {
+      "command": "node -e '<in-memory navigation, header-action, and capability assertions>'",
+      "exit": 0,
+      "summary": "Confirmed proposal actions and commission card follow their respective flags independently."
+    },
+    {
+      "command": "git diff --check 60c57fd...HEAD -- . ':(exclude)nexo/runs'",
+      "exit": 0,
+      "summary": "Passed."
+    },
+    {
+      "command": "Orchestrator-supplied Gate 2 results; not rerun",
+      "exit": 0,
+      "summary": "Reported PASS: web 1968/1968, API integration 549/549, API unit 1603/1603, concurrency 10/10 runs. Reverting each fix makes its regression test fail."
+    }
+  ]
+}
+hook: Stop
+hook: Stop Completed
+tokens used
+107.483
+{
+  "verdict": "APPROVED",
+  "round": 2,
+  "findings": [],
+  "checks": [
+    {
+      "command": "git diff 60c57fd...HEAD -- . ':(exclude)nexo/runs'",
+      "exit": 0,
+      "summary": "Phase 3 review completed. All three previous findings are resolved; no additional actionable defects found."
+    },
+    {
+      "command": "git diff 36bb54f...HEAD -- . ':(exclude)nexo/runs'",
+      "exit": 0,
+      "summary": "Reviewed fixes, real board interaction coverage, and database-clock timestamp changes. Reorders still omit stageChangedAt."
+    },
+    {
+      "command": "node -e '<in-memory navigation, header-action, and capability assertions>'",
+      "exit": 0,
+      "summary": "Confirmed proposal actions and commission card follow their respective flags independently."
+    },
+    {
+      "command": "git diff --check 60c57fd...HEAD -- . ':(exclude)nexo/runs'",
+      "exit": 0,
+      "summary": "Passed."
+    },
+    {
+      "command": "Orchestrator-supplied Gate 2 results; not rerun",
+      "exit": 0,
+      "summary": "Reported PASS: web 1968/1968, API integration 549/549, API unit 1603/1603, concurrency 10/10 runs. Reverting each fix makes its regression test fail."
+    }
+  ]
+}
