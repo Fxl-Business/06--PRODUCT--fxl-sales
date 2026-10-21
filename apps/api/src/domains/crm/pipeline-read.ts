@@ -1,4 +1,4 @@
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq } from 'drizzle-orm';
 import type { getDb } from '../../db/client.js';
 import { salesOpsPipelines, salesOpsPipelineStages } from '../../db/schema.js';
 import type { PipelineStageRow } from './stage-view.js';
@@ -21,7 +21,7 @@ export async function defaultPipelineId(tx: Db, orgId: string): Promise<string |
     .select({ id: salesOpsPipelines.id })
     .from(salesOpsPipelines)
     .where(and(eq(salesOpsPipelines.orgId, orgId), eq(salesOpsPipelines.status, 'active')))
-    .orderBy(asc(salesOpsPipelines.isDefault), asc(salesOpsPipelines.position), asc(salesOpsPipelines.name))
+    .orderBy(desc(salesOpsPipelines.isDefault), asc(salesOpsPipelines.position), asc(salesOpsPipelines.name))
     .limit(1);
   return row?.id ?? null;
 }

@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull, sql, type SQL } from 'drizzle-orm';
+import { and, asc, eq, isNull, or, sql, type SQL } from 'drizzle-orm';
 import type { getDb } from '../../../db/client.js';
 import {
   salesOpsCrmLeadEvents,
@@ -387,6 +387,16 @@ export type DoneResult =
   | { ok: false; reason: 'not_found' | 'seller_person_unmapped' };
 
 /** Idempotent: marking an already-done follow-up keeps its original `done_at`. */
+/**
+ * Who may complete a follow-up: a seller in the lead's scope, or the follow-up's own owner. The
+ * owner clause is the caller's own pessoa only, so an assignment never widens access to anyone
+ * else's lead. It is the same identity `listFollowups` shows in `scope=mine`, so a task a seller
+ * can see is a task they can complete.
+ */
+function followupCompletionCondition(sellerPersonId: string, canClaimUnassigned: boolean): SQL {
+  return or(leadSellerCondition(sellerPersonId, canClaimUnassigned), eq(salesOpsCrmLeadFollowups.ownerPersonId, sellerPersonId))!;
+}
+
 export function markFollowupDone(db: Db, orgId: string, followupId: string, scope: LeadScope): Promise<DoneResult> {
   return withTenant(db, orgId, async (tx) => {
     const gate = await resolveLeadScopePredicate(tx, orgId, scope);
@@ -403,7 +413,7 @@ export function markFollowupDone(db: Db, orgId: string, followupId: string, scop
           eq(salesOpsCrmLeadFollowups.orgId, orgId),
           eq(salesOpsCrmLeadFollowups.id, followupId),
           liveLeadCondition(),
-          ...(gate.sellerPersonId ? [leadSellerCondition(gate.sellerPersonId, gate.canClaimUnassigned)] : []),
+          ...(gate.sellerPersonId ? [followupCompletionCondition(gate.sellerPersonId, gate.canClaimUnassigned)] : []),
         ),
       )
       .limit(1)

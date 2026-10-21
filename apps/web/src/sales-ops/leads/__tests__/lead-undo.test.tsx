@@ -42,6 +42,8 @@ let rows: SalesOpsLead[];
 let calls: Array<{ path: string; method: string; body: Record<string, unknown> | null }>;
 let failNext = false;
 let gatedMove: Promise<ReturnType<typeof response>> | null;
+/** When set, `GET /pipelines` answers this transition graph instead of the complete one. */
+let graphOverride: Array<{ fromStageId: string; toStageId: string }> | null;
 let root: Root;
 let host: HTMLDivElement;
 const response = (status: number, data: unknown) => ({ ok: status < 400, status, json: async () => data });
@@ -50,7 +52,11 @@ const fetcher = async (input: string, init?: RequestInit) => {
   const path = url.pathname;
   const method = init?.method ?? 'GET';
   const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : null;
-  if (method === 'GET' && path.endsWith('/pipelines')) return response(200, pipelineFixtureFor(stages));
+  if (method === 'GET' && path.endsWith('/pipelines')) {
+    const fixture = pipelineFixtureFor(stages);
+    if (graphOverride) fixture.pipelines[0]!.transitions = graphOverride;
+    return response(200, fixture);
+  }
   if (method === 'GET' && path.endsWith('/lead-stages')) return response(200, { stages });
   if (method === 'GET' && path.endsWith('/leads/summary')) return response(200, {
     stages: stages.map((stage) => ({
@@ -95,6 +101,7 @@ beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   edition.value = 'full'; rows = [{ ...original }]; calls = []; failNext = false;
   gatedMove = null;
+  graphOverride = null;
   vi.stubGlobal('fetch', vi.fn(fetcher));
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
 });
@@ -123,6 +130,15 @@ async function pickStage(id: string) {
   const option = [...document.querySelectorAll('[role="option"]')].find((node) => node.textContent?.trim() === id);
   if (!option) throw new Error(`Missing option ${id}`);
   await click(option);
+}
+async function typeLostReason(text: string) {
+  const area = document.querySelector<HTMLTextAreaElement>('[data-lost-reason="true"]');
+  if (!area) throw new Error('Missing lost reason');
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+  await act(async () => {
+    setter?.call(area, text);
+    area.dispatchEvent(new Event('input', { bubbles: true }));
+  });
 }
 async function moveTo(id: string) {
   await click('[data-view-option="list"]');
@@ -159,6 +175,24 @@ it('undoes a Mover write with the original stage and index', async () => {
   await click('[data-undo-action]');
   expect(calls[1]?.body).toMatchObject({ stageId: 'new', position: 0 });
   expect(rows[0]?.stageId).toBe('new');
+});
+
+it('offers no undo for a move to Perdido, whose reverse edge the graph does not allow', async () => {
+  // Forward edges only into Perdido: the reverse (Perdido -> Novo) is absent from the graph.
+  graphOverride = [
+    { fromStageId: 'new', toStageId: 'next' },
+    { fromStageId: 'next', toStageId: 'new' },
+    { fromStageId: 'new', toStageId: 'lost' },
+  ];
+  await render();
+  await click('[data-view-option="list"]');
+  await click('[data-move-trigger="lead-1"]');
+  await pickStage('lost');
+  await typeLostReason('Sem interesse');
+  await click('[data-move-confirm]');
+  expect(calls[0]?.body).toMatchObject({ stageId: 'lost' });
+  expect(rows[0]?.stageId).toBe('lost');
+  expect(document.querySelector('[data-undo-notice]')).toBeNull();
 });
 
 it('uses the visible source index when returning a lead to a populated column', async () => {

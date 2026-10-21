@@ -145,6 +145,61 @@ describe('GET /pipelines and GET /field-definitions', () => {
   });
 });
 
+describe('the default pipeline wins over another active pipeline', () => {
+  it('an unqualified lead and GET /lead-stages use the default pipeline even when a custom one sorts first', async () => {
+    const w = await world('default-first');
+    const [custom] = await sql<{ id: string }[]>`
+      INSERT INTO sales_ops_pipelines (org_id, name, position, is_default, status)
+      VALUES (${w.orgId}, 'Funil Antigo', -5, false, 'active') RETURNING id`;
+    await sql`
+      INSERT INTO sales_ops_pipeline_stages (org_id, pipeline_id, name, position, type, behavior, status)
+      VALUES (${w.orgId}, ${custom!.id}, 'Caixa', 0, 'normal', 'none', 'active')`;
+    const lead = await w.create({});
+    expect(lead.stageId).toBe(w.stage('Novo'));
+    const stages = await call(w.app, 'GET', '/lead-stages');
+    expect(stages.status).toBe(200);
+    expect(stages.json.stages.map((s: { id: string }) => s.id)).toEqual(w.pipeline.stages.map((s) => s.id));
+  });
+});
+
+describe('a restored stage that never had edges', () => {
+  it('a stage created archived gets its edges on restore, so leads move in and out of it', async () => {
+    const w = await world('restore-edges');
+    // Position -1 sorts it before Novo in the open order, so the shared rule links it to Novo.
+    const [archived] = await sql<{ id: string }[]>`
+      INSERT INTO sales_ops_pipeline_stages (org_id, pipeline_id, name, position, type, behavior, status, archived_at)
+      VALUES (${w.orgId}, ${w.pipeline.id}, 'Retomada', -1, 'normal', 'none', 'archived', now()) RETURNING id`;
+    const [edges] = await sql<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM sales_ops_pipeline_transitions
+      WHERE org_id = ${w.orgId} AND (from_stage_id = ${archived!.id} OR to_stage_id = ${archived!.id})`;
+    expect(edges!.n).toBe(0);
+    const lead = await w.create({});
+    expect(lead.stageId).toBe(w.stage('Novo'));
+    const restored = await call(w.app, 'PATCH', `/lead-stages/${archived!.id}`, { status: 'active' });
+    expect(restored.status, JSON.stringify(restored.json)).toBe(200);
+    const into = await call(w.app, 'POST', `/leads/${lead.id}/move`, { stageId: archived!.id, position: 0 });
+    expect(into.status, JSON.stringify(into.json)).toBe(200);
+    const out = await call(w.app, 'POST', `/leads/${lead.id}/move`, { stageId: w.stage('Novo'), position: 0 });
+    expect(out.status, JSON.stringify(out.json)).toBe(200);
+  });
+
+  it('a restore leaves a graph the org already shaped alone', async () => {
+    const w = await world('restore-keeps');
+    const [archived] = await sql<{ id: string }[]>`
+      INSERT INTO sales_ops_pipeline_stages (org_id, pipeline_id, name, position, type, behavior, status, archived_at)
+      VALUES (${w.orgId}, ${w.pipeline.id}, 'Retomada', -1, 'normal', 'none', 'archived', now()) RETURNING id`;
+    await sql`
+      INSERT INTO sales_ops_pipeline_transitions (org_id, pipeline_id, from_stage_id, to_stage_id)
+      VALUES (${w.orgId}, ${w.pipeline.id}, ${w.stage('Novo')}, ${archived!.id})`;
+    const restored = await call(w.app, 'PATCH', `/lead-stages/${archived!.id}`, { status: 'active' });
+    expect(restored.status).toBe(200);
+    const [edges] = await sql<{ n: number }[]>`
+      SELECT count(*)::int AS n FROM sales_ops_pipeline_transitions
+      WHERE org_id = ${w.orgId} AND (from_stage_id = ${archived!.id} OR to_stage_id = ${archived!.id})`;
+    expect(edges!.n).toBe(1);
+  });
+});
+
 describe('the transition graph on move', () => {
   it('an absent pair is 409 transition_not_allowed and writes nothing; an allowed pair writes exactly one event', async () => {
     const w = await world('move');
@@ -376,6 +431,40 @@ describe('seller scope and RLS isolation on the new routes', () => {
     expect(own.status).toBe(200);
     const [events] = await sql<{ n: number }[]>`SELECT count(*)::int AS n FROM sales_ops_crm_lead_events WHERE lead_id = ${brunosLead.id}`;
     expect(events!.n).toBe(1);
+  });
+});
+
+describe('the follow-up owner completes their own task', () => {
+  it('the owner of a follow-up on another seller lead completes it; a seller with no access to the lead answers 404', async () => {
+    const w = await world('followup-owner');
+    const db = getDb();
+    const ana = await createPerson(db, w.orgId, PersonSchema.parse({ displayName: 'Ana', isSeller: true }));
+    const bruno = await createPerson(db, w.orgId, PersonSchema.parse({ displayName: 'Bruno', isSeller: true }));
+    const carla = await createPerson(db, w.orgId, PersonSchema.parse({ displayName: 'Carla', isSeller: true }));
+    if (typeof ana === 'string' || typeof bruno === 'string' || typeof carla === 'string') throw new Error('person');
+    await sql`UPDATE sales_ops_people SET hub_account_id = 'hub_ana_f' WHERE id = ${ana.id}`;
+    await sql`UPDATE sales_ops_people SET hub_account_id = 'hub_bruno_f' WHERE id = ${bruno.id}`;
+    await sql`UPDATE sales_ops_people SET hub_account_id = 'hub_carla_f' WHERE id = ${carla.id}`;
+    const anaWho: Who = { userId: 'hub_ana_f', role: 'seller', name: 'Ana' };
+    const brunoWho: Who = { userId: 'hub_bruno_f', role: 'seller', name: 'Bruno' };
+    const carlaWho: Who = { userId: 'hub_carla_f', role: 'seller', name: 'Carla' };
+    const anasLead = await w.create({ sellerPersonId: ana.id });
+    const assigned = await call(appFor(w.orgId, anaWho), 'POST', `/leads/${anasLead.id}/followups`, {
+      nextStep: 'Retornar ao cliente',
+      dueOn: '2026-10-22',
+      ownerPersonId: bruno.id,
+    });
+    expect(assigned.status, JSON.stringify(assigned.json)).toBe(201);
+    const followupId = assigned.json.followup.id as string;
+
+    const listed = await call(appFor(w.orgId, brunoWho), 'GET', '/followups?scope=mine&status=open');
+    expect(listed.json.followups.map((f: { id: string }) => f.id)).toContain(followupId);
+
+    const denied = await call(appFor(w.orgId, carlaWho), 'POST', `/followups/${followupId}/done`, {});
+    expect(denied.status).toBe(404);
+    const done = await call(appFor(w.orgId, brunoWho), 'POST', `/followups/${followupId}/done`, {});
+    expect(done.status, JSON.stringify(done.json)).toBe(200);
+    expect(done.json.followup.doneAt).not.toBeNull();
   });
 });
 

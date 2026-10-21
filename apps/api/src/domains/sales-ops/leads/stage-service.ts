@@ -1,5 +1,5 @@
 import { planPipelineTransitions, type TransitionPlanStage } from '@fxl-sales/shared-utils/crm-model';
-import { and, asc, eq, max, ne } from 'drizzle-orm';
+import { and, asc, eq, max, ne, or } from 'drizzle-orm';
 import type { getDb } from '../../../db/client.js';
 import { salesOpsPipelineStages, salesOpsPipelineTransitions } from '../../../db/schema.js';
 import { defaultPipelineId, listPipelineStages, pipelineExists } from '../../crm/pipeline-read.js';
@@ -182,6 +182,31 @@ export function createLeadStageInPipeline(
 }
 
 /**
+ * A stage restored from the archive that has NO edge in either direction (it was migrated or
+ * created while archived, so the rule never linked it) gets the edges the shared rule gives a new
+ * stage. A stage that already has any edge keeps the graph the org shaped.
+ */
+async function restoreTransitionsIfDisconnected(
+  tx: Db,
+  orgId: string,
+  pipelineId: string,
+  stageId: string,
+): Promise<void> {
+  const [edge] = await tx
+    .select({ id: salesOpsPipelineTransitions.id })
+    .from(salesOpsPipelineTransitions)
+    .where(
+      and(
+        eq(salesOpsPipelineTransitions.orgId, orgId),
+        or(eq(salesOpsPipelineTransitions.fromStageId, stageId), eq(salesOpsPipelineTransitions.toStageId, stageId)),
+      ),
+    )
+    .limit(1);
+  if (edge) return;
+  await addTransitionsForNewStage(tx, orgId, pipelineId, stageId);
+}
+
+/**
  * A new open stage must be reachable: the explicit transition graph says "a pair that is absent is
  * not allowed". The pairs the shared rule (`planPipelineTransitions`) gives the new stage - to and
  * from the previous open stage, to every exit, and from the pausado exit - are inserted; pairs
@@ -252,6 +277,9 @@ export function updateLeadStage(
       const violated = mapLeadStageUniqueViolation(error);
       if (violated) return violated;
       throw error;
+    }
+    if (current.status === 'archived' && stage?.status === 'active') {
+      await restoreTransitionsIfDisconnected(tx, orgId, current.pipelineId, id);
     }
     // Deliberately NO auditCadastroLifecycle call. The ledger is a closed wire
     // contract whose CadastroEntityTypeSchema is the four audited cadastros, and
