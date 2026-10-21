@@ -1,0 +1,83 @@
+{
+  "verdict": "CHANGES_REQUESTED",
+  "round": 1,
+  "findings": [
+    {
+      "id": "R1-01",
+      "severity": "major",
+      "kind": "objective",
+      "file": "apps/api/src/domains/crm/pipeline-read.ts",
+      "line": 24,
+      "claim": "Default pipeline resolution selects a non-default pipeline when multiple active pipelines exist.",
+      "evidence": "defaultPipelineId orders by asc(isDefault) and takes one row. PostgreSQL sorts false before true, so unqualified lead creation and default-pipeline operations select a custom pipeline instead of the configured default.",
+      "suggestion": "Order isDefault descending, retaining the remaining fallback ordering. Cover a tenant with both default and non-default active pipelines."
+    },
+    {
+      "id": "R1-02",
+      "severity": "major",
+      "kind": "objective",
+      "file": "apps/api/src/domains/sales-ops/leads/stage-service.ts",
+      "line": 240,
+      "claim": "Restoring a stage that was migrated or created while archived leaves it disconnected.",
+      "evidence": "Migration and creation generate transitions only for active stages. updateLeadStage restores status without creating any transitions. The in-memory planner probe confirmed that an archived stage receives zero edges. After restoration, moves into or out of that stage return transition_not_allowed, including for existing leads parked there.",
+      "suggestion": "Establish appropriate incident transitions when restoring a previously disconnected stage, while preserving configured graphs. Cover migration of an archived stage followed by restoration and movement."
+    },
+    {
+      "id": "R1-03",
+      "severity": "major",
+      "kind": "objective",
+      "file": "apps/web/src/sales-ops/leads/lead-form.ts",
+      "line": 251,
+      "claim": "Undoing an edit to a legacy contactless lead always fails.",
+      "evidence": "The real leadToWriteSeed function emits contactPhone:null and contactEmail:null. lead-service.ts:1125-1128 rejects PATCH requests touching contact fields when both remain empty. Normal editing explicitly omits these keys for legacy contactless leads, so editing a name succeeds but Desfazer receives contact_required.",
+      "suggestion": "Preserve contact-key omission when undoing an edit that left a legacy lead contactless, and verify the undo payload against the API contract."
+    },
+    {
+      "id": "R1-04",
+      "severity": "major",
+      "kind": "objective",
+      "file": "apps/api/src/domains/sales-ops/leads/lead-history-service.ts",
+      "line": 406,
+      "claim": "An assigned follow-up owner can see their task but cannot complete it when another seller owns the lead.",
+      "evidence": "addLeadFollowup accepts another tenant person's ownerPersonId, and listFollowups includes tasks owned by the caller. markFollowupDone instead checks the lead's seller. A task assigned to Bruno on Ana's lead therefore appears in Bruno's Minha list but completion returns 404. Lead reassignment can produce the same mismatch.",
+      "suggestion": "Reconcile assignment, listing and completion authorization so task ownership has consistent behavior while preserving tenant and lead-access boundaries."
+    },
+    {
+      "id": "R1-05",
+      "severity": "major",
+      "kind": "objective",
+      "file": "apps/web/src/sales-ops/leads/LeadsBoardContainer.tsx",
+      "line": 206,
+      "claim": "The board offers undo for stage moves whose reverse transition is forbidden.",
+      "evidence": "moveWithUndo publishes an inverse move for every non-conversion movement without checking the reverse edge. The actual transition planner allows normal-to-Perdido but creates no Perdido-to-normal edge. Consequently, moving a lead to Perdido succeeds and offers Desfazer, but clicking it receives 409 transition_not_allowed.",
+      "suggestion": "Only offer inverse movement when the graph permits it, or implement an explicitly authorized server-side undo operation. Cover terminal and asymmetric transitions."
+    }
+  ],
+  "checks": [
+    {
+      "command": "git rev-parse c15a0ca",
+      "exit": 0,
+      "summary": "Resolved the requested review base."
+    },
+    {
+      "command": "git diff c15a0ca...HEAD --stat -- . ':(exclude)nexo/runs'",
+      "exit": 0,
+      "summary": "Confirmed the review scope: 158 changed files."
+    },
+    {
+      "command": "node -e [read-only in-memory TypeScript probes]",
+      "exit": 0,
+      "summary": "Evaluated actual leadToWriteSeed and planPipelineTransitions functions. Confirmed null contact undo payload, missing archived-stage edges, and allowed forward movement with forbidden reverse movement. No files written."
+    },
+    {
+      "command": "nl -ba apps/api/src/domains/sales-ops/leads/lead-history-service.ts | sed -n '370,477p'",
+      "exit": 0,
+      "summary": "Confirmed the mismatch between follow-up listing ownership and completion authorization."
+    },
+    {
+      "command": "ls ../agents-findings.schema.json",
+      "exit": 1,
+      "summary": "Referenced schema file was absent; response follows the supplied strict output schema."
+    }
+  ]
+}
