@@ -84,6 +84,23 @@ export type ContactLeadPayload = {
 
 export type SaveContactLeadPayload = ContactLeadPayload & { id?: string };
 
+export type LeadFieldWriteValue = string | number | null | Array<{ id: string | null; name: string }>;
+export type LeadFieldWrite = { fieldId: string; value: LeadFieldWriteValue };
+/** THE single lead write body of the phase 2 API (LeadWriteSchema). */
+export type LeadWritePayload = {
+  id?: string;
+  contactName: string;
+  /** Absent (not null) when an edit leaves a contact-less lead contact-less: the API keeps the stored value. */
+  contactPhone?: string | null;
+  contactEmail?: string | null;
+  clientId: string | null;
+  clientName: string | null;
+  estimatedValueBrl: number;
+  sellerPersonId?: string | null;
+  pipelineId?: string;
+  fields: LeadFieldWrite[];
+};
+
 /**
  * `toIndex` is the destination index INSIDE the destination column, 0-based, as
  * the operator sees it. The server owns the resulting `position` integers; the
@@ -166,7 +183,7 @@ export const leadsApi = {
     });
   },
 
-  saveLead: ({ id, ...body }: SaveLeadPayload | SaveContactLeadPayload, token: Token) =>
+  saveLead: ({ id, ...body }: SaveLeadPayload | SaveContactLeadPayload | LeadWritePayload, token: Token) =>
     apiFetch<LeadResponse>(id ? `${LEADS_PATH}/${id}` : LEADS_PATH, {
       method: id ? 'PATCH' : 'POST',
       token,
