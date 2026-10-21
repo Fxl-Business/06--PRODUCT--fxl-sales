@@ -1,0 +1,1 @@
+{"agent":"verify","slice":"09-web-lead-resumo","status":"FAIL","report":"nexo/runs/20261021T011348Z-vendas-crm-unificado/agents/verify-09-web-lead-resumo.md","summary":"suite 1874/1874 · lint 0 · type-check 0 · brand 21/21 · 3 majors (Advance Escape test missing, stale-undo/edit tests dropped, CLAUDE.md nav text stale)","done":true,"ts":"2026-10-21T09:25:00Z"}
