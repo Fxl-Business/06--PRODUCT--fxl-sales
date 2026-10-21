@@ -193,7 +193,7 @@ CREATE UNIQUE INDEX "sales_ops_crm_lead_field_values_slot_idx" ON "sales_ops_crm
 --> statement-breakpoint
 CREATE INDEX "sales_ops_crm_lead_field_values_org_lead_idx" ON "sales_ops_crm_lead_field_values" USING btree ("org_id","lead_id");
 --> statement-breakpoint
-CREATE INDEX "sales_ops_crm_lead_field_values_text_idx" ON "sales_ops_crm_lead_field_values" USING btree ("org_id","field_id","value_text") WHERE "sales_ops_crm_lead_field_values"."value_text" is not null;
+CREATE INDEX "sales_ops_crm_lead_field_values_text_idx" ON "sales_ops_crm_lead_field_values" USING btree ("org_id","field_id") WHERE "sales_ops_crm_lead_field_values"."value_text" is not null;
 --> statement-breakpoint
 CREATE INDEX "sales_ops_crm_lead_field_values_number_idx" ON "sales_ops_crm_lead_field_values" USING btree ("org_id","field_id","value_number") WHERE "sales_ops_crm_lead_field_values"."value_number" is not null;
 --> statement-breakpoint

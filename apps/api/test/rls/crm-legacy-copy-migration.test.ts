@@ -6,6 +6,7 @@
  * Requires Docker Postgres running. Run with:
  *   pnpm --filter @fxl-sales/api exec env VITEST_INTEGRATION=1 vitest run test/rls/crm-legacy-copy-migration.test.ts
  */
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
@@ -70,6 +71,9 @@ const CRM_TABLES = [
   'sales_ops_org_modules',
 ] as const;
 
+/** 4000 characters of incompressible text: a btree row over 2704 bytes cannot hold it (0029 indexed the whole value). */
+const LONG_DESCRIPTION = crypto.randomBytes(3000).toString('base64').slice(0, 4000);
+
 const SEED_SQL = `SELECT set_config('app.fxl_admin', 'true', false);
 -- orgA: full edition
 INSERT INTO sales_ops_people (id, org_id, display_name) VALUES
@@ -127,6 +131,17 @@ INSERT INTO clicks (click_id, org_id, link_id, finder_id, app_id, product_id) VA
 INSERT INTO leads (id, org_id, click_id, link_id, status) VALUES ('d0000000-0000-4000-8000-000000000001','orgA','CLICK0000000000000000000001','d0000000-0000-4000-8000-0000000000a4','converted');
 INSERT INTO conversions (source, external_order_id, idempotency_key, org_id, link_id, click_id, finder_id, app_id, product_id, quoted_setup_brl, quoted_monthly_brl, realized_setup_brl, realized_monthly_brl, hold_until, closed_at) VALUES
  ('fxl-financiero','ord1','idem1','orgA','d0000000-0000-4000-8000-0000000000a4','CLICK0000000000000000000001','d0000000-0000-4000-8000-0000000000a3','d0000000-0000-4000-8000-0000000000a1','d0000000-0000-4000-8000-0000000000a2',1000,500,1000,500,now(),now());
+-- orgD: legacy etapas already named like the two exits (Ganho, Ganho (saída), Pausado and an ARCHIVED
+-- Pausado (saída)), plus a lead whose description is 4000 incompressible characters.
+INSERT INTO sales_ops_lead_stages (id, org_id, name, kind, is_system, position, status, archived_at) VALUES
+ ('d0000000-0000-4000-8000-000000000101','orgD','Ganho','normal',false,1,'active',NULL),
+ ('d0000000-0000-4000-8000-000000000102','orgD','Ganho (saída)','normal',false,2,'active',NULL),
+ ('d0000000-0000-4000-8000-000000000103','orgD','Pausado','normal',false,3,'active',NULL),
+ ('d0000000-0000-4000-8000-000000000104','orgD','Pausado (saída)','normal',false,4,'archived', now()),
+ ('d0000000-0000-4000-8000-000000000105','orgD','Proposta','conversion',true,5,'active',NULL),
+ ('d0000000-0000-4000-8000-000000000106','orgD','Perdido','lost',true,6,'active',NULL);
+INSERT INTO sales_ops_leads (id, org_id, contact_name, client_name_snapshot, estimated_value_brl, description, stage_id, stage_changed_at, position) VALUES
+ ('d0000000-0000-4000-8000-000000000301','orgD','Lead descrição longa','',1000,'${LONG_DESCRIPTION}','d0000000-0000-4000-8000-000000000101','2026-09-06T10:00:00Z',0);
 `;
 
 type Fingerprint = Record<string, { n: number; hash: string }>;
@@ -193,7 +208,7 @@ describe('migration 0030 on a database populated at 0029', () => {
   it('every source table (19) is identical before and after (row count and content hash)', async () => {
     expect(await fingerprint(SOURCE_TABLES)).toEqual(sourceBefore);
     // spot checks that the fixture was not empty
-    expect(sourceBefore['sales_ops_leads']!.n).toBe(6);
+    expect(sourceBefore['sales_ops_leads']!.n).toBe(7);
     expect(sourceBefore['sales_ops_lead_products']!.n).toBe(2);
     expect(sourceBefore['sales_ops_settlements']!.n).toBe(1);
     expect(sourceBefore['integration_outbox']!.n).toBe(1);
@@ -236,7 +251,7 @@ describe('migration 0030 on a database populated at 0029', () => {
       'seller_person_id', 'seller_name_snapshot', 'client_id', 'client_name_snapshot', 'estimated_value_brl',
       'lost_reason', 'sale_id', 'created_at', 'updated_at', 'deleted_at', 'deleted_by_user_id', 'deleted_by_name',
     ];
-    for (const id of ['201', '202', '203', '204', '205'].map((s) => L(s)).concat([L('201', 'b')])) {
+    for (const id of ['201', '202', '203', '204', '205'].map((s) => L(s)).concat([L('201', 'b'), L('301', 'd')])) {
       const copied = await lead(id);
       const original = await sourceLead(id);
       for (const column of shared) expect(copied[column], `${id}.${column}`).toEqual(original[column]);
@@ -294,6 +309,15 @@ describe('migration 0030 on a database populated at 0029', () => {
     ]);
   });
 
+  it('copies a 4000-character incompressible description byte-equal into a text value', async () => {
+    const [value] = await rows<{ value_text: string }>(
+      `SELECT v.value_text FROM sales_ops_crm_lead_field_values v JOIN sales_ops_field_definitions f ON f.id = v.field_id AND f.key = 'descricao'
+       WHERE v.lead_id = '${L('301', 'd')}'`,
+    );
+    expect(value!.value_text).toBe(LONG_DESCRIPTION);
+    expect(value!.value_text).toHaveLength(4000);
+  });
+
   it('gives an org with no etapa the pure default pipeline, equal to DEFAULT_PIPELINE_STAGES and its transitions', async () => {
     const stages = await rows<{ id: string; name: string; position: number; type: string; behavior: string; exit_kind: string | null; requires_reason: boolean }>(
       `SELECT id, name, position, type, behavior, exit_kind, requires_reason FROM sales_ops_pipeline_stages WHERE org_id = 'orgC' ORDER BY position`,
@@ -311,7 +335,7 @@ describe('migration 0030 on a database populated at 0029', () => {
   });
 
   it('the SQL transition graph equals the TS rule planPipelineTransitions for every org', async () => {
-    for (const org of ['orgA', 'orgB', 'orgC']) {
+    for (const org of ['orgA', 'orgB', 'orgC', 'orgD']) {
       const stages = await rows<{ id: string; name: string; position: number; type: TransitionPlanStage['type']; exit_kind: TransitionPlanStage['exitKind']; status: TransitionPlanStage['status'] }>(
         `SELECT id, name, position, type, exit_kind, status FROM sales_ops_pipeline_stages WHERE org_id = '${org}'`,
       );
@@ -330,7 +354,7 @@ describe('migration 0030 on a database populated at 0029', () => {
       `SELECT org_id, name, system_key, is_default FROM sales_ops_pipelines ORDER BY org_id`,
     );
     expect(pipelines).toEqual(
-      ['orgA', 'orgB', 'orgC'].map((org_id) => ({ org_id, name: 'Funil CRM padrão', system_key: 'crm-padrao', is_default: true })),
+      ['orgA', 'orgB', 'orgC', 'orgD'].map((org_id) => ({ org_id, name: 'Funil CRM padrão', system_key: 'crm-padrao', is_default: true })),
     );
     expect((await fingerprint(['sales_ops_org_modules']))['sales_ops_org_modules']!.n).toBe(0);
   });
@@ -343,7 +367,8 @@ describe('migration 0030 on a database populated at 0029', () => {
     expect(fields.filter((f) => f.org_id === 'orgA').map((f) => f.key)).toEqual(['cliente', 'produtos', 'descricao', 'nascimento']);
     expect(fields.filter((f) => f.org_id === 'orgB').map((f) => f.key)).toEqual(['cliente']);
     expect(fields.filter((f) => f.org_id === 'orgC').map((f) => f.key)).toEqual(['cliente']);
-    for (const org of ['orgA', 'orgB', 'orgC']) {
+    expect(fields.filter((f) => f.org_id === 'orgD').map((f) => f.key)).toEqual(['cliente', 'descricao']);
+    for (const org of ['orgA', 'orgB', 'orgC', 'orgD']) {
       expect(fields.find((f) => f.org_id === org && f.key === 'cliente')).toMatchObject({ org_id: org, ...cliente });
     }
     expect(fields.find((f) => f.key === 'produtos')).toMatchObject({ kind: 'reference', reference_target: 'produto', multiple: true, is_system: false, removable: true });
@@ -367,7 +392,11 @@ describe('migration 0030 on a database populated at 0029', () => {
     const desc = await rows<{ lead_id: string; value_text: string }>(
       `SELECT v.lead_id, v.value_text FROM sales_ops_crm_lead_field_values v JOIN sales_ops_field_definitions f ON f.id = v.field_id AND f.key = 'descricao' ORDER BY v.lead_id`,
     );
-    expect(desc).toEqual([{ lead_id: L('201'), value_text: 'desc conv' }, { lead_id: L('204'), value_text: '' }]);
+    expect(desc).toEqual([
+      { lead_id: L('201'), value_text: 'desc conv' },
+      { lead_id: L('204'), value_text: '' },
+      { lead_id: L('301', 'd'), value_text: LONG_DESCRIPTION },
+    ]);
     const birth = await rows<{ lead_id: string; value_date: string }>(
       `SELECT v.lead_id, v.value_date::text FROM sales_ops_crm_lead_field_values v JOIN sales_ops_field_definitions f ON f.id = v.field_id AND f.key = 'nascimento'`,
     );
@@ -380,7 +409,7 @@ describe('migration 0030 on a database populated at 0029', () => {
               e.occurred_at = l.stage_changed_at AS same_time
        FROM sales_ops_crm_lead_events e JOIN sales_ops_leads l ON l.id = e.lead_id ORDER BY e.lead_id`,
     );
-    expect(events).toHaveLength(6);
+    expect(events).toHaveLength(7);
     for (const event of events) {
       expect(event).toMatchObject({ kind: 'stage_changed', from_stage_id: null, actor_user_id: 'system', actor_name_snapshot: 'Migração', same_time: true });
     }

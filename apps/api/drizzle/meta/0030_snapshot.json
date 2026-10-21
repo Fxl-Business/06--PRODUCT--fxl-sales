@@ -2847,12 +2847,6 @@
               "isExpression": false,
               "asc": true,
               "nulls": "last"
-            },
-            {
-              "expression": "value_text",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
             }
           ],
           "isUnique": false,

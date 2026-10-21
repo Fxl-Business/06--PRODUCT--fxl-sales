@@ -1732,7 +1732,7 @@ export const salesOpsCrmLeadFieldValues = pgTable(
   (t) => [
     uniqueIndex('sales_ops_crm_lead_field_values_slot_idx').on(t.orgId, t.leadId, t.fieldId, t.position),
     index('sales_ops_crm_lead_field_values_org_lead_idx').on(t.orgId, t.leadId),
-    index('sales_ops_crm_lead_field_values_text_idx').on(t.orgId, t.fieldId, t.valueText).where(sql`${t.valueText} is not null`),
+    index('sales_ops_crm_lead_field_values_text_idx').on(t.orgId, t.fieldId).where(sql`${t.valueText} is not null`),
     index('sales_ops_crm_lead_field_values_number_idx').on(t.orgId, t.fieldId, t.valueNumber).where(sql`${t.valueNumber} is not null`),
     index('sales_ops_crm_lead_field_values_cents_idx').on(t.orgId, t.fieldId, t.valueCents).where(sql`${t.valueCents} is not null`),
     index('sales_ops_crm_lead_field_values_date_idx').on(t.orgId, t.fieldId, t.valueDate).where(sql`${t.valueDate} is not null`),
