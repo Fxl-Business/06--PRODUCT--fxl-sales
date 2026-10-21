@@ -451,8 +451,9 @@ Full reference: `nexo/knowledge/reference/importacao-por-planilha.md`.
 - A historical won day goes through `createSale(..., now = <wonOn>T15:00:00Z)`; a won day after `todayInSaoPaulo` is an error. A payment is a baixa through `applyBaixaTx` with the `manual` policy, never a direct write to `sales_ops_settlements`.
 - A lead cannot be imported into the conversion etapa; one in the lost etapa needs `Motivo da perda`.
 - Limits: 5 MB upload, 5000 data rows, 500 issues returned (`truncated`). No migration; `import.completed` is an `AuditActionSchema` addition, written once, last, in the same transaction.
+- `parseWorkbook` loads every upload through `normalizeXlsxPackage` (`xlsx-package.ts`), which rewrites only the package shape exceljs cannot read (Open XML SDK `x:` prefix, absolute relationship targets, `vmldrawing.vml` names) and returns any other package byte-identical; a new quirk goes there with a fixture in `xlsx-package.test.ts`. `jszip` is pinned exactly to exceljs's own version.
 - The web classifies the import errors by HTTP status only; a 403 renders inline on the screen, never `ForbiddenPanel`; a 409 shows `body.message`. The web never parses xlsx.
-- Oracles: `import-routes.integration.test.ts` (round trip of the example template, all-or-nothing, producer-live, admin gate, re-import recognition), `executor.integration.test.ts`, `client-recognition.test.ts`, `template-example.test.ts`, `workbook-schema.test.ts`, `import-view.test.tsx`, `import-copy.test.ts`.
+- Oracles: `import-routes.integration.test.ts` (round trip of the example template, all-or-nothing, producer-live, admin gate, re-import recognition), `executor.integration.test.ts`, `client-recognition.test.ts`, `template-example.test.ts`, `workbook-schema.test.ts`, `import-view.test.tsx`, `import-copy.test.ts`, `xlsx-package.test.ts`.
 - `exceljs` is pinned EXACTLY in `apps/api` (`exceljs-pin.test.ts`); run `pnpm install` after pulling.
 
 ## Environments

@@ -28,6 +28,7 @@
     "drizzle-orm": "^0.45.2",
     "exceljs": "4.4.0",
     "hono": "4.12.28",
+    "jszip": "3.10.2",
     "node-cron": "^4.2.1",
     "postgres": "^3.4.5",
     "svix": "^1.95.1",

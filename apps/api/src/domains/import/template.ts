@@ -139,6 +139,11 @@ export function buildLeiameLines(catalog: ImportCatalog, opts: TemplateOptions):
   B('A conferência mostra cada erro com a aba, a linha, a coluna e o motivo.');
   B('Corrija os erros nesta mesma planilha, salve e envie o arquivo de novo; não é preciso baixar outro modelo.');
   B('O botão Importar só fica disponível quando não há nenhum erro, e a importação grava tudo de uma vez ou nada.');
+  H('Como salvar o arquivo');
+  B('Edite e salve esta planilha no Microsoft Excel instalado no computador, em Arquivo, Salvar como, com o tipo Pasta de Trabalho do Excel (.xlsx).');
+  B('Evite passar o arquivo por ferramentas que regravam a planilha, como Excel na web, Google Planilhas, conversores, scripts ou assistentes de IA, porque elas podem mudar o formato interno do arquivo.');
+  B('Não mude o nome das abas nem a extensão do arquivo, e não salve como .xls, .csv ou .ods.');
+  B('Se a importação disser que o arquivo não é uma planilha .xlsx válida, abra-o no Excel do computador, use Salvar como .xlsx com outro nome e envie essa cópia.');
   H('Colunas de cada aba');
   for (const def of WORKBOOK_SHEETS) {
     H(def.tab);
