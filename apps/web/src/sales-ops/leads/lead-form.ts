@@ -12,6 +12,9 @@ import type { SalesOpsLead } from './types';
 /** The Cliente system field key. It is carried ONLY by the top-level clientId/clientName. */
 export const CLIENTE_FIELD_KEY = 'cliente';
 
+/** The birth-date field key. It alone is capped at today (no future birthday). */
+export const BIRTH_DATE_FIELD_KEY = 'nascimento';
+
 export const LEAD_FORM_COPY = {
   createTitle: 'Novo lead',
   editTitle: 'Editar lead',
@@ -31,6 +34,7 @@ export const LEAD_FORM_COPY = {
   emailInvalid: 'Informe um e-mail válido.',
   numberInvalid: 'Informe um número válido.',
   dateInvalid: 'Informe uma data válida.',
+  birthDateFuture: 'A data de aniversário não pode ser no futuro.',
   noStageError: 'Nenhuma etapa ativa no funil. O lead não foi salvo.',
   saveFailed: 'Não foi possível salvar o lead. Tente novamente.',
 } as const;
@@ -133,6 +137,17 @@ const FIELD_CHECK_BY_KIND: Record<FieldKind, (draft: FieldDraft | undefined) => 
   reference: () => null,
 };
 
+export function isBirthDateDefinition(definition: FieldDefinition): boolean {
+  return definition.kind === 'date' && definition.key === BIRTH_DATE_FIELD_KEY;
+}
+
+/** A valid ISO day strictly after `today`. Both sides are civil days compared as strings. */
+function isFutureIsoDay(draft: FieldDraft | undefined, today: string): boolean {
+  if (typeof draft !== 'string') return false;
+  const day = draft.trim();
+  return isIsoDay(day) && day > today;
+}
+
 function checkNumber(draft: FieldDraft | undefined): string | null {
   if (typeof draft !== 'string' || draft.trim() === '') return null;
   return Number.isFinite(Number(draft)) ? null : LEAD_FORM_COPY.numberInvalid;
@@ -142,11 +157,12 @@ function checkNumber(draft: FieldDraft | undefined): string | null {
  * `contactOptional` is set by the caller for an EDIT of a lead that never had a contact
  * (most legacy leads). The API accepts a row without contact, so the form does not force one
  * on it; a new lead, or one that already has a contact, still needs one.
+ * `today` is the São Paulo civil day the caller passes (`todayInSaoPaulo()`); this module never reads the clock.
  */
 export function validateLeadFormDraft(
   draft: LeadFormDraft,
   definitions: readonly FieldDefinition[],
-  options: { contactOptional?: boolean } = {},
+  options: { contactOptional?: boolean; today: string },
 ): LeadFormProblem | null {
   if (draft.contactName.trim() === '') return { field: 'contactName', message: LEAD_FORM_COPY.nameRequired };
   if (!options.contactOptional && draft.contactPhone.trim() === '' && draft.contactEmail.trim() === '') {
@@ -158,6 +174,9 @@ export function validateLeadFormDraft(
   for (const definition of renderableDefinitions(definitions)) {
     const message = FIELD_CHECK_BY_KIND[definition.kind](draft.fields[definition.id]);
     if (message !== null) return { field: `field:${definition.id}`, message };
+    if (isBirthDateDefinition(definition) && isFutureIsoDay(draft.fields[definition.id], options.today)) {
+      return { field: `field:${definition.id}`, message: LEAD_FORM_COPY.birthDateFuture };
+    }
   }
   return null;
 }

@@ -15,6 +15,9 @@ import {
 } from '../lead-form';
 import type { SalesOpsLead } from '../types';
 
+const TODAY = '2026-10-21';
+const BIRTH_DEF = { id: 'f-nasc', key: 'nascimento', kind: 'date', label: 'Nascimento', position: 7 } as unknown as FieldDefinition;
+
 const DEFS: FieldDefinition[] = [
   def('f-cli', 'cliente', 'Cliente', 'reference', 0, { referenceTarget: 'cliente', isSystem: true, removable: false }),
   def('f-desc', 'descricao', 'Descrição', 'text', 1),
@@ -107,19 +110,19 @@ const CLIENT_CONTACT_LEAD = leadFixture({
 
 describe('lead-form validation', () => {
   it('requires a name first, then one contact', () => {
-    expect(validateLeadFormDraft(emptyDraft(), DEFS)).toEqual({ field: 'contactName', message: LEAD_FORM_COPY.nameRequired });
-    expect(validateLeadFormDraft(emptyDraft({ contactName: 'Ana' }), DEFS)).toEqual({
+    expect(validateLeadFormDraft(emptyDraft(), DEFS, { today: TODAY })).toEqual({ field: 'contactName', message: LEAD_FORM_COPY.nameRequired });
+    expect(validateLeadFormDraft(emptyDraft({ contactName: 'Ana' }), DEFS, { today: TODAY })).toEqual({
       field: 'contact',
       message: LEAD_FORM_COPY.contactRequired,
     });
-    expect(validateLeadFormDraft(emptyDraft({ contactName: 'Ana', contactPhone: '11999' }), DEFS)).toBeNull();
-    expect(validateLeadFormDraft(emptyDraft({ contactName: 'Ana', contactEmail: 'ana@acme.com' }), DEFS)).toBeNull();
+    expect(validateLeadFormDraft(emptyDraft({ contactName: 'Ana', contactPhone: '11999' }), DEFS, { today: TODAY })).toBeNull();
+    expect(validateLeadFormDraft(emptyDraft({ contactName: 'Ana', contactEmail: 'ana@acme.com' }), DEFS, { today: TODAY })).toBeNull();
   });
 
   it('an edit of a contact-less lead does not force a contact, and the payload omits the contact keys', () => {
     const blank = emptyDraft({ contactName: 'Ana', estimatedValue: '' });
-    expect(validateLeadFormDraft(blank, DEFS)).toEqual({ field: 'contact', message: LEAD_FORM_COPY.contactRequired });
-    expect(validateLeadFormDraft(blank, DEFS, { contactOptional: true })).toBeNull();
+    expect(validateLeadFormDraft(blank, DEFS, { today: TODAY })).toEqual({ field: 'contact', message: LEAD_FORM_COPY.contactRequired });
+    expect(validateLeadFormDraft(blank, DEFS, { contactOptional: true, today: TODAY })).toBeNull();
     const payload = buildLeadWritePayload(blank, DEFS, { id: 'L1', includeSeller: false, contactOptional: true });
     expect('contactPhone' in payload).toBe(false);
     expect('contactEmail' in payload).toBe(false);
@@ -132,7 +135,7 @@ describe('lead-form validation', () => {
   });
 
   it('refuses a malformed e-mail', () => {
-    expect(validateLeadFormDraft(emptyDraft({ contactName: 'Ana', contactEmail: 'ana@' }), DEFS)).toEqual({
+    expect(validateLeadFormDraft(emptyDraft({ contactName: 'Ana', contactEmail: 'ana@' }), DEFS, { today: TODAY })).toEqual({
       field: 'contactEmail',
       message: LEAD_FORM_COPY.emailInvalid,
     });
@@ -140,21 +143,33 @@ describe('lead-form validation', () => {
 
   it('refuses a bad number, money and date', () => {
     const base = emptyDraft({ contactName: 'Ana', contactPhone: '1' });
-    expect(validateLeadFormDraft({ ...base, fields: { 'f-qtd': 'abc' } }, DEFS)).toEqual({
+    expect(validateLeadFormDraft({ ...base, fields: { 'f-qtd': 'abc' } }, DEFS, { today: TODAY })).toEqual({
       field: 'field:f-qtd',
       message: LEAD_FORM_COPY.numberInvalid,
     });
-    expect(validateLeadFormDraft({ ...base, fields: { 'f-orc': 'x' } }, DEFS)).toEqual({
+    expect(validateLeadFormDraft({ ...base, fields: { 'f-orc': 'x' } }, DEFS, { today: TODAY })).toEqual({
       field: 'field:f-orc',
       message: LEAD_FORM_COPY.numberInvalid,
     });
-    expect(validateLeadFormDraft({ ...base, fields: { 'f-prazo': '2026-02-30' } }, DEFS)).toEqual({
+    expect(validateLeadFormDraft({ ...base, fields: { 'f-prazo': '2026-02-30' } }, DEFS, { today: TODAY })).toEqual({
       field: 'field:f-prazo',
       message: LEAD_FORM_COPY.dateInvalid,
     });
     expect(
-      validateLeadFormDraft({ ...base, fields: { 'f-qtd': '3', 'f-orc': '12', 'f-prazo': '2026-11-01' } }, DEFS),
+      validateLeadFormDraft({ ...base, fields: { 'f-qtd': '3', 'f-orc': '12', 'f-prazo': '2026-11-01' } }, DEFS, { today: TODAY }),
     ).toBeNull();
+  });
+
+  it('refuses a future birth date only on the nascimento field, and accepts today', () => {
+    const base = { contactName: 'Ana', contactPhone: '11999990000', contactEmail: '', clientId: null, clientName: '', estimatedValue: '', sellerPersonId: null };
+    const defs = [...DEFS, BIRTH_DEF];
+    expect(validateLeadFormDraft({ ...base, fields: { 'f-nasc': '2026-10-22' } }, defs, { today: TODAY })).toEqual({
+      field: 'field:f-nasc',
+      message: LEAD_FORM_COPY.birthDateFuture,
+    });
+    expect(validateLeadFormDraft({ ...base, fields: { 'f-nasc': TODAY } }, defs, { today: TODAY })).toBeNull();
+    // The same future day on another date field is not the birth-date rule.
+    expect(validateLeadFormDraft({ ...base, fields: { 'f-prazo': '2026-10-22' } }, defs, { today: TODAY })).toBeNull();
   });
 
   it('the cliente definition is never validated nor rendered as a dynamic field', () => {

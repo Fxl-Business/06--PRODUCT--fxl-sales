@@ -9,6 +9,7 @@ import { LeadForm, type LeadFormProps } from '../LeadForm';
 import { CLIENT_PICKER_COPY } from '../client-picker-copy';
 import { LEAD_FORM_COPY } from '../lead-form';
 import type { SalesOpsLead } from '../types';
+import { addDaysToIsoDay, todayInSaoPaulo } from '@fxl-sales/shared-utils/sao-paulo-day';
 
 const act = (React as typeof React & { act: typeof import('react-dom/test-utils').act }).act;
 
@@ -438,6 +439,29 @@ describe('LeadForm', () => {
     await escape(search);
     expect(document.querySelector('[role="listbox"]')).toBeNull();
     expect(onOpenChange).not.toHaveBeenCalled();
+  });
+
+  it('the birth date input is capped at today, and no other date field is', async () => {
+    await renderForm({ definitions: [...DEFS, field('f-nasc', 'date', 7, { key: 'nascimento', label: 'Nascimento' })] });
+    expect(input('lead-field-f-nasc').getAttribute('type')).toBe('date');
+    expect(input('lead-field-f-nasc').getAttribute('max')).toBe(todayInSaoPaulo());
+    expect(input('lead-field-f-prazo').getAttribute('max')).toBeNull();
+  });
+
+  it('a future birth date blocks Salvar with the message, and today is accepted', async () => {
+    const today = todayInSaoPaulo();
+    await renderForm({ definitions: [...DEFS, field('f-nasc', 'date', 7, { key: 'nascimento', label: 'Nascimento' })] });
+    await typeInto(input('lead-contact-name'), 'Ana');
+    await typeInto(input('lead-phone'), '11999990000');
+    expect(saveButton().disabled).toBe(false);
+
+    await typeInto(input('lead-field-f-nasc'), addDaysToIsoDay(today, 1));
+    expect(saveButton().disabled).toBe(true);
+    expect(blockedText()).toBe(LEAD_FORM_COPY.birthDateFuture);
+
+    await typeInto(input('lead-field-f-nasc'), today);
+    expect(saveButton().disabled).toBe(false);
+    expect(blockedText()).toBeNull();
   });
 
   it('a refused save keeps the dialog open with the typed values and an inline error', async () => {

@@ -10,6 +10,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { todayInSaoPaulo } from '@fxl-sales/shared-utils/sao-paulo-day';
 import type { SalesOpsClient, SalesOpsProduct } from '../types';
 import type { SalesOpsLead } from './types';
 import type { LeadWritePayload } from './api';
@@ -85,7 +86,9 @@ export function LeadForm({
   const [saveError, setSaveError] = React.useState<string | null>(null);
   const [prefilled, setPrefilled] = React.useState(false);
 
-  const problem = validateLeadFormDraft(draft, definitions, { contactOptional });
+  // The São Paulo civil day, read here (the view) and passed down; the logic modules never read the clock.
+  const today = todayInSaoPaulo();
+  const problem = validateLeadFormDraft(draft, definitions, { contactOptional, today });
   const showProblem = problem !== null && (submitted || touched.has(problem.field));
   const canCreateClient = Boolean(onCreateClient);
   const clientPlaceholder = clientPickerCopy(canCreateClient);
@@ -266,6 +269,7 @@ export function LeadForm({
             onChange={setFieldDraft}
             products={products}
             {...(sales ? { sales } : {})}
+            today={today}
           />
 
           {showSellerPicker ? (

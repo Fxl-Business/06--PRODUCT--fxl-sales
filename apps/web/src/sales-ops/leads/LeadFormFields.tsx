@@ -13,7 +13,7 @@ import {
   secondaryButtonClass,
 } from './board-ui';
 import type { FieldDefinition, FieldKind, FieldReferenceTarget } from './crm-types';
-import { renderableDefinitions, type FieldDraft } from './lead-form';
+import { isBirthDateDefinition, renderableDefinitions, type FieldDraft } from './lead-form';
 
 /** The dynamic renderers of the one LeadForm. The Cliente is never rendered here (LeadForm owns it). */
 
@@ -23,6 +23,7 @@ export type FieldRendererProps = {
   onChange: (next: FieldDraft) => void;
   products: SalesOpsProduct[];
   sales: ComboboxOption[];
+  today: string;
 };
 
 export type LeadFormFieldsProps = {
@@ -31,6 +32,8 @@ export type LeadFormFieldsProps = {
   onChange: (fieldId: string, next: FieldDraft) => void;
   products: SalesOpsProduct[];
   sales?: ComboboxOption[];
+  /** The São Paulo civil day; caps the birth-date input. */
+  today: string;
 };
 
 const EMPTY_SALES: ComboboxOption[] = [];
@@ -84,11 +87,12 @@ function MoneyRenderer({ definition, draft, onChange }: FieldRendererProps) {
   );
 }
 
-function DateRenderer({ definition, draft, onChange }: FieldRendererProps) {
+function DateRenderer({ definition, draft, onChange, today }: FieldRendererProps) {
   return (
     <Input
       className={formInputClass}
       id={`lead-field-${definition.id}`}
+      max={isBirthDateDefinition(definition) ? today : undefined}
       onChange={(event) => onChange(event.target.value)}
       type="date"
       value={textOf(draft)}
@@ -252,7 +256,7 @@ const FIELD_RENDERERS: Record<FieldKind, (props: FieldRendererProps) => React.JS
   reference: ReferenceRenderer,
 };
 
-export function LeadFormFields({ definitions, drafts, onChange, products, sales = EMPTY_SALES }: LeadFormFieldsProps) {
+export function LeadFormFields({ definitions, drafts, onChange, products, sales = EMPTY_SALES, today }: LeadFormFieldsProps) {
   return (
     <>
       {renderableDefinitions(definitions).map((definition) => {
@@ -268,6 +272,7 @@ export function LeadFormFields({ definitions, drafts, onChange, products, sales 
               onChange={(next) => onChange(definition.id, next)}
               products={products}
               sales={sales}
+              today={today}
             />
           </div>
         );
