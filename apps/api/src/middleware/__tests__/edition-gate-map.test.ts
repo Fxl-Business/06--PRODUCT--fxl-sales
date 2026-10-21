@@ -9,6 +9,8 @@
  *
  * The database is a fake that throws on first use: reaching it means a handler
  * ran, and the app's `onError` turns that into the HANDLER_REACHED marker.
+ * The module loader is mocked (it would otherwise be the first database use) with
+ * the token backfill it performs for a never-seen org.
  */
 import { randomUUID } from 'node:crypto';
 import { exportJWK, generateKeyPair, SignJWT, type JWK } from 'jose';
@@ -47,6 +49,24 @@ vi.mock('../../db/client.js', () => {
     },
     closeDb: async () => undefined,
     resolveAdminDatabaseUrl: () => undefined,
+  };
+});
+
+vi.mock('../../domains/org-modules/service.js', async () => {
+  const { CRM_MODULE_KEYS, modulesForEdition } = await import('@fxl-sales/shared-utils/crm-model');
+  const { resolveSalesEdition } = await import('@fxl-sales/shared-utils/sales-edition');
+  return {
+    // What the real loader returns for a never-seen org: the one-time token backfill.
+    loadOrgModules: async (_orgId: string, tokenModules: readonly unknown[] | undefined) => {
+      const modules = modulesForEdition(resolveSalesEdition(tokenModules));
+      return {
+        modules,
+        sources: Object.fromEntries(CRM_MODULE_KEYS.map((key) => [key, 'token_backfill'])),
+      };
+    },
+    updateOrgModules: async () => {
+      throw new Error('edition-gate-map: updateOrgModules reached');
+    },
   };
 });
 

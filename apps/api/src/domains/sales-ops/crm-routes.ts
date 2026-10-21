@@ -37,7 +37,7 @@ crmRouter.get('/followups', async (c) => {
   });
   if (!parsed.success) return validationResponse(c, parsed.error);
   if (parsed.data.scope === 'team' && !hasAdminRole(c)) return c.json(ADMIN_ROLE_REQUIRED_BODY, 403);
-  const result = await listFollowups(getDb(), c.get('orgId'), parsed.data, leadScope(c));
+  const result = await listFollowups(getDb(), c.get('orgId'), parsed.data, await leadScope(c));
   if (!result.ok) return failureResponse(c, result.reason);
   return c.json({ followups: result.followups });
 });
@@ -45,7 +45,7 @@ crmRouter.get('/followups', async (c) => {
 crmRouter.post('/followups/:id/done', async (c) => {
   const id = z.string().uuid().safeParse(c.req.param('id'));
   if (!id.success) return c.json({ error: 'not_found' }, 404);
-  const result = await markFollowupDone(getDb(), c.get('orgId'), id.data, leadScope(c));
+  const result = await markFollowupDone(getDb(), c.get('orgId'), id.data, await leadScope(c));
   if (!result.ok) return failureResponse(c, result.reason);
   return c.json({ followup: result.followup });
 });

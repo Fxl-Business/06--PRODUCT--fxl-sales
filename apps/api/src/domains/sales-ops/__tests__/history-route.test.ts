@@ -1,3 +1,4 @@
+import { ALL_MODULES_ENABLED } from '@fxl-sales/shared-utils/crm-model';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { Hono } from 'hono';
@@ -45,6 +46,7 @@ function createTestApp() {
   app.use('*', async (c, next) => {
     c.set('userId', 'verified-account');
     c.set('orgId', 'verified-org');
+    c.set('orgModules', ALL_MODULES_ENABLED);
     c.set('userRole', currentRole);
     c.set('userRoles', currentRole ? [currentRole] : []);
     c.set(

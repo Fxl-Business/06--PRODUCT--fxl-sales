@@ -1,11 +1,12 @@
 /**
  * The lead HTTP boundary per edition (phase 2 cutover).
  *
- * Same harness as `lead-routes.test.ts`, plus one Context variable: the `salesEdition` the auth
- * middleware resolves from the VERIFIED token. The edition no longer picks a wire schema: BOTH
+ * Same harness as `lead-routes.test.ts`, plus one Context variable: the organization modules
+ * the loader resolves for the VERIFIED token's organization (`orgModules`). The edition no longer picks a wire schema: BOTH
  * editions (and an absent edition) reach `createLead` / `updateLead` through the one
  * `LeadWriteSchema`. The edition only travels inside the scope object.
  */
+import { modulesForEdition } from '@fxl-sales/shared-utils/crm-model';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { hubAuthContext as sharedHubAuthContext } from '../../../../auth/__tests__/hub-auth-context-fixture.js';
@@ -76,7 +77,7 @@ function createTestApp() {
         ...(currentName !== undefined ? { name: currentName } : {}),
       }),
     );
-    if (currentEdition !== undefined) c.set('salesEdition', currentEdition);
+    c.set('orgModules', modulesForEdition(currentEdition ?? 'full'));
     await next();
   });
   app.route('/leads', leadsRouter);

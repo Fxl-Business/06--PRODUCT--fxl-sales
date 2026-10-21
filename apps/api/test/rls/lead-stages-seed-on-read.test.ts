@@ -8,6 +8,7 @@
  *
  * Run once: `VITEST_INTEGRATION=1 pnpm exec vitest run test/rls/lead-stages-seed-on-read.test.ts`
  */
+import { modulesForEdition } from '@fxl-sales/shared-utils/crm-model';
 import { randomUUID } from 'node:crypto';
 import { DEFAULT_PIPELINE_STAGES } from '@fxl-sales/shared-utils/default-pipeline';
 import { Hono } from 'hono';
@@ -72,7 +73,7 @@ function appFor(
     c.set('orgId', orgId);
     c.set('userRole', options.roles[0]);
     c.set('userRoles', options.roles as never);
-    c.set('salesEdition', options.edition as never);
+    c.set('orgModules', modulesForEdition(options.edition));
     c.set(
       'hubAuth',
       hubAuthContext({ accountId: 'hub_seed_tester', workspaceId: orgId, name: 'Teste' }),

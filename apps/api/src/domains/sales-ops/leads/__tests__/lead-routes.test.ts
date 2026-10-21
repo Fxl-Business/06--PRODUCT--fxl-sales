@@ -8,6 +8,7 @@
  * The service's own behaviour is proved against a real database in
  * `test/rls/leads-seller-scope.test.ts`.
  */
+import { ALL_MODULES_ENABLED } from '@fxl-sales/shared-utils/crm-model';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { hubAuthContext as sharedHubAuthContext } from '../../../../auth/__tests__/hub-auth-context-fixture.js';
@@ -85,6 +86,7 @@ function createTestApp() {
   app.use('*', async (c, next) => {
     c.set('userId', 'verified-account');
     c.set('orgId', 'verified-org');
+    c.set('orgModules', ALL_MODULES_ENABLED);
     c.set('userRole', currentRoles[0]);
     c.set('userRoles', currentRoles as never);
     c.set(

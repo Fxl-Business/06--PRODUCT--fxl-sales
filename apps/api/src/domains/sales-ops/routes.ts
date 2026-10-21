@@ -66,6 +66,7 @@ import {
   recordSettlement,
   reverseSettlement,
 } from './settlements.js';
+import { getSalesEdition } from '../org-modules/context.js';
 
 const saleIdSchema = z.string().uuid();
 
@@ -76,8 +77,9 @@ export const salesOpsRouter = new Hono();
 // this file: Hono runs matched handlers in registration order, so a gate
 // registered below a handler never runs before it. `/x/*` also matches `/x`.
 // Open in every edition, deliberately: /bootstrap, GET /settings, /people,
-// /lead-stages and /leads. The capability set per edition lives in
-// `@fxl-sales/shared-utils/sales-edition`; the full edition passes every gate.
+// /lead-stages and /leads. The capability set per organization lives in
+// `sales_ops_org_modules`; `CAPABILITY_MODULES` in `@fxl-sales/shared-utils/crm-model`
+// maps each capability to its modules, and the full product passes every gate.
 // PUT /settings is gated inline on its route below because GET /settings stays open.
 // ─────────────────────────────────────────────────────────────────────────────
 salesOpsRouter.use('/summary/*', requireCapability('proposals'));
@@ -127,7 +129,7 @@ salesOpsRouter.post('/people', requireAdmin, async (c) => {
   }
   // The leads edition forces the função set to exactly [vendedor] in the service.
   // The full edition keeps today's exact three-argument call.
-  const edition = c.get('salesEdition') ?? 'full';
+  const edition = await getSalesEdition(c);
   const person =
     edition === 'leads'
       ? await createPerson(getDb(), c.get('orgId'), parsed.data, { edition })
@@ -143,7 +145,7 @@ salesOpsRouter.patch('/people/:id', requireAdmin, async (c) => {
   if (!parsed.success) {
     return c.json({ error: 'validation_error', issues: parsed.error.flatten() }, 400);
   }
-  const edition = c.get('salesEdition') ?? 'full';
+  const edition = await getSalesEdition(c);
   const person =
     edition === 'leads'
       ? await updatePerson(getDb(), c.get('orgId'), c.req.param('id'), parsed.data, cadastroActor(c), {
