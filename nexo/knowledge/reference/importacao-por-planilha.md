@@ -143,10 +143,20 @@ API (`apps/api/src/domains/import/__tests__/`):
 - `cadastros.test.ts`, `plan-leads.test.ts`, `plan-propostas.test.ts`, `plan/__tests__/desfechos.test.ts`, `plan-index.test.ts`, `refs.test.ts`, `plan-helpers.test.ts`, `catalog.integration.test.ts`: the planners and the catalog.
 - `client-recognition.test.ts`: the D12 rule (document first, name with tab-wide document agreement, several same-document clientes never fall back to the name, purity).
 - `exceljs-pin.test.ts`: `exceljs` pinned exactly.
+- `xlsx-package.test.ts`: a real template re-saved in the Open XML SDK shape makes plain exceljs throw, and `parseWorkbook` reads it into the same rows with no issue and the header notes intact; an exceljs-written package comes back byte-identical.
 
 Web (`apps/web/src/sales-ops/import/__tests__/`): `import-view.test.tsx` (including the one recognized line, `nothingNew` and the past-tense success line), `import-routing.test.tsx`, `import-copy.test.ts`, `issues.test.ts`.
 
 Slice 10 added tests for the five mutation survivors: parcelas above the items total, a file-level error in `isPlanOk`, the executor's `producer_flow_live` re-check before a settlement, its `won_on_in_future` re-check, and the singular error title.
+
+## Package shape (hotfix 2026-10-21)
+
+A customer's file re-saved by a tool built on the Open XML SDK was refused in production as `invalid_file` although every row was valid.
+exceljs 4.4.0 reads only the package shape it writes: it matches unprefixed SpreadsheetML tags (the SDK writes `<x:workbook>`), it keys comments and VML drawings by the relative relationship target (the SDK writes `/xl/comments1.xml`), and it routes only `vmlDrawing<N>.vml` (the SDK writes `vmldrawing.vml`).
+`parseWorkbook` therefore loads the bytes through `normalizeXlsxPackage` (`apps/api/src/domains/import/xlsx-package.ts`), which rewrites only the package shape, never a cell, and returns a package that needs nothing as the same bytes.
+`jszip` is a direct dependency pinned exactly to the version exceljs already resolves, so the tree does not move.
+The template's Leia-me carries a `Como salvar o arquivo` section after `Como importar`.
+A new package quirk that exceljs cannot read belongs in `normalizeXlsxPackage` with a fixture in `xlsx-package.test.ts`, never in a second parser.
 
 ## Known gaps
 
