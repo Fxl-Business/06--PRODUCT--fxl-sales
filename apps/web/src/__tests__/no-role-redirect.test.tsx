@@ -10,6 +10,7 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import '@/i18n';
 import type { SalesEdition } from '@fxl-sales/shared-utils/sales-edition';
+import { modulesForEdition } from '@fxl-sales/shared-utils/crm-model';
 import type { AppRole } from '@/auth/claims';
 import {
   buildSalesOpsPath,
@@ -474,12 +475,13 @@ describe('the leads edition shares one predicate between NoRoleGuard and SalesOp
   it.each(NON_EMPTY_ROLE_SETS)(
     'in the leads edition the default route for %j is canonical whenever a workspace is visible',
     (roles) => {
-      if (getVisibleWorkspaces(roles, 'leads').length === 0) {
+      const leads = modulesForEdition('leads');
+      if (getVisibleWorkspaces(roles, leads).length === 0) {
         expect(roles).toEqual(['finder']);
         return;
       }
-      const route = getDefaultSalesOpsRoute(roles, undefined, 'leads');
-      const resolution = resolveSalesOpsRoute(route, roles, 'leads');
+      const route = getDefaultSalesOpsRoute(roles, undefined, leads);
+      const resolution = resolveSalesOpsRoute(route, roles, leads);
       expect(resolution.redirect).toBe(false);
       expect(resolution.path).toBe(buildSalesOpsPath(route));
     },

@@ -63,3 +63,16 @@ No audit entry is written for a module change yet (`source` and `updated_at` onl
 - `apps/api/src/middleware/__tests__/require-module-operator.test.ts` (operator allow-list)
 - `apps/api/src/domains/org-modules/__tests__/org-modules-routes.test.ts` (admin routes, unit)
 - `apps/api/src/domains/org-modules/__tests__/org-modules-routes.integration.test.ts` (the acceptance, real DB)
+
+## Web (slice 12)
+
+The navigation catalogue is one list per workspace in `apps/web/src/sales-ops/navigation.ts`, and every entry carries `requires` (the modules that must ALL be on).
+The compact profile (`orcamentos` off) relabels `pessoas` to Vendedores and moves it first, and relabels the seller's `leads` to Prospecção.
+The exact table of entries and the literal lists the equivalence oracle pins are in `navigation-edition.test.ts` and `navigation-modules.test.ts`.
+The shell takes the modules from `GET /bootstrap` (`orgModules`); until the bootstrap settles, `modulesHintFromEdition(profile.edition)` stands in, and a failed bootstrap settles on the hint.
+No `<Navigate>` fires while the modules are unknown, so a valid deep link of an organization whose modules differ from the token hint is never rewritten.
+The shell publishes its modules through `OrgModulesContext` (`apps/web/src/auth/org-modules-context.ts`), and `useSalesEdition()` projects them (`orcamentos` off => `leads`) for the leaf chrome.
+`profile.edition` is the token-derived hint: `NoRoleGuard` runs before any bootstrap, so a finder-only operator of an organization toggled away from its token may see `/no-role` until a reload.
+That limitation is accepted; a second fetch in the auth provider would touch the token invariants.
+The conversion kind of a board stage follows the effective `behavior` the API projects, never the stored `type`, so with `orcamentos` off a drop on the Proposta stage moves the lead and never opens the wizard.
+There is still no module screen: a toggle is the operator API call above.

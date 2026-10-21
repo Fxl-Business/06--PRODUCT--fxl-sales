@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { AppRole } from '@/auth/claims';
+import { modulesForEdition } from '@fxl-sales/shared-utils/crm-model';
+import type { SalesEdition } from '@fxl-sales/shared-utils/sales-edition';
+import { type OrgModules } from '../org-modules';
 import {
   buildSalesOpsPath,
   canSettleInWorkspace,
@@ -475,13 +478,20 @@ const WORKSPACE_FOR_VIEW_LEADS: Record<ComboName, Partial<Record<SalesOpsView, S
   everything: { dashboard: 'operacional', vendas: 'operacional', comissoes: 'operacional', leads: 'operacional', produtos: 'operacional', pessoas: 'cadastros', etapas: 'cadastros', 'leads-excluidos': 'cadastros', vendedores: 'operacional', finders: 'operacional' },
 };
 
+/**
+ * The edition fence now drives the module API with the exact module sets of the two former editions.
+ * `undefined` stays `undefined`: the call with NO argument takes the default (every module).
+ */
+const modulesFor = (edition: SalesEdition | undefined): OrgModules | undefined =>
+  edition === undefined ? undefined : modulesForEdition(edition);
+
 /** `undefined` is the call with NO edition argument; it must equal 'full' and today. */
 const FULL_CALLS = [undefined, 'full'] as const;
 
 describe('full edition is exactly today (FXL)', () => {
   it('keeps the workspace catalogue object and literals', () => {
     expect(getSalesOpsWorkspaces()).toBe(salesOpsWorkspaces);
-    expect(getSalesOpsWorkspaces('full')).toBe(salesOpsWorkspaces);
+    expect(getSalesOpsWorkspaces(modulesForEdition('full'))).toBe(salesOpsWorkspaces);
     expect(salesOpsWorkspaces).toEqual([
       { id: 'tatico', label: 'Tático', description: 'Indicadores e painéis' },
       { id: 'operacional', label: 'Operacional', description: 'Propostas e conferência' },
@@ -493,43 +503,43 @@ describe('full edition is exactly today (FXL)', () => {
   for (const edition of FULL_CALLS) {
     describe(`edition argument ${String(edition)}`, () => {
       it.each(COMBO_NAMES)('visible workspaces for %s', (name) => {
-        expect(getVisibleWorkspaces(COMBOS[name], edition)).toEqual(VISIBLE_FULL[name]);
+        expect(getVisibleWorkspaces(COMBOS[name], modulesFor(edition))).toEqual(VISIBLE_FULL[name]);
       });
       it.each(COMBO_NAMES)('navigation for %s', (name) => {
         for (const workspace of TEAM_WORKSPACES) {
-          expect(pairs(getSalesOpsNavigation(workspace, COMBOS[name], edition))).toEqual(
+          expect(pairs(getSalesOpsNavigation(workspace, COMBOS[name], modulesFor(edition)))).toEqual(
             TEAM_NAV_FULL[workspace],
           );
         }
-        expect(pairs(getSalesOpsNavigation('meus-dados', COMBOS[name], edition))).toEqual(
+        expect(pairs(getSalesOpsNavigation('meus-dados', COMBOS[name], modulesFor(edition)))).toEqual(
           MEUS_DADOS_NAV_FULL[name],
         );
       });
       it.each(COMBO_NAMES)('default route for %s, with and without a preferred workspace', (name) => {
-        expect(buildSalesOpsPath(getDefaultSalesOpsRoute(COMBOS[name], undefined, edition))).toBe(
+        expect(buildSalesOpsPath(getDefaultSalesOpsRoute(COMBOS[name], undefined, modulesFor(edition)))).toBe(
           DEFAULT_PATH_FULL[name],
         );
         WORKSPACES.forEach((workspace, index) => {
           expect(
-            buildSalesOpsPath(getDefaultSalesOpsRoute(COMBOS[name], workspace, edition)),
+            buildSalesOpsPath(getDefaultSalesOpsRoute(COMBOS[name], workspace, modulesFor(edition))),
           ).toBe(PREFERRED_PATH_FULL[name][index]);
         });
       });
       it.each(COMBO_NAMES)('resolves every URL for %s', (name) => {
         for (const url of URLS) {
-          const resolution = resolveSalesOpsRoute(params(url), COMBOS[name], edition);
+          const resolution = resolveSalesOpsRoute(params(url), COMBOS[name], modulesFor(edition));
           expect([resolution.path, resolution.redirect]).toEqual(RESOLVE_FULL[name][url]);
         }
       });
       it.each(COMBO_NAMES)('workspaceForView for %s', (name) => {
         for (const [view, workspace] of Object.entries(WORKSPACE_FOR_VIEW_FULL[name])) {
-          expect(workspaceForView(view as SalesOpsView, COMBOS[name], edition)).toBe(workspace);
+          expect(workspaceForView(view as SalesOpsView, COMBOS[name], modulesFor(edition))).toBe(workspace);
         }
       });
       it('settles exactly as before', () => {
-        expect(canSettleInWorkspace('operacional', ['admin'], edition)).toBe(true);
-        expect(canSettleInWorkspace('operacional', ['seller'], edition)).toBe(false);
-        expect(canSettleInWorkspace('meus-dados', ['admin'], edition)).toBe(false);
+        expect(canSettleInWorkspace('operacional', ['admin'], modulesFor(edition))).toBe(true);
+        expect(canSettleInWorkspace('operacional', ['seller'], modulesFor(edition))).toBe(false);
+        expect(canSettleInWorkspace('meus-dados', ['admin'], modulesFor(edition))).toBe(false);
       });
     });
   }
@@ -537,44 +547,44 @@ describe('full edition is exactly today (FXL)', () => {
 
 describe('leads edition (Construbom)', () => {
   it.each(COMBO_NAMES)('visible workspaces for %s', (name) => {
-    expect(getVisibleWorkspaces(COMBOS[name], 'leads')).toEqual(VISIBLE_LEADS[name]);
+    expect(getVisibleWorkspaces(COMBOS[name], modulesForEdition('leads'))).toEqual(VISIBLE_LEADS[name]);
   });
   it.each(COMBO_NAMES)('navigation for %s', (name) => {
     for (const workspace of TEAM_WORKSPACES) {
-      expect(pairs(getSalesOpsNavigation(workspace, COMBOS[name], 'leads'))).toEqual(
+      expect(pairs(getSalesOpsNavigation(workspace, COMBOS[name], modulesForEdition('leads')))).toEqual(
         TEAM_NAV_LEADS[workspace],
       );
     }
-    expect(pairs(getSalesOpsNavigation('meus-dados', COMBOS[name], 'leads'))).toEqual(
+    expect(pairs(getSalesOpsNavigation('meus-dados', COMBOS[name], modulesForEdition('leads')))).toEqual(
       MEUS_DADOS_NAV_LEADS[name],
     );
   });
   it.each(COMBO_NAMES)('default route for %s', (name) => {
-    expect(buildSalesOpsPath(getDefaultSalesOpsRoute(COMBOS[name], undefined, 'leads'))).toBe(
+    expect(buildSalesOpsPath(getDefaultSalesOpsRoute(COMBOS[name], undefined, modulesForEdition('leads')))).toBe(
       DEFAULT_PATH_LEADS[name],
     );
     WORKSPACES.forEach((workspace, index) => {
-      expect(buildSalesOpsPath(getDefaultSalesOpsRoute(COMBOS[name], workspace, 'leads'))).toBe(
+      expect(buildSalesOpsPath(getDefaultSalesOpsRoute(COMBOS[name], workspace, modulesForEdition('leads')))).toBe(
         PREFERRED_PATH_LEADS[name][index],
       );
     });
   });
   it.each(COMBO_NAMES)('resolves every URL for %s, redirecting all others to the role default', (name) => {
     for (const url of URLS) {
-      const resolution = resolveSalesOpsRoute(params(url), COMBOS[name], 'leads');
+      const resolution = resolveSalesOpsRoute(params(url), COMBOS[name], modulesForEdition('leads'));
       expect([resolution.path, resolution.redirect]).toEqual(RESOLVE_LEADS[name][url]);
     }
   });
   it.each(COMBO_NAMES)('workspaceForView for %s', (name) => {
     for (const [view, workspace] of Object.entries(WORKSPACE_FOR_VIEW_LEADS[name])) {
-      expect(workspaceForView(view as SalesOpsView, COMBOS[name], 'leads')).toBe(workspace);
+      expect(workspaceForView(view as SalesOpsView, COMBOS[name], modulesForEdition('leads'))).toBe(workspace);
     }
   });
   it('drops a proposta id: there is no vendas view', () => {
     const resolution = resolveSalesOpsRoute(
       { workspace: 'operacional', view: 'vendas', saleId: '5b0e7c1e-3f4a-4c2d-9e8b-1a2b3c4d5e6f' },
       ['admin', 'seller', 'finder'],
-      'leads',
+      modulesForEdition('leads'),
     );
     expect(resolution).toEqual({
       route: { workspace: 'operacional', view: 'funil' },
@@ -584,7 +594,7 @@ describe('leads edition (Construbom)', () => {
     expect('saleId' in resolution.route).toBe(false);
   });
   it('never settles', () => {
-    expect(canSettleInWorkspace('operacional', ['admin'], 'leads')).toBe(false);
+    expect(canSettleInWorkspace('operacional', ['admin'], modulesForEdition('leads'))).toBe(false);
   });
 });
 
@@ -592,12 +602,12 @@ describe('Leads excluídos (lead lixeira, AC9)', () => {
   it.each(['full', 'leads'] as const)(
     'is offered to the admin in cadastros in the %s edition, after Importação',
     (edition) => {
-      const ids = getSalesOpsNavigation('cadastros', ['admin'], edition).map((item) => item.id);
+      const ids = getSalesOpsNavigation('cadastros', ['admin'], modulesFor(edition)).map((item) => item.id);
       const at = ids.indexOf('leads-excluidos');
       expect(at).toBeGreaterThan(-1);
       expect(ids[at - 1]).toBe('importacao');
       expect(
-        resolveSalesOpsRoute({ workspace: 'cadastros', view: 'leads-excluidos' }, ['admin'], edition),
+        resolveSalesOpsRoute({ workspace: 'cadastros', view: 'leads-excluidos' }, ['admin'], modulesFor(edition)),
       ).toEqual({
         route: { workspace: 'cadastros', view: 'leads-excluidos' },
         path: '/cadastros/leads-excluidos',
@@ -608,15 +618,15 @@ describe('Leads excluídos (lead lixeira, AC9)', () => {
 
   it.each(['full', 'leads'] as const)('is never offered to a seller in the %s edition', (edition) => {
     for (const workspace of WORKSPACES) {
-      const ids = getSalesOpsNavigation(workspace, ['seller'], edition).map((item) => item.id);
-      if (getVisibleWorkspaces(['seller'], edition).includes(workspace)) {
+      const ids = getSalesOpsNavigation(workspace, ['seller'], modulesFor(edition)).map((item) => item.id);
+      if (getVisibleWorkspaces(['seller'], modulesFor(edition)).includes(workspace)) {
         expect(ids).not.toContain('leads-excluidos');
       }
     }
     const resolution = resolveSalesOpsRoute(
       { workspace: 'cadastros', view: 'leads-excluidos' },
       ['seller'],
-      edition,
+      modulesFor(edition),
     );
     expect(resolution.redirect).toBe(true);
     expect(resolution.route.view).not.toBe('leads-excluidos');
@@ -625,7 +635,7 @@ describe('Leads excluídos (lead lixeira, AC9)', () => {
 
 describe('leads edition labels', () => {
   it('describes operacional as Prospecção and changes nothing else in the catalogue', () => {
-    expect(getSalesOpsWorkspaces('leads')).toEqual([
+    expect(getSalesOpsWorkspaces(modulesForEdition('leads'))).toEqual([
       { id: 'tatico', label: 'Tático', description: 'Indicadores e painéis' },
       { id: 'operacional', label: 'Operacional', description: 'Prospecção' },
       { id: 'cadastros', label: 'Cadastros', description: 'Pessoas, catálogo e regras' },
@@ -639,7 +649,7 @@ describe('leads edition labels', () => {
     });
   });
   it('labels the pessoas screen Vendedores only in the leads edition', () => {
-    const leadsLabel = getSalesOpsNavigation('cadastros', ['admin'], 'leads').find(
+    const leadsLabel = getSalesOpsNavigation('cadastros', ['admin'], modulesForEdition('leads')).find(
       (item) => item.id === 'pessoas',
     )?.label;
     const fullLabel = getSalesOpsNavigation('cadastros', ['admin']).find(
@@ -649,8 +659,8 @@ describe('leads edition labels', () => {
     expect(fullLabel).toBe('Pessoas');
   });
   it('keeps Prospecção and Minha prospecção as the lead screen labels', () => {
-    expect(getSalesOpsNavigation('operacional', ['admin'], 'leads').find((item) => item.id === 'leads')?.label).toBe('Prospecção');
-    expect(getSalesOpsNavigation('meus-dados', ['seller'], 'leads').find((item) => item.id === 'leads')?.label).toBe(
+    expect(getSalesOpsNavigation('operacional', ['admin'], modulesForEdition('leads')).find((item) => item.id === 'leads')?.label).toBe('Prospecção');
+    expect(getSalesOpsNavigation('meus-dados', ['seller'], modulesForEdition('leads')).find((item) => item.id === 'leads')?.label).toBe(
       'Prospecção',
     );
   });

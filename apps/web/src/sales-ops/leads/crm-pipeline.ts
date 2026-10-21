@@ -1,13 +1,8 @@
+import { defaultStageBehavior, effectiveStageBehavior, type OrgModules } from '@fxl-sales/shared-utils/crm-model';
 import type { CrmPipeline, CrmPipelineStage, PipelineExitKind, PipelineStageType } from './crm-types';
 import type { LeadStageKind, SalesOpsLeadStage } from './types';
 
 export const OPENS_ORCAMENTOS_BEHAVIOR = 'opens_orcamentos';
-
-export const LEGACY_KIND_BY_TYPE: Record<PipelineStageType, LeadStageKind> = {
-  normal: 'normal',
-  orcamento: 'conversion',
-  saida: 'normal',
-};
 
 export const LEGACY_KIND_BY_EXIT: Record<PipelineExitKind, LeadStageKind> = {
   ganho: 'normal',
@@ -15,8 +10,33 @@ export const LEGACY_KIND_BY_EXIT: Record<PipelineExitKind, LeadStageKind> = {
   pausado: 'normal',
 };
 
-export function legacyKindOf(stage: Pick<CrmPipelineStage, 'type' | 'exitKind'>): LeadStageKind {
-  return stage.exitKind ? LEGACY_KIND_BY_EXIT[stage.exitKind] : LEGACY_KIND_BY_TYPE[stage.type];
+/**
+ * The conversion kind follows the EFFECTIVE behavior the API projects (`none` while
+ * `orcamentos` is off), never the stored `type`: an orcamento stage of an org without
+ * the module is an ordinary board stage, so a drop on it moves the lead and never
+ * opens the proposta wizard. Unknown behaviours read as `normal`.
+ */
+const LEGACY_KIND_BY_BEHAVIOR: Partial<Record<string, LeadStageKind>> = {
+  [OPENS_ORCAMENTOS_BEHAVIOR]: 'conversion',
+};
+
+export function legacyKindOf(stage: Pick<CrmPipelineStage, 'behavior' | 'exitKind'>): LeadStageKind {
+  if (stage.exitKind) return LEGACY_KIND_BY_EXIT[stage.exitKind];
+  return LEGACY_KIND_BY_BEHAVIOR[stage.behavior] ?? 'normal';
+}
+
+/**
+ * The kind of a stage on the lead SUMMARY, whose projection carries no `behavior`. The
+ * behaviour is the seeded rule (`defaultStageBehavior`) effective for the organization's
+ * modules (the shell's `OrgModulesContext`; outside the shell the whole product applies).
+ */
+export function summaryStageKind(
+  stage: { type: PipelineStageType; exitKind: PipelineExitKind | null },
+  modules: OrgModules | null,
+): LeadStageKind {
+  const seeded = defaultStageBehavior(stage);
+  const behavior = modules ? effectiveStageBehavior({ type: stage.type, behavior: seeded }, modules) : seeded;
+  return legacyKindOf({ behavior, exitKind: stage.exitKind });
 }
 
 /** Selected pipeline, else the default one, else the first (position order). undefined when there is none. */

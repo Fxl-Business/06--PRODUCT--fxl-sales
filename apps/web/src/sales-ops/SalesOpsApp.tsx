@@ -104,6 +104,7 @@ import {
   type SalesOpsView,
   type SalesOpsWorkspace,
 } from './navigation';
+import { modulesHintFromEdition } from './org-modules';
 import { isOptimisticId, withoutOptimisticRows } from './optimistic';
 import type { AppRole } from '@/auth/claims';
 import type {
@@ -132,6 +133,8 @@ import { computeSaleFinancials } from '@fxl-sales/shared-utils/sale-financials';
 import { SPLIT_BP_TOTAL } from '@fxl-sales/shared-utils/professional-split';
 import { todayInSaoPaulo } from '@fxl-sales/shared-utils/sao-paulo-day';
 import { hasCapability } from '@fxl-sales/shared-utils/sales-edition';
+import { editionFromModules, isOrgModules } from '@fxl-sales/shared-utils/crm-model';
+import { OrgModulesContext } from '@/auth/org-modules-context';
 import { CadastroHistorySection } from './CadastroHistoryPanel';
 import { ForbiddenPanel } from './ForbiddenPanel';
 import { AccountAvatar } from './AccountAvatar';
@@ -1327,14 +1330,18 @@ export function SalesOpsApp() {
   const location = useLocation();
   const routeParams = useParams();
   const profile = useAuthProfile();
-  /**
-   * Read off the profile this component already holds, never through a second hook:
-   * the shell's test harnesses mock `@/auth/react` with a hand-written profile, and an
-   * absent `edition` there must fall into navigation.ts's default `'full'`.
-   */
-  const edition = profile.edition;
   const logout = useLogout();
   const bootstrapQuery = useSalesOpsBootstrap();
+  /*
+    The organization's modules come from the bootstrap (`orgModules`). Until it resolves
+    the token-derived hint stands in; a FAILED bootstrap settles on the hint. Navigation
+    reads `modules`; `edition` is the legacy projection the leaf chrome below still reads.
+  */
+  const orgModules = bootstrapQuery.data?.orgModules;
+  const bootstrapModules = isOrgModules(orgModules) ? orgModules : null;
+  const modules = bootstrapModules ?? modulesHintFromEdition(profile.edition);
+  const modulesSettled = bootstrapModules !== null || !bootstrapQuery.isLoading;
+  const edition = editionFromModules(modules);
   const savePerson = useSaveSalesOpsPerson();
   const saveProduct = useSaveSalesOpsProduct();
   const saveClient = useSaveSalesOpsClient();
@@ -1386,14 +1393,14 @@ export function SalesOpsApp() {
   const mountedRef = useRef(true);
 
   const visibleWorkspaceIds = useMemo(
-    () => getVisibleWorkspaces(profile.roles, edition),
-    [profile.roles, edition],
+    () => getVisibleWorkspaces(profile.roles, modules),
+    [profile.roles, modules],
   );
   const etapaParam = new URLSearchParams(location.search).get('etapa') ?? undefined;
   const resolution = resolveSalesOpsRoute(
     etapaParam === undefined ? routeParams : { ...routeParams, etapa: etapaParam },
     profile.roles,
-    edition,
+    modules,
   );
   const { workspace, view } = resolution.route;
   /** The open proposta detail. URL state only (`/:workspace/vendas/:saleId`). */
@@ -1501,7 +1508,7 @@ export function SalesOpsApp() {
         }
         return true;
       });
-  const navItems = getSalesOpsNavigation(workspace, profile.roles, edition);
+  const navItems = getSalesOpsNavigation(workspace, profile.roles, modules);
   /*
     The leads edition renames the people cadastro to Vendedores. Overridden here
     rather than inside `titleForView` so the full-edition map stays byte-identical.
@@ -1515,7 +1522,7 @@ export function SalesOpsApp() {
    * refuses the `cadastros` workspace to anyone without the role.
    */
   const canManageCadastros = workspace === 'cadastros' && profile.roles.includes('admin');
-  const canSettle = canSettleInWorkspace(workspace, profile.roles, edition);
+  const canSettle = canSettleInWorkspace(workspace, profile.roles, modules);
   const canManagePeople = canManageCadastros && view === 'pessoas';
   const canManageFuncoes = canManageCadastros && view === 'funcoes';
   const personModalMatchesRoute = canManagePeople && modal?.kind === 'person';
@@ -1729,7 +1736,7 @@ export function SalesOpsApp() {
   function setWorkspace(next: SalesOpsWorkspace) {
     setWorkspaceMenuOpen(false);
     setModal((current) => (current?.kind === 'person' ? null : current));
-    navigate(buildSalesOpsPath(getDefaultSalesOpsRoute(profile.roles, next, edition)));
+    navigate(buildSalesOpsPath(getDefaultSalesOpsRoute(profile.roles, next, modules)));
   }
 
   function go(next: SalesOpsView) {
@@ -1737,7 +1744,7 @@ export function SalesOpsApp() {
     setModal((current) => (current?.kind === 'person' ? null : current));
     const targetWorkspace = navItems.some((item) => item.id === next)
       ? workspace
-      : workspaceForView(next, profile.roles, edition);
+      : workspaceForView(next, profile.roles, modules);
     navigate(buildSalesOpsPath({ workspace: targetWorkspace, view: next }));
   }
 
@@ -1802,7 +1809,7 @@ export function SalesOpsApp() {
                 : view === 'vendedores' || view === 'finders'
                   ? null
                   : 'Nova proposta';
-  const workspaceCatalogue = getSalesOpsWorkspaces(edition);
+  const workspaceCatalogue = getSalesOpsWorkspaces(modules);
   const availableWorkspaces = workspaceCatalogue.filter((item) =>
     visibleWorkspaceIds.includes(item.id),
   );
@@ -1837,7 +1844,12 @@ export function SalesOpsApp() {
    * unmounts the subtree too, which is the exact regression
    * `quick-20260810-preserve-work-on-session-loss` closed.
    */
-  const rolesAreAuthoritative = profile.isSignedIn;
+  /*
+    `modulesSettled` (slice 12b) joins it: while the bootstrap loads, `modules` is the token hint,
+    which may differ from the organization's real modules, so a valid deep link is not rewritten
+    before they are known. A failed bootstrap settles on the hint.
+   */
+  const rolesAreAuthoritative = profile.isSignedIn && modulesSettled;
 
   if (visibleWorkspaceIds.length === 0 && rolesAreAuthoritative) {
     return <Navigate to="/no-role" replace />;
@@ -1857,777 +1869,779 @@ export function SalesOpsApp() {
   }
 
   return (
-    <div className="sales-ops flex h-screen w-full gap-0 bg-[#e8e8eb] p-1.5 text-[#201f24] md:p-[10px]">
-      <aside
-        className={`flex flex-none flex-col overflow-hidden rounded-[20px] bg-[#18181b] px-4 py-[22px] transition-all duration-200 ${sidebarCollapsed ? 'w-[76px]' : 'w-[244px]'}`}
-      >
-        <div
-          className={`flex items-center ${
-            sidebarCollapsed ? 'justify-center pb-[14px]' : 'gap-[11px] px-[6px] pb-4 pl-2'
-          }`}
+    <OrgModulesContext.Provider value={modules}>
+      <div className="sales-ops flex h-screen w-full gap-0 bg-[#e8e8eb] p-1.5 text-[#201f24] md:p-[10px]">
+        <aside
+          className={`flex flex-none flex-col overflow-hidden rounded-[20px] bg-[#18181b] px-4 py-[22px] transition-all duration-200 ${sidebarCollapsed ? 'w-[76px]' : 'w-[244px]'}`}
         >
-          {!sidebarCollapsed ? (
-            <>
-              <div className="flex h-[34px] w-[34px] flex-none items-center justify-center rounded-[9px] bg-[#eaa81a]">
-                <Folder className="h-[18px] w-[18px] text-[#18181b]" />
-              </div>
-              <div className="min-w-0 flex-1 leading-none">
-                <div className="sales-ops-num text-[19px] font-bold text-[#f3f3f5]">FXL</div>
-                <div className="mt-1 text-[10.5px] font-bold uppercase tracking-[0.14em] text-[#8b8b92]">
-                  Vendas
+          <div
+            className={`flex items-center ${
+              sidebarCollapsed ? 'justify-center pb-[14px]' : 'gap-[11px] px-[6px] pb-4 pl-2'
+            }`}
+          >
+            {!sidebarCollapsed ? (
+              <>
+                <div className="flex h-[34px] w-[34px] flex-none items-center justify-center rounded-[9px] bg-[#eaa81a]">
+                  <Folder className="h-[18px] w-[18px] text-[#18181b]" />
                 </div>
-              </div>
+                <div className="min-w-0 flex-1 leading-none">
+                  <div className="sales-ops-num text-[19px] font-bold text-[#f3f3f5]">FXL</div>
+                  <div className="mt-1 text-[10.5px] font-bold uppercase tracking-[0.14em] text-[#8b8b92]">
+                    Vendas
+                  </div>
+                </div>
+                <button
+                  aria-label="Recolher menu"
+                  className="flex h-[30px] w-[30px] flex-none items-center justify-center rounded-lg border border-[#343439] bg-[#242428] text-[#8b8b92] transition hover:bg-[#2c2c31]"
+                  onClick={() => setSidebarCollapsed(true)}
+                  type="button"
+                >
+                  <ChevronsLeft className="h-4 w-4" />
+                </button>
+              </>
+            ) : (
               <button
-                aria-label="Recolher menu"
-                className="flex h-[30px] w-[30px] flex-none items-center justify-center rounded-lg border border-[#343439] bg-[#242428] text-[#8b8b92] transition hover:bg-[#2c2c31]"
-                onClick={() => setSidebarCollapsed(true)}
+                aria-label="Expandir menu"
+                className="flex h-10 w-10 items-center justify-center rounded-[11px] border border-[#343439] bg-[#242428] text-[#a2a2aa] transition hover:bg-[#2c2c31] hover:text-[#eaa81a]"
+                onClick={() => setSidebarCollapsed(false)}
                 type="button"
               >
-                <ChevronsLeft className="h-4 w-4" />
+                <ChevronsRight className="h-[18px] w-[18px]" />
               </button>
-            </>
-          ) : (
-            <button
-              aria-label="Expandir menu"
-              className="flex h-10 w-10 items-center justify-center rounded-[11px] border border-[#343439] bg-[#242428] text-[#a2a2aa] transition hover:bg-[#2c2c31] hover:text-[#eaa81a]"
-              onClick={() => setSidebarCollapsed(false)}
-              type="button"
-            >
-              <ChevronsRight className="h-[18px] w-[18px]" />
-            </button>
-          )}
-        </div>
+            )}
+          </div>
 
-        <div className="relative mb-4">
-          {!sidebarCollapsed ? (
-            <button
-              aria-expanded={workspaceMenuOpen}
-              className="flex w-full items-center gap-[11px] rounded-[14px] border border-[#343439] bg-[#242428] p-2 text-left transition hover:bg-[#2c2c31]"
-              onClick={() => setWorkspaceMenuOpen((open) => !open)}
-              title="Trocar painel"
-              type="button"
-            >
-              <span
-                className="flex h-9 w-9 flex-none items-center justify-center rounded-[10px]"
+          <div className="relative mb-4">
+            {!sidebarCollapsed ? (
+              <button
+                aria-expanded={workspaceMenuOpen}
+                className="flex w-full items-center gap-[11px] rounded-[14px] border border-[#343439] bg-[#242428] p-2 text-left transition hover:bg-[#2c2c31]"
+                onClick={() => setWorkspaceMenuOpen((open) => !open)}
+                title="Trocar painel"
+                type="button"
+              >
+                <span
+                  className="flex h-9 w-9 flex-none items-center justify-center rounded-[10px]"
+                  style={{
+                    backgroundColor: activeWorkspaceVisual.tileBg,
+                    color: activeWorkspaceVisual.tileColor,
+                  }}
+                >
+                  <ActiveWorkspaceIcon className="h-[18px] w-[18px]" />
+                </span>
+                <span className="min-w-0 flex-1 leading-[1.2]">
+                  {/*
+                    `Painel`, not `Workspace`. This is a SALES-INTERNAL view group
+                    (`SalesOpsWorkspace` in navigation.ts), and the account menu below now
+                    holds a real Hub Organization switcher. Two concepts under one word in
+                    one sidebar made the bigger, chevroned control read as the Organization
+                    picker while being the one that is not. Only the DISPLAY string moved:
+                    the type, the `workspace` URL segment and every `navigation.ts` export
+                    keep their names, because CLAUDE.md makes the URL the single source of
+                    truth for the active Sales workspace and page.
+                  */}
+                  <span className="block text-[10px] font-bold uppercase tracking-[0.16em] text-[#8b8b92]">
+                    Painel
+                  </span>
+                  <span className="sales-ops-num block truncate text-[15px] font-bold text-[#f3f3f5]">
+                    {activeWorkspaceMeta?.label ?? 'Tático'}
+                  </span>
+                </span>
+                <ChevronDown className="h-[15px] w-[15px] flex-none text-[#8b8b92]" />
+              </button>
+            ) : (
+              <button
+                aria-label={`Painel: ${activeWorkspaceMeta?.label ?? 'Tático'}`}
+                className="mx-auto flex h-10 w-10 items-center justify-center rounded-[11px]"
+                onClick={() => setSidebarCollapsed(false)}
                 style={{
                   backgroundColor: activeWorkspaceVisual.tileBg,
                   color: activeWorkspaceVisual.tileColor,
                 }}
-              >
-                <ActiveWorkspaceIcon className="h-[18px] w-[18px]" />
-              </span>
-              <span className="min-w-0 flex-1 leading-[1.2]">
-                {/*
-                  `Painel`, not `Workspace`. This is a SALES-INTERNAL view group
-                  (`SalesOpsWorkspace` in navigation.ts), and the account menu below now
-                  holds a real Hub Organization switcher. Two concepts under one word in
-                  one sidebar made the bigger, chevroned control read as the Organization
-                  picker while being the one that is not. Only the DISPLAY string moved:
-                  the type, the `workspace` URL segment and every `navigation.ts` export
-                  keep their names, because CLAUDE.md makes the URL the single source of
-                  truth for the active Sales workspace and page.
-                */}
-                <span className="block text-[10px] font-bold uppercase tracking-[0.16em] text-[#8b8b92]">
-                  Painel
-                </span>
-                <span className="sales-ops-num block truncate text-[15px] font-bold text-[#f3f3f5]">
-                  {activeWorkspaceMeta?.label ?? 'Tático'}
-                </span>
-              </span>
-              <ChevronDown className="h-[15px] w-[15px] flex-none text-[#8b8b92]" />
-            </button>
-          ) : (
-            <button
-              aria-label={`Painel: ${activeWorkspaceMeta?.label ?? 'Tático'}`}
-              className="mx-auto flex h-10 w-10 items-center justify-center rounded-[11px]"
-              onClick={() => setSidebarCollapsed(false)}
-              style={{
-                backgroundColor: activeWorkspaceVisual.tileBg,
-                color: activeWorkspaceVisual.tileColor,
-              }}
-              type="button"
-            >
-              <ActiveWorkspaceIcon className="h-[19px] w-[19px]" />
-            </button>
-          )}
-          {workspaceMenuOpen && !sidebarCollapsed ? (
-            <>
-              <button
-                aria-label="Fechar painéis"
-                className="fixed inset-0 z-[55] cursor-default"
-                onClick={() => setWorkspaceMenuOpen(false)}
-                type="button"
-              />
-              <div className="absolute left-0 right-0 top-[58px] z-[60] rounded-[14px] border border-[#e5e5ea] bg-white p-[7px] shadow-[0_20px_48px_rgba(0,0,0,.32)]">
-                <div className="px-2.5 pb-[5px] pt-[7px] text-[10px] font-bold uppercase tracking-[0.1em] text-[#9b9ba3]">
-                  Painéis
-                </div>
-                {availableWorkspaces.map((item) => {
-                  const itemVisual = workspaceVisuals[item.id];
-                  const ItemIcon = itemVisual.icon;
-                  const active = workspace === item.id;
-                  return (
-                    <button
-                      className={`flex w-full items-center gap-[9px] rounded-[10px] px-2.5 py-[9px] text-left transition hover:bg-[#f5f5f7] ${
-                        active ? 'bg-[#eaa81a]' : 'bg-transparent'
-                      }`}
-                      key={item.id}
-                      onClick={() => setWorkspace(item.id)}
-                      type="button"
-                    >
-                      <span className="flex h-[15px] w-[15px] flex-none items-center justify-center text-[#18181b]">
-                        {active ? <Check className="h-[15px] w-[15px]" /> : null}
-                      </span>
-                      <ItemIcon
-                        className="h-4 w-4 flex-none"
-                        style={{ color: active ? '#18181b' : '#84848c' }}
-                      />
-                      <span
-                        className={`min-w-0 flex-1 truncate text-[13.5px] ${
-                          active ? 'font-bold text-[#18181b]' : 'font-semibold text-[#201f24]'
-                        }`}
-                      >
-                        {item.label}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </>
-          ) : null}
-        </div>
-
-        <nav
-          className={`flex flex-col gap-1 ${
-            sidebarCollapsed ? 'mt-1 items-center gap-2' : ''
-          }`}
-        >
-          {navItems.map((item) => {
-            if (item.id === 'leads') {
-              return <LeadSidebarNavigation
-                activeStageId={view === 'leads' ? resolution.route.stageId : undefined}
-                collapsed={sidebarCollapsed}
-                key={item.id}
-                onExpand={() => setSidebarCollapsed(false)}
-                workspace={workspace}
-              />;
-            }
-            const Icon = item.icon;
-            const active = view === item.id;
-            const openPayablesCount = bootstrap.payables.filter((payable) => payable.status === 'open').length;
-            return (
-              <button
-                aria-label={item.label}
-                className={`flex items-center gap-[13px] rounded-xl text-left text-sm font-semibold transition ${
-                  sidebarCollapsed
-                    ? 'h-10 w-10 justify-center'
-                    : 'px-[13px] py-[11px]'
-                } ${active ? 'bg-[#f3f3f5] text-[#18181b]' : 'text-[#b3b3bb] hover:bg-white/5 hover:text-white'}`}
-                key={item.id}
-                onClick={() => go(item.id)}
-                title={item.label}
                 type="button"
               >
-                <Icon className="h-[18px] w-[18px] flex-none" />
-                {!sidebarCollapsed ? <span className="min-w-0 flex-1 truncate">{item.label}</span> : null}
-                {!sidebarCollapsed &&
-                item.id === 'comissoes' &&
-                workspace === 'operacional' &&
-                openPayablesCount > 0 ? (
-                  <span
-                    className={`sales-ops-num rounded-full px-2 py-0.5 text-[11px] font-bold ${
-                      active ? 'bg-[#e2b53a] text-[#18181b]' : 'bg-[#3a372b] text-[#eaa81a]'
-                    }`}
-                  >
-                    {openPayablesCount}
-                  </span>
-                ) : null}
+                <ActiveWorkspaceIcon className="h-[19px] w-[19px]" />
               </button>
-            );
-          })}
-        </nav>
-
-        <div className="mt-auto flex flex-col gap-3">
-          {/*
-            The payables card and the proposta shortcut belong to the full product:
-            in the leads edition the `commissions` and `proposals` capabilities are
-            off, so the card would always read R$ 0 and the wizard could only fail.
-          */}
-          {!sidebarCollapsed && hasCapability(edition ?? 'full', 'commissions') ? (
-            <div className="rounded-2xl border border-[#343439] bg-[#242428] p-4">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[#7c7c85]">
-                A pagar este mês
-              </div>
-              <div className="sales-ops-num mt-1 text-[26px] font-bold text-[#f3f3f5]">
-                {formatMoneyBrl(payableBrl, { maximumFractionDigits: 0 })}
-              </div>
-              <div className="mt-1 text-xs text-[#8b8b92]">
-                {bootstrap.payables.filter((item) => item.status === 'open').length} itens em aberto
-              </div>
-            </div>
-          ) : null}
-          {hasCapability(edition ?? 'full', 'proposals') ? (
-            <AccentButton onClick={() => setSaleWizard({ mode: 'create' })}>
-              <Plus className="h-4 w-4" />
-              {!sidebarCollapsed ? <span>Nova proposta</span> : null}
-            </AccentButton>
-          ) : null}
-          <DropdownMenu onOpenChange={setAccountMenuOpen} open={accountMenuOpen}>
-            <DropdownMenuTrigger asChild>
-              <button
-                aria-label="Abrir menu da conta"
-                className={cn(
-                  'flex items-center rounded-[14px] border border-[#343439] bg-[#242428] transition hover:border-[#46464d] hover:bg-[#2c2c31] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#eaa81a] focus-visible:ring-offset-2 focus-visible:ring-offset-[#18181b]',
-                  sidebarCollapsed
-                    ? 'mx-auto size-11 justify-center'
-                    : 'w-full gap-[11px] p-2 text-left',
-                )}
-                onClick={(event) => {
-                  if (event.detail === 0) setAccountMenuOpen(true);
-                }}
-                title="Conta"
-                type="button"
-              >
-                <AccountAvatar avatarUrl={profile.avatarUrl} name={userName} />
-                {!sidebarCollapsed ? (
-                  <>
-                    <span className="min-w-0 flex-1 leading-[1.2]">
-                      <span className="block truncate text-[14px] font-bold text-[#f3f3f5]">
-                        {userName}
-                      </span>
-                      <span className="mt-0.5 block truncate text-[11.5px] text-[#8b8b92]">
-                        {roleLabel}
-                      </span>
-                      {profile.email ? <span className="sr-only">{profile.email}</span> : null}
-                    </span>
-                    <ChevronUp className="size-4 flex-none text-[#8b8b92]" />
-                  </>
-                ) : null}
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent
-              align="start"
-              className="w-[220px] rounded-2xl border-[#e5e5ea] bg-white p-2 text-[#201f24] shadow-[0_20px_48px_rgba(0,0,0,.32)]"
-              portalled={false}
-              side="top"
-              sideOffset={10}
-            >
-              <DropdownMenuLabel className="flex items-center gap-[11px] px-2.5 py-2 font-normal">
-                <AccountAvatar avatarUrl={profile.avatarUrl} name={userName} />
-                <span className="min-w-0 flex-1 leading-[1.2]">
-                  <span className="block truncate text-[13.5px] font-bold text-[#201f24]">
-                    {userName}
-                  </span>
-                  {profile.email ? (
-                    <span className="mt-0.5 block truncate text-[11.5px] text-[#8b8b92]">
-                      {profile.email}
-                    </span>
-                  ) : null}
-                  <span className="mt-0.5 block truncate text-[11.5px] text-[#8b8b92]">
-                    {roleLabel}
-                  </span>
-                </span>
-              </DropdownMenuLabel>
-              <DropdownMenuSeparator className="my-1.5 bg-[#e5e5ea]" />
-              <AccountOrganizationSection onSwitched={() => setAccountMenuOpen(false)} />
-              <AccountSessionActions
-                onLogout={() => {
-                  void logout();
-                }}
-              />
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      </aside>
-
-      <main className="flex min-w-0 flex-1 flex-col overflow-hidden pl-1.5 md:pl-[10px]">
-        <header className="flex flex-none items-center gap-4 rounded-t-2xl border border-[#e5e5ea] bg-[#f3f3f5] px-4 py-3 md:px-[22px] md:py-[15px]">
-          <div className="min-w-0">
-            <h1 className="sales-ops-num text-[23px] font-bold tracking-normal text-[#201f24]">
-              {title.title}
-            </h1>
-            <div className="mt-0.5 text-[12.5px] text-[#8b8b92]">{title.subtitle}</div>
-          </div>
-          <div className="ml-auto flex items-center gap-2">
-            {bootstrapQuery.isFetching && !bootstrapQuery.isLoading ? (
-              <span
-                aria-live="polite"
-                className="flex items-center gap-1.5 text-[12.5px] font-semibold text-[#8b8b92]"
-              >
-                <Loader2 className="h-[13px] w-[13px] animate-spin" />
-                Atualizando
-              </span>
-            ) : null}
-            {headerAction ? (
-              <AccentButton onClick={runHeaderAction}>
-                <Plus className="h-[15px] w-[15px]" />
-                {headerAction}
-              </AccentButton>
-            ) : null}
-            {(isSalesListView(view) || view === 'comissoes') ? (
-              <SecondaryButton onClick={() => setFiltersOpen((open) => !open)}>
-                <Filter className="h-[15px] w-[15px]" />
-                Filtros
-              </SecondaryButton>
-            ) : null}
-            {/* A static period chip of the full product; nothing in the leads edition is period-scoped. */}
-            {edition === 'leads' ? null : isSalesListView(view) ? (
-              <PeriodFilter aria-label="Período das propostas" onChange={setSalesPeriod} value={salesPeriod} />
-            ) : (
-              <div className="hidden items-center gap-2 rounded-xl border border-[#dcdce2] bg-white px-[14px] py-[9px] text-sm font-semibold text-[#57575f] xl:flex">
-                <CalendarDays className="h-[15px] w-[15px] text-[#9c7210]" />
-                Julho 2026
-                <ChevronDown className="h-[13px] w-[13px] text-[#8b8b92]" />
-              </div>
             )}
-          </div>
-        </header>
-
-        <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-b-2xl border border-t-0 border-[#e5e5ea] bg-[#fafafb]">
-          {filtersOpen && isSalesListView(view) ? (
-            <div className="flex flex-none flex-wrap items-center gap-3 border-b border-[#ececf1] bg-white px-[22px] py-[13px]">
-              <span className="text-xs font-bold uppercase tracking-[0.08em] text-[#9b9ba3]">
-                Filtros
-              </span>
-              <div className="w-[190px]">
-                <Combobox
-                  aria-label="Filtrar por status"
-                  className={comboboxTriggerClass}
-                  onChange={(value) =>
-                    setSalesFilters((current) => ({
-                      ...current,
-                      status: value as SalesFilters['status'],
-                    }))
-                  }
-                  options={salesStatusOptionsForView(isSalesListView(view) ? view : 'vendas', salesStatusFilterOptions)}
-                  searchPlaceholder="Buscar status..."
-                  value={effectiveSalesStatus(isSalesListView(view) ? view : 'vendas', salesFilters.status)}
-                />
-              </div>
-              <div className="w-[190px]">
-                <Combobox
-                  aria-label="Filtrar por área"
-                  className={comboboxTriggerClass}
-                  onChange={(value) =>
-                    setSalesFilters((current) => ({ ...current, areaId: value }))
-                  }
-                  options={[
-                    { value: 'all', label: 'Todas as áreas' },
-                    ...areaOptions(persistedBootstrap.areas),
-                  ]}
-                  searchPlaceholder="Buscar área..."
-                  value={salesFilters.areaId}
-                />
-              </div>
-              <span className="ml-auto text-[13px] text-[#8b8b92]">
-                <span className="sales-ops-num font-bold text-[#201f24]">
-                  {filteredSales.length}
-                </span>{' '}
-                registros
-              </span>
-            </div>
-          ) : null}
-          {filtersOpen && view === 'comissoes' ? (
-            <div className="flex flex-none flex-wrap items-center gap-3 border-b border-[#ececf1] bg-white px-[22px] py-[13px]">
-              <span className="text-xs font-bold uppercase tracking-[0.08em] text-[#9b9ba3]">
-                Filtros
-              </span>
-              {/*
-                The status and responsável pickers that used to sit here were inert:
-                `onChange={() => undefined}` with a single option each. Rendering them as
-                searchable Comboboxes would ship a control that provably cannot filter, so
-                they are removed until the comissões filters are actually wired.
-              */}
-              <span className="ml-auto text-[13px] text-[#8b8b92]">
-                <span className="sales-ops-num font-bold text-[#201f24]">
-                  {bootstrap.payables.length}
-                </span>{' '}
-                registros
-              </span>
-            </div>
-          ) : null}
-
-          {/*
-            The leads view is a flex column so the Quadro can FILL the height left
-            here and scroll inside its columns (`boardFillClass`). Only that view:
-            in a flex column every other screen's overflow-clipping children would
-            become shrinkable flex items.
-          */}
-          <div
-            className={`min-h-0 flex-1 overflow-y-auto px-3 py-4 md:px-[22px] md:py-5${
-              view === 'funil' ? ' flex flex-col' : ''
-            }`}
-          >
-            <MutationErrorBanner
-              error={mutationFailure?.view === view ? mutationFailure.error : null}
-              lines={
-                mutationFailure?.view === view
-                  ? lockedRowLines(
-                      mutationFailure.error,
-                      buildTargetDescriptions(
-                        persistedBootstrap.receivables,
-                        persistedBootstrap.payables,
-                      ),
-                    )
-                  : undefined
-              }
-              onDismiss={() => setMutationFailure(null)}
-            />
-            {bootstrapQuery.isLoading ? <LoadingPanel /> : null}
-            {bootstrapQuery.isError ? (
-              /*
-                Most specific classification first, and it must STAY first.
-                A `402 missing_entitlement` is the Hub telling us the operator's ACTIVE
-                Organization does not carry FXL Sales. It is a correct verdict about WHICH
-                tenant is selected, not a transport fault and not a dead session, and it is
-                the only one of the three that the operator can fix from inside the app.
-                `isAuthFailure` is false for a 402 today, so the order is not what makes this
-                branch reachable - it is what keeps it reachable if `isAuthFailure` is ever
-                widened, and it is what stops a reader from believing the generic panel below
-                is the fallback for "any non-401".
-                The invariant this chain encodes: the "verifique o servidor local" copy is
-                reachable ONLY for an error that is neither an entitlement failure, nor a
-                forbidden failure, nor an auth failure. `entitlement-dead-end.test.tsx` is the
-                oracle for all four arms.
-                The 403 arm sits above `isAuthFailure` for the same reason the 402 arm does:
-                `isAuthFailure` is false for a 403 today, so a later widening of it placed above
-                would silently steal every permission answer into `Sessão expirada` and tell the
-                operator to sign in again to fix a permission they do not hold, which a re-login
-                answers with the same status forever.
-
-                No `onRetry` is passed, deliberately: `setActive` already runs
-                `queryClient.clear()`, which DESTROYS the query, so the mounted observer
-                re-subscribes at `status: 'pending'` and the skeleton takes over. A
-                `refetch()` would leave `status: 'error'` and keep this panel on screen
-                naming the OLD Organization while the new tenant's request is in flight.
-              */
-              isEntitlementFailure(bootstrapQuery.error) ? (
-                <MissingEntitlementPanel />
-              ) : isForbiddenFailure(bootstrapQuery.error) ? (
-                <ForbiddenPanel />
-              ) : isAuthFailure(bootstrapQuery.error) ? (
-                /*
-                  An expired or unrenewable Hub session used to render as the API-fault
-                  panel below, so a logged-out operator was told the server was broken.
-                  Covers both halves: no token was available, and a token the API rejected.
-                */
-                <EmptyPanel
-                  text="Sua sessão do FXL Hub expirou ou não pôde ser renovada. Atualize a página para entrar novamente."
-                  title="Sessão expirada"
-                />
-              ) : (
-                <EmptyPanel
-                  text="A API de vendas não respondeu corretamente. Verifique o servidor local e tente novamente."
-                  title="Não foi possível carregar"
-                />
-              )
-            ) : null}
-            {!bootstrapQuery.isLoading && !bootstrapQuery.isError ? (
+            {workspaceMenuOpen && !sidebarCollapsed ? (
               <>
-                {view === 'dashboard' ? (
-                  <DashboardView bootstrap={persistedBootstrap} dashboard={dashboard} go={go} />
-                ) : null}
-                {isSalesListView(view) ? (
-                  <SalesView
-                    bootstrap={persistedBootstrap}
-                    canManage={workspace === 'operacional' && profile.roles.includes('admin')}
-                    canSettle={canSettle}
-                    detailSaleId={detailSaleId}
-                    onCancelContract={(sale) => cancelContract.mutate(sale.id, reportMutation)}
-                    onCloseDetail={closeSaleDetail}
-                    onEdit={(sale) => setSaleWizard({ mode: 'edit', sale })}
-                    onOpenDetail={openSaleDetail}
-                    onTransition={(sale, status) =>
-                      transitionSale.mutate({ saleId: sale.id, status }, reportMutation)
-                    }
-                    sales={filteredSales}
-                  />
-                ) : null}
-                {view === 'vendedores' ? (
-                  <MeuPainelView bootstrap={persistedBootstrap} mode="seller" />
-                ) : null}
-                {view === 'finders' ? (
-                  <MeuPainelView bootstrap={persistedBootstrap} mode="finder" />
-                ) : null}
-                {view === 'comissoes' ? (
-                  <CommissionsView bootstrap={persistedBootstrap} canSettle={canSettle} />
-                ) : null}
-                {view === 'produtos' ? (
-                  <ProductsView
-                    areas={persistedBootstrap.areas}
-                    funcaoCosts={persistedBootstrap.productFuncaoCosts}
-                    funcoes={persistedBootstrap.funcoes}
-                    kind={productKind}
-                    products={persistedBootstrap.products}
-                    onArchive={changeCadastroStatus}
-                    onEdit={(product) => setModal({ kind: 'product', product })}
-                    onKindChange={setProductKind}
-                  />
-                ) : null}
-                {view === 'clientes' ? (
-                  <ClientsView
-                    bootstrap={bootstrap}
-                    onEdit={(client) => setModal({ kind: 'client', client })}
-                  />
-                ) : null}
-                {view === 'areas' ? (
-                  <AreasView
-                    bootstrap={bootstrap}
-                    onArchive={changeCadastroStatus}
-                    onEdit={(area) => setModal({ kind: 'area', area })}
-                  />
-                ) : null}
-                {view === 'pessoas' ? (
-                  edition === 'leads' ? (
-                    <VendedoresView
-                      onEdit={(person) => setModal({ kind: 'person', person })}
-                      onInactivate={(person) =>
-                        changeCadastroStatus({
-                          cadastro: 'pessoa',
-                          id: person.id,
-                          name: person.displayName,
-                          status: 'inactive',
-                        })
-                      }
-                      onReactivate={(person) =>
-                        changeCadastroStatus({
-                          cadastro: 'pessoa',
-                          id: person.id,
-                          name: person.displayName,
-                          status: 'active',
-                        })
-                      }
-                      people={bootstrap.people}
-                    />
-                  ) : (
-                    <PessoasView
-                      bootstrap={bootstrap}
-                      onArchive={changeCadastroStatus}
-                      onEdit={(person) => setModal({ kind: 'person', person })}
-                    />
-                  )
-                ) : null}
-                {view === 'funcoes' ? (
-                  /*
-                    funcoesBootstrap: raw `funcoes` so an optimistic função created here
-                    is visible immediately, persisted `people` so an in-flight optimistic
-                    pessoa never inflates the "Nº pessoas" column - an optimistic row
-                    belongs only to the cadastro that created it.
-                  */
-                  <FuncoesView
-                    bootstrap={funcoesBootstrap}
-                    onArchive={changeCadastroStatus}
-                    onEdit={(funcao) => setModal({ kind: 'funcao', funcao })}
-                  />
-                ) : null}
-                {(view === 'funil' || (view === 'leads' && !resolution.route.leadId)) ? (
-                  /*
-                    ONE component for both routes. The difference between the team
-                    board and a seller's board is NOT this boolean - the scope is
-                    applied on the SERVER inside `withTenant` from the verified
-                    token. `showSellerFilter` only decides whether an admin is
-                    OFFERED the narrowing picker; flipping it for a seller would add
-                    a control, never a row.
-                    `persistedBootstrap` throughout: an optimistic cadastro row
-                    belongs to the cadastro screen that created it, never to a
-                    picker on another page.
-                  */
-                  <LeadsBoardContainer
-                    routedMode={view === 'funil' ? 'board' : 'stage'}
-                    selectedStageId={resolution.route.stageId}
-                    workspace={workspace}
-                    clients={persistedBootstrap.clients}
-                    onCreateClient={async (name) => {
-                      const client = await createClientByName(name);
-                      return client ? { value: client.id, label: client.name } : null;
-                    }}
-                    people={persistedBootstrap.people}
-                    onOpenSale={openSaleFromBoard}
-                    onRequestConversion={requestLeadConversion}
-                    products={persistedBootstrap.products}
-                    sellers={leadSellerOptions}
-                    showSellerFilter={workspace === 'operacional'}
-                  />
-                ) : null}
-                {view === 'leads' && resolution.route.leadId ? (
-                  <LeadSummaryContainer
-                    clients={persistedBootstrap.clients}
-                    leadId={resolution.route.leadId}
-                    onCreateClient={async (name) => {
-                      const client = await createClientByName(name);
-                      return client ? { value: client.id, label: client.name } : null;
-                    }}
-                    onOpenSale={openSaleFromBoard}
-                    onRequestConversion={requestLeadConversion}
-                    products={persistedBootstrap.products}
-                    sellers={leadSellerOptions}
-                    workspace={workspace}
-                  />
-                ) : null}
-                {view === 'etapas' ? <LeadStagesContainer /> : null}
-                {view === 'follow-ups' ? <FollowupsContainer workspace={workspace} /> : null}
-                {view === 'importacao' ? <ImportContainer /> : null}
-                {view === 'leads-excluidos' ? <DeletedLeadsContainer /> : null}
-                {view === 'geral' ? (
-                  /*
-                    The history is a SIBLING of `SettingsView`, never nested inside it:
-                    `SettingsView` is keyed on the persisted settings timestamp, so every
-                    settings save remounts it and would restart the history query and blank
-                    the table. It also returns a single `<form>`, and a confirmation dialog
-                    inside a form is a trap nobody should have to remember.
-                    `persistedBootstrap` and not `bootstrap`: a restore must never target an
-                    `optimistic:` id.
-                  */
-                  <div className="flex flex-col gap-[14px]">
-                    <SettingsView
-                      key={bootstrap.settings?.updatedAt ?? bootstrap.settings?.createdAt ?? 'new'}
-                      isSaving={saveSettings.isPending}
-                      onSave={(payload) => saveSettings.mutate(payload, reportMutation)}
-                      settings={bootstrap.settings}
-                    />
-                    <CadastroHistorySection bootstrap={persistedBootstrap} />
+                <button
+                  aria-label="Fechar painéis"
+                  className="fixed inset-0 z-[55] cursor-default"
+                  onClick={() => setWorkspaceMenuOpen(false)}
+                  type="button"
+                />
+                <div className="absolute left-0 right-0 top-[58px] z-[60] rounded-[14px] border border-[#e5e5ea] bg-white p-[7px] shadow-[0_20px_48px_rgba(0,0,0,.32)]">
+                  <div className="px-2.5 pb-[5px] pt-[7px] text-[10px] font-bold uppercase tracking-[0.1em] text-[#9b9ba3]">
+                    Painéis
                   </div>
-                ) : null}
+                  {availableWorkspaces.map((item) => {
+                    const itemVisual = workspaceVisuals[item.id];
+                    const ItemIcon = itemVisual.icon;
+                    const active = workspace === item.id;
+                    return (
+                      <button
+                        className={`flex w-full items-center gap-[9px] rounded-[10px] px-2.5 py-[9px] text-left transition hover:bg-[#f5f5f7] ${
+                          active ? 'bg-[#eaa81a]' : 'bg-transparent'
+                        }`}
+                        key={item.id}
+                        onClick={() => setWorkspace(item.id)}
+                        type="button"
+                      >
+                        <span className="flex h-[15px] w-[15px] flex-none items-center justify-center text-[#18181b]">
+                          {active ? <Check className="h-[15px] w-[15px]" /> : null}
+                        </span>
+                        <ItemIcon
+                          className="h-4 w-4 flex-none"
+                          style={{ color: active ? '#18181b' : '#84848c' }}
+                        />
+                        <span
+                          className={`min-w-0 flex-1 truncate text-[13.5px] ${
+                            active ? 'font-bold text-[#18181b]' : 'font-semibold text-[#201f24]'
+                          }`}
+                        >
+                          {item.label}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
               </>
             ) : null}
           </div>
-        </section>
-      </main>
 
-      <ProductDialog
-        areas={persistedBootstrap.areas}
-        /*
-          Cost rows come back FLAT, one array for the whole org, so the parent scopes
-          them to the record being edited. A naive `product.funcaoCosts` read would
-          silently render zero costs.
-        */
-        funcaoCosts={persistedBootstrap.productFuncaoCosts.filter(
-          (row) => row.productId === (modal?.kind === 'product' ? modal.product?.id : undefined),
-        )}
-        funcoes={persistedBootstrap.funcoes}
-        modal={modal?.kind === 'product' ? modal : null}
-        onClose={() => setModal(null)}
-        onCreateArea={createAreaByName}
-        onSave={(payload) => {
-          saveProduct.mutate(payload, { onSuccess: () => setModal(null) });
-        }}
-        /*
-          The persisted snapshot, matching every sibling prop here. Products are not
-          an optimistic collection today so this is the raw list by reference, but if
-          they ever become one an in-flight row the server may still reject must not
-          inflate the max and silently skip a number.
-        */
-        products={persistedBootstrap.products}
-        saving={saveProduct.isPending}
-      />
-      <ClientDialog
-        modal={modal?.kind === 'client' ? modal : null}
-        onClose={() => setModal(null)}
-        onSave={(payload) => {
-          saveClient.mutate(payload, { onSuccess: () => setModal(null) });
-        }}
-        saving={saveClient.isPending}
-      />
-      <AreaDialog
-        modal={modal?.kind === 'area' ? modal : null}
-        onClose={() => setModal(null)}
-        onSave={(payload) => {
-          saveArea.mutate(payload, { onSuccess: () => setModal(null) });
-        }}
-        saving={saveArea.isPending}
-      />
-      <FuncaoDialog
-        modal={modal?.kind === 'funcao' ? modal : null}
-        onClose={() => setModal(null)}
-        onSave={(payload) => {
-          saveFuncao.mutate(payload, { onSuccess: () => setModal(null) });
-        }}
-        saving={saveFuncao.isPending}
-      />
-      {edition === 'leads' ? (
-        <VendedorDialog
-          funcoes={persistedBootstrap.funcoes}
-          onClose={() => setModal(null)}
-          onSave={(payload) => {
-            savePerson.mutate(payload, { onSuccess: () => setModal(null) });
-          }}
-          open={personModalMatchesRoute && modal?.kind === 'person'}
-          person={modal?.kind === 'person' ? (modal.person ?? null) : null}
-          saving={savePerson.isPending}
-        />
-      ) : (
-        <PersonDialog
-          funcoes={persistedBootstrap.funcoes}
-          modal={personModalMatchesRoute && modal?.kind === 'person' ? modal : null}
-          onClose={() => setModal(null)}
-          onCreateFuncao={createFuncaoByName}
-          onSave={(payload) => {
-            savePerson.mutate(payload, { onSuccess: () => setModal(null) });
-          }}
-          saving={savePerson.isPending}
-        />
-      )}
-      {bootstrapQuery.isSuccess ? (
-        <SaleWizardDialog
-          bootstrap={persistedBootstrap}
-          /*
-            `isFetching`, not `isLoading`: the dialog is already gated on `isSuccess`,
-            so `isLoading` is false by construction here and would make the guard dead.
-            A background refetch is exactly the window where the snapshot can be
-            mid-flight while the wizard is open.
-          */
-          bootstrapPending={bootstrapQuery.isFetching}
-          editSale={saleWizard?.mode === 'edit' ? saleWizard.sale : null}
-          leadPrefill={saleWizard?.mode === 'convert' ? saleWizard.prefill : null}
-          onAssignFuncao={assignFuncaoToPerson}
-          /*
-            `resolve(null)` is the WHOLE of "cancelling persists nothing": slice
-            06's `emitMove` sees it and returns before touching the optimistic
-            cache, before calling `onMoveLead` and before issuing any request.
-            Nothing is undone because nothing was started.
-          */
-          onClose={() => {
-            if (saleWizard?.mode === 'convert') saleWizard.settle.resolve(null);
-            setSaleWizardSaveError(null);
-            setSaleWizard(null);
-          }}
-          onCreateArea={createAreaByName}
-          onCreateClient={createClientByName}
-          onCreateFuncao={createFuncaoByName}
-          onCreateProduct={(name) => setModal({ kind: 'product', prefillName: name })}
-          onSave={(payload) => {
-            if (saleWizard?.mode === 'edit') {
-              const saleId = saleWizard.sale.id;
-              setSaleWizardSaveError(null);
-              updateSale.mutate(
-                { saleId, payload },
-                {
-                  onSuccess: () => setSaleWizard(null),
-                  /*
-                    The wizard stays open with the operator's edits; the error is
-                    painted inside it. The ref check stops a late error from an
-                    abandoned wizard from painting the next one.
-                  */
-                  onError: (error) => {
-                    const current = saleWizardRef.current;
-                    if (current?.mode === 'edit' && current.sale.id === saleId) {
-                      setSaleWizardSaveError(describeSaleSaveError(error));
-                    }
-                  },
-                },
+          <nav
+            className={`flex flex-col gap-1 ${
+              sidebarCollapsed ? 'mt-1 items-center gap-2' : ''
+            }`}
+          >
+            {navItems.map((item) => {
+              if (item.id === 'leads') {
+                return <LeadSidebarNavigation
+                  activeStageId={view === 'leads' ? resolution.route.stageId : undefined}
+                  collapsed={sidebarCollapsed}
+                  key={item.id}
+                  onExpand={() => setSidebarCollapsed(false)}
+                  workspace={workspace}
+                />;
+              }
+              const Icon = item.icon;
+              const active = view === item.id;
+              const openPayablesCount = bootstrap.payables.filter((payable) => payable.status === 'open').length;
+              return (
+                <button
+                  aria-label={item.label}
+                  className={`flex items-center gap-[13px] rounded-xl text-left text-sm font-semibold transition ${
+                    sidebarCollapsed
+                      ? 'h-10 w-10 justify-center'
+                      : 'px-[13px] py-[11px]'
+                  } ${active ? 'bg-[#f3f3f5] text-[#18181b]' : 'text-[#b3b3bb] hover:bg-white/5 hover:text-white'}`}
+                  key={item.id}
+                  onClick={() => go(item.id)}
+                  title={item.label}
+                  type="button"
+                >
+                  <Icon className="h-[18px] w-[18px] flex-none" />
+                  {!sidebarCollapsed ? <span className="min-w-0 flex-1 truncate">{item.label}</span> : null}
+                  {!sidebarCollapsed &&
+                  item.id === 'comissoes' &&
+                  workspace === 'operacional' &&
+                  openPayablesCount > 0 ? (
+                    <span
+                      className={`sales-ops-num rounded-full px-2 py-0.5 text-[11px] font-bold ${
+                        active ? 'bg-[#e2b53a] text-[#18181b]' : 'bg-[#3a372b] text-[#eaa81a]'
+                      }`}
+                    >
+                      {openPayablesCount}
+                    </span>
+                  ) : null}
+                </button>
               );
-            } else if (saleWizard?.mode === 'convert') {
-              void saveLeadConversion(saleWizard, payload);
-            } else {
-              createSale.mutate(payload, { onSuccess: () => setSaleWizard(null) });
-            }
+            })}
+          </nav>
+
+          <div className="mt-auto flex flex-col gap-3">
+            {/*
+              The payables card and the proposta shortcut belong to the full product:
+              in the leads edition the `commissions` and `proposals` capabilities are
+              off, so the card would always read R$ 0 and the wizard could only fail.
+            */}
+            {!sidebarCollapsed && hasCapability(edition ?? 'full', 'commissions') ? (
+              <div className="rounded-2xl border border-[#343439] bg-[#242428] p-4">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[#7c7c85]">
+                  A pagar este mês
+                </div>
+                <div className="sales-ops-num mt-1 text-[26px] font-bold text-[#f3f3f5]">
+                  {formatMoneyBrl(payableBrl, { maximumFractionDigits: 0 })}
+                </div>
+                <div className="mt-1 text-xs text-[#8b8b92]">
+                  {bootstrap.payables.filter((item) => item.status === 'open').length} itens em aberto
+                </div>
+              </div>
+            ) : null}
+            {hasCapability(edition ?? 'full', 'proposals') ? (
+              <AccentButton onClick={() => setSaleWizard({ mode: 'create' })}>
+                <Plus className="h-4 w-4" />
+                {!sidebarCollapsed ? <span>Nova proposta</span> : null}
+              </AccentButton>
+            ) : null}
+            <DropdownMenu onOpenChange={setAccountMenuOpen} open={accountMenuOpen}>
+              <DropdownMenuTrigger asChild>
+                <button
+                  aria-label="Abrir menu da conta"
+                  className={cn(
+                    'flex items-center rounded-[14px] border border-[#343439] bg-[#242428] transition hover:border-[#46464d] hover:bg-[#2c2c31] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#eaa81a] focus-visible:ring-offset-2 focus-visible:ring-offset-[#18181b]',
+                    sidebarCollapsed
+                      ? 'mx-auto size-11 justify-center'
+                      : 'w-full gap-[11px] p-2 text-left',
+                  )}
+                  onClick={(event) => {
+                    if (event.detail === 0) setAccountMenuOpen(true);
+                  }}
+                  title="Conta"
+                  type="button"
+                >
+                  <AccountAvatar avatarUrl={profile.avatarUrl} name={userName} />
+                  {!sidebarCollapsed ? (
+                    <>
+                      <span className="min-w-0 flex-1 leading-[1.2]">
+                        <span className="block truncate text-[14px] font-bold text-[#f3f3f5]">
+                          {userName}
+                        </span>
+                        <span className="mt-0.5 block truncate text-[11.5px] text-[#8b8b92]">
+                          {roleLabel}
+                        </span>
+                        {profile.email ? <span className="sr-only">{profile.email}</span> : null}
+                      </span>
+                      <ChevronUp className="size-4 flex-none text-[#8b8b92]" />
+                    </>
+                  ) : null}
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="start"
+                className="w-[220px] rounded-2xl border-[#e5e5ea] bg-white p-2 text-[#201f24] shadow-[0_20px_48px_rgba(0,0,0,.32)]"
+                portalled={false}
+                side="top"
+                sideOffset={10}
+              >
+                <DropdownMenuLabel className="flex items-center gap-[11px] px-2.5 py-2 font-normal">
+                  <AccountAvatar avatarUrl={profile.avatarUrl} name={userName} />
+                  <span className="min-w-0 flex-1 leading-[1.2]">
+                    <span className="block truncate text-[13.5px] font-bold text-[#201f24]">
+                      {userName}
+                    </span>
+                    {profile.email ? (
+                      <span className="mt-0.5 block truncate text-[11.5px] text-[#8b8b92]">
+                        {profile.email}
+                      </span>
+                    ) : null}
+                    <span className="mt-0.5 block truncate text-[11.5px] text-[#8b8b92]">
+                      {roleLabel}
+                    </span>
+                  </span>
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator className="my-1.5 bg-[#e5e5ea]" />
+                <AccountOrganizationSection onSwitched={() => setAccountMenuOpen(false)} />
+                <AccountSessionActions
+                  onLogout={() => {
+                    void logout();
+                  }}
+                />
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </aside>
+
+        <main className="flex min-w-0 flex-1 flex-col overflow-hidden pl-1.5 md:pl-[10px]">
+          <header className="flex flex-none items-center gap-4 rounded-t-2xl border border-[#e5e5ea] bg-[#f3f3f5] px-4 py-3 md:px-[22px] md:py-[15px]">
+            <div className="min-w-0">
+              <h1 className="sales-ops-num text-[23px] font-bold tracking-normal text-[#201f24]">
+                {title.title}
+              </h1>
+              <div className="mt-0.5 text-[12.5px] text-[#8b8b92]">{title.subtitle}</div>
+            </div>
+            <div className="ml-auto flex items-center gap-2">
+              {bootstrapQuery.isFetching && !bootstrapQuery.isLoading ? (
+                <span
+                  aria-live="polite"
+                  className="flex items-center gap-1.5 text-[12.5px] font-semibold text-[#8b8b92]"
+                >
+                  <Loader2 className="h-[13px] w-[13px] animate-spin" />
+                  Atualizando
+                </span>
+              ) : null}
+              {headerAction ? (
+                <AccentButton onClick={runHeaderAction}>
+                  <Plus className="h-[15px] w-[15px]" />
+                  {headerAction}
+                </AccentButton>
+              ) : null}
+              {(isSalesListView(view) || view === 'comissoes') ? (
+                <SecondaryButton onClick={() => setFiltersOpen((open) => !open)}>
+                  <Filter className="h-[15px] w-[15px]" />
+                  Filtros
+                </SecondaryButton>
+              ) : null}
+              {/* A static period chip of the full product; nothing in the leads edition is period-scoped. */}
+              {edition === 'leads' ? null : isSalesListView(view) ? (
+                <PeriodFilter aria-label="Período das propostas" onChange={setSalesPeriod} value={salesPeriod} />
+              ) : (
+                <div className="hidden items-center gap-2 rounded-xl border border-[#dcdce2] bg-white px-[14px] py-[9px] text-sm font-semibold text-[#57575f] xl:flex">
+                  <CalendarDays className="h-[15px] w-[15px] text-[#9c7210]" />
+                  Julho 2026
+                  <ChevronDown className="h-[13px] w-[13px] text-[#8b8b92]" />
+                </div>
+              )}
+            </div>
+          </header>
+
+          <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-b-2xl border border-t-0 border-[#e5e5ea] bg-[#fafafb]">
+            {filtersOpen && isSalesListView(view) ? (
+              <div className="flex flex-none flex-wrap items-center gap-3 border-b border-[#ececf1] bg-white px-[22px] py-[13px]">
+                <span className="text-xs font-bold uppercase tracking-[0.08em] text-[#9b9ba3]">
+                  Filtros
+                </span>
+                <div className="w-[190px]">
+                  <Combobox
+                    aria-label="Filtrar por status"
+                    className={comboboxTriggerClass}
+                    onChange={(value) =>
+                      setSalesFilters((current) => ({
+                        ...current,
+                        status: value as SalesFilters['status'],
+                      }))
+                    }
+                    options={salesStatusOptionsForView(isSalesListView(view) ? view : 'vendas', salesStatusFilterOptions)}
+                    searchPlaceholder="Buscar status..."
+                    value={effectiveSalesStatus(isSalesListView(view) ? view : 'vendas', salesFilters.status)}
+                  />
+                </div>
+                <div className="w-[190px]">
+                  <Combobox
+                    aria-label="Filtrar por área"
+                    className={comboboxTriggerClass}
+                    onChange={(value) =>
+                      setSalesFilters((current) => ({ ...current, areaId: value }))
+                    }
+                    options={[
+                      { value: 'all', label: 'Todas as áreas' },
+                      ...areaOptions(persistedBootstrap.areas),
+                    ]}
+                    searchPlaceholder="Buscar área..."
+                    value={salesFilters.areaId}
+                  />
+                </div>
+                <span className="ml-auto text-[13px] text-[#8b8b92]">
+                  <span className="sales-ops-num font-bold text-[#201f24]">
+                    {filteredSales.length}
+                  </span>{' '}
+                  registros
+                </span>
+              </div>
+            ) : null}
+            {filtersOpen && view === 'comissoes' ? (
+              <div className="flex flex-none flex-wrap items-center gap-3 border-b border-[#ececf1] bg-white px-[22px] py-[13px]">
+                <span className="text-xs font-bold uppercase tracking-[0.08em] text-[#9b9ba3]">
+                  Filtros
+                </span>
+                {/*
+                  The status and responsável pickers that used to sit here were inert:
+                  `onChange={() => undefined}` with a single option each. Rendering them as
+                  searchable Comboboxes would ship a control that provably cannot filter, so
+                  they are removed until the comissões filters are actually wired.
+                */}
+                <span className="ml-auto text-[13px] text-[#8b8b92]">
+                  <span className="sales-ops-num font-bold text-[#201f24]">
+                    {bootstrap.payables.length}
+                  </span>{' '}
+                  registros
+                </span>
+              </div>
+            ) : null}
+
+            {/*
+              The leads view is a flex column so the Quadro can FILL the height left
+              here and scroll inside its columns (`boardFillClass`). Only that view:
+              in a flex column every other screen's overflow-clipping children would
+              become shrinkable flex items.
+            */}
+            <div
+              className={`min-h-0 flex-1 overflow-y-auto px-3 py-4 md:px-[22px] md:py-5${
+                view === 'funil' ? ' flex flex-col' : ''
+              }`}
+            >
+              <MutationErrorBanner
+                error={mutationFailure?.view === view ? mutationFailure.error : null}
+                lines={
+                  mutationFailure?.view === view
+                    ? lockedRowLines(
+                        mutationFailure.error,
+                        buildTargetDescriptions(
+                          persistedBootstrap.receivables,
+                          persistedBootstrap.payables,
+                        ),
+                      )
+                    : undefined
+                }
+                onDismiss={() => setMutationFailure(null)}
+              />
+              {bootstrapQuery.isLoading ? <LoadingPanel /> : null}
+              {bootstrapQuery.isError ? (
+                /*
+                  Most specific classification first, and it must STAY first.
+                  A `402 missing_entitlement` is the Hub telling us the operator's ACTIVE
+                  Organization does not carry FXL Sales. It is a correct verdict about WHICH
+                  tenant is selected, not a transport fault and not a dead session, and it is
+                  the only one of the three that the operator can fix from inside the app.
+                  `isAuthFailure` is false for a 402 today, so the order is not what makes this
+                  branch reachable - it is what keeps it reachable if `isAuthFailure` is ever
+                  widened, and it is what stops a reader from believing the generic panel below
+                  is the fallback for "any non-401".
+                  The invariant this chain encodes: the "verifique o servidor local" copy is
+                  reachable ONLY for an error that is neither an entitlement failure, nor a
+                  forbidden failure, nor an auth failure. `entitlement-dead-end.test.tsx` is the
+                  oracle for all four arms.
+                  The 403 arm sits above `isAuthFailure` for the same reason the 402 arm does:
+                  `isAuthFailure` is false for a 403 today, so a later widening of it placed above
+                  would silently steal every permission answer into `Sessão expirada` and tell the
+                  operator to sign in again to fix a permission they do not hold, which a re-login
+                  answers with the same status forever.
+
+                  No `onRetry` is passed, deliberately: `setActive` already runs
+                  `queryClient.clear()`, which DESTROYS the query, so the mounted observer
+                  re-subscribes at `status: 'pending'` and the skeleton takes over. A
+                  `refetch()` would leave `status: 'error'` and keep this panel on screen
+                  naming the OLD Organization while the new tenant's request is in flight.
+                */
+                isEntitlementFailure(bootstrapQuery.error) ? (
+                  <MissingEntitlementPanel />
+                ) : isForbiddenFailure(bootstrapQuery.error) ? (
+                  <ForbiddenPanel />
+                ) : isAuthFailure(bootstrapQuery.error) ? (
+                  /*
+                    An expired or unrenewable Hub session used to render as the API-fault
+                    panel below, so a logged-out operator was told the server was broken.
+                    Covers both halves: no token was available, and a token the API rejected.
+                  */
+                  <EmptyPanel
+                    text="Sua sessão do FXL Hub expirou ou não pôde ser renovada. Atualize a página para entrar novamente."
+                    title="Sessão expirada"
+                  />
+                ) : (
+                  <EmptyPanel
+                    text="A API de vendas não respondeu corretamente. Verifique o servidor local e tente novamente."
+                    title="Não foi possível carregar"
+                  />
+                )
+              ) : null}
+              {!bootstrapQuery.isLoading && !bootstrapQuery.isError ? (
+                <>
+                  {view === 'dashboard' ? (
+                    <DashboardView bootstrap={persistedBootstrap} dashboard={dashboard} go={go} />
+                  ) : null}
+                  {isSalesListView(view) ? (
+                    <SalesView
+                      bootstrap={persistedBootstrap}
+                      canManage={workspace === 'operacional' && profile.roles.includes('admin')}
+                      canSettle={canSettle}
+                      detailSaleId={detailSaleId}
+                      onCancelContract={(sale) => cancelContract.mutate(sale.id, reportMutation)}
+                      onCloseDetail={closeSaleDetail}
+                      onEdit={(sale) => setSaleWizard({ mode: 'edit', sale })}
+                      onOpenDetail={openSaleDetail}
+                      onTransition={(sale, status) =>
+                        transitionSale.mutate({ saleId: sale.id, status }, reportMutation)
+                      }
+                      sales={filteredSales}
+                    />
+                  ) : null}
+                  {view === 'vendedores' ? (
+                    <MeuPainelView bootstrap={persistedBootstrap} mode="seller" />
+                  ) : null}
+                  {view === 'finders' ? (
+                    <MeuPainelView bootstrap={persistedBootstrap} mode="finder" />
+                  ) : null}
+                  {view === 'comissoes' ? (
+                    <CommissionsView bootstrap={persistedBootstrap} canSettle={canSettle} />
+                  ) : null}
+                  {view === 'produtos' ? (
+                    <ProductsView
+                      areas={persistedBootstrap.areas}
+                      funcaoCosts={persistedBootstrap.productFuncaoCosts}
+                      funcoes={persistedBootstrap.funcoes}
+                      kind={productKind}
+                      products={persistedBootstrap.products}
+                      onArchive={changeCadastroStatus}
+                      onEdit={(product) => setModal({ kind: 'product', product })}
+                      onKindChange={setProductKind}
+                    />
+                  ) : null}
+                  {view === 'clientes' ? (
+                    <ClientsView
+                      bootstrap={bootstrap}
+                      onEdit={(client) => setModal({ kind: 'client', client })}
+                    />
+                  ) : null}
+                  {view === 'areas' ? (
+                    <AreasView
+                      bootstrap={bootstrap}
+                      onArchive={changeCadastroStatus}
+                      onEdit={(area) => setModal({ kind: 'area', area })}
+                    />
+                  ) : null}
+                  {view === 'pessoas' ? (
+                    edition === 'leads' ? (
+                      <VendedoresView
+                        onEdit={(person) => setModal({ kind: 'person', person })}
+                        onInactivate={(person) =>
+                          changeCadastroStatus({
+                            cadastro: 'pessoa',
+                            id: person.id,
+                            name: person.displayName,
+                            status: 'inactive',
+                          })
+                        }
+                        onReactivate={(person) =>
+                          changeCadastroStatus({
+                            cadastro: 'pessoa',
+                            id: person.id,
+                            name: person.displayName,
+                            status: 'active',
+                          })
+                        }
+                        people={bootstrap.people}
+                      />
+                    ) : (
+                      <PessoasView
+                        bootstrap={bootstrap}
+                        onArchive={changeCadastroStatus}
+                        onEdit={(person) => setModal({ kind: 'person', person })}
+                      />
+                    )
+                  ) : null}
+                  {view === 'funcoes' ? (
+                    /*
+                      funcoesBootstrap: raw `funcoes` so an optimistic função created here
+                      is visible immediately, persisted `people` so an in-flight optimistic
+                      pessoa never inflates the "Nº pessoas" column - an optimistic row
+                      belongs only to the cadastro that created it.
+                    */
+                    <FuncoesView
+                      bootstrap={funcoesBootstrap}
+                      onArchive={changeCadastroStatus}
+                      onEdit={(funcao) => setModal({ kind: 'funcao', funcao })}
+                    />
+                  ) : null}
+                  {(view === 'funil' || (view === 'leads' && !resolution.route.leadId)) ? (
+                    /*
+                      ONE component for both routes. The difference between the team
+                      board and a seller's board is NOT this boolean - the scope is
+                      applied on the SERVER inside `withTenant` from the verified
+                      token. `showSellerFilter` only decides whether an admin is
+                      OFFERED the narrowing picker; flipping it for a seller would add
+                      a control, never a row.
+                      `persistedBootstrap` throughout: an optimistic cadastro row
+                      belongs to the cadastro screen that created it, never to a
+                      picker on another page.
+                    */
+                    <LeadsBoardContainer
+                      routedMode={view === 'funil' ? 'board' : 'stage'}
+                      selectedStageId={resolution.route.stageId}
+                      workspace={workspace}
+                      clients={persistedBootstrap.clients}
+                      onCreateClient={async (name) => {
+                        const client = await createClientByName(name);
+                        return client ? { value: client.id, label: client.name } : null;
+                      }}
+                      people={persistedBootstrap.people}
+                      onOpenSale={openSaleFromBoard}
+                      onRequestConversion={requestLeadConversion}
+                      products={persistedBootstrap.products}
+                      sellers={leadSellerOptions}
+                      showSellerFilter={workspace === 'operacional'}
+                    />
+                  ) : null}
+                  {view === 'leads' && resolution.route.leadId ? (
+                    <LeadSummaryContainer
+                      clients={persistedBootstrap.clients}
+                      leadId={resolution.route.leadId}
+                      onCreateClient={async (name) => {
+                        const client = await createClientByName(name);
+                        return client ? { value: client.id, label: client.name } : null;
+                      }}
+                      onOpenSale={openSaleFromBoard}
+                      onRequestConversion={requestLeadConversion}
+                      products={persistedBootstrap.products}
+                      sellers={leadSellerOptions}
+                      workspace={workspace}
+                    />
+                  ) : null}
+                  {view === 'etapas' ? <LeadStagesContainer /> : null}
+                  {view === 'follow-ups' ? <FollowupsContainer workspace={workspace} /> : null}
+                  {view === 'importacao' ? <ImportContainer /> : null}
+                  {view === 'leads-excluidos' ? <DeletedLeadsContainer /> : null}
+                  {view === 'geral' ? (
+                    /*
+                      The history is a SIBLING of `SettingsView`, never nested inside it:
+                      `SettingsView` is keyed on the persisted settings timestamp, so every
+                      settings save remounts it and would restart the history query and blank
+                      the table. It also returns a single `<form>`, and a confirmation dialog
+                      inside a form is a trap nobody should have to remember.
+                      `persistedBootstrap` and not `bootstrap`: a restore must never target an
+                      `optimistic:` id.
+                    */
+                    <div className="flex flex-col gap-[14px]">
+                      <SettingsView
+                        key={bootstrap.settings?.updatedAt ?? bootstrap.settings?.createdAt ?? 'new'}
+                        isSaving={saveSettings.isPending}
+                        onSave={(payload) => saveSettings.mutate(payload, reportMutation)}
+                        settings={bootstrap.settings}
+                      />
+                      <CadastroHistorySection bootstrap={persistedBootstrap} />
+                    </div>
+                  ) : null}
+                </>
+              ) : null}
+            </div>
+          </section>
+        </main>
+
+        <ProductDialog
+          areas={persistedBootstrap.areas}
+          /*
+            Cost rows come back FLAT, one array for the whole org, so the parent scopes
+            them to the record being edited. A naive `product.funcaoCosts` read would
+            silently render zero costs.
+          */
+          funcaoCosts={persistedBootstrap.productFuncaoCosts.filter(
+            (row) => row.productId === (modal?.kind === 'product' ? modal.product?.id : undefined),
+          )}
+          funcoes={persistedBootstrap.funcoes}
+          modal={modal?.kind === 'product' ? modal : null}
+          onClose={() => setModal(null)}
+          onCreateArea={createAreaByName}
+          onSave={(payload) => {
+            saveProduct.mutate(payload, { onSuccess: () => setModal(null) });
           }}
-          open={saleWizard !== null}
-          saveError={saleWizardSaveError}
-          saving={createSale.isPending || updateSale.isPending}
+          /*
+            The persisted snapshot, matching every sibling prop here. Products are not
+            an optimistic collection today so this is the raw list by reference, but if
+            they ever become one an in-flight row the server may still reject must not
+            inflate the max and silently skip a number.
+          */
+          products={persistedBootstrap.products}
+          saving={saveProduct.isPending}
         />
-      ) : null}
-    </div>
+        <ClientDialog
+          modal={modal?.kind === 'client' ? modal : null}
+          onClose={() => setModal(null)}
+          onSave={(payload) => {
+            saveClient.mutate(payload, { onSuccess: () => setModal(null) });
+          }}
+          saving={saveClient.isPending}
+        />
+        <AreaDialog
+          modal={modal?.kind === 'area' ? modal : null}
+          onClose={() => setModal(null)}
+          onSave={(payload) => {
+            saveArea.mutate(payload, { onSuccess: () => setModal(null) });
+          }}
+          saving={saveArea.isPending}
+        />
+        <FuncaoDialog
+          modal={modal?.kind === 'funcao' ? modal : null}
+          onClose={() => setModal(null)}
+          onSave={(payload) => {
+            saveFuncao.mutate(payload, { onSuccess: () => setModal(null) });
+          }}
+          saving={saveFuncao.isPending}
+        />
+        {edition === 'leads' ? (
+          <VendedorDialog
+            funcoes={persistedBootstrap.funcoes}
+            onClose={() => setModal(null)}
+            onSave={(payload) => {
+              savePerson.mutate(payload, { onSuccess: () => setModal(null) });
+            }}
+            open={personModalMatchesRoute && modal?.kind === 'person'}
+            person={modal?.kind === 'person' ? (modal.person ?? null) : null}
+            saving={savePerson.isPending}
+          />
+        ) : (
+          <PersonDialog
+            funcoes={persistedBootstrap.funcoes}
+            modal={personModalMatchesRoute && modal?.kind === 'person' ? modal : null}
+            onClose={() => setModal(null)}
+            onCreateFuncao={createFuncaoByName}
+            onSave={(payload) => {
+              savePerson.mutate(payload, { onSuccess: () => setModal(null) });
+            }}
+            saving={savePerson.isPending}
+          />
+        )}
+        {bootstrapQuery.isSuccess ? (
+          <SaleWizardDialog
+            bootstrap={persistedBootstrap}
+            /*
+              `isFetching`, not `isLoading`: the dialog is already gated on `isSuccess`,
+              so `isLoading` is false by construction here and would make the guard dead.
+              A background refetch is exactly the window where the snapshot can be
+              mid-flight while the wizard is open.
+            */
+            bootstrapPending={bootstrapQuery.isFetching}
+            editSale={saleWizard?.mode === 'edit' ? saleWizard.sale : null}
+            leadPrefill={saleWizard?.mode === 'convert' ? saleWizard.prefill : null}
+            onAssignFuncao={assignFuncaoToPerson}
+            /*
+              `resolve(null)` is the WHOLE of "cancelling persists nothing": slice
+              06's `emitMove` sees it and returns before touching the optimistic
+              cache, before calling `onMoveLead` and before issuing any request.
+              Nothing is undone because nothing was started.
+            */
+            onClose={() => {
+              if (saleWizard?.mode === 'convert') saleWizard.settle.resolve(null);
+              setSaleWizardSaveError(null);
+              setSaleWizard(null);
+            }}
+            onCreateArea={createAreaByName}
+            onCreateClient={createClientByName}
+            onCreateFuncao={createFuncaoByName}
+            onCreateProduct={(name) => setModal({ kind: 'product', prefillName: name })}
+            onSave={(payload) => {
+              if (saleWizard?.mode === 'edit') {
+                const saleId = saleWizard.sale.id;
+                setSaleWizardSaveError(null);
+                updateSale.mutate(
+                  { saleId, payload },
+                  {
+                    onSuccess: () => setSaleWizard(null),
+                    /*
+                      The wizard stays open with the operator's edits; the error is
+                      painted inside it. The ref check stops a late error from an
+                      abandoned wizard from painting the next one.
+                    */
+                    onError: (error) => {
+                      const current = saleWizardRef.current;
+                      if (current?.mode === 'edit' && current.sale.id === saleId) {
+                        setSaleWizardSaveError(describeSaleSaveError(error));
+                      }
+                    },
+                  },
+                );
+              } else if (saleWizard?.mode === 'convert') {
+                void saveLeadConversion(saleWizard, payload);
+              } else {
+                createSale.mutate(payload, { onSuccess: () => setSaleWizard(null) });
+              }
+            }}
+            open={saleWizard !== null}
+            saveError={saleWizardSaveError}
+            saving={createSale.isPending || updateSale.isPending}
+          />
+        ) : null}
+      </div>
+    </OrgModulesContext.Provider>
   );
 }
 
