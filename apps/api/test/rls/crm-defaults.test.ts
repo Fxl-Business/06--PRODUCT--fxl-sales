@@ -102,6 +102,17 @@ describe('CRM defaults: ensureDefaultPipeline and the Cliente system field', () 
     expect(again[0]).toMatchObject({ name: 'Vendas B2B', status: 'archived' });
   });
 
+  it('an org with a hand-made pipeline (not default, no system key) gets no default seed at all', async () => {
+    await scratch.adminScratch.unsafe(`INSERT INTO sales_ops_pipelines (org_id, name, position, is_default) VALUES ('org_def_7', 'Funil manual', 0, false)`);
+    const result = await inTenant('org_def_7', (tx) => ensureDefaultPipeline(tx, 'org_def_7'));
+    expect(result.map((p) => [p.name, p.systemKey, p.isDefault])).toEqual([['Funil manual', null, false]]);
+    const [counts] = await adminRows<{ p: number; s: number; t: number }>(
+      `SELECT (SELECT count(*) FROM sales_ops_pipelines WHERE org_id='org_def_7')::int p, (SELECT count(*) FROM sales_ops_pipeline_stages WHERE org_id='org_def_7')::int s,
+              (SELECT count(*) FROM sales_ops_pipeline_transitions WHERE org_id='org_def_7')::int t`,
+    );
+    expect(counts).toEqual({ p: 1, s: 0, t: 0 });
+  });
+
   it('the Cliente system field is re-created if it is ever missing, and never duplicated', async () => {
     await inTenant('org_def_5', (tx) => ensureCrmDefaults(tx, 'org_def_5'));
     await scratch.adminScratch.unsafe(`DELETE FROM sales_ops_field_definitions WHERE org_id = 'org_def_5'`);
