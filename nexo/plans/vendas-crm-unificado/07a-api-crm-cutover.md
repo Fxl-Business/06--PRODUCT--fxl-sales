@@ -141,3 +141,4 @@ Oracle case (`crm-cutover-resync.test.ts`): `an etapa created in the old table a
 - 07b design item 3 says moveLead refusals are "results"; the existing `sale_required_for_conversion` on a plain move is still a thrown `LeadInputError` (400 from 07a). Say so in item 3 so a reader does not expect 409 on `/move` for that case (the 409 `sale_required_for_conversion` is `/advance` only).
 - Phase 2 text says "sem listas paralelas por edicao"; 09e appends follow-ups to the four existing parallel lists (correct for now, phase 3 removes them). Note it in 09e Risks.
 
+## 07a addendum (orchestrator): migration 0031 repeats the CURRENT apps/api/drizzle/0030_crm_legacy_copy.sql from the tree (slice 06.1 changed its exit-name logic), not the copy embedded in this plan.
