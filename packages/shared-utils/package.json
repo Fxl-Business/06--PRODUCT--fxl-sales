@@ -41,6 +41,10 @@
     "./default-pipeline": {
       "types": "./dist/default-pipeline.d.ts",
       "import": "./dist/default-pipeline.js"
+    },
+    "./crm-model": {
+      "types": "./dist/crm-model.d.ts",
+      "import": "./dist/crm-model.js"
     }
   },
   "scripts": {

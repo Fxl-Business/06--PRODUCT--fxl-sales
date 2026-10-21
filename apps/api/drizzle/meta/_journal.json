@@ -204,6 +204,20 @@
       "when": 1791407060098,
       "tag": "0028_lead_soft_delete",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1792567056888,
+      "tag": "0029_crm_unificado_modelo",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1792567747520,
+      "tag": "0030_crm_legacy_copy",
+      "breakpoints": true
     }
   ]
 }

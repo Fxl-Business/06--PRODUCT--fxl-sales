@@ -37,3 +37,21 @@ Gate 1 skipped (autopilot), recorded in `nexo/state.json` at Capture.
 
 Pace `economico` builds serially; the wave-1 slices have disjoint `files_modified`, so they are built concurrently in their own worktrees to save wall-clock time.
 Merges into the run branch stay serial, and only one slice runs Postgres integration tests at a time.
+
+## A7 - Budget-driven plan consolidation
+
+The phase 2 to 4 planners split their work into 25 fine slices, over the run limit of 24 slices and far over the remaining agent dispatches.
+Decision: each phase layer is ONE slice with ordered parts (`nexo/plans/vendas-crm-unificado/parts/`, no frontmatter): 07a (parts 07a1-07a3), 07b, 08 (08a-08e), 09 (09a-09e), 10 (10a-10b), 11 (11a-11c), 12 (12a-12b), 13 (13a-13b), 14 (14a-14c).
+A slice may exceed the 600-line ceiling; each executor dispatch still covers a small part.
+
+## A8 - Plan-check revision 3 (last replans unit)
+
+Three plan-checks failed (1b/1c: 1 blocker, 3 majors; phase 2: 1 blocker, 5 majors; phases 3-4: 1 blocker, 7 majors), all with paste-ready fixes.
+Decision: ONE revision (the third and last `replans` unit) appends a binding "Plan-check addendum" to every affected plan, copied from the reports; no plan is re-planned from scratch.
+Owner-level choices taken under autopilot (also in the Report):
+- 0031 is a RESYNC (insert missing rows, then update changed ones and write one history event per changed stage); a value removed in the old table after 0030 is not mirrored, because migrations may not DELETE.
+- `PUT /org-modules` requires admin AND a platform-operator allow-list `SALES_MODULE_OPERATOR_ACCOUNT_IDS`, empty by default: a tenant admin cannot switch on paid modules for their own org.
+- "Dias sem comprar" counts the latest won sale AND the latest live lead in an exit `ganho` stage, so an org without propostas (Construbom) still gets a figure.
+- The empresa picker prefills only the contact: `sales_ops_clients` has no responsible seller; "responsável da empresa" stays pending.
+- The pipeline is named `Funil CRM padrão` (key `crm-padrao`), not "Padrão"; migrated orgs keep their own etapas inside it.
+- Dynamic field values are typed EAV rows (not JSONB); the Cliente system field is backed by the `client_id` column.

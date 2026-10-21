@@ -2,11 +2,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  DEFAULT_PIPELINE_KEY,
+  DEFAULT_PIPELINE_NAME,
   DEFAULT_PIPELINE_NEW_STAGE_KEYS,
   DEFAULT_PIPELINE_STAGES,
   LEGACY_LEAD_STAGE_COUNTERPART,
   type DefaultPipelineStage,
 } from '@fxl-sales/shared-utils/default-pipeline';
+import { defaultStageBehavior, defaultStageRequiresReason } from '@fxl-sales/shared-utils/crm-model';
 import { describe, expect, it } from 'vitest';
 import { LEAD_STAGE_SEEDS } from '../stages-seed.js';
 
@@ -38,7 +41,7 @@ function readMigration(prefix: string): string {
 
 /**
  * Each entry proves one migration's seed VALUES equal the pipeline constant.
- * SLICE-05-HOOK: slice 05 appends the 0029 entry (new pipeline stage seed) here and the same loop compares it to DEFAULT_PIPELINE_STAGES.
+ * SLICE-05-HOOK (closed by slice 06): migration 0029 carries NO seed rows by design (tables only). The 0030 default-pipeline seed uses a different row shape, so it is compared in the dedicated describe block at the end of this file.
  */
 const MIGRATION_SEED_COMPARISONS = [{ id: '0022', filePattern: '0022', extractRows: extractSeedRows }] as const;
 
@@ -104,5 +107,64 @@ describe('default pipeline parity with the legacy lead stage seed', () => {
       expect(rows.length, `migration ${entry.id} has no seed rows`).toBeGreaterThan(0);
       expectRowsMatchPipeline(rows, `migration ${entry.id}`);
     }
+  });
+});
+
+interface PipelineSeedRow {
+  label: string;
+  ord: number;
+  type: string;
+  behavior: string;
+  exitKind: string | null;
+  requiresReason: boolean;
+}
+
+/** Parses the pure-default `CROSS JOIN (VALUES ...) AS d(...)` block of migration 0030. */
+function extractPipelineSeedRows(sql: string): PipelineSeedRow[] {
+  const block = /CROSS JOIN \(VALUES([\s\S]*?)\) AS d\(/.exec(sql);
+  if (!block) throw new Error('0030 default pipeline VALUES block not found');
+  const rows: PipelineSeedRow[] = [];
+  for (const m of block[1]!.matchAll(/\('([^']+)',\s*(\d+),\s*'(\w+)',\s*'(\w+)',\s*(NULL|'\w+'),\s*(true|false)\)/g)) {
+    rows.push({
+      label: m[1]!,
+      ord: Number(m[2]),
+      type: m[3]!,
+      behavior: m[4]!,
+      exitKind: m[5] === 'NULL' ? null : m[5]!.slice(1, -1),
+      requiresReason: m[6] === 'true',
+    });
+  }
+  return rows;
+}
+
+describe('migration 0030 pure-default pipeline seed parity (SLICE-05-HOOK closed)', () => {
+  const sql0030 = readMigration('0030');
+  const rows = extractPipelineSeedRows(sql0030);
+
+  it('parses seven seed rows out of migration 0030', () => {
+    expect(rows).toHaveLength(7);
+  });
+
+  it('equals DEFAULT_PIPELINE_STAGES label, order, type, exit kind, behavior and reason rule', () => {
+    expect(rows).toEqual(
+      DEFAULT_PIPELINE_STAGES.map((s) => ({
+        label: s.label,
+        ord: s.order,
+        type: s.type,
+        behavior: defaultStageBehavior(s),
+        exitKind: s.exitKind,
+        requiresReason: defaultStageRequiresReason(s),
+      })),
+    );
+  });
+
+  it('names the default pipeline exactly like the constant', () => {
+    expect(sql0030).toContain(`'${DEFAULT_PIPELINE_NAME}', '${DEFAULT_PIPELINE_KEY}'`);
+  });
+
+  it('adds Ganho and Pausado for legacy orgs with the constant labels', () => {
+    expect(sql0030).toContain("('Ganho', 'ganho', 1), ('Pausado', 'pausado', 2)");
+    const labelOf = (key: string) => DEFAULT_PIPELINE_STAGES.find((s) => s.key === key)!.label;
+    expect([labelOf('ganho'), labelOf('pausado')]).toEqual(['Ganho', 'Pausado']);
   });
 });

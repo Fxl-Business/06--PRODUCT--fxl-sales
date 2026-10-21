@@ -1,0 +1,38 @@
+{
+  "verdict": "CHANGES_REQUESTED",
+  "round": 2,
+  "findings": [
+    {
+      "id": "R2",
+      "severity": "major",
+      "kind": "objective",
+      "file": "apps/api/drizzle/0030_crm_legacy_copy.sql",
+      "line": 70,
+      "claim": "A correção ainda pode esgotar os nomes candidatos e abortar a migração.",
+      "evidence": "generate_series(0, 100) limita a busca a 101 nomes. Uma organização com etapas Ganho, Ganho (saída) e Ganho (saída 2) até Ganho (saída 100) ocupa todos eles. O probe confirmou que os 101 nomes são válidos no schema atual e nenhum candidato sobra. Não existe limite de quantidade no serviço legado. Nesse caso, a subconsulta retorna NULL para name NOT NULL, abortando a migração; ON CONFLICT DO NOTHING não absorve essa violação. O mesmo vale para Pausado.",
+      "suggestion": "Gerar candidatos de 0 até a quantidade de etapas existentes no funil, incluindo arquivadas. Isso garante N+1 nomes distintos para N nomes ocupados. Acrescentar um caso que esgote os atuais 101 candidatos."
+    }
+  ],
+  "checks": [
+    {
+      "command": "git diff 58c8ec1...HEAD -- . ':(exclude)nexo/runs'",
+      "exit": 0,
+      "summary": "R1 corrigido no SQL, schema e snapshots. Oráculo ampliado para descrição longa, colisões e todas as tabelas públicas não CRM. R2 permanece parcialmente resolvido."
+    },
+    {
+      "command": "git diff --stat 73a009a...HEAD -- . ':(exclude)nexo/runs'",
+      "exit": 0,
+      "summary": "Escopo completo da fase 1 reavaliado com as correções: 61 arquivos; nenhum outro defeito major identificado."
+    },
+    {
+      "command": "node --experimental-strip-types --input-type=module -e '<probe somente leitura de candidatos e snapshots>'",
+      "exit": 0,
+      "summary": "Confirmados 101 nomes aceitos e selectedName=null; ambos os snapshots indexam apenas org_id e field_id."
+    },
+    {
+      "command": "Gate 2 fornecido pelo orquestrador, sem reexecução",
+      "exit": 0,
+      "summary": "Verify da correção: 21/21, sem drift e reversões detectadas pelo oráculo. Nenhum arquivo ou banco alterado nesta revisão."
+    }
+  ]
+}

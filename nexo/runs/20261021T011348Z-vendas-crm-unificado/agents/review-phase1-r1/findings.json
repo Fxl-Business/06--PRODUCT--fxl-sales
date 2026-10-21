@@ -1,0 +1,48 @@
+{
+  "verdict": "CHANGES_REQUESTED",
+  "round": 1,
+  "findings": [
+    {
+      "id": "R1",
+      "severity": "major",
+      "kind": "objective",
+      "file": "apps/api/drizzle/0029_crm_unificado_modelo.sql",
+      "line": 196,
+      "claim": "Descrições válidas podem fazer a migração 0030 falhar.",
+      "evidence": "O índice B-tree inclui value_text integralmente, e 0030 copia description para essa coluna. O probe confirmou que o schema atual aceita 4.000 caracteres. Valores suficientemente incompressíveis excedem o limite de aproximadamente um terço de página do índice, abortando a cópia. A falha no banco não foi executada nesta revisão somente leitura. Limite documentado em [PostgreSQL B-tree](https://www.postgresql.org/docs/current/btree.html).",
+      "suggestion": "Adotar uma estratégia de indexação que suporte todo o domínio de texto existente, sem truncar valores. Acrescentar ao oráculo uma descrição longa e incompressível."
+    },
+    {
+      "id": "R2",
+      "severity": "major",
+      "kind": "objective",
+      "file": "apps/api/drizzle/0030_crm_legacy_copy.sql",
+      "line": 68,
+      "claim": "Colisões no nome alternativo omitem silenciosamente as saídas obrigatórias.",
+      "evidence": "Uma organização pode ter etapas normais chamadas 'Ganho' e 'Ganho (saída)'. O CASE escolhe o segundo nome, mas o índice único rejeita a inserção e ON CONFLICT DO NOTHING deixa o funil sem saída ganho. O mesmo ocorre com Pausado, inclusive com nomes ocupados por etapas arquivadas. O probe confirmou que esses nomes são aceitos e que os nomes gerados já estão ocupados. Reexecutar a migração mantém a omissão.",
+      "suggestion": "Escolher um nome efetivamente disponível, preservando as etapas existentes. Cobrir colisões simultâneas no nome original e no alternativo no oráculo."
+    }
+  ],
+  "checks": [
+    {
+      "command": "git rev-parse 73a009a",
+      "exit": 0,
+      "summary": "Base confirmada: 73a009a3a0ac83f414e0e39cc53a01dc06f79c0d."
+    },
+    {
+      "command": "git diff --stat 73a009a...HEAD -- . ':(exclude)nexo/runs'",
+      "exit": 0,
+      "summary": "Diff não vazio: 60 arquivos. Revisados SQL, schema, serviços, testes e contratos relevantes."
+    },
+    {
+      "command": "node --experimental-strip-types --input-type=module -e '<probe somente leitura de schemas e SQL>'",
+      "exit": 0,
+      "summary": "Confirmados: descrição aceita com 4.000 bytes, índice sobre texto integral e colisões dos nomes alternativos. Nenhum arquivo ou banco foi alterado."
+    },
+    {
+      "command": "Gate 2 fornecido pelo orquestrador, sem reexecução",
+      "exit": 0,
+      "summary": "Resultados informados: 05a 45/45 e DB 102/102; 05b 6/6 em cinco execuções; 06 19/19; integração 485/485; dez mutações detectadas."
+    }
+  ]
+}

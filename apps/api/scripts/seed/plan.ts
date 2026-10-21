@@ -172,6 +172,16 @@ export const SEED_WRITE_ORDER = [
 ] as const;
 
 export const SEED_DELETE_ORDER = [
+  'salesOpsCrmLeadNotes',
+  'salesOpsCrmLeadFollowups',
+  'salesOpsCrmLeadFieldValues',
+  'salesOpsCrmLeadEvents',
+  'salesOpsCrmLeads',
+  'salesOpsPipelineTransitions',
+  'salesOpsPipelineStages',
+  'salesOpsPipelines',
+  'salesOpsFieldDefinitions',
+  'salesOpsOrgModules',
   'salesOpsSettlements',
   'salesOpsPayables',
   'salesOpsReceivables',

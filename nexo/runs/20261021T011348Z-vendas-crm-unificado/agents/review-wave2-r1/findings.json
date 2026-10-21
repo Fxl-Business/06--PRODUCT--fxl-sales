@@ -1,0 +1,53 @@
+{
+  "verdict": "APPROVED",
+  "round": 1,
+  "findings": [
+    {
+      "id": "R1-01",
+      "severity": "minor",
+      "kind": "objective",
+      "file": "nexo/runs/20261021T011348Z-vendas-crm-unificado/levantamento-entidades.md",
+      "line": 787,
+      "claim": "A descrição inverte a cardinalidade garantida por sales_ops_leads_org_sale_idx.",
+      "evidence": "0022_sales_ops_leads.sql:88 define UNIQUE(org_id, sale_id) WHERE sale_id IS NOT NULL: impede dois leads da mesma organização de compartilhar uma proposta, inclusive leads excluídos logicamente. A coluna sale_id já limita cada lead a uma proposta.",
+      "suggestion": "Corrigir aqui e na linha 60 para 'no máximo um lead por proposta na organização', preservando explicitamente o índice parcial no modelo novo."
+    },
+    {
+      "id": "R1-02",
+      "severity": "minor",
+      "kind": "objective",
+      "file": "nexo/runs/20261021T011348Z-vendas-crm-unificado/levantamento-entidades.md",
+      "line": 478,
+      "claim": "A recomendação de referências a produtos omite os produtos livres existentes nos leads.",
+      "evidence": "lead-schemas.ts:36-50 aceita productName sem productId; lead-service.ts:476-479 persiste productId nulo com productNameSnapshot. Um destino que aceite apenas referências ao catálogo não representa esses registros.",
+      "suggestion": "Registrar que o modelo e o backfill devem preservar também produtos sem referência, incluindo seus snapshots de nome."
+    }
+  ],
+  "checks": [
+    {
+      "command": "git diff 4663b8a...HEAD -- . ':(exclude)nexo/runs'",
+      "exit": 0,
+      "summary": "Diff vazio; nenhuma alteração de produto."
+    },
+    {
+      "command": "git diff --stat 4663b8a...HEAD",
+      "exit": 0,
+      "summary": "Somente levantamento, checker e dois registros de Verify."
+    },
+    {
+      "command": "sed -n '80,95p' apps/api/drizzle/0022_sales_ops_leads.sql",
+      "exit": 0,
+      "summary": "Conferidos índice parcial e FKs compostas por organização."
+    },
+    {
+      "command": "sed -n '465,505p' apps/api/src/domains/sales-ops/leads/lead-service.ts",
+      "exit": 0,
+      "summary": "Confirmada persistência de produtos livres com productId nulo."
+    },
+    {
+      "command": "cat nexo/runs/20261021T011348Z-vendas-crm-unificado/agents/verify-04-levantamento-entidades.md",
+      "exit": 0,
+      "summary": "Registro fornecido confirma checker PASS, 672 citações, 75 conferências manuais e três mutações rejeitadas. Oráculo e suítes não reexecutados."
+    }
+  ]
+}

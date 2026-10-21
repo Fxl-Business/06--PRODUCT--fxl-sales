@@ -50,7 +50,9 @@ export async function deleteSettlementsForOrgs(orgIds: readonly string[]): Promi
  * before parents, with foreign keys still enforced: a table that gains a new
  * reference to the sale tree fails here loudly instead of being skipped. Leads
  * are deleted (not detached) because `sales_ops_leads_org_sale_fk` points at the
- * sale and the seeded leads are fixture data of the same org.
+ * sale and the seeded leads are fixture data of the same org. The unified CRM
+ * lead copies (migration 0030) restrict-reference the sale, the cliente, the
+ * pessoa and the produto, so their lead rows are deleted first.
  */
 export async function purgeOrgLedgerForTests(orgIds: readonly string[]): Promise<void> {
   if (orgIds.length === 0) return;
@@ -67,6 +69,7 @@ export async function purgeOrgLedgerForTests(orgIds: readonly string[]): Promise
           'purgeOrgLedgerForTests needs the local superuser (TEST_MIGRATE_DATABASE_URL)',
         );
       }
+      await deleteCrmLeadRows(tx, ids);
       await tx`DELETE FROM sales_ops_lead_products WHERE org_id = ANY(${ids})`;
       await tx`DELETE FROM sales_ops_leads WHERE org_id = ANY(${ids})`;
       await tx`DELETE FROM sales_ops_payables WHERE org_id = ANY(${ids})`;
@@ -77,6 +80,48 @@ export async function purgeOrgLedgerForTests(orgIds: readonly string[]): Promise
       await tx`DELETE FROM integration_outbox WHERE organization_id = ANY(${ids})`;
       await tx`DELETE FROM integration_inbox WHERE organization_id = ANY(${ids})`;
       await tx`DELETE FROM integration_cursor WHERE organization_id = ANY(${ids})`;
+    });
+  } finally {
+    await client.end();
+  }
+}
+
+/**
+ * The CRM lead rows of the given orgs, children first. Shared by purgeOrgLedgerForTests
+ * and deleteCrmForOrgs; runs inside the caller's superuser transaction.
+ */
+async function deleteCrmLeadRows(tx: postgres.TransactionSql, ids: string[]): Promise<void> {
+  await tx`DELETE FROM sales_ops_crm_lead_notes WHERE org_id = ANY(${ids})`;
+  await tx`DELETE FROM sales_ops_crm_lead_followups WHERE org_id = ANY(${ids})`;
+  await tx`DELETE FROM sales_ops_crm_lead_field_values WHERE org_id = ANY(${ids})`;
+  await tx`DELETE FROM sales_ops_crm_lead_events WHERE org_id = ANY(${ids})`;
+  await tx`DELETE FROM sales_ops_crm_leads WHERE org_id = ANY(${ids})`;
+}
+
+/**
+ * Removes the whole unified CRM model (migrations 0029 and 0030) of the given orgs
+ * from the LOCAL test database: lead rows, then transitions, stages, pipelines,
+ * field definitions and org modules. Ordinary superuser transaction, foreign keys
+ * enforced, so a new CRM reference fails loudly. Phase 2 test files reuse it.
+ */
+export async function deleteCrmForOrgs(orgIds: readonly string[]): Promise<void> {
+  if (orgIds.length === 0) return;
+  const ids = orgIds as string[];
+  const client = postgres(testDatabaseUrls().migrateUrl, { max: 1 });
+  try {
+    await client.begin(async (tx) => {
+      const [me] = await tx<{ rolsuper: boolean }[]>`
+        SELECT rolsuper FROM pg_roles WHERE rolname = current_user
+      `;
+      if (!me?.rolsuper) {
+        throw new Error('deleteCrmForOrgs needs the local superuser (TEST_MIGRATE_DATABASE_URL)');
+      }
+      await deleteCrmLeadRows(tx, ids);
+      await tx`DELETE FROM sales_ops_pipeline_transitions WHERE org_id = ANY(${ids})`;
+      await tx`DELETE FROM sales_ops_pipeline_stages WHERE org_id = ANY(${ids})`;
+      await tx`DELETE FROM sales_ops_pipelines WHERE org_id = ANY(${ids})`;
+      await tx`DELETE FROM sales_ops_field_definitions WHERE org_id = ANY(${ids})`;
+      await tx`DELETE FROM sales_ops_org_modules WHERE org_id = ANY(${ids})`;
     });
   } finally {
     await client.end();

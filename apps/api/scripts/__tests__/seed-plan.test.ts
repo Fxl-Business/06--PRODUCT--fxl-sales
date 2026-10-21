@@ -212,6 +212,22 @@ describe('buildDevSeedPlan - idempotence, structurally', () => {
     expect(index('salesOpsSettlements')).toBeLessThan(index('salesOpsReceivables'));
     expect(index('salesOpsSettlements')).toBeLessThan(index('salesOpsSales'));
   });
+
+  it('deletes the unified CRM tables before every table their restrict FKs point at', () => {
+    const index = (key: string) => SEED_DELETE_ORDER.indexOf(key as (typeof SEED_DELETE_ORDER)[number]);
+    for (const crm of ['salesOpsCrmLeadNotes', 'salesOpsCrmLeadFollowups', 'salesOpsCrmLeadFieldValues', 'salesOpsCrmLeadEvents']) {
+      expect(index(crm), crm).toBeLessThan(index('salesOpsCrmLeads'));
+    }
+    expect(index('salesOpsCrmLeadEvents')).toBeLessThan(index('salesOpsCrmLeads'));
+    expect(index('salesOpsCrmLeads')).toBeLessThan(index('salesOpsPipelineStages'));
+    expect(index('salesOpsPipelineTransitions')).toBeLessThan(index('salesOpsPipelineStages'));
+    expect(index('salesOpsPipelineStages')).toBeLessThan(index('salesOpsPipelines'));
+    expect(index('salesOpsCrmLeadFieldValues')).toBeLessThan(index('salesOpsFieldDefinitions'));
+    for (const target of ['salesOpsSales', 'salesOpsClients', 'salesOpsPeople', 'salesOpsProducts']) {
+      expect(index('salesOpsCrmLeads'), target).toBeLessThan(index(target));
+      expect(index('salesOpsCrmLeadFieldValues'), target).toBeLessThan(index(target));
+    }
+  });
 });
 
 describe('buildDevSeedPlan - tenancy', () => {
