@@ -96,21 +96,21 @@ afterEach(async () => {
   document.body.innerHTML = '';
 });
 
-async function renderBoard(onEditLead = vi.fn(), onOpenSale = vi.fn()) {
+async function renderBoard(onOpenLead = vi.fn(), onOpenSale = vi.fn()) {
   await act(async () => {
     root.render(
       <LeadsBoard
         leads={LEADS}
         lookups={LOOKUPS}
         now={NOW}
-        onEditLead={onEditLead}
+        onOpenLead={onOpenLead}
         onMoveLead={vi.fn()}
         onOpenSale={onOpenSale}
         stages={STAGES}
       />,
     );
   });
-  return { onEditLead, onOpenSale };
+  return { onOpenLead, onOpenSale };
 }
 
 async function click(selector: string) {
@@ -171,12 +171,12 @@ describe('Quadro / Lista toggle', () => {
     expect(rows()).toHaveLength(4);
   });
 
-  it('carries Mover and Editar actions; Editar calls onEditLead, Mover opens the dialog', async () => {
-    const { onEditLead } = await renderBoard();
+  it('carries Mover and Abrir actions; Abrir calls onOpenLead, Mover opens the dialog', async () => {
+    const { onOpenLead } = await renderBoard();
     await click('[data-view-option="list"]');
     expect(container.querySelector('[data-move-trigger="l1"]')).not.toBeNull();
-    await click('[data-edit-lead="l1"]');
-    expect(onEditLead).toHaveBeenCalledTimes(1);
+    await click('[data-open-lead="l1"]');
+    expect(onOpenLead).toHaveBeenCalledTimes(1);
     await click('[data-move-trigger="l1"]');
     expect(document.querySelector('[role="dialog"]')).not.toBeNull();
   });

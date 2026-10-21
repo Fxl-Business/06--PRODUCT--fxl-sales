@@ -392,3 +392,19 @@ The free-text company path of the old dialogs is intentionally gone, because the
 - PENDENCIA (open product question): the responsável da empresa prefill needs either a default seller on the cliente or a prefill from the cliente's most recent lead; no column is added in this run.
 - The form mounts only after `GET /field-definitions` settles, and a refused save keeps it open with the typed values.
 - Oracles: `lead-form.test.ts` (logic), `lead-form.test.tsx` (view), `leads-contact-container.test.tsx` (mount and save), `lead-undo.test.tsx` (inverse PATCH with a Cliente entry in the fixture).
+
+## Resumo do lead (slice 09c, v4.8.0)
+
+- Clicar no card ou na linha da Lista abre o RESUMO do lead, nunca o formulário: o card chama `onOpen` e a Lista chama `onOpenLead` (botão `Abrir`, `data-open-lead`), e o `SalesOpsApp` monta `LeadSummaryContainer` na rota `operacional|meus-dados/leads/:leadId`.
+- A edição do lead mora no resumo (`Editar`): o `LeadForm` do board é só de criação, e o `Lead editado` desfazer usa `leadToWriteSeed` com o `requireUnchangedLead` do resumo (um refetch que tem de bater com a resposta da escrita).
+- `Excluir` no resumo confirma pelo `LeadDeleteDialog` e navega para o funil; a restauração fica em `Cadastros > Leads excluídos`, porque a notificação de desfazer morre com a página.
+- Open product question: a delete from the summary navigates to the funil without an undo notice, unlike the board, and the lead is restorable from `Cadastros > Leads excluídos`.
+- O desfazer compartilhado (`use-undo-notice.ts`, `UndoLayer.tsx`, `undo-conflict.ts`) é o único lugar do aviso de cinco segundos.
+- Oracles: `summary-format.test.ts`, `lead-summary.test.tsx`, `lead-summary-container.test.tsx`, `leads-contact-container.test.tsx` (a card click navigates to the summary), `lead-delete.test.tsx` (a plain click on the card body opens the summary).
+- `Avançar` (slice 09d) lists ONLY the `nextStages` of `GET /leads/:id/summary`, the destinations the API allows from the stage; it never offers the rest of the pipeline.
+- The follow-up is required for a `normal` or `orcamento` destination that does not open the proposta, and not for an exit (`saida`); a destination that opens the proposta goes through the board's conversion door (`onRequestConversion`), the same as a drag, and the lead moves only after the proposta exists.
+- The advance rules are pure in `advance.ts` (`advanceNeeds`, `validateAdvance`, `buildAdvancePayload`, `advanceErrorCopy`); the dialog and the API must agree on them.
+- The note and the follow-up composers (`SummaryComposers.tsx`) write through `useAddLeadNote` and `useAddLeadFollowup`; `Concluir` calls `useMarkFollowupDone`, and every one of them refreshes the whole `['leads']` root.
+- Oracles: `advance.test.ts`, `advance-dialog.test.tsx`, `lead-summary-container.test.tsx`.
+- The follow-ups list (`follow-ups`, slice 09e) shows the open follow-ups of the period by default (`next7`), scoped `team` for an admin under `operacional` and `mine` everywhere else, with a Minha/Equipe toggle only where the team scope is offered.
+- The follow-ups nav entry is appended to the four parallel navigation lists, which phase 3 removes.

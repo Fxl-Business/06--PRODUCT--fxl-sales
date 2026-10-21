@@ -153,6 +153,8 @@ import { buildLeadConversionPrefill, findClientByName } from './leads/conversion
 import type { LeadConversionItem, LeadConversionPrefill } from './leads/conversion';
 import type { LeadConversionRequest } from './leads/LeadsBoard';
 import { LeadsBoardContainer } from './leads/LeadsBoardContainer';
+import { LeadSummaryContainer } from './leads/LeadSummaryContainer';
+import { FollowupsContainer } from './leads/FollowupsContainer';
 import { LeadSidebarNavigation } from './leads/LeadSidebarNavigation';
 import { isNarrowViewport, subscribeNarrowViewport } from './narrow-viewport';
 import { LeadStagesContainer } from './leads/LeadStagesContainer';
@@ -523,6 +525,10 @@ function titleForView(view: SalesOpsView, workspace: SalesOpsWorkspace) {
     'leads-excluidos': {
       title: DELETED_LEADS_COPY.title,
       subtitle: DELETED_LEADS_COPY.subtitle,
+    },
+    'follow-ups': {
+      title: personal ? 'Meus follow-ups' : 'Follow-ups',
+      subtitle: 'Próximos passos combinados com cada lead',
     },
   };
   return map[view];
@@ -1355,7 +1361,12 @@ export function SalesOpsApp() {
     () => getVisibleWorkspaces(profile.roles, edition),
     [profile.roles, edition],
   );
-  const resolution = resolveSalesOpsRoute(routeParams, profile.roles, edition);
+  const etapaParam = new URLSearchParams(location.search).get('etapa') ?? undefined;
+  const resolution = resolveSalesOpsRoute(
+    etapaParam === undefined ? routeParams : { ...routeParams, etapa: etapaParam },
+    profile.roles,
+    edition,
+  );
   const { workspace, view } = resolution.route;
   /** The open proposta detail. URL state only (`/:workspace/vendas/:saleId`). */
   const detailSaleId = resolution.route.saleId ?? null;
@@ -1721,6 +1732,7 @@ export function SalesOpsApp() {
     view === 'geral' ||
     view === 'leads' ||
     view === 'funil' ||
+    view === 'follow-ups' ||
     view === 'etapas' ||
     view === 'importacao' ||
     view === 'leads-excluidos'
@@ -2362,7 +2374,7 @@ export function SalesOpsApp() {
                     onEdit={(funcao) => setModal({ kind: 'funcao', funcao })}
                   />
                 ) : null}
-                {(view === 'leads' || view === 'funil') ? (
+                {(view === 'funil' || (view === 'leads' && !resolution.route.leadId)) ? (
                   /*
                     ONE component for both routes. The difference between the team
                     board and a seller's board is NOT this boolean - the scope is
@@ -2391,7 +2403,23 @@ export function SalesOpsApp() {
                     showSellerFilter={workspace === 'operacional'}
                   />
                 ) : null}
+                {view === 'leads' && resolution.route.leadId ? (
+                  <LeadSummaryContainer
+                    clients={persistedBootstrap.clients}
+                    leadId={resolution.route.leadId}
+                    onCreateClient={async (name) => {
+                      const client = await createClientByName(name);
+                      return client ? { value: client.id, label: client.name } : null;
+                    }}
+                    onOpenSale={openSaleFromBoard}
+                    onRequestConversion={requestLeadConversion}
+                    products={persistedBootstrap.products}
+                    sellers={leadSellerOptions}
+                    workspace={workspace}
+                  />
+                ) : null}
                 {view === 'etapas' ? <LeadStagesContainer /> : null}
+                {view === 'follow-ups' ? <FollowupsContainer workspace={workspace} /> : null}
                 {view === 'importacao' ? <ImportContainer /> : null}
                 {view === 'leads-excluidos' ? <DeletedLeadsContainer /> : null}
                 {view === 'geral' ? (

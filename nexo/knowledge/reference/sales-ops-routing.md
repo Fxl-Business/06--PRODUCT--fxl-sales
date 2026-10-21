@@ -39,9 +39,21 @@ Moved verbatim from `CLAUDE.md` on 2026-09-22 so the standing context stays shor
   Oracles: `navigation.test.ts` (`keeps a proposta id only on the vendas view`, `drops a proposta id for an operator who cannot see the workspace`), `sale-deep-link-route.test.ts`, `sale-deep-link.test.tsx`.
 - Sales edition (feature `edicao-leads`, v4.3.0). `profile.edition` comes from the token's `entitlements.modules` through `resolveSalesEdition` (`@fxl-sales/shared-utils/sales-edition`) in `profileFromToken`; `useSalesEdition()` reads it.
   Every navigation export that takes roles takes a trailing `edition = 'full'`; the full branch is today's code verbatim and is pinned by literal tables in `navigation-edition.test.ts`.
-  Leads edition: `admin` sees `operacional` [`leads` Prospecção] and `cadastros` [`pessoas` labelled Vendedores, `etapas`]; a non-admin `seller` sees `meus-dados` [`leads` Minha prospecção]; `finder` grants nothing; `tatico` is never visible.
-  An admin does not get `meus-dados` in the leads edition, because every admin-bearing claim also yields `seller` and AC2 gives the gestor exactly three screens.
+  Leads edition: `admin` sees `operacional` [`leads` Prospecção, `funil` Funil, `follow-ups` Follow-ups] and `cadastros` [`pessoas` labelled Vendedores, `clientes`, `etapas`, `importacao`, `leads-excluidos`]; a non-admin `seller` sees `meus-dados` [`leads` Prospecção, `funil` Funil, `follow-ups` Meus follow-ups]; `finder` grants nothing; `tatico` is never visible.
+  An admin does not get `meus-dados` in the leads edition, because every admin-bearing claim also yields `seller` and the gestor's visibility is pinned to `operacional` and `cadastros` by `getVisibleWorkspaces`.
   `NoRoleGuard` keys on `getVisibleWorkspaces(roles, edition)`; a leads-edition finder-only operator stays on `/no-role` with no loop (oracle `no-role-redirect.test.tsx`).
   `SalesOpsApp` and `NoRoleGuard` read `profile.edition` from `useAuthProfile()`, never `useSalesEdition()`, so the shell harnesses that mock `@/auth/react` keep working.
   The shell chrome follows the capabilities too: the sidebar `A pagar este mês` card renders only with `commissions`, the sidebar `Nova proposta` only with `proposals` (both through `hasCapability`), and the static period chip only in the full edition.
   The 2026-10-05 browser walk found all three on the leads gestor's screens, where the card always read R$ 0 and the proposta wizard could only fail; oracle `vendedores-routing.test.tsx` pins both editions.
+
+- Lead routes (slice 09a, v4.8.0). The one route pattern has one optional segment, and the stage selection and the lead summary both wanted it.
+  The SEGMENT belongs to the lead summary (`leadId`), a permalink-worthy identity that other screens and bookmarks point at.
+  The stage selection is a view filter, the same class as the `Quadro`/`Lista` toggle, so it moved to the query `?etapa=<stageId>` on `leads`.
+  The single route object stays, so `SalesOpsApp` never remounts, and no second route pattern is added.
+  Old stage URLs `/operacional/leads/<stageId>` now parse as a lead id and the summary answers `Lead não encontrado`; that is accepted because the sidebar of the prior release was the only producer and it now writes the query form.
+  Stray `?etapa=` on another view is dropped with a `redirect`, so the address bar is rewritten through `replace`.
+  Oracles: `lead-routes.test.ts`, `leads-stage-navigation.test.tsx`, `navigation.test.ts` (round trip case).
+- Follow-ups (slice 09e, v4.8.0) are the view id `follow-ups`, appended to the four navigation lists (`operational`, `meusDadosSeller`, `leadsEditionOperational`, `leadsEditionMeusDadosSeller`) because the feature has no edition branch.
+  The scope is `team` only for an admin under `operacional` (the API answers team to an admin alone); everywhere else it is `mine`.
+  The period defaults to the next seven days, the agenda's forward view, and every preset is a São Paulo civil day.
+  Oracles: `followups.test.ts`, `followups-view.test.tsx`, `followups-container.test.tsx`, `navigation-edition.test.ts`.

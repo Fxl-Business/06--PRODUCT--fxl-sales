@@ -43,3 +43,4 @@ Part of slice `09-web-lead-resumo`. Depends on parts 08a, 08b, 09a, 09c, 09d.
 ## Risks
 - The default `next7` preset hides overdue open follow-ups; the status/period controls make `Todo o período` one click away, and the overdue badge shows once visible. Accepted default for an agenda view.
 - The team scope is admin-only on the API; the web never offers it otherwise.
+- Phase 2 text says "sem listas paralelas por edicao"; the follow-ups entries are appended to the four existing parallel nav lists (`operational`, `meusDadosSeller`, `leadsEditionOperational`, `leadsEditionMeusDadosSeller`) and that is correct for now; phase 3 removes those parallel lists.

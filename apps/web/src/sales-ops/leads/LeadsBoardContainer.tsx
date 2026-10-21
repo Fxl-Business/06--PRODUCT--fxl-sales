@@ -4,19 +4,21 @@ import { type LeadFieldSet, leadFieldSet } from '@fxl-sales/shared-utils/sales-e
 import { useAuthProfile, useSalesEdition } from '@/auth/react';
 import type { ComboboxOption } from '@/components/ui/combobox';
 import { Skeleton } from '@/components/ui/skeleton';
-import { buildLeadStagePath, buildSalesOpsPath, type SalesOpsWorkspace } from '../navigation';
+import { buildLeadStagePath, buildLeadSummaryPath, buildSalesOpsPath, type SalesOpsWorkspace } from '../navigation';
 import type { SalesOpsClient, SalesOpsPerson, SalesOpsProduct } from '../types';
-import type { LeadWritePayload, MoveLeadPayload } from './api';
+import type { MoveLeadPayload } from './api';
 import { buildLabelLookups } from './board-labels';
 import { stageOpensConversion } from './board-move';
 import { mutedStateClass } from './board-ui';
-import { boardStages, leadIsConverted } from './calculations';
+import { boardStages } from './calculations';
 import { useFieldDefinitions } from './crm-hooks';
 import { LeadDeleteDialog } from './LeadDeleteDialog';
 import { LeadForm } from './LeadForm';
-import { CLIENTE_FIELD_KEY, leadToWriteSeed } from './lead-form';
 import { LeadsBoard, type LeadConversionRequest } from './LeadsBoard';
-import { RestoreUndoNotice, UndoNotice } from './UndoNotice';
+import { UNDO_CONFLICT, UndoConflictError } from './undo-conflict';
+import { useUndoNotice } from './use-undo-notice';
+import { LEAD_SUMMARY_OPENED_IN_APP } from './lead-summary-nav';
+import { UndoLayer } from './UndoLayer';
 import {
   useDeleteLead,
   useLeadsBoard,
@@ -40,10 +42,6 @@ import type { LeadBoardFilters, SalesOpsLead } from './types';
 const BOARD_LOAD_FAILED = 'Não foi possível carregar o funil de leads.';
 const SELLER_PERSON_UNMAPPED =
   'Seu acesso ainda não está vinculado a um vendedor. Peça ao gestor para conferir seu cadastro em Vendedores.';
-const UNDO_CONFLICT = 'Este lead foi alterado por outra pessoa. Atualize o funil antes de desfazer.';
-
-class UndoConflictError extends Error {}
-
 function sameLeadSnapshot(current: SalesOpsLead | undefined, expected: SalesOpsLead): boolean {
   // The response to the forward write is the expected server state. A fresh
   // board read must still match it before a compensating write can be offered.
@@ -158,56 +156,7 @@ export function LeadsBoardContainer({
   const moveLead = useMoveLead(filters);
   const saveLead = useSaveLead();
   const deleteLead = useDeleteLead();
-  const [undoNotice, setUndoNotice] = React.useState<{
-    id: number;
-    label: string;
-    undo?: () => Promise<unknown>;
-    restoreLeadId?: string;
-  } | null>(null);
-  const [undoError, setUndoError] = React.useState<string | null>(null);
-  const [undoBusy, setUndoBusy] = React.useState(false);
-  const undoSequence = React.useRef(0);
-  const undoInFlight = React.useRef(false);
-
-  React.useEffect(() => {
-    if (!undoNotice || undoBusy || undoError) return;
-    const timer = window.setTimeout(() => setUndoNotice((current) =>
-      current?.id === undoNotice.id ? null : current,
-    ), 5000);
-    return () => window.clearTimeout(timer);
-  }, [undoNotice, undoBusy, undoError]);
-
-  function publishUndo(label: string, undo: () => Promise<unknown>) {
-    setUndoError(null);
-    setUndoNotice({ id: ++undoSequence.current, label, undo });
-  }
-
-  function publishDeleteUndo(leadId: string) {
-    setUndoError(null);
-    setUndoNotice({ id: ++undoSequence.current, label: 'Lead excluído', restoreLeadId: leadId });
-  }
-
-  async function runUndo(restore?: () => Promise<unknown>) {
-    if (!undoNotice || undoInFlight.current) return;
-    const active = undoNotice;
-    const action = restore ?? active.undo;
-    if (!action) return;
-    undoInFlight.current = true;
-    setUndoBusy(true);
-    setUndoError(null);
-    try {
-      await action();
-      setUndoNotice((current) => current?.id === active.id ? null : current);
-      setUndoError(null);
-    } catch (error) {
-      setUndoError(error instanceof UndoConflictError
-        ? UNDO_CONFLICT
-        : 'Não foi possível desfazer. Tente novamente.');
-    } finally {
-      undoInFlight.current = false;
-      setUndoBusy(false);
-    }
-  }
+  const undo = useUndoNotice();
 
   async function requireUnchangedLead(expected: SalesOpsLead) {
     const fresh = await boardQuery.refetch({ throwOnError: true });
@@ -226,7 +175,7 @@ export function LeadsBoardContainer({
     const result = await moveLead.mutateAsync(payload);
     if (!previous || sourceIndex < 0 || payload.saleId ||
       stageOpensConversion(stages.find((stage) => stage.id === payload.toStageId))) return;
-    publishUndo('Lead movido', async () => {
+    undo.publish('Lead movido', async () => {
       await requireUnchangedLead(result.lead);
       return moveLead.mutateAsync({
         leadId: payload.leadId,
@@ -235,22 +184,6 @@ export function LeadsBoardContainer({
         ...(previous.lostReason ? { reason: previous.lostReason } : {}),
       });
     });
-  }
-
-  async function saveWithUndo(payload: LeadWritePayload) {
-    const previous = editingLead?.id === payload.id ? editingLead : null;
-    const result = await saveLead.mutateAsync(payload);
-    if (previous) {
-      // The Cliente is never a field entry (it travels as clientId), so it never counts as "added".
-      const previousIds = new Set((previous.fields ?? []).map((f) => f.fieldId));
-      const added = (result.lead.fields ?? [])
-        .filter((f) => f.key !== CLIENTE_FIELD_KEY && !previousIds.has(f.fieldId))
-        .map((f) => f.fieldId);
-      publishUndo('Lead editado', async () => {
-        await requireUnchangedLead(result.lead);
-        return saveLead.mutateAsync(leadToWriteSeed(previous, added));
-      });
-    }
   }
 
   const lookups = React.useMemo(
@@ -267,26 +200,12 @@ export function LeadsBoardContainer({
   const now = React.useMemo(() => new Date(), []);
 
   const [dialogOpen, setDialogOpen] = React.useState(false);
-  /** The lead the open edit form is editing; null while creating. */
-  const [editingLead, setEditingLead] = React.useState<SalesOpsLead | null>(null);
   /** The lead whose delete confirmation is open; null when none is. */
   const [deleteTarget, setDeleteTarget] = React.useState<SalesOpsLead | null>(null);
 
-  /*
-    The edit form offers `Excluir lead` only for a lead that can be deleted: a
-    converted one answers 409 and gets no button at all.
-  */
-  const requestDeleteFromForm =
-    editingLead !== null && !leadIsConverted(editingLead)
-      ? () => setDeleteTarget(editingLead)
-      : undefined;
-
   async function confirmDelete(lead: SalesOpsLead) {
     await deleteLead.mutateAsync(lead.id);
-    publishDeleteUndo(lead.id);
-    // The edit dialog is modal, so a delete confirmed while it is open came from
-    // it: its lead is gone, so the form closes with the confirmation.
-    if (editingLead?.id === lead.id) setDialogOpen(false);
+    undo.publishRestore(lead.id);
   }
 
   const definitionsQuery = useFieldDefinitions();
@@ -328,14 +247,12 @@ export function LeadsBoardContainer({
         movePending={moveLead.isPending}
         now={now}
         onCreateLead={() => {
-          setEditingLead(null);
           setDialogOpen(true);
         }}
         onDeleteLead={setDeleteTarget}
-        onEditLead={(lead) => {
-          setEditingLead(lead);
-          setDialogOpen(true);
-        }}
+        onOpenLead={workspace
+          ? (lead) => navigate(buildLeadSummaryPath(workspace, lead.id), { state: LEAD_SUMMARY_OPENED_IN_APP })
+          : undefined}
         onLoadMore={() => {
           void boardQuery.fetchNextPage();
         }}
@@ -367,15 +284,15 @@ export function LeadsBoardContainer({
         <LeadForm
           clients={clients}
           definitions={definitions}
-          initial={editingLead}
-          key={editingLead?.id ?? 'novo'}
+          initial={null}
+          key="novo"
           onCreateClient={onCreateClient}
-          onDelete={requestDeleteFromForm}
           onOpenChange={setDialogOpen}
           // The form awaits the save: it closes on success and, on a rejection
           // (400 no_open_stage included), stays open with the typed values and the
-          // mapped error inline.
-          onSubmit={saveWithUndo}
+          // mapped error inline. The form is create-only here: an existing lead is
+          // edited on its summary page.
+          onSubmit={saveLead.mutateAsync}
           open
           pending={saveLead.isPending}
           products={products}
@@ -402,10 +319,7 @@ export function LeadsBoardContainer({
           open
         />
       ) : null}
-      {undoNotice?.restoreLeadId ? (
-        <RestoreUndoNotice leadId={undoNotice.restoreLeadId} busy={undoBusy} onUndo={(restore) => { void runUndo(restore); }} />
-      ) : undoNotice ? <UndoNotice label={undoNotice.label} busy={undoBusy} onUndo={() => { void runUndo(); }} /> : null}
-      {undoError ? <p className="fixed bottom-20 right-6 z-50 rounded-lg border bg-background px-4 py-3 text-destructive shadow-lg" role="alert">{undoError}</p> : null}
+      <UndoLayer undo={undo} />
     </>
   );
 }

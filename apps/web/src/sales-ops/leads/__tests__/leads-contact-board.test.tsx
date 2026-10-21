@@ -147,7 +147,7 @@ async function renderBoard(overrides: BoardOverrides = {}) {
         lookups={LOOKUPS}
         now={NOW}
         onCreateLead={vi.fn()}
-        onEditLead={vi.fn()}
+        onOpenLead={vi.fn()}
         onMoveLead={vi.fn()}
         stages={STAGES}
         {...overrides}
@@ -442,10 +442,10 @@ describe('contact board with no active etapa', () => {
 });
 
 describe('contact LeadCard keeps the drag guard', () => {
-  async function renderCard(onEdit: ReturnType<typeof vi.fn>) {
+  async function renderCard(onOpen: ReturnType<typeof vi.fn>) {
     await act(async () => {
       root.render(
-        <LeadCard fieldSet="contact" lead={LEADS[0]!} lookups={LOOKUPS} now={NOW} onEdit={onEdit} />,
+        <LeadCard fieldSet="contact" lead={LEADS[0]!} lookups={LOOKUPS} now={NOW} onOpen={onOpen} />,
       );
     });
     return required(`[data-lead-card="${LEAD_ANA}"]`);
@@ -458,19 +458,19 @@ describe('contact LeadCard keeps the drag guard', () => {
   }
 
   it('a click after a drag does not edit', async () => {
-    const onEdit = vi.fn();
-    const card = await renderCard(onEdit);
+    const onOpen = vi.fn();
+    const card = await renderCard(onOpen);
     await pointer(card, 'pointerdown', 0);
     await pointer(card, 'click', 20);
-    expect(onEdit).not.toHaveBeenCalled();
+    expect(onOpen).not.toHaveBeenCalled();
   });
 
   it('a click in place edits once', async () => {
-    const onEdit = vi.fn();
-    const card = await renderCard(onEdit);
+    const onOpen = vi.fn();
+    const card = await renderCard(onOpen);
     await pointer(card, 'pointerdown', 0);
     await pointer(card, 'click', 0);
-    expect(onEdit).toHaveBeenCalledTimes(1);
+    expect(onOpen).toHaveBeenCalledTimes(1);
   });
 });
 

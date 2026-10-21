@@ -2,6 +2,7 @@ import {
   BadgeDollarSign,
   BarChart3,
   BriefcaseBusiness,
+  CalendarClock,
   Cog,
   ContactRound,
   Database,
@@ -39,7 +40,8 @@ export type SalesOpsView =
   | 'funil'
   | 'etapas'
   | 'importacao'
-  | 'leads-excluidos';
+  | 'leads-excluidos'
+  | 'follow-ups';
 
 export type SalesOpsNavigationItem = {
   id: SalesOpsView;
@@ -59,14 +61,18 @@ export type SalesOpsRoute = Readonly<{
   view: SalesOpsView;
   /** The open proposta. Only ever present on the `vendas` view. */
   saleId?: string;
-  /** The selected lead stage. Only present on the `leads` view. */
+  /** The selected lead stage, from the `?etapa=` query, only on the leads view. */
   stageId?: string;
+  /** The open lead summary. Only present on the leads view. */
+  leadId?: string;
 }>;
 
 export type SalesOpsRouteParams = Readonly<{
   workspace?: string;
   view?: string;
   saleId?: string;
+  /** The `?etapa=` query value, read by the caller. Only the leads view honours it. */
+  etapa?: string;
 }>;
 
 export type SalesOpsRouteResolution = Readonly<{
@@ -89,6 +95,8 @@ const operational: SalesOpsNavigationItem[] = [
   */
   { id: 'leads', label: 'Prospecção', icon: LayoutGrid },
   { id: 'funil', label: 'Funil', icon: LayoutGrid },
+  // Appended with the follow-ups list (09e): the team's agenda of next steps.
+  { id: 'follow-ups', label: 'Follow-ups', icon: CalendarClock },
 ];
 
 const cadastros: SalesOpsNavigationItem[] = [
@@ -119,6 +127,8 @@ const meusDadosSeller: SalesOpsNavigationItem[] = [
   */
   { id: 'leads', label: 'Minha prospecção', icon: LayoutGrid },
   { id: 'funil', label: 'Funil', icon: LayoutGrid },
+  // Appended with the follow-ups list (09e): the seller's own agenda.
+  { id: 'follow-ups', label: 'Meus follow-ups', icon: CalendarClock },
 ];
 
 const meusDadosFinder: SalesOpsNavigationItem[] = [
@@ -136,6 +146,7 @@ const meusDadosFinder: SalesOpsNavigationItem[] = [
 const leadsEditionOperational: SalesOpsNavigationItem[] = [
   { id: 'leads', label: 'Prospecção', icon: LayoutGrid },
   { id: 'funil', label: 'Funil', icon: LayoutGrid },
+  { id: 'follow-ups', label: 'Follow-ups', icon: CalendarClock },
 ];
 
 /**
@@ -156,6 +167,7 @@ const leadsEditionCadastros: SalesOpsNavigationItem[] = [
 const leadsEditionMeusDadosSeller: SalesOpsNavigationItem[] = [
   { id: 'leads', label: 'Prospecção', icon: LayoutGrid },
   { id: 'funil', label: 'Funil', icon: LayoutGrid },
+  { id: 'follow-ups', label: 'Meus follow-ups', icon: CalendarClock },
 ];
 
 export const salesOpsWorkspaces: Array<{
@@ -261,12 +273,19 @@ export function getSalesOpsNavigation(
 
 export function buildSalesOpsPath(route: SalesOpsRoute): string {
   const base = `/${route.workspace}/${route.view}`;
-  const segment = route.view === 'leads' ? route.stageId : route.saleId;
-  return segment === undefined ? base : `${base}/${encodeURIComponent(segment)}`;
+  if (route.view === 'leads') {
+    if (route.leadId !== undefined) return `${base}/${encodeURIComponent(route.leadId)}`;
+    return route.stageId === undefined ? base : `${base}?etapa=${encodeURIComponent(route.stageId)}`;
+  }
+  return route.saleId === undefined ? base : `${base}/${encodeURIComponent(route.saleId)}`;
 }
 
 export function buildLeadStagePath(workspace: SalesOpsWorkspace, stageId: string): string {
   return buildSalesOpsPath({ workspace, view: 'leads', stageId });
+}
+
+export function buildLeadSummaryPath(workspace: SalesOpsWorkspace, leadId: string): string {
+  return buildSalesOpsPath({ workspace, view: 'leads', leadId });
 }
 
 export function buildLeadFunnelPath(workspace: SalesOpsWorkspace): string {
@@ -343,22 +362,31 @@ export function resolveSalesOpsRoute(
     : undefined;
 
   if (workspace && view) {
-    if (view === 'leads' && !params.saleId) {
+    if (view === 'leads' && !params.saleId && !params.etapa) {
       const route: SalesOpsRoute = { workspace, view: 'funil' };
       return { route, path: buildSalesOpsPath(route), redirect: true };
     }
-    // The proposta id is honoured on the `vendas` view only. Never write the key
-    // as `saleId: undefined`: a present-but-undefined key trips `toStrictEqual`.
+    // The third segment is the proposta id on `vendas` and the lead id on `leads`.
+    // The `?etapa=` query is the stage selection, on `leads` only. Never write a key
+    // as `undefined`: a present-but-undefined key trips `toStrictEqual`.
     const saleId = view === 'vendas' && params.saleId ? params.saleId : undefined;
-    const stageId = view === 'leads' && params.saleId ? params.saleId : undefined;
-    const route: SalesOpsRoute = saleId !== undefined ? { workspace, view, saleId } : stageId !== undefined ? { workspace, view, stageId } : { workspace, view };
-    const droppedSaleId = params.saleId !== undefined && saleId === undefined && stageId === undefined;
+    const leadId = view === 'leads' && params.saleId ? params.saleId : undefined;
+    const stageId = view === 'leads' && !leadId && params.etapa ? params.etapa : undefined;
+    const route: SalesOpsRoute = {
+      workspace,
+      view,
+      ...(saleId !== undefined ? { saleId } : {}),
+      ...(leadId !== undefined ? { leadId } : {}),
+      ...(stageId !== undefined ? { stageId } : {}),
+    };
+    const droppedSaleId = params.saleId !== undefined && saleId === undefined && leadId === undefined;
+    const droppedEtapa = params.etapa !== undefined && stageId === undefined;
     // An aliased view or a dropped id differs from what the URL asked for, which is
     // exactly when the caller must rewrite the address bar. A canonical route stays `false`.
     return {
       route,
       path: buildSalesOpsPath(route),
-      redirect: view !== params.view || droppedSaleId,
+      redirect: view !== params.view || droppedSaleId || droppedEtapa,
     };
   }
 

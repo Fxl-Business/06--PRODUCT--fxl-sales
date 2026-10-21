@@ -278,8 +278,8 @@ describe('LeadsBoard, driven by the keyboard Mover para dialog alone', () => {
   });
 
   it('opens Mover from a card without editing or lifting, then emits one move', async () => {
-    const onEditLead = vi.fn();
-    const { onMoveLead } = await renderBoard([lead(LEAD_A, 'Ana', NOVO_ID)], { onEditLead });
+    const onOpenLead = vi.fn();
+    const { onMoveLead } = await renderBoard([lead(LEAD_A, 'Ana', NOVO_ID)], { onOpenLead });
     const trigger = required(`[data-lead-card="${LEAD_A}"] [data-card-move="${LEAD_A}"]`);
     expect(trigger.getAttribute('aria-label')).toContain('Ana');
     await act(async () => {
@@ -288,7 +288,7 @@ describe('LeadsBoard, driven by the keyboard Mover para dialog alone', () => {
     });
     expect(document.querySelectorAll(`[data-lead-card="${LEAD_A}"]`)).toHaveLength(1);
     await click(trigger);
-    expect(onEditLead).not.toHaveBeenCalled();
+    expect(onOpenLead).not.toHaveBeenCalled();
     await pick(0, 'Negociação');
     await confirmMove();
     expect(onMoveLead).toHaveBeenCalledExactlyOnceWith({
@@ -599,21 +599,21 @@ describe('a move into the conversion stage goes STRAIGHT to the wizard', () => {
   });
 
   it('opens the editor when a non-converted card is clicked in Quadro', async () => {
-    const onEditLead = vi.fn();
-    await renderBoard([lead(LEAD_A, 'Ana', NOVO_ID)], { onEditLead });
+    const onOpenLead = vi.fn();
+    await renderBoard([lead(LEAD_A, 'Ana', NOVO_ID)], { onOpenLead });
 
     const card = required(`[data-lead-card="${LEAD_A}"]`);
     expect(card.querySelector('[data-card-move]')).not.toBeNull();
-    expect(card.querySelector('[data-edit-lead]')).toBeNull();
+    expect(card.querySelector('[data-open-lead]')).toBeNull();
     await click(card, { clientX: 0, clientY: 0 });
 
-    expect(onEditLead).toHaveBeenCalledTimes(1);
-    expect(onEditLead.mock.calls[0]?.[0]).toMatchObject({ id: LEAD_A });
+    expect(onOpenLead).toHaveBeenCalledTimes(1);
+    expect(onOpenLead.mock.calls[0]?.[0]).toMatchObject({ id: LEAD_A });
   });
 
   it('does NOT open the editor for a click that follows a drag (pointer moved > 6px)', async () => {
-    const onEditLead = vi.fn();
-    await renderBoard([lead(LEAD_A, 'Ana', NOVO_ID)], { onEditLead });
+    const onOpenLead = vi.fn();
+    await renderBoard([lead(LEAD_A, 'Ana', NOVO_ID)], { onOpenLead });
 
     const card = required(`[data-lead-card="${LEAD_A}"]`);
     await act(async () => {
@@ -623,6 +623,6 @@ describe('a move into the conversion stage goes STRAIGHT to the wizard', () => {
     });
     await click(card, { clientX: 20, clientY: 20 });
 
-    expect(onEditLead).not.toHaveBeenCalled();
+    expect(onOpenLead).not.toHaveBeenCalled();
   });
 });

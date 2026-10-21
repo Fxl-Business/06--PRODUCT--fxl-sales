@@ -71,6 +71,14 @@ const OWNED_FILES = [
   // is a lead write, so it obeys the same bans (no transition, no second write path).
   'delete-copy.ts',
   'LeadDeleteDialog.tsx',
+  // The lead summary (09c): it writes through the same lead hooks and obeys the same bans.
+  'LeadSummary.tsx',
+  'LeadSummaryContainer.tsx',
+  'summary-format.ts',
+  'lead-summary-nav.ts',
+  'advance.ts',
+  'AdvanceDialog.tsx',
+  'SummaryComposers.tsx',
 ];
 
 /** The one file allowed to spell the conversion kind, because it owns the question. */

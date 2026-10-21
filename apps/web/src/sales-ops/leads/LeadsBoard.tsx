@@ -22,7 +22,7 @@ import type { MoveLeadPayload } from './api';
 import {
   ALL_PHASES_LABEL,
   BOARD_VIEW_LABEL,
-  EDIT_LABEL,
+  OPEN_LABEL,
   EMPTY_COLUMN_HINT,
   EMPTY_PHASE_LIST,
   LIST_HEADERS,
@@ -140,7 +140,7 @@ export type LeadsBoardProps = {
   onMoveLead: (payload: MoveLeadPayload) => void;
   movePending?: boolean;
   onCreateLead?: () => void;
-  onEditLead?: (lead: SalesOpsLead) => void;
+  onOpenLead?: (lead: SalesOpsLead) => void;
   /**
    * Asks for the delete confirmation of a NON-converted lead: the card's kebab
    * menu (and right-click) and the Lista's `Excluir` call it. The container owns
@@ -180,7 +180,7 @@ type SortableCardProps = {
   lead: SalesOpsLead;
   lookups: LabelLookups;
   now: Date;
-  onEdit?: (lead: SalesOpsLead) => void;
+  onOpen?: (lead: SalesOpsLead) => void;
   onDelete?: (lead: SalesOpsLead) => void;
   onMove?: (lead: SalesOpsLead) => void;
   onOpenSale?: (saleId: string) => void;
@@ -196,7 +196,7 @@ function SortableLeadCard({
   lead,
   lookups,
   now,
-  onEdit,
+  onOpen,
   onDelete,
   onMove,
   onOpenSale,
@@ -222,7 +222,7 @@ function SortableLeadCard({
         now={now}
         onDelete={onDelete}
         onMove={onMove}
-        onEdit={onEdit}
+        onOpen={onOpen}
         fieldSet={fieldSet}
         onOpenSale={onOpenSale}
         showDaysBadge={showDaysBadge}
@@ -299,7 +299,7 @@ export function LeadsBoard({
   onMoveLead,
   movePending = false,
   onCreateLead,
-  onEditLead,
+  onOpenLead,
   onDeleteLead,
   onRequestConversion,
   onOpenSale,
@@ -754,7 +754,7 @@ export function LeadsBoard({
                                   lookups={lookups}
                                   now={now}
                                   onDelete={onDeleteLead}
-                                  onEdit={onEditLead}
+                                  onOpen={onOpenLead}
                                   onOpenSale={onOpenSale}
                                   showDaysBadge={stageIsNormal(stage) && !leadIsConverted(lead)}
                                 />
@@ -769,7 +769,7 @@ export function LeadsBoard({
                                 now={now}
                                 onDelete={onDeleteLead}
                                 onMove={() => openMoveDialog(lead)}
-                                onEdit={onEditLead}
+                                onOpen={onOpenLead}
                                 onOpenSale={onOpenSale}
                                 showDaysBadge={stageIsNormal(stage) && !leadIsConverted(lead)}
                               />
@@ -999,11 +999,11 @@ export function LeadsBoard({
                             ) : null}
                             <button
                               className={listActionButtonClass}
-                              data-edit-lead={row.id}
-                              onClick={() => onEditLead?.(row)}
+                              data-open-lead={row.id}
+                              onClick={() => onOpenLead?.(row)}
                               type="button"
                             >
-                              {EDIT_LABEL}
+                              {OPEN_LABEL}
                             </button>
                             {!converted && onDeleteLead ? (
                               <button
