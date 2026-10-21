@@ -9,6 +9,7 @@ import { AppAuthProvider, Protected, useAuthProfile } from '@/auth/react';
 import { getRolesFromHubClaims } from '@/auth/claims';
 import { resolveSalesEdition, SALES_EDITION_LEADS_MODULE } from '@fxl-sales/shared-utils/sales-edition';
 import { getVisibleWorkspaces } from '@/sales-ops/navigation';
+import { modulesHintFromEdition } from '@/sales-ops/org-modules';
 import { getDevIdentitySession, setDevIdentitySession } from '../dev-identity-registry';
 import { installDevIdentityIfEnabled } from '../install-dev-identity';
 
@@ -57,7 +58,7 @@ type HubClaimsLike = Parameters<typeof getRolesFromHubClaims>[0];
 function Probe() {
   const { roles, edition } = useAuthProfile();
   return (
-    <output data-testid="workspaces">{getVisibleWorkspaces(roles, edition).join(',')}</output>
+    <output data-testid="workspaces">{getVisibleWorkspaces(roles, modulesHintFromEdition(edition)).join(',')}</output>
   );
 }
 

@@ -5,6 +5,7 @@ import { MemoryRouter, Navigate, Route, Routes, useLocation, useParams, useSearc
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LeadSidebarNavigation } from '../leads/LeadSidebarNavigation';
 import { LeadsBoardContainer } from '../leads/LeadsBoardContainer';
+import { modulesForEdition } from '@fxl-sales/shared-utils/crm-model';
 import { buildLeadFunnelPath, buildLeadStagePath, getSalesOpsNavigation, resolveSalesOpsRoute } from '../navigation';
 import type { SalesOpsLead, SalesOpsLeadStage } from '../leads/types';
 import { pipelineFixtureFor } from '../leads/__tests__/pipeline-fixture';
@@ -111,7 +112,7 @@ describe('routed lead stages', () => {
     expect(resolveSalesOpsRoute({ workspace: 'meus-dados', view: 'funil' }, ['finder']).route.view).not.toBe('funil');
     expect(resolveSalesOpsRoute({ workspace: 'operacional', view: 'vendas', saleId: 'sale-1' }, ['admin']).route.saleId).toBe('sale-1');
     expect(getSalesOpsNavigation('operacional', ['admin']).map((item) => item.id)).toEqual(['vendas', 'vendas-abertas', 'vendas-ganhas', 'vendas-encerradas', 'comissoes', 'leads', 'funil', 'follow-ups']);
-    expect(getSalesOpsNavigation('operacional', ['admin'], 'leads').map((item) => item.id)).toEqual(['leads', 'funil', 'follow-ups']);
+    expect(getSalesOpsNavigation('operacional', ['admin'], modulesForEdition('leads')).map((item) => item.id)).toEqual(['leads', 'funil', 'follow-ups']);
   });
 
   it('keeps the active group open, orders active stages, and follows a stage click', async () => {
