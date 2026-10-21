@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { LeadsBoardContainer } from '../LeadsBoardContainer';
 import type { SalesOpsLead, SalesOpsLeadStage } from '../types';
+import { pipelineFixtureFor } from './pipeline-fixture';
 
 const act = (React as typeof React & { act: typeof import('react-dom/test-utils').act }).act;
 const edition = vi.hoisted(() => ({ value: 'full' as 'full' | 'leads' }));
@@ -49,6 +50,7 @@ const fetcher = async (input: string, init?: RequestInit) => {
   const path = url.pathname;
   const method = init?.method ?? 'GET';
   const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : null;
+  if (method === 'GET' && path.endsWith('/pipelines')) return response(200, pipelineFixtureFor(stages));
   if (method === 'GET' && path.endsWith('/lead-stages')) return response(200, { stages });
   if (method === 'GET' && path.endsWith('/leads/summary')) return response(200, {
     stages: stages.map((stage) => ({

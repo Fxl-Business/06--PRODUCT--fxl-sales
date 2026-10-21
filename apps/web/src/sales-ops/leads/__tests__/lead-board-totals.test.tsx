@@ -41,6 +41,7 @@ import type {
   SalesOpsLead,
   SalesOpsLeadStage,
 } from '../types';
+import { pipelineFixtureFor } from './pipeline-fixture';
 
 /**
  * AC11 of lead-lixeira: the board's counts, R$ totals, shares, Lista chips,
@@ -527,6 +528,7 @@ function novoLead(index: number): SalesOpsLead {
 
 function routeApi(path: string, init?: { method?: string }): unknown {
   const method = init?.method ?? 'GET';
+  if (method === 'GET' && path === '/api/v1/sales-ops/pipelines') return pipelineFixtureFor(C_STAGES);
   if (method === 'GET' && path === '/api/v1/sales-ops/lead-stages') return { stages: C_STAGES };
   if (method === 'GET' && path.startsWith('/api/v1/sales-ops/leads/summary')) {
     return summaryHandler();
@@ -608,15 +610,16 @@ describe('LeadsBoardContainer over the real hooks', () => {
     expect(container.textContent).not.toContain('Não foi possível carregar o funil de leads.');
   });
 
-  it('asks for the summary once, with no query string when the board has no filter', async () => {
+  it('asks for the summary once, scoped to the selected pipeline', async () => {
     await renderContainer();
     await waitFor(() => novoCards() === 100, '100 cards');
     const summaryCalls = mockedApiFetch.mock.calls.filter(([path]) =>
       String(path).startsWith('/api/v1/sales-ops/leads/summary'),
     );
     expect(summaryCalls).toHaveLength(1);
+    // The summary is scoped to the default pipeline, the same filters the board reads.
     expect(summaryCalls[0]).toEqual([
-      '/api/v1/sales-ops/leads/summary',
+      '/api/v1/sales-ops/leads/summary?pipelineId=pipe-default',
       { method: 'GET', token: 'test-token' },
     ]);
   });

@@ -21,7 +21,9 @@ type ConversionFilters = { source?: string; finderId?: string } | undefined;
  * structurally identical alias for its own consumers, exactly as
  * `CommissionFilters` duplicates its consumers' shape here.
  */
-type LeadBoardFilters = { sellerPersonId?: string } | undefined;
+type LeadBoardFilters =
+  | { sellerPersonId?: string; pipelineId?: string; from?: string; to?: string }
+  | undefined;
 /** Declared locally for the same reason as `LeadBoardFilters`: the follow-ups list filters. */
 type FollowupFilters = { scope: 'mine' | 'team'; status: 'open' | 'done' | 'all'; from?: string; to?: string };
 

@@ -378,3 +378,39 @@ describe('LeadsBoard funnel toggle', () => {
     expect(container.querySelector('[data-leads-funnel]')).toBeNull();
   });
 });
+
+describe('buildCumulativeFunnel parks a pausado stage like the lost stage', () => {
+  const GANHO_ID = 'cccccccc-0000-4000-8000-000000000005';
+  const PAUSADO_ID = 'cccccccc-0000-4000-8000-000000000006';
+  const PIPELINE_STAGES: SalesOpsLeadStage[] = [
+    stage(NOVO_ID, 'Novo', 'normal', 1),
+    stage(CONV_ID, 'Proposta', 'conversion', 2),
+    { ...stage(GANHO_ID, 'Ganho', 'normal', 3), exitKind: 'ganho' },
+    { ...stage(LOST_ID, 'Perdido', 'lost', 4), exitKind: 'perdido' },
+    { ...stage(PAUSADO_ID, 'Pausado', 'normal', 5), exitKind: 'pausado' },
+  ];
+  const ONE_EACH = [
+    lead('n', NOVO_ID, 100_000),
+    lead('p', CONV_ID, 100_000),
+    lead('g', GANHO_ID, 100_000),
+    lead('x', LOST_ID, 100_000),
+    lead('z', PAUSADO_ID, 100_000),
+  ];
+
+  it('keeps a paused lead out of the taper, so the Ganho row does not count it', () => {
+    const funnel = buildCumulativeFunnel(aggregatesFromLeads(ONE_EACH), PIPELINE_STAGES);
+    expect(funnel.rows.map((row) => [row.name, row.count])).toEqual([
+      ['Novo', 3],
+      ['Proposta', 2],
+      ['Ganho', 1],
+    ]);
+    expect(funnel.parked).toEqual([
+      { stageId: PAUSADO_ID, name: 'Pausado', count: 1, totalBrl: 100_000 },
+    ]);
+    expect(funnel.lost?.name).toBe('Perdido');
+  });
+
+  it('keeps the footer grand total counting every lead, paused included', () => {
+    expect(buildLeadFunnel(aggregatesFromLeads(ONE_EACH), PIPELINE_STAGES).totalCount).toBe(5);
+  });
+});

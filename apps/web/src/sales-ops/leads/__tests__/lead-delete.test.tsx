@@ -14,6 +14,7 @@ import { MUTATION_ERROR_COPY } from '../../mutation-error-copy';
 import { LEAD_DELETE_COPY, LEAD_DELETE_ERROR_COPY, leadDeleteErrorCopy } from '../delete-copy';
 import { flattenLeadPages } from '../optimistic';
 import type { LeadsInfiniteData, SalesOpsLead, SalesOpsLeadStage } from '../types';
+import { pipelineFixtureFor } from './pipeline-fixture';
 
 /**
  * THE LEAD DELETE ORACLE (lixeira slice 03): AC1 to AC5 and AC7 in the UI.
@@ -156,6 +157,9 @@ let deleteCalls: Array<{ url: string; method: string; body: unknown; auth: strin
 function route(input: string, init?: RequestInit): Promise<FakeResponse> {
   const url = new URL(String(input));
   const method = (init?.method ?? 'GET').toUpperCase();
+  if (url.pathname.endsWith('/sales-ops/pipelines')) {
+    return Promise.resolve(json(200, pipelineFixtureFor(STAGES)));
+  }
   if (url.pathname.endsWith('/sales-ops/lead-stages')) {
     return Promise.resolve(json(200, { stages: STAGES }));
   }

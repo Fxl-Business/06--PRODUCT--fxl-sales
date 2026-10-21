@@ -104,6 +104,7 @@ vi.mock('@/components/ui/dialog', () => ({
 }));
 
 import { SalesOpsApp } from '../../SalesOpsApp';
+import { pipelineFixtureFor } from './pipeline-fixture';
 
 const act = (React as typeof React & { act: typeof import('react-dom/test-utils').act }).act;
 
@@ -314,6 +315,7 @@ function route(input: string, init?: RequestInit): Promise<Response> {
   }
 
   if (url.includes('/sales-ops/bootstrap')) return Promise.resolve(json(200, BOOTSTRAP));
+  if (url.includes('/sales-ops/pipelines')) return Promise.resolve(json(200, pipelineFixtureFor(STAGES)));
   if (url.includes('/sales-ops/lead-stages')) {
     return Promise.resolve(json(200, { stages: STAGES.map(stageRow) }));
   }

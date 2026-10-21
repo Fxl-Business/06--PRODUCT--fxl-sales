@@ -77,3 +77,29 @@ describe('avatarInitials', () => {
     expect(avatarInitials('   ')).toBe('?');
   });
 });
+
+describe('stageColors by pipeline type and exit', () => {
+  it('gives orcamento, ganho, perdido and pausado four distinct colours', () => {
+    const map = stageColors([
+      { id: 'o', kind: 'conversion', type: 'orcamento' },
+      { id: 'g', kind: 'normal', type: 'saida', exitKind: 'ganho' },
+      { id: 'p', kind: 'lost', type: 'saida', exitKind: 'perdido' },
+      { id: 'z', kind: 'normal', type: 'saida', exitKind: 'pausado' },
+    ]);
+    const dots = ['o', 'g', 'p', 'z'].map((id) => map.get(id)?.dot);
+    expect(dots).toEqual(['#b7791f', '#2f9155', '#c2413b', '#8b8b92']);
+    expect(new Set(dots).size).toBe(4);
+  });
+
+  it('keeps the legacy conversion and lost colours for stages without a type', () => {
+    const map = stageColors([stage('c', 'conversion'), stage('l', 'lost')]);
+    expect(map.get('c')?.dot).toBe('#2f9155');
+    expect(map.get('l')?.dot).toBe('#c2413b');
+  });
+
+  it('is not normal for a pipeline special stage, and is normal for a plain normal stage', () => {
+    expect(stageIsNormal({ kind: 'conversion', type: 'orcamento' })).toBe(false);
+    expect(stageIsNormal({ kind: 'normal', type: 'saida', exitKind: 'pausado' })).toBe(false);
+    expect(stageIsNormal({ kind: 'normal', type: 'normal' })).toBe(true);
+  });
+});

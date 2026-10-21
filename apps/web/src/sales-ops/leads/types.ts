@@ -152,7 +152,9 @@ export type LeadBoardModel = { leads: SalesOpsLead[]; hasMore: boolean };
  * is imported by `admin/`, `finder/` and `lib/` and must not grow an edge into a
  * sales-ops subtree. It mirrors `CommissionFilters`, duplicated the same way.
  */
-export type LeadBoardFilters = { sellerPersonId?: string } | undefined;
+export type LeadBoardFilters =
+  | { sellerPersonId?: string; pipelineId?: string; from?: string; to?: string }
+  | undefined;
 
 /**
  * One row of `GET /api/v1/sales-ops/leads/summary`: every LIVE lead the caller

@@ -77,13 +77,22 @@ export function dragHandsBackToDialog(stage: SalesOpsLeadStage | undefined): boo
   return stageRequiresReason(stage);
 }
 
+/**
+ * `allowedStageIds` is the pipeline's transition graph from the lead's stage
+ * (`allowedTargetIds`). A stage outside it is never offered as a target; the own
+ * stage stays, because a reorder inside its column is always allowed. Absent
+ * means no graph is known and every stage stays, as before.
+ */
 export function moveTargetsFor(
   lead: SalesOpsLead,
   stages: readonly SalesOpsLeadStage[],
   hasConversionHandler: boolean,
+  allowedStageIds?: ReadonlySet<string>,
 ): SalesOpsLeadStage[] {
   if (leadIsConverted(lead)) return [];
-  return stages.filter((stage) => (stageOpensConversion(stage) ? hasConversionHandler : true));
+  return stages
+    .filter((stage) => (stageOpensConversion(stage) ? hasConversionHandler : true))
+    .filter((stage) => !allowedStageIds || allowedStageIds.has(stage.id));
 }
 
 export type MovePositionOption = { value: string; label: string; index: number };

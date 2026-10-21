@@ -284,3 +284,17 @@ describe('dragHandsBackToDialog', () => {
     expect(dragHandsBackToDialog(undefined)).toBe(false);
   });
 });
+
+describe('moveTargetsFor with allowedStageIds', () => {
+  it('drops the stages outside the allowed set and keeps the own stage when it is in the set', () => {
+    const own = lead(LEAD_A, 'Ana', NEGOCIACAO_ID);
+    const allowed = new Set([NEGOCIACAO_ID, PERDIDO_ID]);
+    const ids = moveTargetsFor(own, stages, true, allowed).map((stage) => stage.id);
+    expect(ids).toEqual([NEGOCIACAO_ID, PERDIDO_ID]);
+  });
+
+  it('keeps every stage when no allowed set is given', () => {
+    const own = lead(LEAD_A, 'Ana', NEGOCIACAO_ID);
+    expect(moveTargetsFor(own, stages, true)).toHaveLength(stages.length);
+  });
+});

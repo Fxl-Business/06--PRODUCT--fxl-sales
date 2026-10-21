@@ -173,3 +173,34 @@ describe('leadsApi', () => {
     ]);
   });
 });
+
+describe('leads period and pipeline query', () => {
+  it('listLeads sends pipelineId, from and to; absent ones are absent', async () => {
+    await leadsApi.listLeads(
+      { stageId: 'S1', pipelineId: 'P1', from: '2026-10-19', to: '2026-10-20' },
+      'token-1',
+    );
+    const url = new URL(`http://x${call(0)[0]}`);
+    expect(url.searchParams.get('pipelineId')).toBe('P1');
+    expect(url.searchParams.get('from')).toBe('2026-10-19');
+    expect(url.searchParams.get('to')).toBe('2026-10-20');
+
+    vi.clearAllMocks();
+    await leadsApi.listLeads({ stageId: 'S1' }, 'token-1');
+    expect(call(0)[0]).toBe(`${LEADS_PATH}?stageId=S1&limit=100`);
+  });
+
+  it('stageSummary carries the same three params and omits absent ones', async () => {
+    await leadsApi.stageSummary({ pipelineId: 'P1', from: '2026-10-19', to: '2026-10-19', sellerPersonId: 'p-2' }, 'token-1');
+    const url = new URL(`http://x${call(0)[0]}`);
+    expect(url.pathname).toBe(`${LEADS_PATH}/summary`);
+    expect(url.searchParams.get('pipelineId')).toBe('P1');
+    expect(url.searchParams.get('from')).toBe('2026-10-19');
+    expect(url.searchParams.get('to')).toBe('2026-10-19');
+    expect(url.searchParams.get('sellerPersonId')).toBe('p-2');
+
+    vi.clearAllMocks();
+    await leadsApi.stageSummary(undefined, 'token-1');
+    expect(call(0)[0]).toBe(`${LEADS_PATH}/summary`);
+  });
+});
