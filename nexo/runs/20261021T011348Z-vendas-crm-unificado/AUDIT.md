@@ -32,3 +32,8 @@ Plan-check (Sonnet) returned FAIL with one major defect: slice 04's oracle used 
 The fix was mechanical, so the orchestrator applied it to the plan text (one `replans` unit): the oracle runs without `--git-base`, and a separate `git status`/`git diff` outside `nexo/runs` proves no product file changed; 04 now depends on 01, 02 and 03; slice 02's test 6 parses its input through `LeadStageSchema`.
 The two stale "zero etapas" comments (`seed-dev.ts:298`, `lead-service.ts:1090`) stay as they are for now (comments only).
 Gate 1 skipped (autopilot), recorded in `nexo/state.json` at Capture.
+
+## A6 - Parallel builds inside a wave
+
+Pace `economico` builds serially; the wave-1 slices have disjoint `files_modified`, so they are built concurrently in their own worktrees to save wall-clock time.
+Merges into the run branch stay serial, and only one slice runs Postgres integration tests at a time.

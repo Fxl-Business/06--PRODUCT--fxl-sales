@@ -1,0 +1,1 @@
+{"agent":"plan-check","slice":"fase0-1a","status":"FAIL","report":"nexo/runs/20261021T011348Z-vendas-crm-unificado/agents/plan-check.md","summary":"01-03 pass; 04 oracle --git-base fails on untracked run records (major, mechanical fix); 4 minors","done":true,"ts":"2026-10-21T01:42:27Z"}
