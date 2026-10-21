@@ -379,14 +379,23 @@ describe('template workbook', () => {
     expect(text).not.toContain('Clientes e pessoas parecidos com um cadastro existente');
   });
 
-  it('Leia-me tells how to save the file, right after Como importar', () => {
+  it('Leia-me talks to the AI assistant that fills the file, right after Como importar', () => {
     const lines = buildLeiameLines(catalogFixture(), { example: false });
     const headings = lines.filter((l) => l.kind === 'heading').map((l) => l.text);
-    expect(headings[headings.indexOf('Como importar') + 1]).toBe('Como salvar o arquivo');
+    const at = headings.indexOf('Como importar');
+    expect(headings.slice(at + 1, at + 3)).toEqual(['Preencher com um assistente de IA', 'Salvar o arquivo']);
     const text = lines.map((l) => l.text).join('\n');
-    for (const s of ['Microsoft Excel instalado no computador', 'Excel na web', '.xls, .csv ou .ods', 'Salvar como .xlsx com outro nome']) {
+    for (const s of [
+      'Instruções para o assistente de IA:',
+      'openpyxl.load_workbook',
+      'sem recriar a planilha do zero',
+      'inclusive Leia-me e Listas',
+      'nunca como .xls, .csv, .ods',
+      'Pasta de Trabalho do Excel (.xlsx)',
+    ]) {
       expect(text).toContain(s);
     }
+    expect(text).not.toContain('Microsoft Excel instalado no computador');
   });
 
   it('derives no metadata from the clock', () => {
