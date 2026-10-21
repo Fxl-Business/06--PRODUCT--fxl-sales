@@ -278,14 +278,17 @@ describe('LeadSummaryContainer', () => {
     expect(container.querySelector('p')?.parentElement?.textContent).not.toContain(LEAD_ID);
   });
 
-  it('Voltar pops history when opened in-app and replaces with the funil otherwise', async () => {
+  it('Voltar pops the history when the summary was opened in-app', async () => {
+    // The previous entry is NOT the funil: a pop lands on /operacional/vendas, a replace with the funil would not.
     await renderAt([
-      '/operacional/funil',
+      '/operacional/vendas',
       { pathname: `/operacional/leads/${LEAD_ID}`, state: LEAD_SUMMARY_OPENED_IN_APP },
     ]);
     await click('[data-summary-back]');
-    expect(path()).toBe('/operacional/funil');
+    expect(path()).toBe('/operacional/vendas');
+  });
 
+  it('Voltar replaces the entry with the funil when the summary was opened directly', async () => {
     await renderAt([`/operacional/leads/${LEAD_ID}`]);
     await click('[data-summary-back]');
     expect(path()).toBe('/operacional/funil');
