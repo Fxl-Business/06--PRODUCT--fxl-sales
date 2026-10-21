@@ -316,4 +316,18 @@ describe('the proposta and commission chrome follows the modules, not the editio
     expect(locationPath()).toBe('/operacional/comissoes');
     expect(buttonsLabelled('Nova proposta').length).toBeGreaterThan(0);
   });
+
+  it('comissoes on with orcamentos off: the commission balance card shows', async () => {
+    settled({ ...LEADS_MODULES, comissoes: true });
+    await render('/operacional/funil', ['admin']);
+
+    expect(container.textContent).toContain('A pagar este mês');
+  });
+
+  it('comissoes off with orcamentos on: the commission balance card is hidden', async () => {
+    settled({ ...FULL_MODULES, comissoes: false });
+    await render('/operacional/funil', ['admin']);
+
+    expect(container.textContent).not.toContain('A pagar este mês');
+  });
 });

@@ -132,7 +132,6 @@ import { computeSaleFinancials } from '@fxl-sales/shared-utils/sale-financials';
 */
 import { SPLIT_BP_TOTAL } from '@fxl-sales/shared-utils/professional-split';
 import { todayInSaoPaulo } from '@fxl-sales/shared-utils/sao-paulo-day';
-import { hasCapability } from '@fxl-sales/shared-utils/sales-edition';
 import {
   editionFromModules,
   isOrgModules,
@@ -2072,7 +2071,7 @@ export function SalesOpsApp() {
               in the leads edition the `commissions` and `proposals` capabilities are
               off, so the card would always read R$ 0 and the wizard could only fail.
             */}
-            {!sidebarCollapsed && hasCapability(edition ?? 'full', 'commissions') ? (
+            {!sidebarCollapsed && modulesAllowCapability(modules, 'commissions') ? (
               <div className="rounded-2xl border border-[#343439] bg-[#242428] p-4">
                 <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[#7c7c85]">
                   A pagar este mês
