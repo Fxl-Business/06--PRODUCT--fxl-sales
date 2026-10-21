@@ -1,18 +1,20 @@
-import { asc, eq } from 'drizzle-orm';
 import type { getDb } from '../../../db/client.js';
-import { salesOpsLeadStages } from '../../../db/schema.js';
+import { ensureCrmDefaults } from '../../crm/defaults.js';
+import { defaultPipelineId, listPipelineStages } from '../../crm/pipeline-read.js';
+import { toLeadStageView, type LeadStageView } from '../../crm/stage-view.js';
 import { withTenant } from './with-tenant.js';
 
 type Db = ReturnType<typeof getDb>;
 
 export type LeadStageKind = 'normal' | 'conversion' | 'lost';
-export type LeadStageRow = typeof salesOpsLeadStages.$inferSelect;
+export type LeadStageRow = LeadStageView;
 
 /**
- * The default pipeline written for every org. Byte-identical to the VALUES list
- * in migration 0022 - if these two ever disagree, an org provisioned before the
- * deploy and one provisioned after get different boards.
- * `leads-schema-migration.test.ts` asserts they agree.
+ * FROZEN since the phase 2 cutover: the four etapas migration 0022 seeded. Nothing writes them any
+ * more (the default etapas of a new org are the seven of the default CRM pipeline, seeded by
+ * `ensureCrmDefaults`); the constant stays only for the 0022 parity oracle
+ * (`leads-schema-migration.test.ts`) and the import template tests. Byte-identical to the VALUES
+ * list in migration 0022.
  *
  * Four stages, only two of them system: two would leave an org with a conversion
  * column and a Perdido column and nowhere for a lead to start. `Novo` and
@@ -35,57 +37,20 @@ export const LEAD_STAGE_SEEDS = [
 export const SYSTEM_LEAD_STAGE_KINDS = ['conversion', 'lost'] as const;
 
 /**
- * Reads the org's stages in board order.
+ * Seeds the org's default CRM pipeline (7 stages, 22 transitions, the Cliente field) when the org
+ * has NO pipeline row and returns the DEFAULT pipeline's stages in board order, in the legacy
+ * `kind` / `isSystem` shape. MUST be called inside an already tenant-scoped transaction; see
+ * {@link ensureLeadStagesForOrg} for the entry point that opens one.
  *
- * The explicit `eq(salesOpsLeadStages.orgId, orgId)` is defence in depth and NOT
- * redundant with RLS: over the `app.fxl_admin` connection the admin policy makes
- * every org's rows visible, and this filter is then the only thing scoping the
- * read.
- */
-function selectStages(tx: Db, orgId: string): Promise<LeadStageRow[]> {
-  return tx
-    .select()
-    .from(salesOpsLeadStages)
-    .where(eq(salesOpsLeadStages.orgId, orgId))
-    .orderBy(asc(salesOpsLeadStages.position), asc(salesOpsLeadStages.name));
-}
-
-/**
- * Seeds the default pipeline for an org that does not have it yet and returns the
- * org's stages in board order. MUST be called inside an already tenant-scoped
- * transaction; see {@link ensureLeadStagesForOrg} for the entry point that opens
- * one.
- *
- * `isSystem` and `kind` are never taken from a caller - there is no caller
- * parameter at all.
+ * This is the legacy facade over `ensureCrmDefaults`: it keeps the callers that predate the cutover
+ * (the stage read, the bootstrap route, the import routes) and their allow-list test unchanged,
+ * and it writes ONLY the unified tables.
  */
 export async function ensureLeadStages(tx: Db, orgId: string): Promise<LeadStageRow[]> {
-  const existing = await selectStages(tx, orgId);
-  // "Has this org been seeded" is "does it have ANY stage row", not "does it have
-  // each of the four". An org that renamed `Novo` to `Prospecção`, or archived
-  // it, must never have `Novo` re-inserted underneath it.
-  if (existing.length > 0) return existing;
-
-  await tx
-    .insert(salesOpsLeadStages)
-    .values(
-      LEAD_STAGE_SEEDS.map((seed) => ({
-        orgId,
-        name: seed.name,
-        kind: seed.kind,
-        isSystem: seed.isSystem,
-        position: seed.position,
-      })),
-    )
-    // Bare, i.e. every unique index, NOT a named arbiter. The table carries two
-    // unique indexes this seed writes into - (org_id, name) and the partial
-    // (org_id, kind) - and naming one makes Postgres raise 23505 whenever it
-    // reports the other, turning a concurrent first read into an HTTP 500.
-    .onConflictDoNothing();
-
-  // Re-read rather than use `.returning()`: a concurrent first caller can win the
-  // race, the conflict is absorbed, and `.returning()` would then come back short.
-  return selectStages(tx, orgId);
+  await ensureCrmDefaults(tx, orgId);
+  const pipelineId = await defaultPipelineId(tx, orgId);
+  if (pipelineId === null) return [];
+  return (await listPipelineStages(tx, orgId, pipelineId)).map(toLeadStageView);
 }
 
 /** Opens the tenant transaction and seeds. The public entry point. */

@@ -1,30 +1,25 @@
-import { leadFieldSet } from '@fxl-sales/shared-utils/sales-edition';
 import { type Context, Hono } from 'hono';
 import { z } from 'zod';
 import { getDb } from '../../../db/client.js';
 import { requireAdmin } from '../../../middleware/require-admin.js';
 import { cadastroActor } from '../cadastro-actor.js';
 import {
-  CreateContactLeadSchema,
-  CreateLeadSchema,
+  LeadPatchSchema,
   LeadStageSummaryQuerySchema,
+  LeadWriteSchema,
   ListDeletedLeadsQuerySchema,
   ListLeadsQuerySchema,
   MoveLeadSchema,
-  UpdateContactLeadSchema,
-  UpdateLeadSchema,
 } from './lead-schemas.js';
 import {
   LeadInputError,
   type LeadScope,
   type WriteLeadResult,
-  createContactLead,
   createLead,
   getLead,
   listLeads,
   moveLead,
   summarizeLeadStages,
-  updateContactLead,
   updateLead,
 } from './lead-service.js';
 import { type LeadActor, deleteLead, listDeletedLeads, restoreLead } from './lead-trash-service.js';
@@ -89,15 +84,6 @@ function leadScope(c: Context): LeadScope {
   };
 }
 
-/**
- * Which lead wire contract this request speaks, from the edition the auth
- * middleware resolved from the VERIFIED token. Absent means 'full', the same
- * fail-to-full rule requireCapability applies, so it can never change FXL.
- */
-function usesContactFields(c: Context): boolean {
-  return leadFieldSet(c.get('salesEdition') ?? 'full') === 'contact';
-}
-
 function validationResponse(c: Context, error: z.ZodError) {
   return c.json({ error: 'validation_error', issues: error.flatten() }, 400);
 }
@@ -152,17 +138,11 @@ leadsRouter.get('/', async (c) => {
 
 leadsRouter.post('/', async (c) => {
   const body = await c.req.json().catch(() => ({}));
+  const parsed = LeadWriteSchema.safeParse(body);
+  if (!parsed.success) return validationResponse(c, parsed.error);
   let result: WriteLeadResult;
   try {
-    if (usesContactFields(c)) {
-      const parsed = CreateContactLeadSchema.safeParse(body);
-      if (!parsed.success) return validationResponse(c, parsed.error);
-      result = await createContactLead(getDb(), c.get('orgId'), parsed.data, leadScope(c));
-    } else {
-      const parsed = CreateLeadSchema.safeParse(body);
-      if (!parsed.success) return validationResponse(c, parsed.error);
-      result = await createLead(getDb(), c.get('orgId'), parsed.data, leadScope(c));
-    }
+    result = await createLead(getDb(), c.get('orgId'), parsed.data, leadScope(c));
   } catch (error) {
     if (error instanceof LeadInputError) return leadInputErrorResponse(c, error);
     throw error;
@@ -212,24 +192,11 @@ leadsRouter.get('/:id', async (c) => {
 leadsRouter.patch('/:id', async (c) => {
   const id = leadIdSchema.safeParse(c.req.param('id'));
   if (!id.success) return c.json({ error: 'not_found' }, 404);
-  const body = await c.req.json().catch(() => ({}));
+  const parsed = LeadPatchSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) return validationResponse(c, parsed.error);
   let result: WriteLeadResult;
   try {
-    if (usesContactFields(c)) {
-      const parsed = UpdateContactLeadSchema.safeParse(body);
-      if (!parsed.success) return validationResponse(c, parsed.error);
-      result = await updateContactLead(
-        getDb(),
-        c.get('orgId'),
-        id.data,
-        parsed.data,
-        leadScope(c),
-      );
-    } else {
-      const parsed = UpdateLeadSchema.safeParse(body);
-      if (!parsed.success) return validationResponse(c, parsed.error);
-      result = await updateLead(getDb(), c.get('orgId'), id.data, parsed.data, leadScope(c));
-    }
+    result = await updateLead(getDb(), c.get('orgId'), id.data, parsed.data, leadScope(c));
   } catch (error) {
     if (error instanceof LeadInputError) return leadInputErrorResponse(c, error);
     throw error;

@@ -24,16 +24,20 @@ import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import * as schema from '../../src/db/schema.js';
 import { testDatabaseUrls } from '../../src/db/__tests__/test-database-urls.js';
-import { CreateLeadSchema, MoveLeadSchema } from '../../src/domains/sales-ops/leads/lead-schemas.js';
 import {
+  LeadWriteBaseSchema,
+  MoveLeadSchema,
+} from '../../src/domains/sales-ops/leads/lead-schemas.js';
+import {
+  createLead,
+  moveLead,
   type LeadScope,
   type LeadView,
   type WriteLeadResult,
-  createLead,
-  moveLead,
 } from '../../src/domains/sales-ops/leads/lead-service.js';
 import { ensureLeadStagesForOrg } from '../../src/domains/sales-ops/leads/stages-seed.js';
 import { PersonSchema, createPerson, withTenant } from '../../src/domains/sales-ops/service.js';
+import { deleteCrmForOrgs } from '../../src/db/__tests__/settlement-test-cleanup.js';
 
 const { appUrl: APP_DB_URL, adminUrl: ADMIN_DB_URL } = testDatabaseUrls();
 const ADMIN_CONNECTION_OPTIONS = { connection: { 'app.fxl_admin': 'true' } } as const;
@@ -88,9 +92,7 @@ describe('sales operations leads: concurrent board writes never deadlock and kee
 
   afterAll(async () => {
     for (const orgId of orgIds) {
-      await adminClient`DELETE FROM sales_ops_lead_products WHERE org_id = ${orgId}`;
-      await adminClient`DELETE FROM sales_ops_leads WHERE org_id = ${orgId}`;
-      await adminClient`DELETE FROM sales_ops_lead_stages WHERE org_id = ${orgId}`;
+      await deleteCrmForOrgs([orgId]);
       await adminClient`DELETE FROM sales_ops_person_funcoes WHERE org_id = ${orgId}`;
       await adminClient`DELETE FROM sales_ops_people WHERE org_id = ${orgId}`;
       await adminClient`DELETE FROM sales_ops_funcoes WHERE org_id = ${orgId}`;
@@ -126,7 +128,7 @@ describe('sales operations leads: concurrent board writes never deadlock and kee
       await createLead(
         db,
         orgId,
-        CreateLeadSchema.parse({
+        LeadWriteBaseSchema.parse({
           contactName,
           clientName: 'Empresa',
           estimatedValueBrl: 100000,
@@ -144,7 +146,7 @@ describe('sales operations leads: concurrent board writes never deadlock and kee
   /** One column as [contactName, position] pairs, in board order, read where RLS hides nothing. */
   async function column(orgId: string, stageId: string) {
     const rows = await adminClient<Array<{ contact_name: string; position: number }>>`
-      SELECT contact_name, "position" FROM sales_ops_leads
+      SELECT contact_name, "position" FROM sales_ops_crm_leads
       WHERE org_id = ${orgId} AND stage_id = ${stageId}
       ORDER BY "position", id`;
     return rows.map((row) => [row.contact_name, row.position]);
@@ -155,7 +157,7 @@ describe('sales operations leads: concurrent board writes never deadlock and kee
       Array<{ seller_person_id: string | null; stage_id: string; position: number; stage_changed_us: string }>
     >`SELECT seller_person_id, stage_id, "position",
              (EXTRACT(EPOCH FROM stage_changed_at)::numeric * 1000000)::bigint::text AS stage_changed_us
-      FROM sales_ops_leads WHERE id = ${leadId}`;
+      FROM sales_ops_crm_leads WHERE id = ${leadId}`;
     return row!;
   }
 
@@ -165,7 +167,7 @@ describe('sales operations leads: concurrent board writes never deadlock and kee
    * writer at a known point (a card its renumber must lock next, or the vendedor
    * row a lead INSERT's foreign-key check must share-lock).
    */
-  async function holdRow(table: 'sales_ops_leads' | 'sales_ops_people', orgId: string, id: string) {
+  async function holdRow(table: 'sales_ops_crm_leads' | 'sales_ops_people', orgId: string, id: string) {
     let release!: () => void;
     const released = new Promise<void>((resolve) => {
       release = resolve;
@@ -213,7 +215,7 @@ describe('sales operations leads: concurrent board writes never deadlock and kee
 
     // Ana's move is parked on `Trava`, the first card its source-column renumber
     // locks after the destination column; Bruno's card sits after it, still free.
-    const hold = await holdRow('sales_ops_leads', w.orgId, parked.id);
+    const hold = await holdRow('sales_ops_crm_leads', w.orgId, parked.id);
     let outcomes: Outcome[];
     try {
       const first = outcomeOf(move(w.orgId, poolAna.id, w.negociacao.id, 0, sellerScope('hub_ana')));
@@ -254,7 +256,7 @@ describe('sales operations leads: concurrent board writes never deadlock and kee
 
     // Ana's reorder is parked on `Trava`, right after her own card in the
     // column's (position, id) lock order; Bruno's card is last and still free.
-    const hold = await holdRow('sales_ops_leads', w.orgId, parked.id);
+    const hold = await holdRow('sales_ops_crm_leads', w.orgId, parked.id);
     let outcomes: Outcome[];
     try {
       const first = outcomeOf(move(w.orgId, anas.id, w.novo.id, 3, sellerScope('hub_ana')));
@@ -290,7 +292,7 @@ describe('sales operations leads: concurrent board writes never deadlock and kee
 
     // Ana's move has claimed the card (uncommitted) and is parked renumbering the
     // source column, on `Trava`.
-    const hold = await holdRow('sales_ops_leads', w.orgId, parked.id);
+    const hold = await holdRow('sales_ops_crm_leads', w.orgId, parked.id);
     let outcomes: Outcome[];
     try {
       const first = outcomeOf(move(w.orgId, pool.id, w.negociacao.id, 0, sellerScope('hub_ana')));
@@ -329,14 +331,14 @@ describe('sales operations leads: concurrent board writes never deadlock and kee
         createLead(
           db,
           w.orgId,
-          CreateLeadSchema.parse({ contactName: 'Primeiro', clientName: 'Empresa', sellerPersonId: w.ana.id }),
+          LeadWriteBaseSchema.parse({ contactName: 'Primeiro', clientName: 'Empresa', sellerPersonId: w.ana.id }),
           ADMIN_SCOPE,
         ),
       );
       const firstPid = (await blockedBehind(hold.pid))!;
       let secondSettled = false;
       const second = outcomeOf(
-        createLead(db, w.orgId, CreateLeadSchema.parse({ contactName: 'Segundo', clientName: 'Empresa' }), ADMIN_SCOPE),
+        createLead(db, w.orgId, LeadWriteBaseSchema.parse({ contactName: 'Segundo', clientName: 'Empresa' }), ADMIN_SCOPE),
       ).finally(() => {
         secondSettled = true;
       });
@@ -378,7 +380,7 @@ describe('sales operations leads: concurrent board writes never deadlock and kee
     });
     const importing = withTenant(db, w.orgId, async (tx) => {
       okLead(
-        await createLead(tx, w.orgId, CreateLeadSchema.parse({ contactName: 'Importado', clientName: 'Empresa' }), ADMIN_SCOPE),
+        await createLead(tx, w.orgId, LeadWriteBaseSchema.parse({ contactName: 'Importado', clientName: 'Empresa' }), ADMIN_SCOPE),
       );
       const [self] = (await tx.execute(sql`SELECT pg_backend_pid() AS pid`)) as unknown as Array<{ pid: number }>;
       started(self!.pid);

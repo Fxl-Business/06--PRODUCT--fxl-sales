@@ -1,11 +1,12 @@
 import { Hono } from 'hono';
+import { z } from 'zod';
 import { getDb } from '../../../db/client.js';
 import { requireAdmin } from '../../../middleware/require-admin.js';
-import { LeadStageSchema, ReorderLeadStagesSchema, UpdateLeadStageSchema } from './schemas.js';
+import { CreateLeadStageSchema, ReorderLeadStagesSchema, UpdateLeadStageSchema } from './schemas.js';
 import {
-  createLeadStage,
+  createLeadStageInPipeline,
   listLeadStages,
-  reorderLeadStages,
+  reorderLeadStagesInPipeline,
   updateLeadStage,
 } from './stage-service.js';
 
@@ -31,7 +32,11 @@ export const leadStagesRouter = new Hono();
 // picker need the list, and a seller has a board - but only an admin may create,
 // rename, archive or reorder one. The same split as GET/POST /funcoes.
 leadStagesRouter.get('/lead-stages', async (c) => {
-  const stages = await listLeadStages(getDb(), c.get('orgId'));
+  const pipelineId = c.req.query('pipelineId');
+  if (pipelineId !== undefined && !z.string().uuid().safeParse(pipelineId).success) {
+    return c.json({ error: 'validation_error', reason: 'invalid_pipeline_id' }, 400);
+  }
+  const stages = await listLeadStages(getDb(), c.get('orgId'), pipelineId);
   return c.json({ stages });
 });
 
@@ -42,7 +47,8 @@ leadStagesRouter.post('/lead-stages/reorder', requireAdmin, async (c) => {
   if (!parsed.success) {
     return c.json({ error: 'validation_error', issues: parsed.error.flatten() }, 400);
   }
-  const stages = await reorderLeadStages(getDb(), c.get('orgId'), parsed.data.stageIds);
+  const stages = await reorderLeadStagesInPipeline(getDb(), c.get('orgId'), parsed.data.stageIds, parsed.data.pipelineId);
+  if (stages === 'pipeline_not_found') return c.json({ error: 'not_found' }, 404);
   if (stages === 'set_mismatch') {
     return c.json({ error: 'validation_error', reason: 'stage_set_mismatch' }, 400);
   }
@@ -50,11 +56,12 @@ leadStagesRouter.post('/lead-stages/reorder', requireAdmin, async (c) => {
 });
 
 leadStagesRouter.post('/lead-stages', requireAdmin, async (c) => {
-  const parsed = LeadStageSchema.safeParse(await c.req.json().catch(() => ({})));
+  const parsed = CreateLeadStageSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) {
     return c.json({ error: 'validation_error', issues: parsed.error.flatten() }, 400);
   }
-  const stage = await createLeadStage(getDb(), c.get('orgId'), parsed.data);
+  const stage = await createLeadStageInPipeline(getDb(), c.get('orgId'), parsed.data);
+  if (stage === 'pipeline_not_found') return c.json({ error: 'not_found' }, 404);
   if (stage === 'duplicate') return c.json({ error: 'conflict', reason: 'stage_name_taken' }, 409);
   return c.json({ stage }, 201);
 });

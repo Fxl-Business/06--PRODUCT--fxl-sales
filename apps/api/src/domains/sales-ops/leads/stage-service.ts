@@ -1,15 +1,24 @@
+import { planPipelineTransitions, type TransitionPlanStage } from '@fxl-sales/shared-utils/crm-model';
 import { and, asc, eq, max, ne } from 'drizzle-orm';
 import type { getDb } from '../../../db/client.js';
-import { salesOpsLeadStages } from '../../../db/schema.js';
+import { salesOpsPipelineStages, salesOpsPipelineTransitions } from '../../../db/schema.js';
+import { defaultPipelineId, listPipelineStages, pipelineExists } from '../../crm/pipeline-read.js';
+import { ensureBareDefaultPipeline } from '../../crm/pipeline-write.js';
+import { legacyStageIsSystem, toLeadStageView, type LeadStageView } from '../../crm/stage-view.js';
 import { ensureLeadStages } from './stages-seed.js';
 import { withTenant } from './with-tenant.js';
 import type { LeadStageInput } from './schemas.js';
 
 type Db = ReturnType<typeof getDb>;
 
-export type LeadStageRow = typeof salesOpsLeadStages.$inferSelect;
+export type LeadStageRow = LeadStageView;
 
 /**
+ * Phase 2 cutover: these functions read and write the unified `sales_ops_pipeline_stages`. The
+ * response keeps the old row shape (`kind`, `isSystem`, derived) and adds `pipelineId`, `type`,
+ * `behavior`, `exitKind` and `requiresReason`. Without an explicit pipeline every function works
+ * on the org's DEFAULT pipeline.
+ *
  * There is exactly ONE duplicate sentinel on this surface.
  *
  * Unlike createFuncao there is no 'duplicate_slug' and no 'reserved_slug': 01
@@ -28,7 +37,7 @@ export type LeadStageDuplicate = 'duplicate';
  * `kind`, so it can never be the constraint a PATCH violates.
  */
 const LEAD_STAGE_UNIQUE_VIOLATIONS: Record<string, LeadStageDuplicate> = {
-  sales_ops_lead_stages_org_name_idx: 'duplicate',
+  sales_ops_pipeline_stages_org_pipeline_name_idx: 'duplicate',
 };
 
 function mapLeadStageUniqueViolation(error: unknown): LeadStageDuplicate | null {
@@ -48,24 +57,38 @@ function mapLeadStageUniqueViolation(error: unknown): LeadStageDuplicate | null 
   return null;
 }
 
-/** Per-org uniqueness for the display name. One rule, so one probe. */
+/** Per-pipeline uniqueness for the display name. One rule, so one probe. */
 async function findLeadStageClash(
   tx: Db,
   orgId: string,
+  pipelineId: string,
   name: string,
   excludeId?: string,
 ): Promise<LeadStageDuplicate | null> {
-  const notSelf = excludeId ? [ne(salesOpsLeadStages.id, excludeId)] : [];
+  const notSelf = excludeId ? [ne(salesOpsPipelineStages.id, excludeId)] : [];
   const [byName] = await tx
-    .select({ id: salesOpsLeadStages.id })
-    .from(salesOpsLeadStages)
-    .where(and(eq(salesOpsLeadStages.orgId, orgId), eq(salesOpsLeadStages.name, name), ...notSelf))
+    .select({ id: salesOpsPipelineStages.id })
+    .from(salesOpsPipelineStages)
+    .where(
+      and(
+        eq(salesOpsPipelineStages.orgId, orgId),
+        eq(salesOpsPipelineStages.pipelineId, pipelineId),
+        eq(salesOpsPipelineStages.name, name),
+        ...notSelf,
+      ),
+    )
     .limit(1);
   return byName ? 'duplicate' : null;
 }
 
+/** The pipeline a request addresses: the explicit one when it exists in the org, else the default. */
+async function resolvePipeline(tx: Db, orgId: string, requested?: string): Promise<string | null> {
+  if (requested !== undefined) return (await pipelineExists(tx, orgId, requested)) ? requested : null;
+  return defaultPipelineId(tx, orgId);
+}
+
 /**
- * The org's stages in board order.
+ * The pipeline's stages in board order.
  *
  * It returns ARCHIVED stages too, a deliberate divergence from the four audited
  * cadastros. A lead can still be sitting on a stage an admin just archived, and
@@ -74,54 +97,110 @@ async function findLeadStageClash(
  * stage can be restored from, and it can only offer that if this read returns
  * the archived row. The board filters to `status === 'active'` itself.
  *
- * `name` is the tiebreaker so the order is total even before the first reorder,
- * when the seed may have written equal positions.
- *
- * Seeds the default pipeline when the org has no stage row at all (ECV bug); see
- * ensureLeadStages.
+ * Seeds the default CRM pipeline when the org has no pipeline row at all (ECV bug); see
+ * ensureLeadStages. An unknown `pipelineId` answers an empty list.
  */
-export function listLeadStages(db: Db, orgId: string): Promise<LeadStageRow[]> {
-  return withTenant(db, orgId, (tx) => ensureLeadStages(tx, orgId));
+export function listLeadStages(db: Db, orgId: string, pipelineId?: string): Promise<LeadStageRow[]> {
+  return withTenant(db, orgId, async (tx) => {
+    const seeded = await ensureLeadStages(tx, orgId);
+    if (pipelineId === undefined) return seeded;
+    if (!(await pipelineExists(tx, orgId, pipelineId))) return [];
+    return (await listPipelineStages(tx, orgId, pipelineId)).map(toLeadStageView);
+  });
 }
 
-export function createLeadStage(
+export type LeadStageCreateInput = LeadStageInput & { pipelineId?: string | undefined };
+
+/** Creates a stage in the org's DEFAULT pipeline (the import executor and every pre-cutover caller). */
+export async function createLeadStage(
   db: Db,
   orgId: string,
   data: LeadStageInput,
 ): Promise<LeadStageRow | LeadStageDuplicate> {
+  // Without a pipelineId the default pipeline is used, so 'pipeline_not_found' is unreachable.
+  return (await createLeadStageInPipeline(db, orgId, data)) as LeadStageRow | LeadStageDuplicate;
+}
+
+export function createLeadStageInPipeline(
+  db: Db,
+  orgId: string,
+  data: LeadStageCreateInput,
+): Promise<LeadStageRow | LeadStageDuplicate | 'pipeline_not_found'> {
   return withTenant(db, orgId, async (tx) => {
+    // An org that never read its etapas has no pipeline yet: its first etapa creates the bare
+    // default pipeline and the org is then never seeded (the pre-cutover "own first etapa" rule).
+    const pipelineId =
+      data.pipelineId === undefined
+        ? await ensureBareDefaultPipeline(tx, orgId)
+        : await resolvePipeline(tx, orgId, data.pipelineId);
+    if (pipelineId === null) return 'pipeline_not_found' as const;
+
     // Fast path, purely for the error message: it names which rule was hit
     // without waiting on a lock. It is NOT the guard - see the conflict clause.
-    const clash = await findLeadStageClash(tx, orgId, data.name);
+    const clash = await findLeadStageClash(tx, orgId, pipelineId, data.name);
     if (clash) return clash;
 
-    // The max is taken over EVERY stage in the org, archived included, so a new
+    // The max is taken over EVERY stage in the pipeline, archived included, so a new
     // stage can never land on an archived stage's position and a later restore
     // cannot collide. A count(*)-based position would.
     const [{ value: highest } = { value: null }] = await tx
-      .select({ value: max(salesOpsLeadStages.position) })
-      .from(salesOpsLeadStages)
-      .where(eq(salesOpsLeadStages.orgId, orgId));
+      .select({ value: max(salesOpsPipelineStages.position) })
+      .from(salesOpsPipelineStages)
+      .where(and(eq(salesOpsPipelineStages.orgId, orgId), eq(salesOpsPipelineStages.pipelineId, pipelineId)));
     const position = (highest ?? -1) + 1;
 
     const [stage] = await tx
-      .insert(salesOpsLeadStages)
-      // `isSystem` and `kind` are written LITERALLY here and never spread from
-      // `data` - the same reason createFuncao writes isSystem: false literally.
-      // Only the migration seed may mint a system stage.
-      .values({ ...data, orgId, position, isSystem: false, kind: 'normal' })
+      .insert(salesOpsPipelineStages)
+      // `type`, `behavior` and `exitKind` are written LITERALLY here and never spread from
+      // `data`: a stage minted through this API is always an ordinary open stage.
+      .values({
+        orgId,
+        pipelineId,
+        name: data.name,
+        status: data.status,
+        position,
+        type: 'normal',
+        behavior: 'none',
+        exitKind: null,
+        requiresReason: false,
+      })
       // The probe above is a time-of-check/time-of-use race: a concurrent writer
       // (an admin double-clicking Save is enough) can land the same name in
       // between, and a plain INSERT would raise 23505 and escape as an HTTP 500
       // instead of the designed 409. Absorbing the conflict here makes
-      // sales_ops_lead_stages_org_name_idx the ACTUAL guard.
+      // sales_ops_pipeline_stages_org_pipeline_name_idx the ACTUAL guard.
       .onConflictDoNothing()
       .returning();
-    if (stage) return stage;
-    // Lost the race. Re-probe under a fresh statement snapshot, which now sees
-    // the committed winner, and fall back to the name reason.
-    return (await findLeadStageClash(tx, orgId, data.name)) ?? ('duplicate' as const);
+    if (!stage) {
+      // Lost the race. Re-probe under a fresh statement snapshot, which now sees
+      // the committed winner, and fall back to the name reason.
+      return (await findLeadStageClash(tx, orgId, pipelineId, data.name)) ?? ('duplicate' as const);
+    }
+    await addTransitionsForNewStage(tx, orgId, pipelineId, stage.id);
+    return toLeadStageView(stage);
   });
+}
+
+/**
+ * A new open stage must be reachable: the explicit transition graph says "a pair that is absent is
+ * not allowed". The pairs the shared rule (`planPipelineTransitions`) gives the new stage - to and
+ * from the previous open stage, to every exit, and from the pausado exit - are inserted; pairs
+ * between OTHER stages are never touched, so a graph the org shaped stays as it is.
+ */
+async function addTransitionsForNewStage(
+  tx: Db,
+  orgId: string,
+  pipelineId: string,
+  stageId: string,
+): Promise<void> {
+  const stages = await listPipelineStages(tx, orgId, pipelineId);
+  const plan = stages.map((stage) => ({ ...stage, type: stage.type as TransitionPlanStage['type'], exitKind: stage.exitKind as TransitionPlanStage['exitKind'], status: stage.status as TransitionPlanStage['status'] }));
+  const pairs = planPipelineTransitions(plan).filter(([from, to]) => from === stageId || to === stageId);
+  if (pairs.length === 0) return;
+  await tx
+    .insert(salesOpsPipelineTransitions)
+    .values(pairs.map(([fromStageId, toStageId]) => ({ orgId, pipelineId, fromStageId, toStageId })))
+    .onConflictDoNothing();
 }
 
 export function updateLeadStage(
@@ -133,21 +212,21 @@ export function updateLeadStage(
   return withTenant(db, orgId, async (tx) => {
     const [current] = await tx
       .select()
-      .from(salesOpsLeadStages)
-      .where(and(eq(salesOpsLeadStages.orgId, orgId), eq(salesOpsLeadStages.id, id)))
+      .from(salesOpsPipelineStages)
+      .where(and(eq(salesOpsPipelineStages.orgId, orgId), eq(salesOpsPipelineStages.id, id)))
       .limit(1)
       .for('update');
     if (!current) return null;
-    // Byte-for-byte the funções rule: a system stage is fully immutable through
-    // this endpoint - no rename, no archive, no restore. Its POSITION is still
+    // Byte-for-byte the funções rule: a system stage (the conversion and the lost etapa) is fully
+    // immutable through this endpoint - no rename, no archive, no restore. Its POSITION is still
     // reorderable, which reorderLeadStages does without going through here.
-    if (current.isSystem && (data.name !== undefined || data.status !== undefined)) {
+    if (legacyStageIsSystem(current) && (data.name !== undefined || data.status !== undefined)) {
       return 'is_system' as const;
     }
 
     if (data.name !== undefined) {
       // Fast path for the error message only; the unique index is the real guard.
-      const clash = await findLeadStageClash(tx, orgId, data.name, id);
+      const clash = await findLeadStageClash(tx, orgId, current.pipelineId, data.name, id);
       if (clash) return clash;
     }
 
@@ -159,15 +238,15 @@ export function updateLeadStage(
     try {
       stage = await tx.transaction(async (nested) => {
         const [row] = await nested
-          .update(salesOpsLeadStages)
+          .update(salesOpsPipelineStages)
           .set({
             ...data,
             ...archivedAtPatch(current.status, data.status ?? current.status),
             updatedAt: new Date(),
           })
-          .where(and(eq(salesOpsLeadStages.orgId, orgId), eq(salesOpsLeadStages.id, id)))
+          .where(and(eq(salesOpsPipelineStages.orgId, orgId), eq(salesOpsPipelineStages.id, id)))
           .returning();
-        return row ?? null;
+        return row ? toLeadStageView(row) : null;
       });
     } catch (error) {
       const violated = mapLeadStageUniqueViolation(error);
@@ -195,9 +274,9 @@ function archivedAtPatch(before: string, after: string): { archivedAt?: Date | n
 }
 
 /**
- * Writes a total order over the org's ACTIVE stages, in ONE transaction.
+ * Writes a total order over the pipeline's ACTIVE stages, in ONE transaction.
  *
- * - The payload is the COMPLETE ordered set of the org's active stage ids, or it
+ * - The payload is the COMPLETE ordered set of the pipeline's active stage ids, or it
  *   is rejected. A partial "move stage X to index 3" payload cannot express the
  *   result without the server re-deriving every other position, and two admins
  *   doing that concurrently interleave into an order neither asked for. A total
@@ -211,20 +290,39 @@ function archivedAtPatch(before: string, after: string): { archivedAt?: Date | n
  *   index would abort the transaction. This endpoint is the only writer of
  *   position after create and it writes a total order, so uniqueness is an
  *   invariant of the writer rather than of the schema.
- * - It writes sales_ops_lead_stages and NOTHING else. No lead row is read or
- *   written, so no lead's stage_changed_at can move.
+ * - It writes the stage rows and NOTHING else. No lead row is read or written, so no lead's
+ *   stage_changed_at can move, and the transition graph is explicit data: reordering never
+ *   regenerates it.
  */
-export function reorderLeadStages(
+/** Reorders the DEFAULT pipeline's active stages. */
+export async function reorderLeadStages(
   db: Db,
   orgId: string,
   stageIds: string[],
 ): Promise<LeadStageRow[] | 'set_mismatch'> {
+  return (await reorderLeadStagesInPipeline(db, orgId, stageIds, undefined)) as LeadStageRow[] | 'set_mismatch';
+}
+
+export function reorderLeadStagesInPipeline(
+  db: Db,
+  orgId: string,
+  stageIds: string[],
+  pipelineId: string | undefined,
+): Promise<LeadStageRow[] | 'set_mismatch' | 'pipeline_not_found'> {
   return withTenant(db, orgId, async (tx) => {
+    const resolved = await resolvePipeline(tx, orgId, pipelineId);
+    if (resolved === null) return (pipelineId === undefined ? 'set_mismatch' : 'pipeline_not_found') as 'set_mismatch';
     const active = await tx
-      .select({ id: salesOpsLeadStages.id })
-      .from(salesOpsLeadStages)
-      .where(and(eq(salesOpsLeadStages.orgId, orgId), eq(salesOpsLeadStages.status, 'active')))
-      .orderBy(asc(salesOpsLeadStages.position))
+      .select({ id: salesOpsPipelineStages.id })
+      .from(salesOpsPipelineStages)
+      .where(
+        and(
+          eq(salesOpsPipelineStages.orgId, orgId),
+          eq(salesOpsPipelineStages.pipelineId, resolved),
+          eq(salesOpsPipelineStages.status, 'active'),
+        ),
+      )
+      .orderBy(asc(salesOpsPipelineStages.position))
       .for('update');
 
     // Full-set equality, both directions. The schema already refused duplicates,
@@ -235,15 +333,11 @@ export function reorderLeadStages(
 
     for (const [index, id] of stageIds.entries()) {
       await tx
-        .update(salesOpsLeadStages)
+        .update(salesOpsPipelineStages)
         .set({ position: index, updatedAt: new Date() })
-        .where(and(eq(salesOpsLeadStages.orgId, orgId), eq(salesOpsLeadStages.id, id)));
+        .where(and(eq(salesOpsPipelineStages.orgId, orgId), eq(salesOpsPipelineStages.id, id)));
     }
 
-    return tx
-      .select()
-      .from(salesOpsLeadStages)
-      .where(eq(salesOpsLeadStages.orgId, orgId))
-      .orderBy(asc(salesOpsLeadStages.position), asc(salesOpsLeadStages.name));
+    return (await listPipelineStages(tx, orgId, resolved)).map(toLeadStageView);
   });
 }

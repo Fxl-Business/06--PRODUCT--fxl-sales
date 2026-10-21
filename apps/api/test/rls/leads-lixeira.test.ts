@@ -38,22 +38,20 @@ import * as schema from '../../src/db/schema.js';
 import { testDatabaseUrls } from '../../src/db/__tests__/test-database-urls.js';
 import { computeEntryHash } from '../../src/domains/audit/service.js';
 import {
-  CreateContactLeadSchema,
-  CreateLeadSchema,
+  LeadPatchSchema,
+  LeadWriteBaseSchema,
   ListLeadsQuerySchema,
   MoveLeadSchema,
-  UpdateLeadSchema,
 } from '../../src/domains/sales-ops/leads/lead-schemas.js';
 import {
   LeadInputError,
-  type LeadScope,
-  type LeadView,
-  type WriteLeadResult,
-  createContactLead,
   createLead,
   getLead,
   listLeads,
   moveLead,
+  type LeadScope,
+  type LeadView,
+  type WriteLeadResult,
   updateLead,
 } from '../../src/domains/sales-ops/leads/lead-service.js';
 import {
@@ -66,6 +64,7 @@ import { LeadStageSchema } from '../../src/domains/sales-ops/leads/schemas.js';
 import { createLeadStage, updateLeadStage } from '../../src/domains/sales-ops/leads/stage-service.js';
 import { ensureLeadStagesForOrg } from '../../src/domains/sales-ops/leads/stages-seed.js';
 import { PersonSchema, createPerson } from '../../src/domains/sales-ops/service.js';
+import { deleteCrmForOrgs } from '../../src/db/__tests__/settlement-test-cleanup.js';
 
 const { leadsRouter } = await import('../../src/domains/sales-ops/leads/lead-routes.js');
 
@@ -155,9 +154,7 @@ describe('sales operations leads: the lixeira', () => {
     for (const orgId of orgIds) {
       // Our entries are the ledger tail because the integration project runs files serially.
       await adminClient`DELETE FROM audit_log WHERE actor_org_id = ${orgId}`;
-      await adminClient`DELETE FROM sales_ops_lead_products WHERE org_id = ${orgId}`;
-      await adminClient`DELETE FROM sales_ops_leads WHERE org_id = ${orgId}`;
-      await adminClient`DELETE FROM sales_ops_lead_stages WHERE org_id = ${orgId}`;
+      await deleteCrmForOrgs([orgId]);
       await adminClient`DELETE FROM sales_ops_payables WHERE org_id = ${orgId}`;
       await adminClient`DELETE FROM sales_ops_receivables WHERE org_id = ${orgId}`;
       await adminClient`DELETE FROM sales_ops_sale_items WHERE org_id = ${orgId}`;
@@ -171,7 +168,7 @@ describe('sales operations leads: the lixeira', () => {
       await adminClient`DELETE FROM sales_ops_funcoes WHERE org_id = ${orgId}`;
       await adminClient`DELETE FROM sales_ops_clients WHERE org_id = ${orgId}`;
     }
-    await adminClient.unsafe(`DROP TRIGGER IF EXISTS fxl_lixeira_commit_probe_trg ON sales_ops_leads`);
+    await adminClient.unsafe(`DROP TRIGGER IF EXISTS fxl_lixeira_commit_probe_trg ON sales_ops_crm_leads`);
     await adminClient.unsafe(`DROP FUNCTION IF EXISTS fxl_lixeira_commit_probe()`);
     await closeDb();
     await appClient.end();
@@ -217,7 +214,7 @@ describe('sales operations leads: the lixeira', () => {
       await createLead(
         db,
         orgId,
-        CreateLeadSchema.parse({
+        LeadWriteBaseSchema.parse({
           contactName,
           clientName: 'Empresa Pool',
           estimatedValueBrl: 100000,
@@ -245,7 +242,7 @@ describe('sales operations leads: the lixeira', () => {
       }>
     >`SELECT seller_person_id, seller_name_snapshot, stage_id, "position", contact_name, lost_reason,
              stage_changed_at, deleted_at, deleted_by_user_id, deleted_by_name, updated_at
-      FROM sales_ops_leads WHERE id = ${leadId}`;
+      FROM sales_ops_crm_leads WHERE id = ${leadId}`;
     return row!;
   }
 
@@ -258,7 +255,7 @@ describe('sales operations leads: the lixeira', () => {
 
   async function livePositions(orgId: string, stageId: string) {
     const rows = await adminClient<Array<{ contact_name: string; position: number }>>`
-      SELECT contact_name, "position" FROM sales_ops_leads
+      SELECT contact_name, "position" FROM sales_ops_crm_leads
       WHERE org_id = ${orgId} AND stage_id = ${stageId} AND deleted_at IS NULL
       ORDER BY "position"`;
     return rows.map((row) => [row.contact_name, row.position]);
@@ -275,14 +272,14 @@ describe('sales operations leads: the lixeira', () => {
       CREATE OR REPLACE FUNCTION fxl_lixeira_commit_probe() RETURNS trigger AS $$
       BEGIN RAISE EXCEPTION 'fxl_lixeira_commit_probe'; END $$ LANGUAGE plpgsql`);
     await adminClient.unsafe(`
-      CREATE CONSTRAINT TRIGGER fxl_lixeira_commit_probe_trg AFTER UPDATE ON sales_ops_leads
+      CREATE CONSTRAINT TRIGGER fxl_lixeira_commit_probe_trg AFTER UPDATE ON sales_ops_crm_leads
         DEFERRABLE INITIALLY DEFERRED
         FOR EACH ROW WHEN (NEW.id = '${leadId}')
         EXECUTE FUNCTION fxl_lixeira_commit_probe()`);
     try {
       return await run();
     } finally {
-      await adminClient.unsafe(`DROP TRIGGER IF EXISTS fxl_lixeira_commit_probe_trg ON sales_ops_leads`);
+      await adminClient.unsafe(`DROP TRIGGER IF EXISTS fxl_lixeira_commit_probe_trg ON sales_ops_crm_leads`);
       await adminClient.unsafe(`DROP FUNCTION IF EXISTS fxl_lixeira_commit_probe()`);
     }
   }
@@ -310,7 +307,7 @@ describe('sales operations leads: the lixeira', () => {
     expect(open.leads.map((lead) => lead.position)).toEqual([1, 2]);
 
     expect(await getLead(db, w.orgId, a.id, ADMIN_SCOPE)).toEqual(NOT_FOUND);
-    expect(await updateLead(db, w.orgId, a.id, UpdateLeadSchema.parse({ contactName: 'X' }), ADMIN_SCOPE)).toEqual(
+    expect(await updateLead(db, w.orgId, a.id, LeadPatchSchema.parse({ contactName: 'X' }), ADMIN_SCOPE)).toEqual(
       NOT_FOUND,
     );
     expect(
@@ -569,7 +566,7 @@ describe('sales operations leads: the lixeira', () => {
     expect(result.lead.lostReason).toBeNull();
     expect(new Date(result.lead.stageChangedAt).getTime()).toBeGreaterThan(s1.getTime());
     const restored = (await auditFor(lead.id))[1]!;
-    expect((restored.before_jsonb as { stageName: string }).stageName).toBe('Em negociação');
+    expect((restored.before_jsonb as { stageName: string }).stageName).toBe(w.second.name);
     expect((restored.after_jsonb as { metadata: { stageName: string } }).metadata.stageName).toBe('Novo');
 
     // Leads edition with no open etapa left: the existing 400 sentinel, and nothing is seeded.
@@ -578,10 +575,10 @@ describe('sales operations leads: the lixeira', () => {
     if (unico === 'duplicate') throw new Error('duplicate stage');
     const carla = await vendedor(org2, 'Carla', 'hub_carla', true);
     const contact = okLead(
-      await createContactLead(
+      await createLead(
         db,
         org2,
-        CreateContactLeadSchema.parse({ contactName: 'Contato' }),
+        LeadWriteBaseSchema.parse({ contactName: 'Contato' }),
         leadsSellerScope('hub_carla'),
       ),
     );
@@ -596,7 +593,7 @@ describe('sales operations leads: the lixeira', () => {
     expect((await rowOf(contact.id)).deleted_at).not.toBeNull();
     expect(await auditFor(contact.id)).toHaveLength(1);
     const stageCount = await adminClient<{ n: number }[]>`
-      SELECT count(*)::int AS n FROM sales_ops_lead_stages WHERE org_id = ${org2}`;
+      SELECT count(*)::int AS n FROM sales_ops_pipeline_stages WHERE org_id = ${org2}`;
     expect(stageCount[0]!.n).toBe(1);
   });
 
@@ -618,7 +615,7 @@ describe('sales operations leads: the lixeira', () => {
     // Through ::text first: postgres.js serializes a timestamptz-typed parameter
     // via a JS Date and would round the instant to milliseconds.
     const setAt = (id: string, at: string) =>
-      adminClient`UPDATE sales_ops_leads SET deleted_at = ${at}::text::timestamptz WHERE id = ${id}`;
+      adminClient`UPDATE sales_ops_crm_leads SET deleted_at = ${at}::text::timestamptz WHERE id = ${id}`;
     await setAt(l1.id, '2026-10-01T12:00:00.123456Z');
     await setAt(l2.id, '2026-10-01T12:00:00.123400Z');
     await setAt(l3.id, '2026-10-01T12:00:00.123400Z');

@@ -19,6 +19,9 @@ export const LeadStageSchema = z.object({
   status: z.enum(['active', 'archived']).default('active'),
 });
 
+/** `POST /lead-stages`: the stage plus the optional pipeline it joins (default pipeline when absent). */
+export const CreateLeadStageSchema = LeadStageSchema.extend({ pipelineId: z.string().uuid().optional() });
+
 /**
  * `.partial()` over a schema carrying a `.default()` keeps `parse({})` equal to
  * `{}`, exactly as UpdateFuncaoSchema does. Same spelling, deliberately.
@@ -33,6 +36,7 @@ export const UpdateLeadStageSchema = LeadStageSchema.partial();
 export const ReorderLeadStagesSchema = z
   .object({
     stageIds: z.array(z.string().uuid()).min(1),
+    pipelineId: z.string().uuid().optional(),
   })
   .superRefine((value, ctx) => {
     if (new Set(value.stageIds).size === value.stageIds.length) return;

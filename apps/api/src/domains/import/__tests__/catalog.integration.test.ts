@@ -4,14 +4,15 @@
  *
  * Run: VITEST_INTEGRATION=1 pnpm exec vitest run src/domains/import/__tests__/catalog.integration.test.ts
  */
-import { eq, inArray } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
+import { deleteCrmForOrgs } from '../../../db/__tests__/settlement-test-cleanup.js';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { closeDb, getAdminDb, getDb } from '../../../db/client.js';
 import {
   salesOpsAreas,
   salesOpsClients,
   salesOpsFuncoes,
-  salesOpsLeadStages,
+  salesOpsPipelineStages,
   salesOpsPeople,
   salesOpsPersonFuncoes,
   salesOpsProductFuncaoCosts,
@@ -42,7 +43,7 @@ const catalogOf = (orgId: string, now = NOW) =>
 
 async function counts(orgId: string) {
   const admin = getAdminDb();
-  const stages = await admin.select().from(salesOpsLeadStages).where(eq(salesOpsLeadStages.orgId, orgId));
+  const stages = await admin.select().from(salesOpsPipelineStages).where(eq(salesOpsPipelineStages.orgId, orgId));
   const funcoes = await admin.select().from(salesOpsFuncoes).where(eq(salesOpsFuncoes.orgId, orgId));
   return { stages: stages.length, funcoes: funcoes.length };
 }
@@ -61,7 +62,7 @@ afterAll(async () => {
     await admin.delete(salesOpsFuncoes).where(eq(salesOpsFuncoes.orgId, orgId));
     await admin.delete(salesOpsAreas).where(eq(salesOpsAreas.orgId, orgId));
     await admin.delete(salesOpsClients).where(eq(salesOpsClients.orgId, orgId));
-    await admin.delete(salesOpsLeadStages).where(inArray(salesOpsLeadStages.orgId, [orgId]));
+    await deleteCrmForOrgs([orgId]);
     await admin.delete(salesOpsSettings).where(eq(salesOpsSettings.orgId, orgId));
   }
   registerProducerFlowGate(() => false);
@@ -148,7 +149,8 @@ describe('readImportCatalog', () => {
     expect(catalog.clients).toEqual([{ id: expect.any(String), name: 'Padaria', document: '12.345.678/0001-90' }]);
     expect(catalog.settings).toEqual({ defaultSellerCommissionPct: 12, defaultFinderCommissionPct: 4, defaultTaxPct: 5.5 });
     expect(catalog.stages.map((s) => [s.name, s.kind, s.position])).toEqual([
-      ['Novo', 'normal', 1], ['Em negociação', 'normal', 2], ['Proposta', 'conversion', 3], ['Perdido', 'lost', 4],
+      ['Novo', 'normal', 1], ['Qualificação', 'normal', 2], ['Em negociação', 'normal', 3],
+      ['Proposta', 'conversion', 4], ['Ganho', 'normal', 5], ['Perdido', 'lost', 6], ['Pausado', 'normal', 7],
     ]);
     expect(catalog.funcoes.map((f) => f.slug).sort()).toEqual(['desenvolvedor', 'designer', 'vendedor']);
     expect(JSON.stringify(catalog)).not.toContain('Outra');
@@ -180,7 +182,16 @@ describe('readImportCatalog', () => {
       return readImportCatalog(tx, orgId, NOW);
     });
     expect(catalog.funcoes.map((f) => [f.name, f.isSystem]).sort()).toEqual([['Finder', true], ['Vendedor', true]]);
-    expect(catalog.stages.map((s) => s.name)).toEqual(['Novo', 'Em negociação', 'Proposta', 'Perdido']);
+    // The default CRM pipeline; kind is the derived legacy vocabulary (orcamento -> conversion, perdido -> lost).
+    expect(catalog.stages.map((s) => [s.name, s.kind])).toEqual([
+      ['Novo', 'normal'],
+      ['Qualificação', 'normal'],
+      ['Em negociação', 'normal'],
+      ['Proposta', 'conversion'],
+      ['Ganho', 'normal'],
+      ['Perdido', 'lost'],
+      ['Pausado', 'normal'],
+    ]);
   });
 
   it('mirrors the producer gate', async () => {

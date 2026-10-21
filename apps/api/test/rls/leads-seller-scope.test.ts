@@ -19,18 +19,18 @@ import postgres from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import * as schema from '../../src/db/schema.js';
 import {
-  CreateLeadSchema,
+  LeadPatchSchema,
+  LeadWriteBaseSchema,
   ListLeadsQuerySchema,
   MoveLeadSchema,
-  UpdateLeadSchema,
 } from '../../src/domains/sales-ops/leads/lead-schemas.js';
 import {
   LeadInputError,
-  type LeadScope,
   createLead,
   getLead,
   listLeads,
   moveLead,
+  type LeadScope,
   updateLead,
 } from '../../src/domains/sales-ops/leads/lead-service.js';
 import { ensureLeadStagesForOrg } from '../../src/domains/sales-ops/leads/stages-seed.js';
@@ -47,6 +47,7 @@ import {
   updatePerson,
 } from '../../src/domains/sales-ops/service.js';
 import { testDatabaseUrls } from '../../src/db/__tests__/test-database-urls.js';
+import { deleteCrmForOrgs } from '../../src/db/__tests__/settlement-test-cleanup.js';
 
 const { appUrl: APP_DB_URL, adminUrl: ADMIN_DB_URL } = testDatabaseUrls();
 const ADMIN_CONNECTION_OPTIONS = { connection: { 'app.fxl_admin': 'true' } } as const;
@@ -85,9 +86,7 @@ describe('sales operations leads: seller scope, movement and isolation', () => {
     for (const orgId of orgIds) {
       // FK order: lead products, then leads (which reference stages, clientes,
       // pessoas and vendas), then everything they pointed at.
-      await adminClient`DELETE FROM sales_ops_lead_products WHERE org_id = ${orgId}`;
-      await adminClient`DELETE FROM sales_ops_leads WHERE org_id = ${orgId}`;
-      await adminClient`DELETE FROM sales_ops_lead_stages WHERE org_id = ${orgId}`;
+      await deleteCrmForOrgs([orgId]);
       await adminClient`DELETE FROM sales_ops_payables WHERE org_id = ${orgId}`;
       await adminClient`DELETE FROM sales_ops_receivables WHERE org_id = ${orgId}`;
       await adminClient`DELETE FROM sales_ops_sale_items WHERE org_id = ${orgId}`;
@@ -142,7 +141,7 @@ describe('sales operations leads: seller scope, movement and isolation', () => {
   }
 
   function leadPayload(overrides: Record<string, unknown> = {}) {
-    return CreateLeadSchema.parse({
+    return LeadWriteBaseSchema.parse({
       contactName: 'Contato Um',
       clientName: 'Empresa Um',
       estimatedValueBrl: 250000,
@@ -409,7 +408,7 @@ describe('sales operations leads: seller scope, movement and isolation', () => {
         adminDb,
         orgA,
         idB,
-        UpdateLeadSchema.parse({ contactName: 'hijack' }),
+        LeadPatchSchema.parse({ contactName: 'hijack' }),
         ADMIN_SCOPE,
       ),
     ).toEqual({ ok: false, reason: 'not_found' });
@@ -441,7 +440,7 @@ describe('sales operations leads: seller scope, movement and isolation', () => {
 
     const readStamp = async (id: string) => {
       const [row] = await adminClient<{ stage_changed_at: Date }[]>`
-        SELECT stage_changed_at FROM sales_ops_leads WHERE id = ${id}`;
+        SELECT stage_changed_at FROM sales_ops_crm_leads WHERE id = ${id}`;
       return row!.stage_changed_at;
     };
     const before = await readStamp(secondId);
@@ -458,12 +457,12 @@ describe('sales operations leads: seller scope, movement and isolation', () => {
 
     expect(await readStamp(secondId)).toEqual(before);
     const [reordered] = await adminClient<{ id: string; position: number }[]>`
-      SELECT id, "position" FROM sales_ops_leads
+      SELECT id, "position" FROM sales_ops_crm_leads
       WHERE org_id = ${orgId} ORDER BY "position" ASC`;
     expect(reordered!.id).toBe(secondId);
     // And the card that was pushed down really moved, so the reorder happened.
     const [, pushed] = await adminClient<{ id: string; position: number }[]>`
-      SELECT id, "position" FROM sales_ops_leads
+      SELECT id, "position" FROM sales_ops_crm_leads
       WHERE org_id = ${orgId} ORDER BY "position" ASC`;
     expect(pushed!.id).toBe(firstId);
   });
@@ -486,7 +485,7 @@ describe('sales operations leads: seller scope, movement and isolation', () => {
     const readStampMicros = async () => {
       const [row] = await adminClient<{ micros: string }[]>`
         SELECT (EXTRACT(EPOCH FROM stage_changed_at)::numeric * 1000000)::bigint AS micros
-        FROM sales_ops_leads WHERE id = ${id}`;
+        FROM sales_ops_crm_leads WHERE id = ${id}`;
       return BigInt(row!.micros);
     };
 
@@ -528,7 +527,7 @@ describe('sales operations leads: seller scope, movement and isolation', () => {
         db,
         orgId,
         id,
-        UpdateLeadSchema.parse({ contactName: 'Outro Contato', estimatedValueBrl: 999 }),
+        LeadPatchSchema.parse({ contactName: 'Outro Contato', estimatedValueBrl: 999 }),
         ADMIN_SCOPE,
       ),
     );
@@ -554,7 +553,7 @@ describe('sales operations leads: seller scope, movement and isolation', () => {
 
     const [row] = await adminClient<
       { stage_id: string; position: number; lost_reason: string | null }[]
-    >`SELECT stage_id, "position", lost_reason FROM sales_ops_leads WHERE id = ${id}`;
+    >`SELECT stage_id, "position", lost_reason FROM sales_ops_crm_leads WHERE id = ${id}`;
     expect(row!.stage_id).toBe(open.id);
     expect(row!.position).toBe(1);
     expect(row!.lost_reason).toBeNull();
@@ -570,7 +569,7 @@ describe('sales operations leads: seller scope, movement and isolation', () => {
       ),
     );
     const [moved] = await adminClient<{ stage_id: string; lost_reason: string | null }[]>`
-      SELECT stage_id, lost_reason FROM sales_ops_leads WHERE id = ${id}`;
+      SELECT stage_id, lost_reason FROM sales_ops_crm_leads WHERE id = ${id}`;
     expect(moved!.stage_id).toBe(lost.id);
     expect(moved!.lost_reason).toBe('preço fora do orçamento');
   });
@@ -671,7 +670,7 @@ describe('sales operations leads: seller scope, movement and isolation', () => {
         adminDb,
         orgA,
         id,
-        UpdateLeadSchema.parse({ contactName: 'Depois' }),
+        LeadPatchSchema.parse({ contactName: 'Depois' }),
         ADMIN_SCOPE,
       ),
     ).toEqual({ ok: false, reason: 'already_converted' });
@@ -735,7 +734,7 @@ describe('sales operations leads: seller scope, movement and isolation', () => {
       ),
     );
     await expectOk(
-      updateLead(db, orgId, id, UpdateLeadSchema.parse({ contactName: 'Editado' }), ADMIN_SCOPE),
+      updateLead(db, orgId, id, LeadPatchSchema.parse({ contactName: 'Editado' }), ADMIN_SCOPE),
     );
     await expectOk(
       moveLead(
@@ -789,7 +788,7 @@ describe('sales operations leads: seller scope, movement and isolation', () => {
         db,
         orgId,
         lead.id,
-        UpdateLeadSchema.parse({ products: [{ productName: 'Somente este' }] }),
+        LeadPatchSchema.parse({ products: [{ productName: 'Somente este' }] }),
         ADMIN_SCOPE,
       ),
     );
@@ -799,13 +798,13 @@ describe('sales operations leads: seller scope, movement and isolation', () => {
 
     // An absent key leaves the child rows alone; [] clears them.
     const untouched = await expectOk(
-      updateLead(db, orgId, lead.id, UpdateLeadSchema.parse({ contactName: 'X' }), ADMIN_SCOPE),
+      updateLead(db, orgId, lead.id, LeadPatchSchema.parse({ contactName: 'X' }), ADMIN_SCOPE),
     );
     expect((untouched as unknown as { lead: { products: unknown[] } }).lead.products).toHaveLength(
       1,
     );
     const cleared = await expectOk(
-      updateLead(db, orgId, lead.id, UpdateLeadSchema.parse({ products: [] }), ADMIN_SCOPE),
+      updateLead(db, orgId, lead.id, LeadPatchSchema.parse({ products: [] }), ADMIN_SCOPE),
     );
     expect((cleared as unknown as { lead: { products: unknown[] } }).lead.products).toEqual([]);
   });
@@ -830,7 +829,7 @@ describe('sales operations leads: seller scope, movement and isolation', () => {
     );
     const [row] = await adminClient<
       { client_name_snapshot: string; seller_name_snapshot: string }[]
-    >`SELECT client_name_snapshot, seller_name_snapshot FROM sales_ops_leads
+    >`SELECT client_name_snapshot, seller_name_snapshot FROM sales_ops_crm_leads
       WHERE id = ${(created as unknown as { lead: { id: string } }).lead.id}`;
     expect(row!.client_name_snapshot).toBe('Empresa Cadastrada');
     expect(row!.seller_name_snapshot).toBe('Ana Martins');
@@ -888,12 +887,14 @@ describe('sales operations leads: seller scope, movement and isolation', () => {
     if (!adminBoard.ok) throw new Error(`unexpected refusal: ${adminBoard.reason}`);
     expect(adminBoard.leads).toHaveLength(1);
 
-    // Seeing the pool is not filing into it: the create rules did not change, and
-    // a full-edition seller may still not file an UNASSIGNED lead.
-    expect(await createLead(db, orgId, leadPayload(), sellerScope('hub_ana'))).toEqual({
-      ok: false,
-      reason: 'seller_scope',
-    });
+    // Seeing the pool is not filing into it. Since the phase 2 cutover a seller who names no vendedor
+    // files the lead as their OWN in both editions (W2); naming a colleague is still seller_scope.
+    const own = await createLead(db, orgId, leadPayload({ contactName: 'Minha' }), sellerScope('hub_ana'));
+    if (!own.ok) throw new Error(`unexpected refusal: ${own.reason}`);
+    expect(own.lead.sellerPersonId).toBe(ana.id);
+    expect(
+      await createLead(db, orgId, leadPayload({ sellerPersonId: bruno.id }), sellerScope('hub_ana')),
+    ).toEqual({ ok: false, reason: 'seller_scope' });
   });
 
   it('paginates one column by the (position, id) keyset', async () => {

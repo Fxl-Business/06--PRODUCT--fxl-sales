@@ -9,7 +9,7 @@ import {
   SaleInstallmentSchema,
 } from '../../sales-ops/service.js';
 import { LeadStageSchema } from '../../sales-ops/leads/schemas.js';
-import { CreateLeadSchema } from '../../sales-ops/leads/lead-schemas.js';
+import { LEAD_CLIENT_NAME_MAX, LEAD_CONTACT_NAME_MAX, LEAD_DESCRIPTION_MAX } from '../../sales-ops/leads/lead-schemas.js';
 import { LEAD_STAGE_SEEDS } from '../../sales-ops/leads/stages-seed.js';
 import { coerceCell, normalizeLabel, rawCell } from '../cells.js';
 import {
@@ -152,9 +152,9 @@ describe('workbook schema', () => {
     expect(maxOf('produtos', 'nome')).toBe(ProductSchema.innerType().shape.name.maxLength);
     expect(maxOf('pessoas', 'nome')).toBe(PersonSchema.shape.displayName.maxLength);
     expect(maxOf('etapas', 'nome')).toBe(LeadStageSchema.shape.name.maxLength);
-    expect(maxOf('leads', 'contato')).toBe(CreateLeadSchema.shape.contactName.maxLength);
-    expect(maxOf('leads', 'empresa')).toBe(CreateLeadSchema.shape.clientName.maxLength);
-    expect(maxOf('leads', 'descricao')).toBe(CreateLeadSchema.shape.description.unwrap().unwrap().maxLength);
+    expect(maxOf('leads', 'contato')).toBe(LEAD_CONTACT_NAME_MAX);
+    expect(maxOf('leads', 'empresa')).toBe(LEAD_CLIENT_NAME_MAX);
+    expect(maxOf('leads', 'descricao')).toBe(LEAD_DESCRIPTION_MAX);
     const clientFields = {
       nome: ClientSchema.shape.name.maxLength,
       contato: ClientSchema.shape.contact.unwrap().unwrap().maxLength,
