@@ -66,6 +66,16 @@ function resolveCutoffIso(): string {
 // plan's order and this writer's operations throws immediately rather than
 // silently reordering deletes or inserts around a restrict FK.
 const EXPECTED_DELETE_ORDER = [
+  'salesOpsCrmLeadNotes',
+  'salesOpsCrmLeadFollowups',
+  'salesOpsCrmLeadFieldValues',
+  'salesOpsCrmLeadEvents',
+  'salesOpsCrmLeads',
+  'salesOpsPipelineTransitions',
+  'salesOpsPipelineStages',
+  'salesOpsPipelines',
+  'salesOpsFieldDefinitions',
+  'salesOpsOrgModules',
   'salesOpsSettlements',
   'salesOpsPayables',
   'salesOpsReceivables',
@@ -312,6 +322,19 @@ async function main(): Promise<void> {
     await withTenant(db, orgId, async (tx) => {
       // Deletes: children first, every one scoped by org_id, in
       // SEED_DELETE_ORDER.
+      //
+      // The unified CRM tables (migration 0029) come first: sales_ops_crm_leads
+      // restrict-references clientes, pessoas, propostas and produtos.
+      await tx.delete(schema.salesOpsCrmLeadNotes).where(eq(schema.salesOpsCrmLeadNotes.orgId, orgId));
+      await tx.delete(schema.salesOpsCrmLeadFollowups).where(eq(schema.salesOpsCrmLeadFollowups.orgId, orgId));
+      await tx.delete(schema.salesOpsCrmLeadFieldValues).where(eq(schema.salesOpsCrmLeadFieldValues.orgId, orgId));
+      await tx.delete(schema.salesOpsCrmLeadEvents).where(eq(schema.salesOpsCrmLeadEvents.orgId, orgId));
+      await tx.delete(schema.salesOpsCrmLeads).where(eq(schema.salesOpsCrmLeads.orgId, orgId));
+      await tx.delete(schema.salesOpsPipelineTransitions).where(eq(schema.salesOpsPipelineTransitions.orgId, orgId));
+      await tx.delete(schema.salesOpsPipelineStages).where(eq(schema.salesOpsPipelineStages.orgId, orgId));
+      await tx.delete(schema.salesOpsPipelines).where(eq(schema.salesOpsPipelines.orgId, orgId));
+      await tx.delete(schema.salesOpsFieldDefinitions).where(eq(schema.salesOpsFieldDefinitions.orgId, orgId));
+      await tx.delete(schema.salesOpsOrgModules).where(eq(schema.salesOpsOrgModules.orgId, orgId));
       //
       // sales_ops_settlements refuses DELETE (FXS01) and its RESTRICT FKs block
       // the ledger deletes below. The dev seed runs only against the local
