@@ -27,6 +27,7 @@ dist/
 .superpowers/
 .playwright-mcp/
 .demo/
+.pnpm-store/
 .claude/worktrees/
 .worktrees/
 
