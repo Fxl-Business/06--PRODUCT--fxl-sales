@@ -436,9 +436,9 @@ describe('LeadSummaryContainer', () => {
     expect(mocks.addNoteAsync).toHaveBeenCalledWith({ leadId: LEAD_ID, body: 'Cliente pediu desconto' });
 
     setInput('summary-followup-step', 'Mandar proposta');
-    setInput('summary-followup-due', '2026-10-30');
+    setInput('summary-followup-due', '2099-12-31');
     await click('[data-followup-add]');
-    expect(mocks.addFollowupAsync).toHaveBeenCalledWith({ leadId: LEAD_ID, nextStep: 'Mandar proposta', dueOn: '2026-10-30' });
+    expect(mocks.addFollowupAsync).toHaveBeenCalledWith({ leadId: LEAD_ID, nextStep: 'Mandar proposta', dueOn: '2099-12-31' });
 
     await click('[data-followup-done="fu-1"]');
     expect(mocks.markDone).toHaveBeenCalledWith('fu-1');
