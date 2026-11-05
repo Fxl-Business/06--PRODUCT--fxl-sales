@@ -1,0 +1,46 @@
+# project.fxl.yaml - FXL Harness project manifest for FXL Sales.
+#
+# Same format as the FXL Harness's own manifest. The Harness reads only the `prototipo` block
+# (packages/engine/src/manifest/project-manifest.ts); the header keeps the repo-intrinsic facts in one place.
+schemaVersion: 1
+
+id: product.fxl-sales
+name: FXL Sales
+type: product
+localSlot: 6 # folder number 06; ports below follow it
+
+stack:
+  runtime: node>=20
+  language: typescript
+  packageManager: pnpm@10
+
+local:
+  ports:
+    frontend: 8006
+    backend: 3006
+    db: 5006
+
+commands:
+  install: pnpm install
+  build: pnpm run build
+  test: pnpm test
+  lint: pnpm run lint
+
+ai:
+  rulePack: nexo # the methodology this repo ships on (CLAUDE.md + nexo/)
+
+# `prototipo`: what the prototype mode serves and fences. {port} is the port the engine gives.
+# The engine splits `command` on whitespace and runs it WITHOUT a shell, so the environment
+# goes through `env`: VITE_AUTH_FAKE=1 turns on the EXISTING development identity (the page opens
+# signed in with no Hub), and --host 127.0.0.1 is the origin the engine opens. The page is a second
+# Vite entry served in dev only; `index.html` stays the only build input, so it never ships.
+prototipo:
+  command: env VITE_AUTH_FAKE=1 pnpm --filter @fxl-sales/web exec vite --host 127.0.0.1 --port {port} --strictPort
+  page: /prototype.html
+  # Only the screens: the sales-ops tree and the UI kit, plus the fake data. Auth, the dev identity,
+  # the fake network layer, the API client and every config stay outside the fence.
+  fence:
+    - apps/web/src/sales-ops/
+    - apps/web/src/components/
+    - apps/web/src/prototype/fixtures/
+  fixtures: apps/web/src/prototype/fixtures/

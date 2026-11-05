@@ -90,6 +90,10 @@ Full reference: `nexo/knowledge/reference/development-identity-mode.md`.
 - `leads-owner` and `leads-seller` (on `org_fake_leads`, `FIXTURE_LEADS_EDITION_ORGANIZATION_ID`) are the ONLY identities with `modules`, exactly `['sales.edition.leads']`; `LEADS_EDITION_MODULE` is pinned equal to `SALES_EDITION_LEADS_MODULE` by `dev-identity-roles.test.tsx`.
   The seed plan gives that org no etapas, no settings row and one UNBOUND vendedor pessoa with `leads-seller`'s email; the first `GET /lead-stages` or `GET /bootstrap` seeds the seven default etapas at runtime (see Edição Leads).
 - `apps/api/scripts/seed-dev.ts` seeds the roster's orgs against LOCAL Postgres only.
+- The Harness prototype page (`apps/web/prototype.html`, a second Vite entry served in dev only) is the real App over a fake network and THIS same identity: `apps/web/src/prototype/main.tsx` calls `installFakeSource()` (swaps `fetch` and `EventSource`) and then `installDevIdentityIfEnabled()`, and never names `@fxl-sales/auth-fake`.
+  `project.fxl.yaml` (`prototipo` block) serves it with `env VITE_AUTH_FAKE=1`; the engine runs the command without a shell, hence `env`.
+  Reads answer the real route shapes from an in-memory world seeded from `apps/web/src/prototype/fixtures/` (typed against the app's wire types; `team-owner`, `leads-owner`, `leads-seller` only), a write mutates that world, a reload seeds it again, and any other method, path, query or identity answers `404 not_in_prototype` naming the combination.
+  Nothing outside `src/prototype/` imports it and `vite.config.ts` lists no build input, so a production build never contains it: `scripts/__tests__/prototype-isolation.test.mjs` builds both ways (with a positive control). Reference: `nexo/knowledge/reference/development-identity-mode.md` (section Prototype page).
 
 ## Tenancy
 
