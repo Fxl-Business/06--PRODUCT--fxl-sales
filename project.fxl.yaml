@@ -35,6 +35,7 @@ ai:
 # signed in with no Hub), and --host 127.0.0.1 is the origin the engine opens. The page is a second
 # Vite entry served in dev only; `index.html` stays the only build input, so it never ships.
 prototipo:
+  modo: tela
   command: env VITE_AUTH_FAKE=1 pnpm --filter @fxl-sales/web exec vite --host 127.0.0.1 --port {port} --strictPort
   page: /prototype.html
   # Only the screens: the sales-ops tree and the UI kit, plus the fake data. Auth, the dev identity,
