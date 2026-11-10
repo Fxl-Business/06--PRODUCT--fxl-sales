@@ -29,19 +29,28 @@ commands:
 ai:
   rulePack: nexo # the methodology this repo ships on (CLAUDE.md + nexo/)
 
-# `prototipo`: what the prototype mode serves and fences. {port} is the port the engine gives.
-# The engine splits `command` on whitespace and runs it WITHOUT a shell, so the environment
-# goes through `env`: VITE_AUTH_FAKE=1 turns on the EXISTING development identity (the page opens
-# signed in with no Hub), and --host 127.0.0.1 is the origin the engine opens. The page is a second
-# Vite entry served in dev only; `index.html` stays the only build input, so it never ships.
+# `prototipo`: the prototype is the real app, signed in through the development identity. {port} is the
+# port the engine gives. The engine starts Docker, runs `docker compose up -d db` from the main checkout,
+# waits for 5006 and runs `command`. The script creates a scratch database on that Postgres (keyed by
+# its pid), migrates and seeds it with `seed-dev.ts`, runs the real API with SALES_AUTH_FAKE on a free
+# port and the web on {port}, and drops the database on SIGTERM or SIGINT. It refuses a non-local
+# database host and never touches the developer's database or ports. Every identity of the roster is on
+# the floating switcher. The engine runs `command` WITHOUT a shell, split on whitespace.
 prototipo:
-  modo: tela
-  command: env VITE_AUTH_FAKE=1 pnpm --filter @fxl-sales/web exec vite --host 127.0.0.1 --port {port} --strictPort
-  page: /prototype.html
-  # Only the screens: the sales-ops tree and the UI kit, plus the fake data. Auth, the dev identity,
-  # the fake network layer, the API client and every config stay outside the fence.
+  modo: app
+  servicos:
+    - compose: docker-compose.yml
+      servico: db
+      porta: 5006
+  command: pnpm --filter @fxl-sales/api exec tsx scripts/prototipo/run.ts --port {port}
+  page: /
+  # The screens, the UI kit, the seed and the identity roster: a new case is a new seed row or a new
+  # roster identity, and the old ones stay as they are. The API, auth wiring and every config stay outside.
   fence:
     - apps/web/src/sales-ops/
     - apps/web/src/components/
-    - apps/web/src/prototype/fixtures/
-  fixtures: apps/web/src/prototype/fixtures/
+    - apps/api/scripts/seed/
+    - packages/auth-fake/src/
+  fixtures: apps/api/scripts/seed/
+  exclusivos:
+    - apps/api/scripts/prototipo/

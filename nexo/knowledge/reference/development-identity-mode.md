@@ -79,7 +79,16 @@ Moved verbatim from `CLAUDE.md` on 2026-09-22 so the standing context stays shor
 - The pessoa is unbound on purpose: the first `leads-seller` request goes through the real email self-claim (`resolveCallerPersonId`), the same path a Construbom vendedor takes. Re-running the seed resets the claim.
 - The production activation of the edition is documented in `nexo/playbooks/ativar-edicao-leads.md`.
 
-## Prototype page (Harness prototype mode)
+## Prototype app (Harness prototype mode `app`)
+
+- The `prototipo` block of `project.fxl.yaml` is `modo: app`, with `servicos: [{compose: docker-compose.yml, servico: db, porta: 5006}]`, `page: /`, `fixtures: apps/api/scripts/seed/` and `exclusivos: [apps/api/scripts/prototipo/]`. The engine starts Docker, runs `docker compose up -d db` from the main checkout, waits for 5006, runs the command and publishes once `page` answers.
+- `run.ts` order: refuse a non-local host (`maintenanceDatabaseUrl` and `scratchDatabaseUrl` call `isLocalDatabaseHost`); refuse a `.env.local` that defines a pinned or outside-service key (the API loads it WITH override, `localOverrides`); take `DATABASE_URL` from `.env.local`, `.env` or `.env.dev.example` (a worktree has no `.env`); drop orphan scratch databases (`orphanDatabases`, a dead pid); create `fxl_sales_proto_<yyyymmddhhmmss>_<pid>`; build the shared packages; run `src/db/migrate.ts` and `scripts/seed-dev.ts` with the child environment; start the API on a free port and wait for `/health`; start Vite on `--port` and wait for `/`.
+- The child environment (`apiEnv`) pins `DATABASE_URL` and `ADMIN_DATABASE_URL` to the scratch database, `SALES_AUTH_FAKE=1`, `NODE_ENV=development`, `SALES_LISTEN_HOST=127.0.0.1`, `CORS_ORIGIN` to the web origin and `SALES_ENV_FILE` to blank (the named env file is the guard's one escape hatch and is never used here). Every `FXL_HUB_*`, `SENTRY_DSN`, session and operator key is emptied (`withoutOutsideServices`). The web gets `VITE_AUTH_FAKE=1` and `VITE_API_URL` / `VITE_AUTH_PROXY_TARGET` at the prototype API.
+- The children stay in the script's process group: the Harness stops the task by signalling the group. The script's SIGTERM, SIGINT and SIGHUP handlers (`on`, never `once`) wait for ONE shared cleanup that drops the database (`DROP DATABASE ... WITH (FORCE)`, only through `isScratchDatabaseName`). A child that exits ends the script.
+- Every roster identity is on the floating switcher; the seed is the one `make db-seed` uses, so a new case is a new seed row or roster identity.
+- Oracles: `apps/api/scripts/prototipo/__tests__/ambiente.test.ts` (pure rules) and `run-guard.test.ts` (the local-database proof of this entrypoint).
+
+## Prototype page (Harness prototype mode `tela`, no longer used by the block)
 
 - `apps/web/prototype.html` is a SECOND Vite entry for the FXL Harness prototype mode. The dev server serves it at `/prototype.html`; `index.html` stays the only build input (`vite.config.ts` has no `rollupOptions.input`), so the page and everything under `apps/web/src/prototype/` never ship.
 - It reuses this mode and adds no second fake login. `src/prototype/main.tsx` runs `installFakeSource()`, then `installDevIdentityIfEnabled()` (the same call `main.tsx` makes), and only then renders `App`. It needs `VITE_AUTH_FAKE=1`, which the `prototipo.command` in `project.fxl.yaml` sets through `env` (the engine splits the command on whitespace and runs it without a shell). Without the flag the page says so instead of falling through to the real Hub login.

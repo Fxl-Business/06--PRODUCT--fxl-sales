@@ -1,4 +1,4 @@
-.PHONY: dev front back stg back-stg front-stg dev-fake back-fake front-fake dev-fake-setup \
+.PHONY: dev front back stg back-stg front-stg dev-fake back-fake front-fake dev-fake-setup prototipo \
        install setup setup-no-db build build-shared build-web build-api \
        lint lint-fix type-check check \
        migrate db-up db-down db-reset db-seed docker-up docker-down docker-build \
@@ -78,6 +78,13 @@ dev-fake-setup: ## One-shot: start the DB, migrate, seed the dev dataset, then r
 	$(MAKE) migrate
 	$(MAKE) db-seed
 	$(MAKE) dev-fake
+
+# The Harness prototype by hand: the real API and web with development identities on a scratch
+# database that exists only while the process runs (the Harness runs the same script from the
+# `prototipo` block of project.fxl.yaml). Needs `make db-up`. Never touches the dev database or ports.
+PROTOTIPO_PORT ?= 8106
+prototipo: ## The Harness prototype by hand: scratch DB + seed, API and web with dev identities on PROTOTIPO_PORT (needs make db-up)
+	pnpm --filter @fxl-sales/api exec tsx scripts/prototipo/run.ts --port $(PROTOTIPO_PORT)
 
 # --- Staging ---
 #

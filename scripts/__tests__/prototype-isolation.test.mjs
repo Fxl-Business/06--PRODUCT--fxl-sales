@@ -75,59 +75,59 @@ test('the prototype adds no second fake login: it never names the auth-fake pack
   );
 });
 
-/** The `prototipo:` block as written, read without a YAML dependency (the block is flat plus one list). */
+/** The `prototipo:` block as written, read without a YAML dependency (flat fields plus the `fence` and `exclusivos` lists). */
 function readPrototipoBlock() {
   const lines = read('project.fxl.yaml').split('\n');
   const start = lines.findIndex((line) => /^prototipo:\s*$/.test(line));
   assert.ok(start >= 0, 'project.fxl.yaml has no prototipo block');
-  const block = { command: '', page: '', fence: [], fixtures: '' };
+  const block = { modo: '', command: '', page: '', fence: [], fixtures: '', exclusivos: [], servicos: false };
   let key = null;
   for (const raw of lines.slice(start + 1)) {
     if (/^\S/.test(raw)) break;
     const line = raw.replace(/\s+#.*$/, '');
     if (/^\s*#/.test(raw) || line.trim() === '') continue;
     const item = /^\s+-\s+(.+)$/.exec(line);
-    if (item && key === 'fence') {
-      block.fence.push(item[1].trim());
+    if (item && (key === 'fence' || key === 'exclusivos')) {
+      block[key].push(item[1].trim());
       continue;
     }
-    const field = /^\s+(command|page|fence|fixtures):\s*(.*)$/.exec(line);
+    const field = /^\s+(modo|command|page|fence|fixtures|exclusivos|servicos):\s*(.*)$/.exec(line);
     if (!field) continue;
     key = field[1];
-    if (key !== 'fence') block[key] = field[2].trim();
+    if (key === 'servicos') block.servicos = true;
+    else if (key !== 'fence' && key !== 'exclusivos') block[key] = field[2].trim();
   }
   return block;
 }
 
-test('project.fxl.yaml declares a valid prototipo block whose page and folders exist', () => {
+test('project.fxl.yaml declares a valid app prototipo block whose script and folders exist', () => {
   const block = readPrototipoBlock();
+  assert.equal(block.modo, 'app');
+  assert.ok(block.servicos, 'an app block declares the services the engine starts');
+  assert.match(read('project.fxl.yaml'), /servico: db\n\s+porta: 5006/);
+  assert.match(read('docker-compose.yml'), /^ {2}db:/m, 'the declared compose service must exist');
   assert.ok(block.command.includes('{port}'), 'command must carry {port}');
-  assert.match(block.command, /VITE_AUTH_FAKE=1/, 'the existing dev identity must be switched on by the command');
-  // The engine splits the command on whitespace and runs it without a shell.
-  assert.equal(block.command.split(/\s+/)[0], 'env');
-  assert.ok(block.page.startsWith('/'));
-  assert.ok(fs.existsSync(path.join(WEB, block.page.slice(1))), `${block.page} must exist under apps/web`);
+  const script = block.command.split(/\s+/).find((word) => /\.ts$/.test(word));
+  assert.equal(script, 'scripts/prototipo/run.ts');
+  assert.ok(fs.existsSync(path.join(ROOT, 'apps/api', script)), `${script} must exist under apps/api`);
+  assert.equal(block.page, '/');
   assert.ok(block.fence.length > 0);
-  for (const folder of [...block.fence, block.fixtures]) {
+  for (const folder of [...block.fence, block.fixtures, ...block.exclusivos]) {
     assert.ok(fs.statSync(path.join(ROOT, folder)).isDirectory(), `${folder} must be a folder`);
   }
   assert.ok(block.fence.includes(block.fixtures), 'the fixtures folder is the data a prototype edits');
+  assert.deepEqual(block.exclusivos, ['apps/api/scripts/prototipo/']);
 });
 
-test('the fence covers only screen folders, never auth, identity, network or config', () => {
+test('the fence covers only screens, the seed and the identity roster, never the API, auth wiring or config', () => {
   const { fence } = readPrototipoBlock();
-  const forbidden = ['apps/web/src/auth', 'apps/web/src/dev', 'apps/web/src/lib', 'apps/web/src/prototype/'];
+  const allowed = ['apps/web/src/sales-ops/', 'apps/web/src/components/', 'apps/api/scripts/seed/', 'packages/auth-fake/src/'];
+  assert.deepEqual([...fence].sort(), [...allowed].sort());
+  const forbidden = ['apps/web/src/auth/', 'apps/web/src/dev/', 'apps/web/src/lib/', 'apps/web/src/prototype/', 'apps/api/src/', 'apps/api/scripts/prototipo/'];
   for (const folder of fence) {
-    const normalized = folder.endsWith('/') ? folder : `${folder}/`;
-    if (normalized === 'apps/web/src/prototype/fixtures/') continue;
     for (const banned of forbidden) {
-      assert.ok(
-        !(normalized + '/').startsWith(banned.endsWith('/') ? banned : `${banned}/`),
-        `${folder} must not be inside the fence`,
-      );
+      assert.ok(!folder.startsWith(banned), `${folder} must not be inside the fence`);
     }
-    assert.ok(normalized.startsWith('apps/web/src/'), `${folder} must be a web screen folder`);
-    assert.notEqual(normalized, 'apps/web/src/', 'the whole src is too wide');
   }
 });
 
