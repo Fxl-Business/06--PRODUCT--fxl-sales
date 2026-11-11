@@ -270,6 +270,34 @@ The repo has no mutation tool, so every Verify ran targeted mutant probes by han
 
 Oracles: `apps/api/test/rls/leads-lixeira.test.ts`, `lead-soft-delete-migration.test.ts`, `leads-stage-summary.test.ts`, `lead-delete.test.tsx`, `deleted-leads-view.test.tsx`, `lead-board-totals.test.tsx`, `navigation-edition.test.ts`.
 
+## Excluir todos os leads de uma etapa (api-lote)
+
+Full rule: `CLAUDE.md` (Arquivamento e histórico) and `arquivamento-e-historico.md` (section Whole-etapa delete and batch restore).
+
+Why it exists.
+Deleting one lead at a time does not scale to the Construbom's cleanup of about 1700 leads in the `Lista de Clientes` etapa of Prospecção, and the clientes of the cadastro must stay untouched.
+
+The server.
+`deleteStageLeads` and `restoreLeadBatch` live in `lead-trash-service.ts` and each is ONE transaction with the lock order of every board writer: scope (an etapa of the token's org), `lockLeadBoard`, the cards locked by one read, set-based UPDATEs, one `renumberStage` per column, and the ledger last.
+The entries are written by `writeAuditEntries` (`apps/api/src/domains/audit/service.ts`), the batch form of `writeAuditEntry`: one `FOR UPDATE` read of the chain tail, hashing in order, INSERTs in chunks of 500.
+A loop over `deleteLead` would renumber the column and take the global ledger lock twice per lead.
+Because the file now holds both forms, `lead-contract.test.ts` pins 2 `writeAuditEntry(tx,`, 2 `writeAuditEntries(tx,` and 4 `lockLeadBoard(tx, orgId)`.
+There is no `statement_timeout` in `apps/api/src`, so one transaction is the chosen shape rather than idempotent blocks.
+
+The batch.
+`deleted_batch_id` (migration `0032_lead_delete_batch`) is a uuid minted per act and stamped with `deleted_at` on every deleted lead; it is also in each `lead.deleted` entry's `afterJsonb.batchId`.
+Converted cards (`sale_id` set) stay live and are reported as `skippedConvertedCount`; the preview and the delete answer the same two counts, so the dialog and the result agree.
+The batch restore returns every lead still in the batch with the `restoreLead` rule, leaves alone a lead that already left it, answers `restoredCount: 0` for a batch restored already and `404` for one that never existed in the org.
+
+The screens.
+The column header action `Excluir todos os leads desta etapa` sits beside `Ver em lista` and renders only when `LeadsBoardContainer` passes `onDeleteStageLeads`, which it does for an `admin`.
+`StageDeleteDialog` reads the preview, shows `Etapa: <name>` and the count of leads that go (and the converted ones that stay), and enables the confirm button only after the operator types that count (`stageDeleteTypedMatches`, tolerant of `1.700`, never for zero).
+A refusal stays inside the dialog through the mutation copy, a 403 included, never `ForbiddenPanel`.
+`Cadastros > Leads excluídos` shows `Restaurar lote` for a lead with a `batchId`, which restores the whole batch once and refreshes the board.
+No raw id is rendered.
+
+Oracles: `apps/api/test/rls/leads-lote.test.ts`, `apps/api/tests/acceptance/api-lote/lead-stage-batch.acceptance.test.ts`, `lead-contract.test.ts`, `lead-routes.test.ts`, `stage-delete.test.tsx`, `deleted-leads-view.test.tsx`.
+
 ## Valores no Kanban, Cliente no card e texto do seletor (2026-10-08, construbom-leads-ajustes)
 
 Full rules: `CLAUDE.md` (Kanban de leads, Edição Leads and UI Controls).

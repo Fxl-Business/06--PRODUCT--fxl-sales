@@ -193,6 +193,15 @@ Full reference: `nexo/knowledge/reference/arquivamento-e-historico.md`.
 - A lead is the exception with a SOFT DELETE: `POST /leads/:id/delete` (still no DELETE verb) sets `deleted_at`/`deleted_by_user_id`/`deleted_by_name`, and every lead read and write filters `liveLeadCondition()`.
   `lead.deleted` and `lead.restored` audit entries are written in the same `tx`; restore and the deleted list are `requireAdmin` and live in `Cadastros > Leads excluídos`.
   The code lives in `lead-trash-service.ts` so `lead-service.ts` keeps no audit writes (oracle `apps/api/test/rls/leads-lixeira.test.ts`).
+- Whole-etapa delete ("Excluir todos os leads desta etapa") is the same soft delete in bulk, `requireAdmin` and POST only: `GET /leads/stages/:stageId/delete-all-preview` (stage name, `deletableCount`, `skippedConvertedCount`), `POST /leads/stages/:stageId/delete-all` (`batchId`, `deletedCount`, `skippedConvertedCount`) and `POST /leads/batches/:batchId/restore` (`restoredCount`), all registered above `/:id`, org only from the token.
+  `deleteStageLeads` and `restoreLeadBatch` (`lead-trash-service.ts`) run ONE `withTenant` transaction each, never a loop over `deleteLead` / `restoreLead`: one `lockLeadBoard`, the cards locked by one read, set-based UPDATEs, one `renumberStage` per column, and every `lead.deleted` / `lead.restored` entry LAST through `writeAuditEntries` (`apps/api/src/domains/audit/service.ts`, one unbroken stretch of the hash chain, same `tx`).
+  `lead-trash-service.ts` therefore holds 2 `writeAuditEntry(tx,`, 2 `writeAuditEntries(tx,` and 4 `lockLeadBoard(tx, orgId)`; `lead-contract.test.ts` pins them.
+- `sales_ops_crm_leads.deleted_batch_id` (migration `0032_lead_delete_batch`, nullable uuid, partial index on `(org_id, deleted_batch_id)`) groups the leads one bulk delete took out; it is NULL for a live lead and for a lead deleted on its own, and every restore clears it.
+  A converted lead (`sale_id` set) is never deleted by the bulk act: it stays live and is only counted as `skippedConvertedCount`.
+  The bulk delete never touches the clientes table or any `client_id`, and an etapa with nothing to delete writes nothing and answers `batchId: null`.
+  The batch restore follows `restoreLead` (own etapa while active, else the first open etapa, one `stage_changed` event each) and leaves alone a lead that already left the batch; a fully restored batch answers `restoredCount: 0`, a batch of another org or one that never existed answers `404`.
+- Web: the column header action renders only when `LeadsBoardContainer` passes `onDeleteStageLeads`, i.e. for an `admin`; `StageDeleteDialog` shows the etapa and the server count and enables the confirm button only after the operator types that count; a failure stays inside the dialog through the mutation copy, never `ForbiddenPanel`.
+  `Cadastros > Leads excluídos` offers `Restaurar lote` for a lead with a `batchId` (oracles `apps/api/test/rls/leads-lote.test.ts`, `stage-delete.test.tsx`, `deleted-leads-view.test.tsx`).
 
 ## Pessoas e Funções
 

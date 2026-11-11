@@ -37,3 +37,29 @@ Full reasoning: `kanban-de-leads.md` (section Excluir lead, lixeira e totais rea
 - The trash list is `GET /leads/deleted`, org-scoped inside `withTenant`, keyset-paged, and never projects `deleted_by_user_id`.
 - A restore is a new ledger entry, never an undo, exactly as for the cadastros.
 - The code is `lead-trash-service.ts`, so the contract test that `lead-service.ts` writes no audit still holds.
+
+### Whole-etapa delete and batch restore (api-lote)
+
+The same soft delete, taken for every live lead of one etapa at once (about 1700 leads of `Lista de Clientes` in Prospecção were the trigger).
+Full reasoning: `kanban-de-leads.md` (section Excluir todos os leads de uma etapa).
+
+- Routes, all admin-only (`requireAdmin`), POST for the writes, registered above `/:id`, org only from the token:
+  `GET /leads/stages/:stageId/delete-all-preview` (read only: `stageName`, `deletableCount`, `skippedConvertedCount`),
+  `POST /leads/stages/:stageId/delete-all` (`batchId`, `deletedCount`, `skippedConvertedCount`) and
+  `POST /leads/batches/:batchId/restore` (`restoredCount`).
+  The router still has no DELETE verb.
+- Migration `0032_lead_delete_batch` adds the nullable `deleted_batch_id uuid` to `sales_ops_crm_leads` plus a partial index on `(org_id, deleted_batch_id)`.
+  It is NULL for a live lead and for a lead deleted on its own, set together with `deleted_at` by the bulk delete, cleared by every restore, and a plain uuid (no reference).
+  `GET /leads/deleted` projects it as `batchId`; the raw `deleted_by_user_id` is still never projected.
+- One transaction per act, never a loop over `deleteLead` / `restoreLead` (a renumber and two ledger round trips per lead is quadratic at thousands of leads):
+  one `lockLeadBoard`, the cards locked by one read, set-based UPDATEs, one `renumberStage` per column, and the ledger LAST.
+  The entries go through `writeAuditEntries`, which reads the chain tail once with `FOR UPDATE` (held until COMMIT), hashes the entries in order and inserts them in chunks of 500, so the serial ids follow the chain order.
+  Every lead still gets its own `lead.deleted` (or `lead.restored`) entry in the same `tx`; `afterJsonb.batchId` marks the act.
+- A converted lead (`sale_id` set) is never deleted by the bulk act: it stays live, keeps its place in the column and is only counted as `skippedConvertedCount`.
+  An etapa with nothing to delete writes nothing and answers `batchId: null`; an unknown or other-org etapa is `404`.
+- The bulk delete writes no `client_id`, no `client_name_snapshot` and nothing in the clientes table.
+  `lead-contract.test.ts` forbids `salesOpsClients` and any hard delete in `lead-trash-service.ts`.
+- The batch restore follows `restoreLead`: the lead's own etapa while it is active, else the first open etapa of its pipeline (one `stage_changed` event each, `lost_reason` cleared), appended in the order the cards had, the column renumbered dense, no open etapa is the existing `400 no_open_stage`.
+  A lead that left the batch (restored on its own, or restored and deleted again in another batch) is not touched.
+  A fully restored batch answers `restoredCount: 0`; the batch id is told apart from one that never existed by the org-scoped `lead.deleted` entries, so that case is `404`.
+- A restore is a new ledger entry per lead, never an undo, exactly as for the single lead.
