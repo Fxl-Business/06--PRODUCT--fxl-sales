@@ -471,6 +471,12 @@ Full reference: `nexo/knowledge/reference/importacao-por-planilha.md`.
 - `parseWorkbook` loads every upload through `normalizeXlsxPackage` (`xlsx-package.ts`), which rewrites only the package shape exceljs cannot read (Open XML SDK `x:` prefix, absolute relationship targets, and comments or VML drawing parts found by RELATIONSHIP TYPE under names exceljs does not route, such as openpyxl's `xl/comments/comment1.xml`, which every AI assistant writes) and returns any other package byte-identical; a new quirk goes there with a fixture in `xlsx-package.test.ts`. `jszip` is pinned exactly to exceljs's own version.
 - The web classifies the import errors by HTTP status only; a 403 renders inline on the screen, never `ForbiddenPanel`; a 409 shows `body.message`. The web never parses xlsx.
 - Oracles: `import-routes.integration.test.ts` (round trip of the example template, all-or-nothing, producer-live, admin gate, re-import recognition), `executor.integration.test.ts`, `client-recognition.test.ts`, `template-example.test.ts`, `workbook-schema.test.ts`, `import-view.test.tsx`, `import-copy.test.ts`, `xlsx-package.test.ts`.
+- Mapear etapas: `POST /import/preview` and `POST /import/commit` take an optional multipart `stageMap` (JSON, sheet etapa name -> `{stageId}` | `{create: true}` | `{first: true}`), applied in `plan/leads.ts` before `refs.resolve('stage')`; no map plans exactly as before and a malformed one is `400` with no write.
+  `{stageId}` is never trusted: it must be an active, non-conversion etapa of the org's default pipeline in the catalog, else the row error `invalid_stage_target` and nothing is written. `{first: true}` is a blank Etapa cell.
+  `{create: true}` goes through `checkNewStage`, the core `planEtapas` also uses (no second validation), with the plan key `stageMap:<n>`; the commit re-plans with the map it receives.
+  The preview body adds `leadStages` (distinct Etapa names of the Leads tab with `leads` and `resolution` `existing | not_found | conversion`) and `stageTargets` (active, default pipeline, no conversion), from `summarizeLeadStages` in `plan/stage-map.ts`.
+  The web step `StageMapStep.tsx` has one `Combobox` per name (pre-filled when matched by name), `Validar novamente` resends the map, and `Importar` needs every etapa resolved and zero errors.
+  Oracles: `plan-stage-map.test.ts` and `tests/acceptance/mapear-etapas/`.
 - `exceljs` is pinned EXACTLY in `apps/api` (`exceljs-pin.test.ts`); run `pnpm install` after pulling.
 
 ## Environments

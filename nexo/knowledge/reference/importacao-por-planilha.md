@@ -81,6 +81,19 @@ Status mapping: Rascunho creates `draft`; Ganha creates `won`; blank or Aberta c
   The human chose the rule (document first, then name; same name with different documents stays a new cliente with a warning) and that a recognized cliente is never updated, so the import stays create-only.
   Rejected: one warning per row (the reported bug), one file-level warning issue (reads as a problem and never reaches the commit body or the audit), passing the recognition as a planner argument (two entry points could disagree), and picking one of several same-document clientes by id (an arbitrary link).
   Known edges: a recognized row skips `ClientSchema` validation of its optional columns (nothing is written) and the in-sheet duplicate bookkeeping, so an unrecognized row reusing its sheet name gets no in-sheet name warning, but a lead naming that name still raises `ambiguous_client`, so nothing is silent.
+- D13. Mapear etapas (run m-202611111703-mapear-as-etapas-da-planilha).
+  Leads exported from another organization carry etapa names that do not exist here, and the import refused each row with `Não encontramos a etapa` or with the conversion error, so the only way out was editing the sheet by hand.
+  Preview and commit take an optional multipart field `stageMap` (JSON): the name as written in the Leads tab maps to `{ stageId }`, `{ create: true }` or `{ first: true }`.
+  Names are matched with `normalizeLabel`, like every other lookup.
+  The planner applies the map in `plan/leads.ts` BEFORE `refs.resolve('stage')`; a name with no entry keeps the old behaviour, and a request with no `stageMap` plans exactly as before.
+  `{ stageId }` is never trusted: it must be an ACTIVE, non-conversion etapa found in the catalog, which holds only the default pipeline of the org read from the token.
+  An id of another organization, an unknown id, an archived etapa or the conversion etapa is the row error `invalid_stage_target` on the Etapa column, and nothing is written (all or nothing, as always).
+  `{ first: true }` is the same as a blank Etapa cell: the executor puts the lead in the first open etapa.
+  `{ create: true }` goes through `checkNewStage` in `plan/cadastros.ts`, the one core that `planEtapas` (the Etapas tab) also uses, so the `duplicate_existing` and `duplicate_archived` rules and `LeadStageSchema` have no second implementation.
+  It emits one `createLeadStage` with the plan key `stageMap:<n>` for all the leads of that name; when the Etapas tab of the same file already creates the etapa, the leads reuse that plan key and there is still one creation.
+  The loss reason rule still runs on the resolved etapa: mapping to the lost etapa without `Motivo da perda` is a row error.
+  A malformed `stageMap` (not JSON, wrong shape, an unknown key inside an entry, or a file instead of text) is `400 { error: 'validation_error', reason: 'invalid_file' }` with no write; a blank field means no map.
+  The commit re-parses, re-reads the catalog and re-plans WITH the map it receives, so it never relies on the preview.
 
 ## Preview versus commit
 
@@ -97,11 +110,14 @@ Base `/api/v1/sales-ops/import`, every route behind `requireAdmin`.
 | Route | Answer |
 | --- | --- |
 | `GET /template?example=0\|1` | `200` xlsx attachment (`fxl-vendas-importacao.xlsx` or `fxl-vendas-importacao-exemplo.xlsx`), `Cache-Control: no-store`, dropdowns from the org's active cadastros |
-| `POST /preview` (multipart `file`) | `200 ImportPreviewBody { ok, counts, recognized, issues, truncated }` |
-| `POST /commit` (the same file again) | `201 { counts, recognized }`, `422 ImportPreviewBody`, or `409 { error: 'conflict', reason: 'import_execution_failed', message }` |
+| `POST /preview` (multipart `file`, optional `stageMap`) | `200 ImportPreviewBody { ok, counts, recognized, issues, truncated, leadStages, stageTargets }` |
+| `POST /commit` (the same file and the same `stageMap` again) | `201 { counts, recognized }`, `422 ImportPreviewBody`, or `409 { error: 'conflict', reason: 'import_execution_failed', message }` |
 
 Upload refusals: no file or not an xlsx is `400 { error: 'validation_error', reason: 'invalid_file' }`; over the limit is `413 { error: 'payload_too_large', reason: 'file_too_large' }`.
 A readable xlsx with no template tab is not a 400: it is a `no_known_sheets` error in a normal preview.
+`leadStages` lists the distinct names of the Etapa column of the Leads tab (first spelling wins, order of first appearance) as `{ name, leads, resolution }`; `resolution` is `{ kind: 'existing', stageId }` (an etapa with that name, `stageId: null` when the Etapas tab of the same file creates it), `{ kind: 'not_found' }` or `{ kind: 'conversion' }`.
+`stageTargets` lists the etapas a lead may be sent to (`{ id, name, kind: 'normal' | 'lost' }`): active, of the default pipeline, in board order, never the conversion etapa.
+Both are computed by `summarizeLeadStages` WITHOUT the map, so the table of the web screen keeps showing the sheet as written, while `issues` reflect the map that was sent.
 The `409` message is the pt-BR sentence of `ImportExecutionError` naming tab and row, with no ids.
 
 ## Module layout (API)
@@ -115,6 +131,7 @@ All code is in `apps/api/src/domains/import/`.
 - `catalog.ts`: `readImportCatalog(tx, orgId, now)`, the org snapshot (never writes).
 - `client-recognition.ts`: `recognizeClientRows` and `documentDigits`, the D12 rule; pure, called only by `buildRefIndex`.
 - `refs.ts`: `buildRefIndex`, name to existing id or workbook ref; it owns the Clientes recognition (`recognizedClient`).
+- `plan/stage-map.ts`: `StageMapSchema` (strict Zod shape of the field) and `summarizeLeadStages`; pure.
 - `plan/`: `cadastros.ts`, `leads.ts`, `propostas.ts`, `desfechos.ts`, `plan-helpers.ts`, and `index.ts` (`planImport`, `isPlanOk`, `toPreviewBody`). Planners are pure: no I/O, no clock, no env.
 - `executor.ts`: `executeImportPlan`, only existing domain services.
 - `template.ts`: `buildTemplateWorkbook` and `buildExampleDataset(today)`; row 1 of each tab equals the schema example fields.
@@ -123,9 +140,13 @@ All code is in `apps/api/src/domains/import/`.
 ## The web screen
 
 `apps/web/src/sales-ops/import/`: `ImportContainer.tsx`, `ImportView.tsx`, `ImportCountsTable.tsx`, `ImportIssueList.tsx`, `hooks.ts`, `api.ts`, `issues.ts`, `import-copy.ts`, `types.ts`.
+`StageMapStep.tsx` is the Mapear etapas step.
 `SalesOpsApp.tsx` has one mount line for `view === 'importacao'`; the nav entry sits right before `Geral`.
-Three steps: download the blank or example template, upload and validate, then import.
+Steps: download the blank or example template, upload and validate, map the etapas (only when the Leads tab has etapas), then import.
 `Importar` is enabled only for an ok preview with something to create, and asks for confirmation; it commits the same file.
+Mapear etapas shows the table `Etapa na planilha | Leads | Vai para`, one `Combobox` per etapa name (no native select), with the `stageTargets`, `Criar etapa com este nome` and `Primeira etapa`.
+Names already matched by `resolution` come pre-filled (an etapa created by the Etapas tab reads `Criada pela aba Etapas` and sends no entry); the unresolved ones, and the conversion one, start empty and highlighted.
+`Validar novamente` sends the file again with the `stageMap` of the choices, and `Importar` stays disabled while any etapa has no destination or the preview has any error; commit sends the same `stageMap`.
 A new file selection discards the previous preview.
 Errors are classified by HTTP status only: a 403 renders inline admin copy and never `ForbiddenPanel`; a 409 shows `Nada foi importado: <body.message>` (slice 09.1); 413, 422 and generic have their own copy.
 The web never parses xlsx and never renders an id.
@@ -142,6 +163,8 @@ API (`apps/api/src/domains/import/__tests__/`):
 - `workbook-schema.test.ts`, `cells.test.ts`, `parse.test.ts`: the one definition, coercers, parser.
 - `cadastros.test.ts`, `plan-leads.test.ts`, `plan-propostas.test.ts`, `plan/__tests__/desfechos.test.ts`, `plan-index.test.ts`, `refs.test.ts`, `plan-helpers.test.ts`, `catalog.integration.test.ts`: the planners and the catalog.
 - `client-recognition.test.ts`: the D12 rule (document first, name with tab-wide document agreement, several same-document clientes never fall back to the name, purity).
+- `plan-stage-map.test.ts`: the map in the planner (stageId, first, create, invalid targets, loss reason, no map equals today) and `summarizeLeadStages`.
+  `import-routes.test.ts` covers the shape of the field; `tests/acceptance/mapear-etapas/` drives preview and commit with the real database (`map-stages.integration.test.ts`) and the screen (`map-stages-step.web.test.tsx`).
 - `exceljs-pin.test.ts`: `exceljs` pinned exactly.
 - `xlsx-package.test.ts`: a real template re-saved in the Open XML SDK shape makes plain exceljs throw, and `parseWorkbook` reads it into the same rows with no issue and the header notes intact; an exceljs-written package comes back byte-identical.
 
