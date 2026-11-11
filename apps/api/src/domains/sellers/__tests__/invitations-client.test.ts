@@ -12,7 +12,7 @@
  */
 import type { HubConfig } from '@fxl-business/hub-sdk';
 import type { MiddlewareHandler } from 'hono';
-import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SalesInvitationsClient } from '../invitations-client.js';
 
 const HUB_CLIENT_ID = 'pk_fxl-sales_development_unit-test-only-0123456789';
@@ -83,6 +83,21 @@ function fakeClient(): SalesInvitationsClient {
     resend: vi.fn(),
   };
 }
+
+// The first import of the app-auth graph is the slow one (transform cost). Pay it
+// here, outside any case: a case that times out keeps running in the background
+// and its late `loadGraph` interleaves with the next case's `vi.resetModules`,
+// which then sees a real client where it expected null.
+beforeAll(async () => {
+  stubValidHubConfig();
+  try {
+    await loadGraph();
+  } finally {
+    vi.doUnmock('@fxl-business/hub-sdk/server');
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  }
+}, 60_000);
 
 beforeEach(() => {
   createCalls = [];

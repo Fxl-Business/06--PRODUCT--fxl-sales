@@ -18,6 +18,10 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['src/**/__tests__/**/*.test.ts', 'src/**/__tests__/**/*.test.tsx'],
+    // Boards that render 100 cards take seconds alone and several times that when
+    // every worker competes for CPU, so the 5 s/10 s defaults flake under the gate.
+    testTimeout: 15000,
+    hookTimeout: 20000,
     passWithNoTests: true,
   },
 });

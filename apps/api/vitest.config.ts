@@ -45,10 +45,10 @@ export default defineConfig({
         // Blanks the six Hub credential names so no unit file inherits the
         // machine's own .env. See the file for why, and why it is not magic.
         setupFiles: ['./test/unit-setup.ts'],
-        // Files that reload the module graph (vi.resetModules plus dynamic
-        // imports) exceed the 5 s/10 s defaults when every worker competes for CPU.
-        testTimeout: 30000,
-        hookTimeout: 30000,
+        // Cases that reload the module graph (vi.resetModules plus dynamic imports)
+        // take 1-2 s alone and several times that when every worker competes for CPU.
+        testTimeout: 15000,
+        hookTimeout: 20000,
         // Phase 01 ships only RLS integration tests (run via test:integration).
         // Unit suite is empty for now - don't fail the gate / future CI on it.
         passWithNoTests: true,
