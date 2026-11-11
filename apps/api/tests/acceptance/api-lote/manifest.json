@@ -1,0 +1,43 @@
+{
+  "slice": "api-lote",
+  "runner": "vitest (integration project, local Postgres)",
+  "command": "cd apps/api && pnpm exec vitest run --config tests/acceptance/api-lote/vitest.config.ts",
+  "files": [
+    "apps/api/tests/acceptance/api-lote/lead-stage-batch.acceptance.test.ts",
+    "apps/api/tests/acceptance/api-lote/vitest.config.ts",
+    "apps/api/tests/acceptance/api-lote/manifest.json"
+  ],
+  "files_modified": [],
+  "contract_assumed": {
+    "delete_batch": {
+      "route": "POST /leads/stages/:stageId/delete-all",
+      "guard": "requireAdmin, org from the token",
+      "ok": "200 { batchId: uuid, deletedCount: number, skippedConvertedCount: number }",
+      "errors": "404 { error: 'not_found' } (unknown, malformed or other-org stage); 403 { error: 'forbidden', reason: 'admin_role_required' }"
+    },
+    "restore_batch": {
+      "route": "POST /leads/batches/:batchId/restore",
+      "guard": "requireAdmin, org from the token",
+      "ok": "200 { restoredCount: number }, 0 when nothing is left to restore",
+      "errors": "404 { error: 'not_found' }; 403 admin body"
+    },
+    "deleted_list": "GET /leads/deleted items carry batchId: string | null",
+    "column": "sales_ops_crm_leads.deleted_batch_id uuid NULL (set by the batch delete, cleared by any restore, never set by a single delete)",
+    "no_delete_verb": true
+  },
+  "criteria_covered": {
+    "admin_only_route_403_for_non_admin": ["only an admin", "restoring a batch is admin-only"],
+    "clientes_never_touched": ["an admin deletes every live unconverted lead", "restoring a batch returns its leads"],
+    "one_lead_deleted_entry_each_same_tx_converted_skipped_and_reported": ["an admin deletes every live unconverted lead", "about 1700 leads"],
+    "batch_restore_and_integration_tests": ["restoring a batch returns its leads", "a batch whose etapa was archived", "about 1700 leads"],
+    "board_action_admin_only_with_confirmation_dialog": "NOT covered here: the request names no component or prop, so a blind web test would be a guess. Belongs to the web slice."
+  },
+  "decisions_pinned": [
+    "A second delete-all on the same etapa answers 200 with deletedCount 0 and skippedConvertedCount still counting live converted cards; it writes nothing.",
+    "A lead restored on its own (or restored and deleted again on its own) leaves the batch: the batch restore skips it and does not audit it twice.",
+    "Batch restore keeps restoreLead's rules: own etapa if still active, else the first open etapa with one stage_changed event; appended at the end in the original order; column dense.",
+    "Batch restore is admin-only, like the deleted list.",
+    "Delete-all writes no stage_changed event."
+  ],
+  "not_run_here": "The suite needs the local Docker Postgres (TEST_DATABASE_URL, ADMIN_DATABASE_URL, TEST_MIGRATE_DATABASE_URL); this sandbox has none, so the expected Red was not observed. The config loads and stops at globalSetup on the missing URLs."
+}
