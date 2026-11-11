@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { MUTATION_ERROR_COPY } from '../../mutation-error-copy';
-import { IMPORT_COPY, importErrorMessage } from '../import-copy';
+import { exportErrorMessage, IMPORT_COPY, importErrorMessage } from '../import-copy';
 
 describe('IMPORT_COPY.errorsTitle', () => {
   it('is singular for one error and plural otherwise', () => {
@@ -101,5 +101,14 @@ describe('importErrorMessage 409 row detail', () => {
     expect(importErrorMessage({ status: 422, body: { message: 'x' } })).toBe(
       importErrorMessage({ status: 422 }),
     );
+  });
+});
+
+describe('exportErrorMessage', () => {
+  it('classifies by status and keeps the 409 message free of the commit wording', () => {
+    expect(exportErrorMessage({ status: 409, message: 'Passa do limite.' })).toBe('Passa do limite.');
+    expect(exportErrorMessage({ status: 409 })).toContain('limite de linhas');
+    expect(exportErrorMessage({ status: 403 })).toBe(MUTATION_ERROR_COPY.adminRequired);
+    expect(exportErrorMessage({ status: 500 })).toBe(MUTATION_ERROR_COPY.generic);
   });
 });

@@ -32,6 +32,18 @@ export function useDownloadImportTemplate() {
   });
 }
 
+export function useExportLeads() {
+  const { getToken } = useAccessToken();
+  // NO_CACHE_EFFECT: the export is a read; it writes nothing the query cache holds.
+  return useAppMutation<void, unknown, void>({
+    mutationFn: async () => {
+      const { blob, filename } = await importApi.exportLeads(await requireToken(getToken));
+      saveBlob(blob, filename);
+    },
+    invalidates: NO_CACHE_EFFECT,
+  });
+}
+
 export function usePreviewImport() {
   const { getToken } = useAccessToken();
   // NO_CACHE_EFFECT: the dry run is a read-only server verification.

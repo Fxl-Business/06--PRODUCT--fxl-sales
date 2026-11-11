@@ -11,7 +11,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { MUTATION_ERROR_COPY } from '../mutation-error-copy';
-import { IMPORT_COPY, importErrorMessage } from './import-copy';
+import { exportErrorMessage, IMPORT_COPY, importErrorMessage } from './import-copy';
 import { ImportCountsTable } from './ImportCountsTable';
 import { ImportIssueList } from './ImportIssueList';
 import { groupImportIssues, recognizedClientCount, totalCount } from './issues';
@@ -36,10 +36,11 @@ const secondaryButtonClass =
 const errorBannerClass =
   'flex items-start gap-3 rounded-[10px] border border-[#f1c9c4] bg-[#fdf2f1] px-4 py-3 text-[13.5px] font-semibold text-[#c93d32]';
 
-type Busy = 'download-blank' | 'download-example' | 'preview' | 'commit' | null;
+type Busy = 'export' | 'download-blank' | 'download-example' | 'preview' | 'commit' | null;
 
 type ImportViewProps = {
   onDownload: (example: boolean) => Promise<void>;
+  onExportLeads: () => Promise<void>;
   onPreview: (file: File) => Promise<ImportPreviewBody>;
   onCommit: (file: File) => Promise<ImportCommitBody>;
 };
@@ -66,11 +67,12 @@ function StepPanel({
   );
 }
 
-export function ImportView({ onCommit, onDownload, onPreview }: ImportViewProps) {
+export function ImportView({ onCommit, onDownload, onExportLeads, onPreview }: ImportViewProps) {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<ImportPreviewBody | null>(null);
   const [result, setResult] = useState<ImportCommitBody | null>(null);
   const [error, setError] = useState<unknown>(null);
+  const [errorFromExport, setErrorFromExport] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [busy, setBusy] = useState<Busy>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -78,6 +80,7 @@ export function ImportView({ onCommit, onDownload, onPreview }: ImportViewProps)
 
   function clearErrors() {
     setError(null);
+    setErrorFromExport(false);
     setLocalError(null);
   }
 
@@ -97,6 +100,19 @@ export function ImportView({ onCommit, onDownload, onPreview }: ImportViewProps)
       await onDownload(example);
     } catch (e) {
       setError(e);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function runExport() {
+    setBusy('export');
+    clearErrors();
+    try {
+      await onExportLeads();
+    } catch (e) {
+      setError(e);
+      setErrorFromExport(true);
     } finally {
       setBusy(null);
     }
@@ -162,7 +178,8 @@ export function ImportView({ onCommit, onDownload, onPreview }: ImportViewProps)
       {hasError ? (
         <div className={errorBannerClass} data-import-error role="alert">
           <span className="min-w-0 flex-1 leading-[1.4]">
-            {localError ?? importErrorMessage(error)}
+            {localError ??
+              (errorFromExport ? exportErrorMessage(error) : importErrorMessage(error))}
           </span>
           <button
             aria-label={MUTATION_ERROR_COPY.dismiss}
@@ -220,6 +237,25 @@ export function ImportView({ onCommit, onDownload, onPreview }: ImportViewProps)
               >
                 <Download aria-hidden className="size-4" />
                 {IMPORT_COPY.downloadExample}
+              </button>
+            </div>
+          </StepPanel>
+
+          <StepPanel step="export" text={IMPORT_COPY.exportHint} title={IMPORT_COPY.exportTitle}>
+            <div>
+              <button
+                className={secondaryButtonClass}
+                data-import-export
+                disabled={busy !== null}
+                onClick={() => void runExport()}
+                type="button"
+              >
+                {busy === 'export' ? (
+                  <Loader2 aria-hidden className="size-4 animate-spin" />
+                ) : (
+                  <Download aria-hidden className="size-4" />
+                )}
+                {IMPORT_COPY.exportLeads}
               </button>
             </div>
           </StepPanel>

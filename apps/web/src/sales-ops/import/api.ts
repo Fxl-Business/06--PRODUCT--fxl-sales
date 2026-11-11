@@ -1,6 +1,7 @@
 import { apiFetchBlob, apiUpload } from '@/lib/api-client';
 import {
   IMPORT_EXAMPLE_FILENAME,
+  IMPORT_EXPORT_FILENAME,
   IMPORT_TEMPLATE_FILENAME,
   type ImportCommitBody,
   type ImportPreviewBody,
@@ -24,6 +25,13 @@ export const importApi = {
       blob,
       filename: filename ?? (example ? IMPORT_EXAMPLE_FILENAME : IMPORT_TEMPLATE_FILENAME),
     };
+  },
+  exportLeads: async (token: string) => {
+    const { blob, filename } = await apiFetchBlob(`${BASE}/export/leads`, {
+      method: 'GET',
+      token,
+    });
+    return { blob, filename: filename ?? IMPORT_EXPORT_FILENAME };
   },
   preview: (file: File, token: string) =>
     apiUpload<ImportPreviewBody>(`${BASE}/preview`, { token, form: fileForm(file) }),

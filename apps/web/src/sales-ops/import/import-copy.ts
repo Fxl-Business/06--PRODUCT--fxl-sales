@@ -9,6 +9,10 @@ export const IMPORT_COPY = {
     'O modelo em branco já traz as listas com os cadastros atuais da organização. O modelo com exemplo mostra uma linha preenchida em cada aba.',
   downloadBlank: 'Baixar modelo em branco',
   downloadExample: 'Baixar modelo com exemplo',
+  exportLeads: 'Exportar leads',
+  exportTitle: 'Levar leads para outra organização',
+  exportHint:
+    'Baixa os leads ativos e ainda não convertidos desta organização, com os clientes deles, no mesmo formato do modelo. Dá para importar o arquivo em outra organização.',
   step2Title: '2. Envie a planilha preenchida',
   step2Text: 'Apenas arquivos .xlsx de até 5 MB. Abas vazias são ignoradas.',
   chooseFile: 'Escolher arquivo',
@@ -86,4 +90,20 @@ export function importErrorMessage(error: unknown): string {
     return 'Nada foi importado: a planilha ou os cadastros da organização mudaram desde a validação. Corrija os erros abaixo e valide novamente.';
   }
   return MUTATION_ERROR_COPY.generic;
+}
+
+/**
+ * The export is a GET that writes nothing, so its 409 (over the import's row limit) is
+ * a plain warning with the server's `message`, not the commit's "Nada foi importado".
+ * Keyed on the status only; every other status reads as the import's.
+ */
+export function exportErrorMessage(error: unknown): string {
+  const status =
+    typeof error === 'object' && error !== null ? (error as { status?: unknown }).status : null;
+  if (status === 409) {
+    const message = (error as { message?: unknown }).message;
+    const detail = typeof message === 'string' ? message.trim() : '';
+    return detail || 'A exportação passa do limite de linhas da importação.';
+  }
+  return importErrorMessage(error);
 }

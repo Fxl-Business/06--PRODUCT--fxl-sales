@@ -65,6 +65,7 @@ export const MAX_RETURNED_ISSUES = 500;
 
 export const IMPORT_TEMPLATE_FILENAME = 'fxl-vendas-importacao.xlsx';
 export const IMPORT_EXAMPLE_FILENAME = 'fxl-vendas-importacao-exemplo.xlsx';
+export const IMPORT_EXPORT_FILENAME = 'fxl-leads-exportacao.xlsx';
 export const XLSX_ACCEPT =
   '.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 

@@ -50,7 +50,7 @@ vi.mock('@/components/ui/alert-dialog', () => {
 });
 
 vi.mock('../api', () => ({
-  importApi: { downloadTemplate: vi.fn(), preview: vi.fn(), commit: vi.fn() },
+  importApi: { downloadTemplate: vi.fn(), preview: vi.fn(), commit: vi.fn(), exportLeads: vi.fn() },
 }));
 
 import { importApi } from '../api';
@@ -381,5 +381,33 @@ describe('import view', () => {
     expect(container.querySelector('[data-import-step="2"]')).not.toBeNull();
     expect(text()).toContain(IMPORT_COPY.noFile);
     expect(button(IMPORT_COPY.validate).disabled).toBe(true);
+  });
+});
+
+describe('Exportar leads', () => {
+  it('downloads the workbook through the export route', async () => {
+    api.exportLeads.mockResolvedValue({ blob: new Blob(['x']), filename: 'leads.xlsx' });
+    await renderView();
+    await click(button(IMPORT_COPY.exportLeads));
+    expect(api.exportLeads).toHaveBeenCalledWith('test-token');
+    expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows the 409 message from the server as a plain warning', async () => {
+    api.exportLeads.mockRejectedValue({ status: 409, error: 'export_too_large', message: 'Passa do limite' });
+    await renderView();
+    await click(button(IMPORT_COPY.exportLeads));
+    const banner = container.querySelector('[data-import-error]');
+    expect(banner?.textContent).toContain('Passa do limite');
+    expect(banner?.textContent).not.toContain('Nada foi importado');
+  });
+
+  it('shows a 403 inline as the admin-required copy', async () => {
+    api.exportLeads.mockRejectedValue({ status: 403, error: 'forbidden' });
+    await renderView();
+    await click(button(IMPORT_COPY.exportLeads));
+    expect(container.querySelector('[data-import-error]')?.textContent).toContain(
+      MUTATION_ERROR_COPY.adminRequired,
+    );
   });
 });

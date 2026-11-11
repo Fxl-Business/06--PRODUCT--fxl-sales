@@ -1,4 +1,9 @@
-import { useCommitImport, useDownloadImportTemplate, usePreviewImport } from './hooks';
+import {
+  useCommitImport,
+  useDownloadImportTemplate,
+  useExportLeads,
+  usePreviewImport,
+} from './hooks';
 import { ImportView } from './ImportView';
 
 /**
@@ -8,11 +13,13 @@ import { ImportView } from './ImportView';
  */
 export function ImportContainer() {
   const download = useDownloadImportTemplate();
+  const exportLeads = useExportLeads();
   const preview = usePreviewImport();
   const commit = useCommitImport();
   return (
     <ImportView
       onCommit={(file) => commit.mutateAsync(file)}
+      onExportLeads={() => exportLeads.mutateAsync()}
       onDownload={(example) => download.mutateAsync(example)}
       onPreview={(file) => preview.mutateAsync(file)}
     />
