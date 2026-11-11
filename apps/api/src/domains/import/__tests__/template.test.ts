@@ -116,6 +116,21 @@ function sheet(wb: ExcelJS.Workbook, name: string): ExcelJS.Worksheet {
 }
 
 describe('template workbook', () => {
+  it('fills only the sheets given in opts.rows (an export), money as reais, and leaves the others empty', async () => {
+    const wb = createTemplateWorkbook(catalogFixture(), {
+      example: false,
+      rows: {
+        leads: [{ contato: 'Carlos Lima', empresa: 'Padaria', valorEstimado: 1250050, produtos: ['A', 'B'] }],
+      },
+    });
+    const leads = wb.getWorksheet(getSheetDef('leads').tab)!;
+    expect(leads.rowCount).toBe(2);
+    expect(leads.getCell(2, 1).value).toBe('Carlos Lima');
+    expect(leads.getCell(2, 3).value).toBe(12500.5);
+    expect(leads.getCell(2, 6).value).toBe('A; B');
+    expect(wb.getWorksheet(getSheetDef('clientes').tab)!.rowCount).toBe(1);
+  });
+
   it('writes Leia-me first, the 13 data tabs in contract order and a hidden Listas tab last', async () => {
     for (const example of [false, true]) {
       const wb = await reload(await buildTemplateWorkbook(catalogFixture(), { example }));

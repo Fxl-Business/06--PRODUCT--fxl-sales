@@ -18,7 +18,8 @@ import {
 } from './workbook-schema.js';
 import type { CellValue, ImportCatalog, SheetKey } from './types.js';
 
-export type TemplateOptions = { example: boolean };
+/** `rows` fills data sheets with real records instead of the example (an export); a sheet left out stays empty. */
+export type TemplateOptions = { example: boolean; rows?: Readonly<Partial<Record<SheetKey, readonly ExampleRow[]>>> };
 
 /** Full rows: every column key of the sheet present, null where blank. Values are post-coercion (cents, ISO days, enum VALUES, booleans, string[]). */
 export type ExampleRow = Readonly<Record<string, CellValue>>;
@@ -533,9 +534,9 @@ export function createTemplateWorkbook(catalog: ImportCatalog, opts: TemplateOpt
   const listColumns = buildListColumns(catalog);
   const ranges = writeListas(listas, listColumns);
   const listValues = new Map(listColumns.map((c) => [c.id, c.values] as const));
-  const dataset = opts.example ? buildExampleDataset(catalog.today) : null;
+  const dataset = opts.example ? buildExampleDataset(catalog.today) : (opts.rows ?? null);
   for (const [def, ws] of dataSheets) {
-    writeDataSheet(ws, def, ranges, listValues, dataset ? dataset[def.key] : []);
+    writeDataSheet(ws, def, ranges, listValues, dataset?.[def.key] ?? []);
   }
   return wb;
 }

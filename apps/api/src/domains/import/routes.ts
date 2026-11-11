@@ -8,6 +8,7 @@ import { cadastroActor } from '../sales-ops/cadastro-actor.js';
 import { ensureLeadStages } from '../sales-ops/leads/stages-seed.js';
 import { ensureSystemFuncoes, withTenant, type Db } from '../sales-ops/service.js';
 import { readImportCatalog } from './catalog.js';
+import { LeadsExportError, readLeadsExport } from './export.js';
 import { ImportExecutionError, executeImportPlan } from './executor.js';
 import { INVALID_FILE_CODE, parseWorkbook } from './parse.js';
 import { isPlanOk, planImport, toPreviewBody } from './plan/index.js';
@@ -24,6 +25,7 @@ import { MAX_UPLOAD_BYTES } from './workbook-schema.js';
 
 export const XLSX_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 export const TEMPLATE_FILENAME = 'fxl-vendas-importacao.xlsx';
+export const LEADS_EXPORT_FILENAME = 'fxl-vendas-leads-exportados.xlsx';
 export const EXAMPLE_TEMPLATE_FILENAME = 'fxl-vendas-importacao-exemplo.xlsx';
 export const INVALID_FILE_BODY = { error: 'validation_error', reason: 'invalid_file' } as const;
 export const FILE_TOO_LARGE_BODY = { error: 'payload_too_large', reason: 'file_too_large' } as const;
@@ -103,6 +105,30 @@ importRouter.get('/template', requireAdmin, async (c) => {
     'Content-Disposition': `attachment; filename="${example ? EXAMPLE_TEMPLATE_FILENAME : TEMPLATE_FILENAME}"`,
     'Cache-Control': 'no-store',
   });
+});
+
+importRouter.get('/export/leads', requireAdmin, async (c) => {
+  const orgId = c.get('orgId');
+  const now = new Date();
+  const modules = await getOrgModules(c);
+  try {
+    // Rolled back like the template: the dropdowns list the default etapas without persisting them, and nothing is written.
+    const bytes = await readOnlyTenant(orgId, async (tx) => {
+      const catalog = await seededCatalog(tx, orgId, now, modules);
+      const { leads, clientes } = await readLeadsExport(tx, orgId);
+      return buildTemplateWorkbook(catalog, { example: false, rows: { leads, clientes } });
+    });
+    return c.body(new Uint8Array(bytes), 200, {
+      'Content-Type': XLSX_CONTENT_TYPE,
+      'Content-Disposition': `attachment; filename="${LEADS_EXPORT_FILENAME}"`,
+      'Cache-Control': 'no-store',
+    });
+  } catch (error) {
+    if (error instanceof LeadsExportError) {
+      return c.json({ error: 'conflict', reason: error.reason, message: error.message }, 409);
+    }
+    throw error;
+  }
 });
 
 importRouter.post('/preview', requireAdmin, uploadBodyLimit, async (c) => {

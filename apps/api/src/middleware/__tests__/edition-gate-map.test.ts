@@ -160,6 +160,7 @@ const LEADS_GRANTED: readonly RouteCase[] = [
   r('salesOps', 'POST', '/clients', `${SO}/clients`),
   r('salesOps', 'PATCH', '/clients/:id', `${SO}/clients/${ID}`),
   r('salesOps', 'GET', '/import/template', `${SO}/import/template`),
+  r('salesOps', 'GET', '/import/export/leads', `${SO}/import/export/leads`),
   r('salesOps', 'POST', '/import/preview', `${SO}/import/preview`),
   r('salesOps', 'POST', '/import/commit', `${SO}/import/commit`),
 ];
