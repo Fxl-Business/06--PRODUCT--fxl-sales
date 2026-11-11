@@ -1,0 +1,15 @@
+{
+  "slice": "mapear-etapas",
+  "files": [
+    "tests/acceptance/mapear-etapas/_fixtures.ts",
+    "tests/acceptance/mapear-etapas/vitest.api.config.ts",
+    "tests/acceptance/mapear-etapas/vitest.web.config.ts",
+    "tests/acceptance/mapear-etapas/map-stages.integration.test.ts",
+    "tests/acceptance/mapear-etapas/map-stages-step.web.test.tsx"
+  ],
+  "commands": [
+    "VITEST_INTEGRATION=1 node_modules/.bin/vitest run -c tests/acceptance/mapear-etapas/vitest.api.config.ts",
+    "node_modules/.bin/vitest run -c tests/acceptance/mapear-etapas/vitest.web.config.ts"
+  ],
+  "notes": "Red before implementation. The API test reads the new preview fields by value (their keys are not in the contract). The web test ASSUMES preview keys leadStages and stageTargets and a stageMap argument to importApi.preview; reconcile with the contract."
+}
