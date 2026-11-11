@@ -134,6 +134,8 @@ export function deleteLead(
         deletedAt,
         deletedByUserId: actor.userId,
         deletedByName: actor.name,
+        // A delete on its own never belongs to a batch.
+        deletedBatchId: null,
         updatedAt: deletedAt,
       })
       .where(and(eq(salesOpsCrmLeads.orgId, orgId), eq(salesOpsCrmLeads.id, id), liveLeadCondition()));
@@ -219,6 +221,8 @@ export function restoreLead(
         deletedAt: null,
         deletedByUserId: null,
         deletedByName: null,
+        // Every restore clears the batch: a lead restored on its own has left it.
+        deletedBatchId: null,
         stageId: target.id,
         position,
         // KEY OMISSION, the moveLead rule: stage_changed_at moves only when the

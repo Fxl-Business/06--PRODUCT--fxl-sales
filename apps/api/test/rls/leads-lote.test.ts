@@ -10,12 +10,13 @@
 import { randomUUID } from 'node:crypto';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { closeDb } from '../../src/db/client.js';
 import * as schema from '../../src/db/schema.js';
 import { deleteCrmForOrgs } from '../../src/db/__tests__/settlement-test-cleanup.js';
 import { testDatabaseUrls } from '../../src/db/__tests__/test-database-urls.js';
+import { writeAuditEntries } from '../../src/domains/audit/service.js';
 import { LeadWriteBaseSchema } from '../../src/domains/sales-ops/leads/lead-schemas.js';
 import {
   type LeadScope,
@@ -27,9 +28,17 @@ import {
   deleteLead,
   deleteStageLeads,
   previewStageDelete,
+  restoreLead,
   restoreLeadBatch,
 } from '../../src/domains/sales-ops/leads/lead-trash-service.js';
 import { ensureLeadStagesForOrg } from '../../src/domains/sales-ops/leads/stages-seed.js';
+
+// Passes through to the real ledger writer; one test makes it throw to prove the rollback.
+vi.mock('../../src/domains/audit/service.js', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../../src/domains/audit/service.js')>();
+  return { ...original, writeAuditEntries: vi.fn(original.writeAuditEntries) };
+});
+const auditEntries = vi.mocked(writeAuditEntries);
 
 const { appUrl: APP_DB_URL, adminUrl: ADMIN_DB_URL } = testDatabaseUrls();
 const ADMIN_CONNECTION_OPTIONS = { connection: { 'app.fxl_admin': 'true' } } as const;
@@ -108,6 +117,12 @@ describe('sales operations leads: the bulk lixeira', () => {
     return Number(row!.n);
   }
 
+  async function columnShape(orgId: string, stageId: string) {
+    return adminClient<{ id: string; position: number; deleted_at: Date | null }[]>`
+      SELECT id, "position", deleted_at FROM sales_ops_crm_leads
+      WHERE org_id = ${orgId} AND stage_id = ${stageId} ORDER BY "position", id`;
+  }
+
   async function auditCount(orgId: string, action: string): Promise<number> {
     const [row] = await adminClient<{ n: string }[]>`
       SELECT count(*)::text AS n FROM audit_log WHERE actor_org_id = ${orgId} AND action = ${action}`;
@@ -181,12 +196,18 @@ describe('sales operations leads: the bulk lixeira', () => {
   it('is all or nothing: a failure while writing the ledger rolls every lead back', async () => {
     const w = await world('atomic');
     for (let i = 1; i <= 5; i += 1) await lead(w.orgId, `L${i}`);
-    // A null actor id violates audit_log.actor_user_id NOT NULL, after the UPDATE and the renumber.
-    await expect(
-      deleteStageLeads(db, w.orgId, w.open.id, { userId: null as unknown as string, name: null }),
-    ).rejects.toThrow();
+    const columnBefore = await columnShape(w.orgId, w.open.id);
+    // The ledger write is the last step, after the set-based UPDATE and the renumber: make it
+    // throw so the rollback of work already applied in the transaction is what is proven.
+    auditEntries.mockRejectedValueOnce(new Error('ledger down'));
+    await expect(deleteStageLeads(db, w.orgId, w.open.id, ACTOR)).rejects.toThrow('ledger down');
+    expect(auditEntries).toHaveBeenCalledTimes(1);
     expect(await deletedCount(w.orgId)).toBe(0);
+    const [batched] = await adminClient<{ n: string }[]>`
+      SELECT count(*)::text AS n FROM sales_ops_crm_leads WHERE org_id = ${w.orgId} AND deleted_batch_id IS NOT NULL`;
+    expect(batched!.n).toBe('0');
     expect(await auditCount(w.orgId, 'lead.deleted')).toBe(0);
+    expect(await columnShape(w.orgId, w.open.id)).toEqual(columnBefore);
   });
 
   it('touches only the token\'s org, and an etapa with nothing to delete writes nothing', async () => {
@@ -218,18 +239,30 @@ describe('sales operations leads: the bulk lixeira', () => {
   it('a lead that left the batch is not restored a second time', async () => {
     const w = await world('left');
     const a = await lead(w.orgId, 'A');
-    await lead(w.orgId, 'B');
+    const b = await lead(w.orgId, 'B');
+    const batchOf = async (id: string) => {
+      const [row] = await adminClient<{ deleted_batch_id: string | null }[]>`
+        SELECT deleted_batch_id FROM sales_ops_crm_leads WHERE id = ${id}`;
+      return row!.deleted_batch_id;
+    };
     const batch = await deleteStageLeads(db, w.orgId, w.open.id, ACTOR);
     if (!batch.ok || batch.batchId === null) throw new Error('expected a batch');
-    // A restored on its own (the single restore clears the batch id): the batch owns only B now.
-    await adminClient`
-      UPDATE sales_ops_crm_leads SET deleted_at = NULL, deleted_by_user_id = NULL, deleted_by_name = NULL,
-        deleted_batch_id = NULL WHERE id = ${a.id}`;
-    expect(await restoreLeadBatch(db, w.orgId, batch.batchId, ACTOR)).toEqual({ ok: true, restoredCount: 1 });
+    expect(await batchOf(a.id)).toBe(batch.batchId);
+    expect(await batchOf(b.id)).toBe(batch.batchId);
+
+    // A is restored on its own: the single restore clears the batch id.
+    expect(await restoreLead(db, w.orgId, a.id, true, ACTOR)).toMatchObject({ ok: true });
+    expect(await batchOf(a.id)).toBeNull();
+    // Deleted on its own again, A is no longer in any batch.
     expect(await deleteLead(db, w.orgId, a.id, ADMIN_SCOPE, ACTOR)).toEqual({ ok: true });
-    const [row] = await adminClient<{ deleted_batch_id: string | null }[]>`
-      SELECT deleted_batch_id FROM sales_ops_crm_leads WHERE id = ${a.id}`;
-    expect(row!.deleted_batch_id).toBeNull();
+    expect(await batchOf(a.id)).toBeNull();
+
+    // The batch owns only B now.
+    expect(await restoreLeadBatch(db, w.orgId, batch.batchId, ACTOR)).toEqual({ ok: true, restoredCount: 1 });
+    expect(await batchOf(b.id)).toBeNull();
+    const stillDeleted = await adminClient<{ id: string }[]>`
+      SELECT id FROM sales_ops_crm_leads WHERE org_id = ${w.orgId} AND deleted_at IS NOT NULL`;
+    expect(stillDeleted.map((row) => row.id)).toEqual([a.id]);
   });
 
   it('deletes and restores a few hundred leads in one transaction each', async () => {
