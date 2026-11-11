@@ -409,7 +409,9 @@ describe('Sales Ops canonical routing', () => {
 
     expect(accountButton).not.toBeNull();
     expect(sidebar?.textContent).toContain('Test User');
-    expect(sidebar?.textContent).toContain('Equipe');
+    // The active Organization leads the closed trigger; the roles moved to the open menu.
+    expect(accountButton?.textContent).toContain('FXL Matriz');
+    expect(accountButton?.textContent).not.toContain('Equipe');
     expect(header?.textContent).not.toContain('Test User');
     expect(header?.querySelector('button[aria-label="Sair"]')).toBeNull();
     expect(container.querySelector('button[aria-label="Sair"]')).toBeNull();
@@ -417,6 +419,7 @@ describe('Sales Ops canonical routing', () => {
     await click(accountButton!);
 
     expect(sidebar?.textContent).toContain('test.user@fxl.example');
+    expect(sidebar?.textContent).toContain('Equipe');
     await click(buttonByText('Sair'));
     expect(authMocks.logout).toHaveBeenCalledTimes(1);
   });

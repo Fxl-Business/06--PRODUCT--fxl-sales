@@ -506,3 +506,69 @@ describe('sales-ops account dropdown Trocar conta', () => {
     expect(container.innerHTML).not.toContain(rawWorkspaceId);
   });
 });
+
+describe('sales-ops account trigger names the active Organization', () => {
+  const trigger = () => byName('Abrir menu da conta')!;
+  const lines = () =>
+    [...trigger().querySelectorAll('span.block')].map((line) => line.textContent);
+
+  it('shows the Organization as the main line and the user as the small second line, without roles', async () => {
+    await renderRoute('/tatico/dashboard');
+
+    expect(lines()).toEqual(['Alfa Consultoria', 'Test User']);
+    expect(trigger().querySelector('span.block')?.className).toContain('font-bold');
+    expect(trigger().textContent).not.toContain('Administrador');
+    expect(trigger().getAttribute('title')).toBe('Conta - Alfa Consultoria · Test User');
+  });
+
+  it('keeps the name and roles layout without an active Organization', async () => {
+    active = null;
+    await renderRoute('/tatico/dashboard');
+
+    expect(lines()[0]).toBe('Test User');
+    expect(lines()).toHaveLength(2);
+    expect(lines()[1]).not.toBe('Test User');
+    expect(trigger().getAttribute('title')).toBe('Conta');
+    expect(trigger().hasAttribute('aria-describedby')).toBe(false);
+  });
+
+  it('never shows the raw id when the label falls back to it', async () => {
+    active = nameless;
+    await renderRoute('/tatico/dashboard');
+
+    expect(trigger().textContent).not.toContain('org-c');
+    expect(trigger().getAttribute('title')).toBe('Conta');
+    expect(lines()[0]).toBe('Test User');
+  });
+
+  it('carries the Organization and the user in the title and accessible description when the sidebar is collapsed', async () => {
+    await renderRoute('/tatico/dashboard');
+    await click(container.querySelector<HTMLButtonElement>('button[aria-label="Recolher menu"]')!);
+
+    expect(trigger().querySelector('span.block')).toBeNull();
+    expect(trigger().getAttribute('title')).toContain('Alfa Consultoria');
+    expect(trigger().getAttribute('title')).toContain('Test User');
+    const describedBy = trigger().getAttribute('aria-describedby');
+    expect(describedBy).toBeTruthy();
+    const description = document.getElementById(describedBy!)?.textContent ?? '';
+    expect(description).toContain('Alfa Consultoria');
+    expect(description).toContain('Test User');
+  });
+
+  it('shows the new Organization after a successful setActive, with no page reload', async () => {
+    authMocks.setActive.mockImplementation(async (organizationId: string) => {
+      active = organizationId === 'org-b' ? beta : active;
+      others = [alfa, nameless];
+    });
+    await renderRoute('/tatico/dashboard');
+    expect(lines()[0]).toBe('Alfa Consultoria');
+
+    await openAccountMenu();
+    await click(byName('Trocar para Beta Engenharia')!);
+    await flushReact();
+
+    expect(authMocks.setActive).toHaveBeenCalledWith('org-b');
+    expect(lines()[0]).toBe('Beta Engenharia');
+    expect(trigger().getAttribute('title')).toBe('Conta - Beta Engenharia · Test User');
+  });
+});

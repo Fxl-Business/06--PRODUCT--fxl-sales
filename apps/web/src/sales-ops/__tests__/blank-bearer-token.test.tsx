@@ -23,6 +23,14 @@ vi.mock('@/auth/react', () => ({
   }),
   useLogout: () => mocks.logout,
   useAccessToken: () => ({ getToken: mocks.getToken }),
+  useOrganizations: () => ({
+    active: null,
+    activeName: undefined,
+    organizations: [],
+    others: [],
+    setActive: async () => {},
+    switchAccount: () => {},
+  }),
   useSalesEdition: () => 'full',
 }));
 

@@ -43,3 +43,27 @@ describe('every @/auth/react mock exports useSalesEdition', () => {
     },
   );
 });
+
+describe('every @/auth/react mock of a test that renders SalesOpsApp exports useOrganizations', () => {
+  /*
+    The shell reads `useOrganizations().active` for the closed account trigger, so a
+    closed mock factory without it throws `useOrganizations is not a function`.
+  */
+  const shellMockingFiles = mockingFiles.filter((file) =>
+    /import[^;]*\bSalesOpsApp\b[^;]*from/.test(readFileSync(file, 'utf8')),
+  );
+
+  it('finds the shell mocks it guards (non-vacuous)', () => {
+    expect(shellMockingFiles.length).toBeGreaterThan(0);
+  });
+
+  it.each(shellMockingFiles.map((file) => [relative(SRC_ROOT, file), file]))(
+    '%s exports useOrganizations from its mock',
+    (name, file) => {
+      expect(
+        readFileSync(file, 'utf8').includes('useOrganizations'),
+        `${name} renders SalesOpsApp and mocks @/auth/react without useOrganizations`,
+      ).toBe(true);
+    },
+  );
+});

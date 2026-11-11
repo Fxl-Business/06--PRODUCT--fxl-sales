@@ -1154,10 +1154,10 @@ function LoadingPanel() {
  * the token re-mint and the cache decision all live in the auth provider behind it.
  * Nothing here may call `client.setActive`, flush a query cache, or reload the page.
  *
- * The hook is called HERE and not in `SalesOpsApp`, because Radix mounts
- * `DropdownMenuContent` only while the menu is open. Hoisting it to the shell would
- * run it on every render of every test that mocks `@/auth/react` with a closed
- * factory and never opens this menu, and there are five of those.
+ * The shell also calls `useOrganizations` (for the closed trigger, which names the
+ * active Organization), so every `vi.mock('@/auth/react')` factory of a test that
+ * renders the shell exports it (`auth-mock-edition-export.test.ts`). This section still
+ * reads its own copy, so it stays correct when mounted alone.
  *
  * Rows are `DropdownMenuItem`s rather than a `Combobox` on purpose. This is a menu of
  * session actions, not a single-select form picker, and it already sits inside a menu:
@@ -1289,9 +1289,8 @@ function AccountOrganizationSection({ onSwitched }: { onSwitched: () => void }) 
  * the seam drops an absent one. Nothing here builds a URL, flushes a cache or touches
  * the SDK client.
  *
- * The hook is called here, inside the menu content, for the same reason
- * `AccountOrganizationSection` calls it there: Radix mounts this only while the menu
- * is open.
+ * The hook is called here as well as in the shell (which reads `active` for the closed
+ * trigger); the mocks of `@/auth/react` therefore all export it.
  */
 function AccountSessionActions({ onLogout }: { onLogout: () => void }) {
   const { active, switchAccount } = useOrganizations();
@@ -1363,6 +1362,7 @@ export function SalesOpsApp() {
   useEffect(() => subscribeNarrowViewport(setSidebarCollapsed), []);
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const { active: activeOrganization } = useOrganizations();
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [modal, setModal] = useState<ModalState>(null);
   const [saleWizard, setSaleWizard] = useState<SaleWizardRequest | null>(null);
@@ -1735,6 +1735,13 @@ export function SalesOpsApp() {
     .reduce((sum, payable) => sum + payable.amountBrl, 0);
   const roleLabel = roleSummaryLabel(profile.roles);
   const userName = profile.name ?? 'FXL';
+  // The closed trigger names the active Organization, never a raw id: a label that fell
+  // back to the id is dropped and the trigger keeps the name and roles layout.
+  const triggerOrg =
+    activeOrganization && !isOrgLabelFallback(activeOrganization)
+      ? orgLabel(activeOrganization)
+      : null;
+  const triggerTitle = triggerOrg ? `Conta - ${triggerOrg} · ${userName}` : 'Conta';
 
   function setWorkspace(next: SalesOpsWorkspace) {
     setWorkspaceMenuOpen(false);
@@ -2103,18 +2110,24 @@ export function SalesOpsApp() {
                   onClick={(event) => {
                     if (event.detail === 0) setAccountMenuOpen(true);
                   }}
-                  title="Conta"
+                  aria-describedby={triggerOrg ? 'account-trigger-description' : undefined}
+                  title={triggerTitle}
                   type="button"
                 >
                   <AccountAvatar avatarUrl={profile.avatarUrl} name={userName} />
+                  {triggerOrg ? (
+                    <span className="sr-only" id="account-trigger-description">
+                      {triggerTitle}
+                    </span>
+                  ) : null}
                   {!sidebarCollapsed ? (
                     <>
                       <span className="min-w-0 flex-1 leading-[1.2]">
                         <span className="block truncate text-[14px] font-bold text-[#f3f3f5]">
-                          {userName}
+                          {triggerOrg ?? userName}
                         </span>
                         <span className="mt-0.5 block truncate text-[11.5px] text-[#8b8b92]">
-                          {roleLabel}
+                          {triggerOrg ? userName : roleLabel}
                         </span>
                         {profile.email ? <span className="sr-only">{profile.email}</span> : null}
                       </span>
