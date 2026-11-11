@@ -42,6 +42,7 @@ import {
   createPerson,
   createProduct,
   createSale,
+  ensureSystemFuncoes,
   getSalesOpsSnapshot,
   getSalesOpsSummary,
   getSettings,
@@ -61,6 +62,7 @@ import {
   updateProduct,
   updateSale,
   upsertSettings,
+  withTenant,
 } from './service.js';
 import {
   RecordSettlementSchema,
@@ -136,6 +138,14 @@ salesOpsRouter.get('/bootstrap', async (c) => {
   const orgId = c.get('orgId');
   // ECV bug: an org created after migration 0022 has no etapas until something seeds them.
   await ensureLeadStagesForOrg(getDb(), orgId);
+  // Same for the system funcoes (vendedor, finder): without them no vendedor and so no proposta
+  // can exist. Absent slugs only; a custom funcao squatting the name must not take the app down.
+  try {
+    await withTenant(getDb(), orgId, (tx) => ensureSystemFuncoes(tx, orgId));
+  } catch (error) {
+    if (!(error instanceof Error) || error.message !== 'system_funcao_seed_failed') throw error;
+    console.warn('[fxl-sales-api] system funcao seed skipped on bootstrap: system_funcao_seed_failed');
+  }
   const snapshot = await getSalesOpsSnapshot(getDb(), orgId);
   return c.json({ ...snapshot, orgModules: await getOrgModules(c) });
 });

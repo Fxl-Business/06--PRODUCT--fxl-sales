@@ -210,6 +210,9 @@ Full reference: `nexo/knowledge/reference/pessoas-e-funcoes.md`.
 - A Pessoa is the single people cadastro; a Função is an org-scoped role assigned to a pessoa.
 - `vendedor` and `finder` are the only system funções: not renamable or archivable (`409 funcao_is_system`), no edit affordance. Everything else, `Prestador` included, is org-created.
 - Funções are archived, never deleted.
+- `GET /bootstrap` seeds the missing system funções (`vendedor`, `finder`) on read, in a `withTenant` transaction before the snapshot, through the ONE `ensureSystemFuncoes` (no second implementation).
+  The guard is per absent system slug: an existing função, active or archived, is never recreated or written. A custom função squatting the name raises `system_funcao_seed_failed`, which the bootstrap logs and survives.
+  Only the bootstrap route, the import routes and the leads-edition person writes may call it (oracles `sales-ops/__tests__/funcoes-seed-callers.test.ts` and `test/rls/bootstrap-system-funcoes-seed.test.ts`).
 - Web code checks funções through `hasFuncao` (in `apps/web/src/sales-ops/calculations.ts`), never through the deprecated `is_seller` / `is_finder` / `is_collaborator` mirrors. Do not reintroduce `isCollaboratorPerson`.
 - Person writes send `funcaoIds` as a full set replacement; empty is `funcao_required`.
 - Hub `AppRole` values are unrelated to funções.
