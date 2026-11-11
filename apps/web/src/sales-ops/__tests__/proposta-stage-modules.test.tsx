@@ -63,6 +63,8 @@ vi.mock('../leads/hooks', () => ({
   useMoveLead: () => mutation,
   useSaveLead: () => mutation,
   useDeleteLead: () => mutation,
+  useDeleteStageLeads: () => mutation,
+  useStageDeletePreview: () => ({ data: undefined, isError: false }),
 }));
 vi.mock('@/auth/react', async () => {
   const { editionFromModules: toEdition } = await import('@fxl-sales/shared-utils/crm-model');

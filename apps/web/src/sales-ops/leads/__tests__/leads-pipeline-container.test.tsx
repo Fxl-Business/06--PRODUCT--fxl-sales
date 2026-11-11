@@ -80,6 +80,8 @@ vi.mock('../hooks', () => ({
   },
   useSaveLead: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useDeleteLead: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useDeleteStageLeads: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useStageDeletePreview: () => ({ data: undefined, isError: false }),
 }));
 
 vi.mock('../crm-hooks', () => ({

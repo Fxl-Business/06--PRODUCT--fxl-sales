@@ -1,18 +1,19 @@
 import { useNavigate } from 'react-router-dom';
 import { buildSalesOpsPath } from '../navigation';
-import { useDeletedLeads, useRestoreLead } from './deleted-leads';
+import { useDeletedLeads, useRestoreLead, useRestoreLeadBatch } from './deleted-leads';
 import { DeletedLeadsView } from './DeletedLeadsView';
 
 /**
  * The `cadastros/leads-excluidos` mounting point (the `LeadStagesContainer`
  * convention): `SalesOpsApp.tsx` mounts it conditionally so the trash is read only
- * while the screen is on, and it holds no state and no logic. `onRestore` is
+ * while the screen is on, and it holds no state and no logic. `onRestore` and `onRestoreBatch` are
  * `mutateAsync`, because the view keys every notice on the REJECTION.
  */
 export function DeletedLeadsContainer() {
   const navigate = useNavigate();
   const deleted = useDeletedLeads();
   const restore = useRestoreLead();
+  const restoreBatch = useRestoreLeadBatch();
   return (
     <DeletedLeadsView
       error={deleted.error}
@@ -27,6 +28,7 @@ export function DeletedLeadsContainer() {
         void deleted.fetchNextPage();
       }}
       onRestore={(id) => restore.mutateAsync(id).then(() => undefined)}
+      onRestoreBatch={(batchId) => restoreBatch.mutateAsync(batchId)}
     />
   );
 }

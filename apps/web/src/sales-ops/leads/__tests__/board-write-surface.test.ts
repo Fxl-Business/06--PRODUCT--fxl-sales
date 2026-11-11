@@ -71,6 +71,9 @@ const OWNED_FILES = [
   // is a lead write, so it obeys the same bans (no transition, no second write path).
   'delete-copy.ts',
   'LeadDeleteDialog.tsx',
+  // The whole-etapa delete: its confirmation and copy obey the same bans.
+  'stage-delete-copy.ts',
+  'StageDeleteDialog.tsx',
   // The lead summary (09c): it writes through the same lead hooks and obeys the same bans.
   'LeadSummary.tsx',
   'LeadSummaryContainer.tsx',

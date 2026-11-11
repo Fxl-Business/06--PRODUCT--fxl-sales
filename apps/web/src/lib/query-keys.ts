@@ -125,6 +125,7 @@ export const queryKeys = {
     summary: (filters: LeadBoardFilters) => ['leads', 'summary', filters ?? null] as const,
     stages: () => ['leads', 'stages'] as const,
     deleted: () => ['leads', 'deleted'] as const,
+    stageDeletePreview: (stageId: string) => ['leads', 'stage-delete-preview', stageId] as const,
     pipelines: () => ['leads', 'pipelines'] as const,
     fieldDefinitions: () => ['leads', 'field-definitions'] as const,
     detail: (leadId: string) => ['leads', 'detail', leadId] as const,

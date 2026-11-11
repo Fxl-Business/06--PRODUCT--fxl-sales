@@ -14,7 +14,7 @@ import {
 } from '@dnd-kit/core';
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Filter, List, Plus, SquareKanban } from 'lucide-react';
+import { Filter, List, Plus, SquareKanban, Trash2 } from 'lucide-react';
 import type { LeadFieldSet } from '@fxl-sales/shared-utils/sales-edition';
 import { Combobox, type ComboboxOption } from '@/components/ui/combobox';
 import { formatMoneyBrl } from '../calculations';
@@ -102,6 +102,7 @@ import {
   leadContactLine,
 } from './contact-lead';
 import { LEAD_DELETE_COPY } from './delete-copy';
+import { STAGE_DELETE_COPY } from './stage-delete-copy';
 import { BoardScrollbar } from './BoardScrollbar';
 import { matchesBoardSearch } from './board-search';
 import { LeadCard, UnassignedLeadMarker } from './LeadCard';
@@ -169,6 +170,12 @@ export type LeadsBoardProps = {
    * the confirmation and the mutation. Absent means no delete affordance at all.
    */
   onDeleteLead?: (lead: SalesOpsLead) => void;
+  /**
+   * Asks for the whole-etapa delete confirmation: the column header's trash button
+   * calls it with the etapa. The container hands it ONLY to an administrator, so
+   * absent means no such affordance at all. The container owns the confirmation.
+   */
+  onDeleteStageLeads?: (stage: SalesOpsLeadStage) => void;
   /**
    * Called INSTEAD of `onMoveLead` when the destination is the conversion door.
    *   resolve(saleId) -> the board then calls `onMoveLead(payload)` with it
@@ -326,6 +333,7 @@ export function LeadsBoard({
   onCreateLead,
   onOpenLead,
   onDeleteLead,
+  onDeleteStageLeads,
   onRequestConversion,
   onOpenSale,
   sellerFilter,
@@ -779,6 +787,18 @@ export function LeadsBoard({
                         >
                           <List aria-hidden size={15} />
                         </button>
+                        {onDeleteStageLeads ? (
+                          <button
+                            aria-label={STAGE_DELETE_COPY.actionLabel(stage.name)}
+                            className={iconButtonClass}
+                            data-delete-stage-leads={stage.id}
+                            onClick={() => onDeleteStageLeads(stage)}
+                            title={STAGE_DELETE_COPY.action}
+                            type="button"
+                          >
+                            <Trash2 aria-hidden size={15} />
+                          </button>
+                        ) : null}
                       </div>
                       <div className="mt-2 flex items-baseline justify-between gap-2">
                         <span className="sales-ops-num text-[20px] font-bold text-[#201f24]" data-stage-total>

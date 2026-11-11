@@ -37,6 +37,11 @@ export type DeletedLeadView = {
   /** ISO instant of the deletion. */
   deletedAt: string;
   deletedByName: string | null;
+  /**
+   * The whole-etapa delete this lead went out with; `null` for a lead deleted on its
+   * own. Like `id` it is a restore key only and is never rendered.
+   */
+  batchId: string | null;
 };
 
 export type DeletedLeadsPage = { items: DeletedLeadView[]; nextCursor: string | null };
@@ -60,6 +65,14 @@ export const DELETED_LEADS_COPY = {
   restore: 'Restaurar',
   restoring: 'Restaurando…',
   restoreLabel: (name: string) => `Restaurar o lead ${name}`,
+  restoreBatch: 'Restaurar lote',
+  restoringBatch: 'Restaurando lote…',
+  restoreBatchLabel: (name: string) => `Restaurar o lote do lead ${name}`,
+  batchRestored: (count: number) =>
+    count === 1
+      ? 'O lote foi restaurado: 1 lead voltou para o quadro de prospecção.'
+      : `O lote foi restaurado: ${count} leads voltaram para o quadro de prospecção.`,
+  batchGone: 'Este lote já não está entre os excluídos. A lista foi atualizada.',
   unknownAuthor: 'Autor não identificado',
   noSeller: 'Sem vendedor',
   noValue: '-',
@@ -97,6 +110,14 @@ export function restoreLead(token: string, id: string): Promise<LeadResponse> {
   return apiFetch<LeadResponse>(`${LEADS_PATH}/${id}/restore`, { method: 'POST', token });
 }
 
+/** `POST /leads/batches/:batchId/restore` with NO body: the whole batch comes back at once. */
+export function restoreLeadBatch(token: string, batchId: string): Promise<{ restoredCount: number }> {
+  return apiFetch<{ restoredCount: number }>(`${LEADS_PATH}/batches/${batchId}/restore`, {
+    method: 'POST',
+    token,
+  });
+}
+
 /** Every loaded page, in order. Tolerates a malformed page (AGENTS rule 10). */
 export function flattenDeletedLeads(data: DeletedLeadsInfiniteData | undefined): DeletedLeadView[] {
   if (!data) return [];
@@ -114,6 +135,21 @@ export function withoutDeletedLead(
     pages: data.pages.map((page) => ({
       ...page,
       items: (Array.isArray(page.items) ? page.items : []).filter((item) => item.id !== id),
+    })),
+  };
+}
+
+/** The cache entry without every row of one restored batch, on every page. */
+export function withoutDeletedBatch(
+  data: DeletedLeadsInfiniteData | undefined,
+  batchId: string,
+): DeletedLeadsInfiniteData | undefined {
+  if (!data) return data;
+  return {
+    ...data,
+    pages: data.pages.map((page) => ({
+      ...page,
+      items: (Array.isArray(page.items) ? page.items : []).filter((item) => item.batchId !== batchId),
     })),
   };
 }
@@ -172,6 +208,26 @@ export function useRestoreLead() {
     onSuccess: (_response, id) => {
       queryClient.setQueryData<DeletedLeadsInfiniteData>(queryKeys.leads.deleted(), (current) =>
         withoutDeletedLead(current, id),
+      );
+    },
+  });
+}
+
+/**
+ * `POST /leads/batches/:batchId/restore`. Like `useRestoreLead` there is no optimistic
+ * write: the batch's rows leave the cached trash only once the server answered 200,
+ * and `queryKeys.leads.all` then refetches the trash (a batch can be larger than the
+ * loaded pages), the board and the column totals.
+ */
+export function useRestoreLeadBatch() {
+  const { getToken } = useAccessToken();
+  const queryClient = useQueryClient();
+  return useAppMutation<{ restoredCount: number }, Error, string>({
+    mutationFn: async (batchId) => restoreLeadBatch(await requireToken(getToken), batchId),
+    invalidates: [queryKeys.leads.all],
+    onSuccess: (_response, batchId) => {
+      queryClient.setQueryData<DeletedLeadsInfiniteData>(queryKeys.leads.deleted(), (current) =>
+        withoutDeletedBatch(current, batchId),
       );
     },
   });

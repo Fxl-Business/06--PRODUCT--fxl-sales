@@ -11,11 +11,14 @@ import { queryKeys } from '@/lib/query-keys';
 import { requireToken } from '@/lib/require-token';
 import {
   deleteLead,
+  deleteStageLeads,
   leadsApi,
+  previewStageDelete,
   type LeadWritePayload,
   type MoveLeadPayload,
   type ReorderLeadStagesPayload,
   type SaveLeadStagePayload,
+  type StageDeleteResult,
   type SetLeadStageStatusPayload,
 } from './api';
 import { boardStages } from './calculations';
@@ -406,6 +409,36 @@ export function useReorderLeadStages() {
   const { getToken } = useAccessToken();
   return useAppMutation<LeadStagesReorderResponse, Error, ReorderLeadStagesPayload>({
     mutationFn: async (payload) => leadsApi.reorderStages(payload, await requireToken(getToken)),
+    invalidates: [queryKeys.leads.all],
+  });
+}
+
+/**
+ * The count the whole-etapa delete dialog asks the operator to type. Read from the
+ * server on open (the board's own badge may include converted leads or lag), and
+ * never cached across openings: it sits under the `['leads']` root, so every lead
+ * write refetches it, and `gcTime: 0` drops it when the dialog closes.
+ */
+export function useStageDeletePreview(stageId: string | null) {
+  const { getToken } = useAccessToken();
+  return useQuery({
+    queryKey: queryKeys.leads.stageDeletePreview(stageId ?? ''),
+    queryFn: async () => previewStageDelete(await requireToken(getToken), stageId ?? ''),
+    enabled: stageId !== null,
+    gcTime: 0,
+    staleTime: 0,
+  });
+}
+
+/**
+ * `POST /leads/stages/:stageId/delete-all`. Not optimistic: 1700 cards leaving at once is
+ * an answer the server owns, so the board, the column totals and the trash simply
+ * refetch (`queryKeys.leads.all`) once it has answered. A rejection reaches the dialog.
+ */
+export function useDeleteStageLeads() {
+  const { getToken } = useAccessToken();
+  return useAppMutation<StageDeleteResult, Error, string>({
+    mutationFn: async (stageId) => deleteStageLeads(await requireToken(getToken), stageId),
     invalidates: [queryKeys.leads.all],
   });
 }

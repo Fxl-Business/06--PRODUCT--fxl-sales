@@ -12,25 +12,29 @@ import type { SalesOpsClient, SalesOpsPerson, SalesOpsProduct } from '../types';
 import type { MoveLeadPayload } from './api';
 import { buildLabelLookups } from './board-labels';
 import { stageOpensConversion } from './board-move';
-import { mutedStateClass } from './board-ui';
+import { mutedStateClass, noticeClass } from './board-ui';
 import { boardStages } from './calculations';
 import { useFieldDefinitions, usePipelines } from './crm-hooks';
 import { isTransitionAllowed, pickPipeline, pipelineStagesAsBoardStages } from './crm-pipeline';
 import { LeadDeleteDialog } from './LeadDeleteDialog';
 import { LeadForm } from './LeadForm';
 import { LeadsBoard, type LeadConversionRequest } from './LeadsBoard';
+import { StageDeleteDialog, type StageDeletePreviewState } from './StageDeleteDialog';
+import { STAGE_DELETE_COPY } from './stage-delete-copy';
 import { UNDO_CONFLICT, UndoConflictError } from './undo-conflict';
 import { useUndoNotice } from './use-undo-notice';
 import { LEAD_SUMMARY_OPENED_IN_APP } from './lead-summary-nav';
 import { UndoLayer } from './UndoLayer';
 import {
   useDeleteLead,
+  useDeleteStageLeads,
   useLeadsBoard,
   useLeadStageSummary,
   useMoveLead,
   useSaveLead,
+  useStageDeletePreview,
 } from './hooks';
-import type { LeadBoardFilters, SalesOpsLead } from './types';
+import type { LeadBoardFilters, SalesOpsLead, SalesOpsLeadStage } from './types';
 
 /**
  * The ONLY file in this slice that names a hook. Everything above it -
@@ -184,6 +188,7 @@ export function LeadsBoardContainer({
   const moveLead = useMoveLead(filters);
   const saveLead = useSaveLead();
   const deleteLead = useDeleteLead();
+  const deleteStageLeads = useDeleteStageLeads();
   const undo = useUndoNotice();
 
   async function requireUnchangedLead(expected: SalesOpsLead) {
@@ -238,6 +243,26 @@ export function LeadsBoardContainer({
     undo.publishRestore(lead.id);
   }
 
+  /** The etapa whose whole-etapa delete confirmation is open (admin only); null when none is. */
+  const [stageDeleteTarget, setStageDeleteTarget] = React.useState<SalesOpsLeadStage | null>(null);
+  /** What the last whole-etapa delete did, until the operator dismisses it. */
+  const [stageDeleteNotice, setStageDeleteNotice] = React.useState<string | null>(null);
+  const stageDeletePreview = useStageDeletePreview(stageDeleteTarget?.id ?? null);
+  const stageDeletePreviewState: StageDeletePreviewState = stageDeletePreview.data
+    ? {
+        status: 'ready',
+        deletableCount: stageDeletePreview.data.deletableCount,
+        skippedConvertedCount: stageDeletePreview.data.skippedConvertedCount,
+      }
+    : stageDeletePreview.isError
+      ? { status: 'error' }
+      : { status: 'loading' };
+
+  async function confirmStageDelete(stage: SalesOpsLeadStage) {
+    const result = await deleteStageLeads.mutateAsync(stage.id);
+    setStageDeleteNotice(STAGE_DELETE_COPY.done(stage.name, result.deletedCount));
+  }
+
   const definitionsQuery = useFieldDefinitions();
   const definitions = definitionsQuery.data ?? [];
 
@@ -265,6 +290,22 @@ export function LeadsBoardContainer({
   return (
     <>
       <MutationErrorBanner error={moveError} onDismiss={() => setMoveError(null)} />
+      {stageDeleteNotice !== null ? (
+        <div
+          className={`${noticeClass} mb-3 flex items-center justify-between gap-3`}
+          data-stage-delete-done=""
+          role="status"
+        >
+          <span>{stageDeleteNotice}</span>
+          <button
+            className="font-semibold underline"
+            onClick={() => setStageDeleteNotice(null)}
+            type="button"
+          >
+            {STAGE_DELETE_COPY.dismiss}
+          </button>
+        </div>
+      ) : null}
       <LeadsBoard
         pipeline={pipeline}
         pipelineSelector={{
@@ -288,6 +329,7 @@ export function LeadsBoardContainer({
           setDialogOpen(true);
         }}
         onDeleteLead={setDeleteTarget}
+        onDeleteStageLeads={isAdmin ? setStageDeleteTarget : undefined}
         onOpenLead={workspace
           ? (lead) => navigate(buildLeadSummaryPath(workspace, lead.id), { state: LEAD_SUMMARY_OPENED_IN_APP })
           : undefined}
@@ -359,6 +401,18 @@ export function LeadsBoardContainer({
             if (!next) setDeleteTarget(null);
           }}
           open
+        />
+      ) : null}
+      {isAdmin && stageDeleteTarget ? (
+        <StageDeleteDialog
+          key={`stage-delete:${stageDeleteTarget.id}`}
+          onConfirm={() => confirmStageDelete(stageDeleteTarget)}
+          onOpenChange={(next) => {
+            if (!next) setStageDeleteTarget(null);
+          }}
+          open
+          preview={stageDeletePreviewState}
+          stageName={stageDeleteTarget.name}
         />
       ) : null}
       <UndoLayer undo={undo} />

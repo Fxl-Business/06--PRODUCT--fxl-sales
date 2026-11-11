@@ -78,6 +78,8 @@ vi.mock('../hooks', () => ({
   // The CRM read hooks (`crm-hooks.ts`) are mocked here: the form mounts only once they settle.
   // The delete flow has its own oracle (`lead-delete.test.tsx`); here it is inert.
   useDeleteLead: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useDeleteStageLeads: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useStageDeletePreview: () => ({ data: undefined, isError: false }),
 }));
 
 vi.mock('../crm-hooks', () => ({

@@ -215,3 +215,36 @@ export const leadsApi = {
 export function deleteLead(token: Token, id: string): Promise<void> {
   return apiFetch<void>(`${LEADS_PATH}/${id}/delete`, { method: 'POST', token });
 }
+
+/** `GET /leads/stages/:stageId/delete-all-preview`: what the whole-etapa delete would touch. */
+export type StageDeletePreview = {
+  stageName: string;
+  deletableCount: number;
+  skippedConvertedCount: number;
+};
+
+/** `POST /leads/stages/:stageId/delete-all`: the batch that was written and what it left alone. */
+export type StageDeleteResult = {
+  batchId: string;
+  deletedCount: number;
+  skippedConvertedCount: number;
+};
+
+export function previewStageDelete(token: Token, stageId: string): Promise<StageDeletePreview> {
+  return apiFetch<StageDeletePreview>(`${LEADS_PATH}/stages/${stageId}/delete-all-preview`, {
+    method: 'GET',
+    token,
+  });
+}
+
+/**
+ * Soft-deletes every live, non-converted lead of one etapa in ONE batch (admin only,
+ * a POST action like `/delete`, never the DELETE verb). The cliente is never touched.
+ * Undone as a whole by `restoreLeadBatch` in `deleted-leads.ts`.
+ */
+export function deleteStageLeads(token: Token, stageId: string): Promise<StageDeleteResult> {
+  return apiFetch<StageDeleteResult>(`${LEADS_PATH}/stages/${stageId}/delete-all`, {
+    method: 'POST',
+    token,
+  });
+}

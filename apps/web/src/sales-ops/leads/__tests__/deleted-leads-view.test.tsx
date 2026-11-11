@@ -11,6 +11,7 @@ import { DeletedLeadsContainer } from '../DeletedLeadsContainer';
 import {
   DELETED_LEADS_COPY,
   restoreFailureKind,
+  withoutDeletedBatch,
   withoutDeletedLead,
   type DeletedLeadView,
   type DeletedLeadsPage,
@@ -34,6 +35,7 @@ vi.mock('@/auth/react', () => ({
 const ID_A = 'a1a1a1a1-0000-4000-8000-000000000001';
 const ID_B = 'b2b2b2b2-0000-4000-8000-000000000002';
 const ID_C = 'c3c3c3c3-0000-4000-8000-000000000003';
+const BATCH_ID = 'd4d4d4d4-0000-4000-8000-000000000004';
 const CURSOR = 'MjAyNi0xMC0wNlQwMjoxNTowMC4wMDBafGIyYjI';
 
 const ROW_A: DeletedLeadView = {
@@ -45,6 +47,7 @@ const ROW_A: DeletedLeadView = {
   estimatedValueBrl: 150000,
   deletedAt: '2026-10-07T18:30:00.000Z',
   deletedByName: 'Gestora Paula',
+  batchId: null,
 };
 /** No empresa, no vendedor, unknown author, and a UTC day ahead of São Paulo. */
 const ROW_B: DeletedLeadView = {
@@ -56,6 +59,7 @@ const ROW_B: DeletedLeadView = {
   estimatedValueBrl: 0,
   deletedAt: '2026-10-06T02:15:00.000Z',
   deletedByName: null,
+  batchId: BATCH_ID,
 };
 const ROW_C: DeletedLeadView = {
   id: ID_C,
@@ -66,6 +70,7 @@ const ROW_C: DeletedLeadView = {
   estimatedValueBrl: 990000,
   deletedAt: '2026-10-01T12:00:00.000Z',
   deletedByName: 'Gestora Paula',
+  batchId: BATCH_ID,
 };
 
 type Responder = { status: number; body: unknown };
@@ -76,6 +81,7 @@ const server = {
   /** Page size the stub serves before handing back `CURSOR`. */
   firstPageSize: 2,
   restoreAnswer: { status: 200, body: { lead: {} } } as Responder,
+  batchAnswer: { status: 200, body: { restoredCount: 2 } } as Responder,
   /** When set, the first page GET waits for it. */
   holdList: null as Promise<void> | null,
   /** When set, the restore POST waits for it. */
@@ -105,6 +111,7 @@ beforeEach(() => {
   server.rows = [ROW_A, ROW_B, ROW_C];
   server.firstPageSize = 2;
   server.restoreAnswer = { status: 200, body: { lead: {} } };
+  server.batchAnswer = { status: 200, body: { restoredCount: 2 } };
   server.holdList = null;
   server.holdRestore = null;
   server.listAnswer = null;
@@ -124,6 +131,13 @@ beforeEach(() => {
             }
           : { items: server.rows.slice(server.firstPageSize), nextCursor: null };
       return respond(200, page);
+    }
+    const batch = /^\/api\/v1\/sales-ops\/leads\/batches\/([^/]+)\/restore$/.exec(url.pathname);
+    if (method === 'POST' && batch) {
+      if (server.batchAnswer.status === 200 && !server.keepRestoredRow) {
+        server.rows = server.rows.filter((row) => row.batchId !== batch[1]);
+      }
+      return respond(server.batchAnswer.status, server.batchAnswer.body);
     }
     const restore = /^\/api\/v1\/sales-ops\/leads\/([^/]+)\/restore$/.exec(url.pathname);
     if (method === 'POST' && restore) {
@@ -199,6 +213,10 @@ function restoreButtonFor(name: string): HTMLButtonElement {
   if (!button) throw new Error(`no Restaurar for ${name}`);
   return button;
 }
+function restoreBatchButtonFor(name: string): HTMLButtonElement | null {
+  const row = rows().find((candidate) => candidate.textContent?.includes(name));
+  return row?.querySelector<HTMLButtonElement>('[data-restore-batch]') ?? null;
+}
 const callsTo = (method: string, pathname: string) =>
   fetchMock.mock.calls.filter(
     ([url, init]) =>
@@ -233,6 +251,23 @@ describe('Leads excluídos: data layer', () => {
       [],
     ]);
     expect(withoutDeletedLead(undefined, ID_A)).toBeUndefined();
+  });
+});
+
+describe('Leads excluídos: restaurar lote (data layer)', () => {
+  it('drops every row of one batch from every cached page and keeps the others', () => {
+    const data = {
+      pages: [
+        { items: [ROW_A, ROW_B], nextCursor: CURSOR },
+        { items: [ROW_C], nextCursor: null },
+      ],
+      pageParams: [null, CURSOR],
+    };
+    expect(withoutDeletedBatch(data, BATCH_ID)?.pages.map((page) => page.items)).toEqual([
+      [ROW_A],
+      [],
+    ]);
+    expect(withoutDeletedBatch(undefined, BATCH_ID)).toBeUndefined();
   });
 });
 
@@ -452,5 +487,66 @@ describe('Leads excluídos: the screen', () => {
     await renderScreen();
     expect(container.querySelector('[data-forbidden]')).not.toBeNull();
     expect(container.querySelector('[data-deleted-leads-table]')).toBeNull();
+  });
+});
+
+describe('Leads excluídos: Restaurar lote', () => {
+  it('offers Restaurar lote only on rows that belong to a batch', async () => {
+    await renderScreen();
+    expect(restoreBatchButtonFor('Ana Souza')).toBeNull();
+    expect(restoreBatchButtonFor('Bruno Lima')?.textContent).toContain(
+      DELETED_LEADS_COPY.restoreBatch,
+    );
+  });
+
+  it('posts once to the batch restore action and removes every row of the batch', async () => {
+    await renderScreen();
+    await act(async () => restoreBatchButtonFor('Bruno Lima')?.click());
+    await flush();
+    const posts = callsTo('POST', `/api/v1/sales-ops/leads/batches/${BATCH_ID}/restore`);
+    expect(posts).toHaveLength(1);
+    expect((posts[0]?.[1] as RequestInit).body).toBeUndefined();
+    expect(callsTo('POST', `/api/v1/sales-ops/leads/${ID_B}/restore`)).toHaveLength(0);
+    expect(rowText('Bruno Lima')).toBeNull();
+    expect(rowText('Ana Souza')).not.toBeNull();
+    expect(container.querySelector('[data-restore-batch-success]')?.textContent).toBe(
+      DELETED_LEADS_COPY.batchRestored(2),
+    );
+  });
+
+  it('never renders the batch id', async () => {
+    await renderScreen();
+    expect(container.innerHTML).not.toContain(BATCH_ID);
+  });
+
+  it('403 renders the inline MutationErrorBanner, never the ForbiddenPanel', async () => {
+    server.batchAnswer = { status: 403, body: { error: 'forbidden', reason: 'admin_role_required' } };
+    await renderScreen();
+    await act(async () => restoreBatchButtonFor('Bruno Lima')?.click());
+    await flush();
+    expect(container.querySelector('[data-mutation-error]')?.textContent).toContain(
+      MUTATION_ERROR_COPY.adminRequired,
+    );
+    expect(container.querySelector('[data-forbidden]')).toBeNull();
+    expect(rowText('Bruno Lima')).not.toBeNull();
+  });
+
+  it('404 says the batch already left the trash', async () => {
+    server.batchAnswer = { status: 404, body: { error: 'not_found' } };
+    await renderScreen();
+    await act(async () => restoreBatchButtonFor('Bruno Lima')?.click());
+    await flush();
+    expect(container.querySelector('[data-restore-batch-gone]')?.textContent).toBe(
+      DELETED_LEADS_COPY.batchGone,
+    );
+  });
+
+  it('400 no_open_stage sends the gestor to Etapas do funil', async () => {
+    server.batchAnswer = { status: 400, body: { error: 'validation_error', reason: 'no_open_stage' } };
+    await renderScreen();
+    await act(async () => restoreBatchButtonFor('Bruno Lima')?.click());
+    await flush();
+    expect(container.querySelector('[data-restore-no-stage]')).not.toBeNull();
+    expect(rowText('Bruno Lima')).not.toBeNull();
   });
 });

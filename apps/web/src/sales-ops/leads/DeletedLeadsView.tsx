@@ -1,4 +1,4 @@
-import { Loader2, RotateCcw } from 'lucide-react';
+import { Layers, Loader2, RotateCcw } from 'lucide-react';
 import { useState } from 'react';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
@@ -39,7 +39,9 @@ const successNoticeClass =
 type RestoreNotice =
   | { kind: 'restored'; name: string }
   | { kind: 'no_open_stage' }
-  | { kind: 'gone' };
+  | { kind: 'gone' }
+  | { kind: 'batch_restored'; count: number }
+  | { kind: 'batch_gone' };
 
 export type DeletedLeadsViewProps = {
   items: readonly DeletedLeadView[];
@@ -57,6 +59,8 @@ export type DeletedLeadsViewProps = {
    * and the banner below are keyed on the rejection.
    */
   onRestore: (id: string) => Promise<void>;
+  /** Restores a whole-etapa delete at once. Rejects like `onRestore`. */
+  onRestoreBatch: (batchId: string) => Promise<{ restoredCount: number }>;
   onGoToStages: () => void;
 };
 
@@ -103,14 +107,17 @@ export function DeletedLeadsView({
   loadMoreFailed,
   onLoadMore,
   onRestore,
+  onRestoreBatch,
   onGoToStages,
 }: DeletedLeadsViewProps) {
   const [pendingId, setPendingId] = useState<string | null>(null);
+  const [pendingBatchId, setPendingBatchId] = useState<string | null>(null);
+  const busy = pendingId !== null || pendingBatchId !== null;
   const [notice, setNotice] = useState<RestoreNotice | null>(null);
   const [bannerError, setBannerError] = useState<unknown>(null);
 
   async function restore(lead: DeletedLeadView) {
-    if (pendingId !== null) return;
+    if (busy) return;
     setPendingId(lead.id);
     setNotice(null);
     setBannerError(null);
@@ -124,6 +131,24 @@ export function DeletedLeadsView({
       else setBannerError(failure);
     } finally {
       setPendingId(null);
+    }
+  }
+
+  async function restoreBatch(batchId: string) {
+    if (busy) return;
+    setPendingBatchId(batchId);
+    setNotice(null);
+    setBannerError(null);
+    try {
+      const result = await onRestoreBatch(batchId);
+      setNotice({ kind: 'batch_restored', count: result.restoredCount });
+    } catch (failure) {
+      const kind = restoreFailureKind(failure);
+      if (kind === 'no_open_stage') setNotice({ kind: 'no_open_stage' });
+      else if (kind === 'gone') setNotice({ kind: 'batch_gone' });
+      else setBannerError(failure);
+    } finally {
+      setPendingBatchId(null);
     }
   }
 
@@ -159,6 +184,16 @@ export function DeletedLeadsView({
       {notice?.kind === 'restored' ? (
         <p className={`${successNoticeClass} mb-4`} data-restore-success role="status">
           {DELETED_LEADS_COPY.restored(notice.name)}
+        </p>
+      ) : null}
+      {notice?.kind === 'batch_restored' ? (
+        <p className={`${successNoticeClass} mb-4`} data-restore-batch-success role="status">
+          {DELETED_LEADS_COPY.batchRestored(notice.count)}
+        </p>
+      ) : null}
+      {notice?.kind === 'batch_gone' ? (
+        <p className={`${noticeClass} mb-4`} data-restore-batch-gone role="status">
+          {DELETED_LEADS_COPY.batchGone}
         </p>
       ) : null}
       {notice?.kind === 'gone' ? (
@@ -217,6 +252,7 @@ export function DeletedLeadsView({
             <TableBody>
               {items.map((lead) => {
                 const pending = pendingId === lead.id;
+                const batchPending = lead.batchId !== null && pendingBatchId === lead.batchId;
                 const client = present(lead.clientName);
                 const stage = present(lead.stageName);
                 const seller = present(lead.sellerName);
@@ -246,24 +282,48 @@ export function DeletedLeadsView({
                       {formatRecordedAt(lead.deletedAt)}
                     </TableCell>
                     <TableCell className="px-4 py-3 text-center">
-                      <button
-                        aria-busy={pending || undefined}
-                        aria-label={DELETED_LEADS_COPY.restoreLabel(lead.contactName)}
-                        className={restoreButtonClass}
-                        data-restore-lead
-                        disabled={pendingId !== null}
-                        onClick={() => {
-                          void restore(lead);
-                        }}
-                        type="button"
-                      >
-                        {pending ? (
-                          <Loader2 className="h-[14px] w-[14px] animate-spin" />
-                        ) : (
-                          <RotateCcw className="h-[14px] w-[14px]" />
-                        )}
-                        {pending ? DELETED_LEADS_COPY.restoring : DELETED_LEADS_COPY.restore}
-                      </button>
+                      <div className="flex flex-col items-center gap-1.5">
+                        <button
+                          aria-busy={pending || undefined}
+                          aria-label={DELETED_LEADS_COPY.restoreLabel(lead.contactName)}
+                          className={restoreButtonClass}
+                          data-restore-lead
+                          disabled={busy}
+                          onClick={() => {
+                            void restore(lead);
+                          }}
+                          type="button"
+                        >
+                          {pending ? (
+                            <Loader2 className="h-[14px] w-[14px] animate-spin" />
+                          ) : (
+                            <RotateCcw className="h-[14px] w-[14px]" />
+                          )}
+                          {pending ? DELETED_LEADS_COPY.restoring : DELETED_LEADS_COPY.restore}
+                        </button>
+                        {lead.batchId ? (
+                          <button
+                            aria-busy={batchPending || undefined}
+                            aria-label={DELETED_LEADS_COPY.restoreBatchLabel(lead.contactName)}
+                            className={restoreButtonClass}
+                            data-restore-batch
+                            disabled={busy}
+                            onClick={() => {
+                              void restoreBatch(lead.batchId as string);
+                            }}
+                            type="button"
+                          >
+                            {batchPending ? (
+                              <Loader2 className="h-[14px] w-[14px] animate-spin" />
+                            ) : (
+                              <Layers className="h-[14px] w-[14px]" />
+                            )}
+                            {batchPending
+                              ? DELETED_LEADS_COPY.restoringBatch
+                              : DELETED_LEADS_COPY.restoreBatch}
+                          </button>
+                        ) : null}
+                      </div>
                     </TableCell>
                   </TableRow>
                 );

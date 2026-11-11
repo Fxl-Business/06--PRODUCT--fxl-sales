@@ -30,6 +30,8 @@ vi.mock('../leads/hooks', () => ({
   useMoveLead: () => mutation,
   useSaveLead: () => mutation,
   useDeleteLead: () => mutation,
+  useDeleteStageLeads: () => mutation,
+  useStageDeletePreview: () => ({ data: undefined, isError: false }),
 }));
 let roles: Array<'admin' | 'seller' | 'finder'> = ['admin'];
 vi.mock('@/auth/react', () => ({
