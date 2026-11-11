@@ -12,8 +12,9 @@ import { LeadsExportError, readLeadsExport } from './export.js';
 import { ImportExecutionError, executeImportPlan } from './executor.js';
 import { INVALID_FILE_CODE, parseWorkbook } from './parse.js';
 import { isPlanOk, planImport, toPreviewBody } from './plan/index.js';
+import { StageMapSchema, summarizeLeadStages } from './plan/stage-map.js';
 import { buildTemplateWorkbook } from './template.js';
-import type { ImportCatalog, ImportCommitBody, ImportPlan, ParsedWorkbook } from './types.js';
+import type { ImportCatalog, ImportCommitBody, ImportPlan, ParsedWorkbook, StageMap } from './types.js';
 import { MAX_UPLOAD_BYTES } from './workbook-schema.js';
 
 /*
@@ -70,9 +71,11 @@ const uploadBodyLimit = bodyLimit({
   onError: (c) => c.json(FILE_TOO_LARGE_BODY, 413),
 });
 
-type UploadResult = { ok: true; parsed: ParsedWorkbook } | { ok: false; status: 400 | 413 };
+type UploadResult =
+  | { ok: true; parsed: ParsedWorkbook; stageMap: StageMap | undefined }
+  | { ok: false; status: 400 | 413 };
 
-/** Reads the `file` field and parses it. Never throws for user input. */
+/** Reads the `file` field and parses it, plus the optional JSON `stageMap` field. Never throws for user input. */
 async function readUpload(c: Context): Promise<UploadResult> {
   let body: Record<string, string | File>;
   try {
@@ -82,10 +85,27 @@ async function readUpload(c: Context): Promise<UploadResult> {
   }
   const file = body['file'];
   if (!(file instanceof File)) return { ok: false, status: 400 };
+  const stageMap = readStageMap(body['stageMap']);
+  if (stageMap === 'invalid') return { ok: false, status: 400 };
   if (file.size > MAX_UPLOAD_BYTES) return { ok: false, status: 413 };
   const parsed = await parseWorkbook(new Uint8Array(await file.arrayBuffer()));
   if (parsed.issues.some((i) => i.code === INVALID_FILE_CODE)) return { ok: false, status: 400 };
-  return { ok: true, parsed };
+  return { ok: true, parsed, stageMap };
+}
+
+/** A blank field means no map; anything that is not JSON of the StageMap shape is refused. */
+function readStageMap(raw: string | File | undefined): StageMap | undefined | 'invalid' {
+  if (raw === undefined) return undefined;
+  if (typeof raw !== 'string') return 'invalid';
+  if (raw.trim() === '') return undefined;
+  let json: unknown;
+  try {
+    json = JSON.parse(raw);
+  } catch {
+    return 'invalid';
+  }
+  const parsed = StageMapSchema.safeParse(json);
+  return parsed.success ? parsed.data : 'invalid';
 }
 
 function refusal(c: Context, status: 400 | 413): Response {
@@ -138,10 +158,14 @@ importRouter.post('/preview', requireAdmin, uploadBodyLimit, async (c) => {
   const now = new Date();
   const modules = await getOrgModules(c);
   // Seed, read and plan in one transaction, then roll it back: preview writes nothing.
-  const plan = await readOnlyTenant(orgId, async (tx) =>
-    planImport(upload.parsed, await seededCatalog(tx, orgId, now, modules)),
-  );
-  return c.json(toPreviewBody(plan), 200);
+  const { plan, step } = await readOnlyTenant(orgId, async (tx) => {
+    const catalog = await seededCatalog(tx, orgId, now, modules);
+    return {
+      plan: planImport(upload.parsed, catalog, upload.stageMap),
+      step: summarizeLeadStages(upload.parsed, catalog),
+    };
+  });
+  return c.json({ ...toPreviewBody(plan), ...step }, 200);
 });
 
 importRouter.post('/commit', requireAdmin, uploadBodyLimit, async (c) => {
@@ -154,7 +178,7 @@ importRouter.post('/commit', requireAdmin, uploadBodyLimit, async (c) => {
   try {
     const result = await withTenant(getDb(), orgId, async (tx) => {
       // The seed is part of the committed transaction (and rolls back with it on any failure).
-      const plan = planImport(upload.parsed, await seededCatalog(tx, orgId, now, modules));
+      const plan = planImport(upload.parsed, await seededCatalog(tx, orgId, now, modules), upload.stageMap);
       if (!isPlanOk(plan)) throw new ImportPlanRejected(plan);
       return executeImportPlan(tx, orgId, plan, actor, now, modules);
     });

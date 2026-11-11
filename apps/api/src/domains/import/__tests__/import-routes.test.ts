@@ -137,6 +137,27 @@ describe('import upload refusals', () => {
     expect(fakeDb.transaction).not.toHaveBeenCalled();
   });
 
+  it('refuses a malformed stageMap with the validation body before any transaction', async () => {
+    const valid = new Blob([new Uint8Array(await buildXlsx(exampleTabs()))]);
+    for (const path of PATHS) {
+      const malformed = [
+        '{not json',
+        '[]',
+        '{"Contato":{"stageId":""}}',
+        '{"Contato":{"create":false}}',
+        '{"Contato":{"first":true,"x":1}}',
+      ];
+      for (const bad of malformed) {
+        const data = form(valid);
+        data.set('stageMap', bad);
+        const response = await post(path, data);
+        expect(response.status, bad).toBe(400);
+        expect(await response.json()).toEqual(INVALID_FILE_BODY);
+      }
+    }
+    expect(fakeDb.transaction).not.toHaveBeenCalled();
+  });
+
   it('reaches the database only for an admin with a valid workbook', async () => {
     const valid = new Blob([new Uint8Array(await buildXlsx(exampleTabs()))]);
     const response = await post('/import/preview', form(valid));
