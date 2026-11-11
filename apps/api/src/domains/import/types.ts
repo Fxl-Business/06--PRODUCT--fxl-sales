@@ -119,6 +119,10 @@ export type ImportCatalog = {
 
 export type EntityRef = { existingId: string } | { planKey: string };
 
+/** Where the leads of one spreadsheet etapa name go. The key of a StageMap is the name as written in the Leads tab. */
+export type StageMapEntry = { stageId: string } | { create: true } | { first: true };
+export type StageMap = Readonly<Record<string, StageMapEntry>>;
+
 /** A Clientes row that IS this existing cliente (D12). `name` is the STORED name, the label every lookup answers. */
 export type RecognizedClient = { existingId: string; name: string };
 /** Excel row number of the Clientes tab -> the existing cliente that row is. */

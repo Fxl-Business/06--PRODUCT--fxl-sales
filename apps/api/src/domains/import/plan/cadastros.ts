@@ -586,6 +586,22 @@ function planClientes(
 // Etapas
 // ---------------------------------------------------------------------------
 
+/**
+ * The ONE etapa-creation rule: the name must not exist in the funil (active or archived) and must satisfy
+ * LeadStageSchema. The Etapas tab and the Leads tab stage map (`{create: true}`) both go through it.
+ */
+export function checkNewStage(nome: string, catalog: ImportCatalog) {
+  const key = normalizeLabel(nome);
+  const found = catalog.stages.find((s) => normalizeLabel(s.name) === key);
+  const duplicate = found
+    ? found.status === 'active'
+      ? { code: 'duplicate_existing', message: `A etapa "${nome}" já existe no funil; remova esta linha (os leads já podem usar a etapa existente).` }
+      : { code: 'duplicate_archived', message: `A etapa "${nome}" já existe arquivada; restaure em Cadastros > Etapas e remova esta linha.` }
+    : null;
+  const candidate = { name: nome, status: 'active' };
+  return { duplicate, result: LeadStageSchema.safeParse(candidate), candidate };
+}
+
 function planEtapas(parsed: ParsedWorkbook, catalog: ImportCatalog, blocked: Set<string>): Part {
   const out: Part = { operations: [], issues: [] };
   const seen = new Map<string, number>();
@@ -596,22 +612,14 @@ function planEtapas(parsed: ParsedWorkbook, catalog: ImportCatalog, blocked: Set
     const col = header('etapas', 'nome');
     const issues: ImportIssue[] = [];
 
-    const found = catalog.stages.find((s) => normalizeLabel(s.name) === key);
-    if (found) {
-      issues.push(
-        found.status === 'active'
-          ? rowError('etapas', row.row, col, 'duplicate_existing', `A etapa "${nome}" já existe no funil; remova esta linha (os leads já podem usar a etapa existente).`)
-          : rowError('etapas', row.row, col, 'duplicate_archived', `A etapa "${nome}" já existe arquivada; restaure em Cadastros > Etapas e remova esta linha.`),
-      );
-    }
+    const { duplicate, result, candidate } = checkNewStage(nome, catalog);
+    if (duplicate) issues.push(rowError('etapas', row.row, col, duplicate.code, duplicate.message));
     const earlier = seen.get(key);
     if (earlier !== undefined) {
       issues.push(rowError('etapas', row.row, col, 'duplicate_in_sheet', `A etapa "${nome}" já aparece na linha ${earlier} desta aba.`));
     } else {
       seen.set(key, row.row);
     }
-    const candidate = { name: nome, status: 'active' };
-    const result = LeadStageSchema.safeParse(candidate);
     if (!result.success) {
       issues.push(
         ...zodIssuesToImportIssues(result.error, { sheet: 'etapas', row: row.row, columns: { name: col }, fallbackColumn: null, values: candidate }),

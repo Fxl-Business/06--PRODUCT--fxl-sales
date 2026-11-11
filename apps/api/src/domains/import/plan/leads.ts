@@ -13,7 +13,10 @@ import type {
   ImportOperation,
   ParsedWorkbook,
   SheetPlanResult,
+  StageMap,
+  StageMapEntry,
 } from '../types.js';
+import { checkNewStage } from './cadastros.js';
 import {
   PLACEHOLDER_UUID,
   erroredRowKeys,
@@ -61,12 +64,28 @@ function hasOpenStage(parsed: ParsedWorkbook, catalog: ImportCatalog): boolean {
   );
 }
 
-export function planLeads(parsed: ParsedWorkbook, catalog: ImportCatalog, refs: ImportRefIndex): SheetPlanResult {
+/** The map keyed by normalized label, so "contato " and "Contato" are one entry (same matching as every other name). */
+function normalizeStageMap(stageMap: StageMap | undefined): Map<string, StageMapEntry> {
+  const byKey = new Map<string, StageMapEntry>();
+  for (const [name, entry] of Object.entries(stageMap ?? {})) byKey.set(normalizeLabel(name), entry);
+  return byKey;
+}
+
+export function planLeads(
+  parsed: ParsedWorkbook,
+  catalog: ImportCatalog,
+  refs: ImportRefIndex,
+  stageMap?: StageMap,
+): SheetPlanResult {
   const rows = parsed.sheets.leads.rows;
   if (rows.length === 0) return { operations: [], issues: [], counts: {} };
 
   const issues: ImportIssue[] = [];
   const operations: ImportOperation[] = [];
+  const mapped = normalizeStageMap(stageMap);
+  // Etapas the map asks to create: normalized name -> planKey of the one createLeadStage op (emitted on first use).
+  const createdStages = new Map<string, string>();
+  const stageOperations: ImportOperation[] = [];
   const blocked = erroredRowKeys(parsed.issues);
   const seen = new Map<string, number>();
 
@@ -174,11 +193,65 @@ export function planLeads(parsed: ParsedWorkbook, catalog: ImportCatalog, refs: 
     let stageRef: EntityRef | null = null;
     let kind: StageKind | null = null;
     let etapaFailed = false;
-    if (etapa !== null) {
+    const entry = etapa === null ? undefined : mapped.get(normalizeLabel(etapa));
+    const etapaCol = header(SHEET, 'etapa');
+    if (etapa !== null && entry !== undefined && 'first' in entry) {
+      // {first: true} is the blank cell: the executor puts the lead in the first open etapa.
+    } else if (etapa !== null && entry !== undefined && 'stageId' in entry) {
+      // The server never trusts the id: it must be an active, non-conversion etapa of THIS org's default pipeline.
+      const target = catalog.stages.find((s) => s.id === entry.stageId);
+      if (!target || target.status !== 'active' || target.kind === 'conversion') {
+        etapaFailed = true;
+        rowIssues.push(
+          rowError(
+            SHEET,
+            row.row,
+            etapaCol,
+            'invalid_stage_target',
+            `A etapa escolhida para "${etapa}" não existe, está arquivada ou é a de conversão; escolha outra etapa de destino.`,
+          ),
+        );
+      } else {
+        kind = target.kind;
+        stageRef = { existingId: target.id };
+      }
+    } else if (etapa !== null && entry !== undefined && 'create' in entry) {
+      const key = normalizeLabel(etapa);
+      const { duplicate, result, candidate } = checkNewStage(etapa, catalog);
+      const tabStage = refs.resolve('stage', etapa);
+      if (duplicate) {
+        etapaFailed = true;
+        rowIssues.push(rowError(SHEET, row.row, etapaCol, duplicate.code, duplicate.message));
+      } else if (!result.success) {
+        etapaFailed = true;
+        rowIssues.push(
+          ...zodIssuesToImportIssues(result.error, {
+            sheet: SHEET,
+            row: row.row,
+            columns: { name: etapaCol },
+            fallbackColumn: etapaCol,
+            values: candidate,
+          }),
+        );
+      } else if (tabStage.ok && 'planKey' in tabStage.ref) {
+        // The Etapas tab already creates it: one creation, never a second.
+        kind = 'normal';
+        stageRef = tabStage.ref;
+      } else {
+        let planKey = createdStages.get(key);
+        if (planKey === undefined) {
+          planKey = `stageMap:${createdStages.size + 1}`;
+          createdStages.set(key, planKey);
+          stageOperations.push({ op: 'createLeadStage', planKey, input: result.data });
+        }
+        kind = 'normal';
+        stageRef = { planKey };
+      }
+    } else if (etapa !== null) {
       const l = refs.resolve('stage', etapa);
       if (!l.ok) {
         etapaFailed = true;
-        rowIssues.push(lookupIssue(SHEET, row.row, header(SHEET, 'etapa'), l));
+        rowIssues.push(lookupIssue(SHEET, row.row, etapaCol, l));
       } else {
         kind = stageKind(l.ref, catalog);
         if (kind === 'conversion') {
@@ -186,7 +259,7 @@ export function planLeads(parsed: ParsedWorkbook, catalog: ImportCatalog, refs: 
             rowError(
               SHEET,
               row.row,
-              header(SHEET, 'etapa'),
+              etapaCol,
               'conversion_stage',
               `A etapa "${etapa}" é a de conversão; um lead só chega nela quando vira proposta dentro do FXL Vendas. Escolha outra etapa.`,
             ),
@@ -284,5 +357,9 @@ export function planLeads(parsed: ParsedWorkbook, catalog: ImportCatalog, refs: 
     }
   }
 
-  return { operations, issues, counts: operations.length > 0 ? { leads: operations.length } : {} };
+  // A mapped etapa is created before any lead that points at it; a failing plan writes nothing anyway.
+  const counts: SheetPlanResult['counts'] = {};
+  if (operations.length > 0) counts.leads = operations.length;
+  if (stageOperations.length > 0) counts.etapas = stageOperations.length;
+  return { operations: [...stageOperations, ...operations], issues, counts };
 }

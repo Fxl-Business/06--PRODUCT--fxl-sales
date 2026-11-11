@@ -7,6 +7,7 @@ import type {
   ImportPreviewBody,
   ParsedWorkbook,
   SheetKey,
+  StageMap,
 } from '../types.js';
 import { MAX_RETURNED_ISSUES, SHEET_KEYS } from '../workbook-schema.js';
 import { planCadastros } from './cadastros.js';
@@ -15,10 +16,10 @@ import { planLeads } from './leads.js';
 import { planPropostas } from './propostas.js';
 
 /** Pure: no I/O, no clock, no env. The four sheet planners run in contract order over one ref index. */
-export function planImport(parsed: ParsedWorkbook, catalog: ImportCatalog): ImportPlan {
+export function planImport(parsed: ParsedWorkbook, catalog: ImportCatalog, stageMap?: StageMap): ImportPlan {
   const refs = buildRefIndex(parsed, catalog);
   const cadastros = planCadastros(parsed, catalog, refs);
-  const leads = planLeads(parsed, catalog, refs);
+  const leads = planLeads(parsed, catalog, refs, stageMap);
   const propostas = planPropostas(parsed, catalog, refs);
   const desfechos = planDesfechos(parsed, catalog, refs, propostas);
   return {
