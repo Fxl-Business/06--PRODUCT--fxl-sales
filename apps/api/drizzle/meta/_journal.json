@@ -225,6 +225,13 @@
       "when": 1792569511070,
       "tag": "0031_crm_cutover_resync",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1794399993336,
+      "tag": "0032_lead_delete_batch",
+      "breakpoints": true
     }
   ]
 }

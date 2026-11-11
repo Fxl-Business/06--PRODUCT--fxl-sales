@@ -197,7 +197,13 @@ describe('lead wire contract', () => {
 
   it('keeps every audited lead act in lead-trash-service.ts', () => {
     expect(leadTrashServiceSource.match(/writeAuditEntry\(tx,/g)).toHaveLength(2);
-    expect(leadTrashServiceSource.match(/lockLeadBoard\(tx, orgId\)/g)).toHaveLength(2);
+    // The single pair writes one entry per call; the batch pair writes its entries through
+    // the chained batch writer, last, in the same transaction.
+    expect(leadTrashServiceSource.match(/writeAuditEntries\(\s*tx,/g)).toHaveLength(2);
+    // Four board writers (delete, restore, delete-all, restore-batch), one lock each.
+    expect(leadTrashServiceSource.match(/lockLeadBoard\(tx, orgId\)/g)).toHaveLength(4);
+    expect(leadTrashServiceSource).not.toMatch(/DELETE FROM|\.delete\(/);
+    expect(leadTrashServiceSource).not.toMatch(/salesOpsClients/);
     expect(leadTrashServiceSource).not.toMatch(/getAdminDb/);
     expect(leadTrashServiceSource).not.toMatch(/claimantFor/);
     expect(leadTrashServiceSource).not.toMatch(/ensureLeadStages/);

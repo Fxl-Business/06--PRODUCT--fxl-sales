@@ -1652,6 +1652,12 @@ export const salesOpsCrmLeads = pgTable(
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
     deletedByUserId: text('deleted_by_user_id'),
     deletedByName: text('deleted_by_name'),
+    /**
+     * Groups the leads one "Excluir todos os leads desta etapa" act deleted, so
+     * Cadastros > Leads excluídos can restore them as a batch. NULL for a live
+     * lead and for a single delete; cleared by every restore. Never a reference.
+     */
+    deletedBatchId: uuid('deleted_batch_id'),
   },
   (t) => [
     uniqueIndex('sales_ops_crm_leads_org_id_id_idx').on(t.orgId, t.id),
@@ -1666,6 +1672,10 @@ export const salesOpsCrmLeads = pgTable(
     index('sales_ops_crm_leads_org_deleted_idx')
       .on(t.orgId, t.deletedAt, t.id)
       .where(sql`${t.deletedAt} is not null`),
+    // The batch restore's read (one batch of a few thousand rows out of the whole table).
+    index('sales_ops_crm_leads_org_deleted_batch_idx')
+      .on(t.orgId, t.deletedBatchId)
+      .where(sql`${t.deletedBatchId} is not null`),
     foreignKey({
       columns: [t.orgId, t.pipelineId],
       foreignColumns: [salesOpsPipelines.orgId, salesOpsPipelines.id],

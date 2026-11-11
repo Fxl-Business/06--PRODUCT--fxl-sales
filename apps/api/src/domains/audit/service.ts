@@ -209,3 +209,52 @@ export async function writeAuditEntry(
   if (!inserted) throw new Error('audit_write_failed');
   return inserted;
 }
+
+/** Rows per INSERT of `writeAuditEntries`: 10 bound columns each, far below the 65535-parameter cap. */
+const AUDIT_BATCH_INSERT_ROWS = 500;
+
+/**
+ * Appends many hash-chained rows as ONE unbroken stretch of the chain, for an act that
+ * audits every row it touches (the lead bulk delete and restore).
+ *
+ * The same contract as `writeAuditEntry`, in the caller's transaction: the tail row is read
+ * once with FOR UPDATE (the lock is held until COMMIT, so nothing can slip between two of
+ * these entries), each entry hashes over the previous one in order, and the rows are
+ * inserted in that order in chunks, so the serial ids follow the chain order. A thousand
+ * entries cost a handful of statements instead of two round trips each.
+ */
+export async function writeAuditEntries(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- accepts getDb()/getAdminDb() and tx handles structurally
+  db: any,
+  entries: WriteAuditEntryInput[],
+): Promise<void> {
+  if (entries.length === 0) return;
+  const tail = (await db
+    .select({ entryHash: auditLog.entryHash })
+    .from(auditLog)
+    .orderBy(desc(auditLog.id))
+    .limit(1)
+    .for('update')) as Array<{ entryHash: string }>;
+  let prevHash = tail[0]?.entryHash && tail[0].entryHash.length === 64 ? tail[0].entryHash : '0'.repeat(64);
+
+  const rows = entries.map((entry) => {
+    const rowForHash = {
+      actorUserId: entry.actorUserId,
+      actorOrgId: entry.actorOrgId ?? null,
+      action: entry.action,
+      entityType: entry.entityType,
+      entityId: entry.entityId,
+      beforeJsonb: entry.beforeJsonb ?? null,
+      afterJsonb: entry.afterJsonb ?? null,
+      requestId: entry.requestId ?? null,
+    };
+    const entryHash = computeEntryHash(prevHash, rowForHash as Record<string, unknown>);
+    const row = { ...rowForHash, prevHash, entryHash };
+    prevHash = entryHash;
+    return row;
+  });
+
+  for (let start = 0; start < rows.length; start += AUDIT_BATCH_INSERT_ROWS) {
+    await db.insert(auditLog).values(rows.slice(start, start + AUDIT_BATCH_INSERT_ROWS));
+  }
+}

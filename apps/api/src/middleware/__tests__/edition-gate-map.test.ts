@@ -188,6 +188,10 @@ const OPEN: readonly RouteCase[] = [
   r('salesOps', 'GET', '/leads/summary', `${SO}/leads/summary`),
   r('salesOps', 'POST', '/leads/:id/delete', `${SO}/leads/${ID}/delete`),
   r('salesOps', 'POST', '/leads/:id/restore', `${SO}/leads/${ID}/restore`),
+  // The whole-etapa delete and its batch restore: lead lixeira acts, ungated like the single pair.
+  r('salesOps', 'GET', '/leads/stages/:stageId/delete-all-preview', `${SO}/leads/stages/${ID}/delete-all-preview`),
+  r('salesOps', 'POST', '/leads/stages/:stageId/delete-all', `${SO}/leads/stages/${ID}/delete-all`),
+  r('salesOps', 'POST', '/leads/batches/:batchId/restore', `${SO}/leads/batches/${ID}/restore`),
   // Phase 2b: the CRM reads, the lead history acts and the follow-ups. Ungated like /leads.
   r('salesOps', 'GET', '/pipelines', `${SO}/pipelines`),
   r('salesOps', 'GET', '/field-definitions', `${SO}/field-definitions`),

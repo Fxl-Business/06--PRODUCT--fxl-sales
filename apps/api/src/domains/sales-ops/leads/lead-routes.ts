@@ -29,7 +29,15 @@ import {
 } from './lead-service.js';
 import { LeadFilterError, parseDynamicFilters } from './lead-filters.js';
 import { addLeadFollowup, addLeadNote, advanceLead, getLeadSummary } from './lead-history-service.js';
-import { type LeadActor, deleteLead, listDeletedLeads, restoreLead } from './lead-trash-service.js';
+import {
+  type LeadActor,
+  deleteLead,
+  deleteStageLeads,
+  listDeletedLeads,
+  previewStageDelete,
+  restoreLead,
+  restoreLeadBatch,
+} from './lead-trash-service.js';
 
 /**
  * The lead entity's HTTP surface, mounted at '/leads' into salesOpsRouter.
@@ -44,7 +52,9 @@ import { type LeadActor, deleteLead, listDeletedLeads, restoreLead } from './lea
  * merely goes nowhere ends in the terminal `lost` stage, which is what that stage
  * is for. Removing a lead by mistake or as junk is the lixeira: `POST /:id/delete`
  * is a SOFT delete (a POST action like `/move`) that its actor or a gestor reverses with
- * `POST /:id/restore`, both audited in lead-trash-service.ts.
+ * `POST /:id/restore`, both audited in lead-trash-service.ts. The whole-etapa act is the same
+ * kind of POST, admin only: `POST /stages/:stageId/delete-all` and its undo
+ * `POST /batches/:batchId/restore`.
  */
 export const leadsRouter = new Hono();
 
@@ -203,6 +213,45 @@ leadsRouter.get('/deleted', requireAdmin, async (c) => {
   if (!parsed.success) return validationResponse(c, parsed.error);
   const page = await listDeletedLeads(getDb(), c.get('orgId'), parsed.data);
   return c.json({ items: page.items, nextCursor: page.nextCursor });
+});
+
+// The whole-etapa delete and its batch restore. Admin only, org from the token, POST (never
+// DELETE). Registered above '/:id' with the other static paths.
+leadsRouter.get('/stages/:stageId/delete-all-preview', requireAdmin, async (c) => {
+  const stageId = leadIdSchema.safeParse(c.req.param('stageId'));
+  if (!stageId.success) return c.json({ error: 'not_found' }, 404);
+  const result = await previewStageDelete(getDb(), c.get('orgId'), stageId.data);
+  if (!result.ok) return failureResponse(c, result.reason);
+  return c.json({
+    stageName: result.stageName,
+    deletableCount: result.deletableCount,
+    skippedConvertedCount: result.skippedConvertedCount,
+  });
+});
+
+leadsRouter.post('/stages/:stageId/delete-all', requireAdmin, async (c) => {
+  const stageId = leadIdSchema.safeParse(c.req.param('stageId'));
+  if (!stageId.success) return c.json({ error: 'not_found' }, 404);
+  const result = await deleteStageLeads(getDb(), c.get('orgId'), stageId.data, leadActor(c));
+  if (!result.ok) return failureResponse(c, result.reason);
+  return c.json({
+    batchId: result.batchId,
+    deletedCount: result.deletedCount,
+    skippedConvertedCount: result.skippedConvertedCount,
+  });
+});
+
+leadsRouter.post('/batches/:batchId/restore', requireAdmin, async (c) => {
+  const batchId = leadIdSchema.safeParse(c.req.param('batchId'));
+  if (!batchId.success) return c.json({ error: 'not_found' }, 404);
+  try {
+    const result = await restoreLeadBatch(getDb(), c.get('orgId'), batchId.data, leadActor(c));
+    if (!result.ok) return failureResponse(c, result.reason);
+    return c.json({ restoredCount: result.restoredCount });
+  } catch (error) {
+    if (error instanceof LeadInputError) return leadInputErrorResponse(c, error);
+    throw error;
+  }
 });
 
 /**

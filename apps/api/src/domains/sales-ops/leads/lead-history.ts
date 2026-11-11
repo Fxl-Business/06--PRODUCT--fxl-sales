@@ -59,3 +59,24 @@ export async function recordStageChange(tx: Db, change: StageChange): Promise<st
     .returning({ id: salesOpsCrmLeadEvents.id });
   return event!.id;
 }
+
+/** Rows per INSERT of `recordStageChanges`, well below the 65535-parameter cap. */
+const STAGE_CHANGE_INSERT_ROWS = 500;
+
+/** The batch form of `recordStageChange`: one `stage_changed` event per change, inserted in chunks. */
+export async function recordStageChanges(tx: Db, changes: StageChange[]): Promise<void> {
+  for (let start = 0; start < changes.length; start += STAGE_CHANGE_INSERT_ROWS) {
+    await tx.insert(salesOpsCrmLeadEvents).values(
+      changes.slice(start, start + STAGE_CHANGE_INSERT_ROWS).map((change) => ({
+        orgId: change.orgId,
+        leadId: change.leadId,
+        kind: 'stage_changed' as const,
+        fromStageId: change.fromStageId,
+        toStageId: change.toStageId,
+        reason: change.reason,
+        actorUserId: change.actorUserId,
+        actorNameSnapshot: change.actorName,
+      })),
+    );
+  }
+}

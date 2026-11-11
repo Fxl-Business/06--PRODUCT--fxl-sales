@@ -28,6 +28,9 @@ const trashMocks = vi.hoisted(() => ({
   deleteLead: vi.fn(),
   restoreLead: vi.fn(),
   listDeletedLeads: vi.fn(),
+  deleteStageLeads: vi.fn(),
+  previewStageDelete: vi.fn(),
+  restoreLeadBatch: vi.fn(),
 }));
 vi.mock('../lead-trash-service.js', () => trashMocks);
 
@@ -45,6 +48,7 @@ const { leadsRouter } = await import('../lead-routes.js');
 const LEAD_ID = '55555555-5555-4555-8555-555555555555';
 const STAGE_ID = '66666666-6666-4666-8666-666666666666';
 const SALE_ID = '77777777-7777-4777-8777-777777777777';
+const BATCH_ID = '88888888-8888-4888-8888-888888888888';
 
 const deletedView = {
   id: LEAD_ID,
@@ -56,6 +60,7 @@ const deletedView = {
   estimatedValueBrl: 250000,
   deletedAt: '2026-10-07T12:00:00.000Z',
   deletedByName: 'Gestora',
+  batchId: null,
 };
 
 const leadView = {
@@ -427,5 +432,90 @@ describe('Sales Ops lead routes', () => {
     expect((await app.request('/leads/deleted?limit=201')).status).toBe(400);
     expect((await app.request(`/leads/deleted?cursor=7:${LEAD_ID}`)).status).toBe(400);
     expect(serviceMocks.getLead).not.toHaveBeenCalled();
+  });
+
+  it('POST /leads/stages/:stageId/delete-all is admin-only, takes the org and actor from the token and maps its outcomes', async () => {
+    currentRoles = ['seller'];
+    const denied = await app.request(`/leads/stages/${STAGE_ID}/delete-all`, { method: 'POST' });
+    expect(denied.status).toBe(403);
+    expect(await denied.json()).toEqual({ error: 'forbidden', reason: 'admin_role_required' });
+    expect(trashMocks.deleteStageLeads).not.toHaveBeenCalled();
+
+    currentRoles = ['admin', 'seller', 'finder'];
+    trashMocks.deleteStageLeads.mockResolvedValueOnce({
+      ok: true,
+      batchId: BATCH_ID,
+      deletedCount: 3,
+      skippedConvertedCount: 1,
+    });
+    const ok = await app.request(`/leads/stages/${STAGE_ID}/delete-all`, { method: 'POST' });
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual({ batchId: BATCH_ID, deletedCount: 3, skippedConvertedCount: 1 });
+    expect(trashMocks.deleteStageLeads).toHaveBeenCalledWith(mockedDb, 'verified-org', STAGE_ID, {
+      userId: 'verified-account',
+      name: 'ana@example.test',
+    });
+
+    trashMocks.deleteStageLeads.mockResolvedValueOnce({ ok: false, reason: 'not_found' });
+    expect((await app.request(`/leads/stages/${STAGE_ID}/delete-all`, { method: 'POST' })).status).toBe(404);
+    expect((await app.request('/leads/stages/not-a-uuid/delete-all', { method: 'POST' })).status).toBe(404);
+    expect(trashMocks.deleteStageLeads).toHaveBeenCalledTimes(2);
+    expect(serviceMocks.getLead).not.toHaveBeenCalled();
+  });
+
+  it('GET /leads/stages/:stageId/delete-all-preview is admin-only and reports what the delete would do', async () => {
+    currentRoles = ['seller'];
+    expect((await app.request(`/leads/stages/${STAGE_ID}/delete-all-preview`)).status).toBe(403);
+    expect(trashMocks.previewStageDelete).not.toHaveBeenCalled();
+
+    currentRoles = ['admin', 'seller', 'finder'];
+    trashMocks.previewStageDelete.mockResolvedValueOnce({
+      ok: true,
+      stageName: 'Lista de Clientes',
+      deletableCount: 1700,
+      skippedConvertedCount: 2,
+    });
+    const ok = await app.request(`/leads/stages/${STAGE_ID}/delete-all-preview`);
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual({ stageName: 'Lista de Clientes', deletableCount: 1700, skippedConvertedCount: 2 });
+    expect(trashMocks.previewStageDelete).toHaveBeenCalledWith(mockedDb, 'verified-org', STAGE_ID);
+
+    trashMocks.previewStageDelete.mockResolvedValueOnce({ ok: false, reason: 'not_found' });
+    expect((await app.request(`/leads/stages/${STAGE_ID}/delete-all-preview`)).status).toBe(404);
+  });
+
+  it('POST /leads/batches/:batchId/restore is admin-only and maps its outcomes', async () => {
+    currentRoles = ['seller'];
+    const denied = await app.request(`/leads/batches/${BATCH_ID}/restore`, { method: 'POST' });
+    expect(denied.status).toBe(403);
+    expect(trashMocks.restoreLeadBatch).not.toHaveBeenCalled();
+
+    currentRoles = ['admin', 'seller', 'finder'];
+    trashMocks.restoreLeadBatch.mockResolvedValueOnce({ ok: true, restoredCount: 5 });
+    const ok = await app.request(`/leads/batches/${BATCH_ID}/restore`, { method: 'POST' });
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual({ restoredCount: 5 });
+    expect(trashMocks.restoreLeadBatch).toHaveBeenCalledWith(mockedDb, 'verified-org', BATCH_ID, {
+      userId: 'verified-account',
+      name: 'ana@example.test',
+    });
+
+    trashMocks.restoreLeadBatch.mockResolvedValueOnce({ ok: false, reason: 'not_found' });
+    expect((await app.request(`/leads/batches/${BATCH_ID}/restore`, { method: 'POST' })).status).toBe(404);
+    expect((await app.request('/leads/batches/not-a-uuid/restore', { method: 'POST' })).status).toBe(404);
+
+    trashMocks.restoreLeadBatch.mockRejectedValueOnce(new LeadInputError('no_open_stage'));
+    const noStage = await app.request(`/leads/batches/${BATCH_ID}/restore`, { method: 'POST' });
+    expect(noStage.status).toBe(400);
+    expect(await noStage.json()).toEqual({ error: 'validation_error', reason: 'no_open_stage', itemIndex: -1 });
+  });
+
+  it('has no DELETE verb on the whole-etapa routes', async () => {
+    for (const path of [`/leads/stages/${STAGE_ID}/delete-all`, `/leads/batches/${BATCH_ID}/restore`]) {
+      const response = await app.request(path, { method: 'DELETE' });
+      expect([404, 405]).toContain(response.status);
+    }
+    expect(trashMocks.deleteStageLeads).not.toHaveBeenCalled();
+    expect(trashMocks.restoreLeadBatch).not.toHaveBeenCalled();
   });
 });
