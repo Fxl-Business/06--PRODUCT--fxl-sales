@@ -1882,9 +1882,9 @@ export function SalesOpsApp() {
 
   return (
     <OrgModulesContext.Provider value={modules}>
-      <div className="sales-ops flex h-screen w-full gap-0 bg-[#e8e8eb] p-1.5 text-[#201f24] md:p-[10px]">
+      <div className="sales-ops flex h-screen w-full gap-0 overflow-hidden bg-[#e8e8eb] p-1.5 text-[#201f24] md:p-[10px]">
         <aside
-          className={`flex flex-none flex-col overflow-hidden rounded-[20px] bg-[#18181b] px-4 py-[22px] transition-all duration-200 ${sidebarCollapsed ? 'w-[76px]' : 'w-[244px]'}`}
+          className={`relative flex flex-none flex-col overflow-hidden rounded-[20px] bg-[#18181b] px-4 py-[22px] transition-all duration-200 ${sidebarCollapsed ? 'w-[76px]' : 'w-[244px]'}`}
         >
           <div
             className={`flex items-center ${
@@ -2023,7 +2023,7 @@ export function SalesOpsApp() {
           </div>
 
           <nav
-            className={`flex flex-col gap-1 ${
+            className={`sales-ops-nav-scroll flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto overflow-x-hidden ${
               sidebarCollapsed ? 'mt-1 items-center gap-2' : ''
             }`}
           >
@@ -2072,7 +2072,7 @@ export function SalesOpsApp() {
             })}
           </nav>
 
-          <div className="mt-auto flex flex-col gap-3">
+          <div className="mt-auto flex flex-none flex-col gap-3 pt-3">
             {/*
               The payables card and the proposta shortcut belong to the full product:
               in the leads edition the `commissions` and `proposals` capabilities are
