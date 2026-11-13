@@ -76,6 +76,11 @@ export type LeadCardProps = {
   /** Computed by the board (normal stage and not converted). */
   showDaysBadge?: boolean;
   /**
+   * Computed by the board (`stageIsLost`). The stored lost reason survives a move
+   * out of Perdido, so it is shown only while the card sits in a lost stage.
+   */
+  showLostReason?: boolean;
+  /**
    * 'contact' in the leads edition: the Cliente (`Sem cliente` when none) and the
    * birthday under the name, the value beside the menu, and no produtos.
    */
@@ -167,6 +172,7 @@ export function LeadCard({
   dragHandleProps,
   isDragging = false,
   showDaysBadge = true,
+  showLostReason = true,
   fieldSet = 'full',
   onDelete,
   onMove,
@@ -328,7 +334,7 @@ export function LeadCard({
         </div>
       ) : null}
 
-      {lead.lostReason ? (
+      {showLostReason && lead.lostReason ? (
         <div
           className="rounded-lg bg-[#fcf1f0] px-3 py-2 text-[12px] text-[#9b2f2a]"
           data-lost-reason-note

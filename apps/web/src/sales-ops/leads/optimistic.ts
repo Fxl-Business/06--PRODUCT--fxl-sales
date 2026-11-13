@@ -72,8 +72,9 @@ export function moveLeadInList(
     // ONLY on a real stage change. On a pure reorder the stamp comes out
     // byte-identical, which is what keeps the "days parked" counter honest.
     stageChangedAt: sameStage ? moving.stageChangedAt : now,
-    // A reorder never touches the reason either.
-    lostReason: sameStage ? moving.lostReason : (payload.reason ?? null),
+    // A reorder never touches the reason either, and a move without one (out of
+    // Perdido included) keeps the stored reason, as the server does.
+    lostReason: sameStage ? moving.lostReason : (payload.reason ?? moving.lostReason),
   };
   replacements.set(movedRow.id, movedRow);
 

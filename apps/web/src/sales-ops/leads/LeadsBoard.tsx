@@ -74,6 +74,7 @@ import {
   segmentedButtonClass,
   segmentedContainerClass,
   stageColors,
+  stageIsLost,
   stageIsNormal,
   columnClass,
   dragHandleSurfaceClass,
@@ -214,6 +215,7 @@ type SortableCardProps = {
   onMove?: (lead: SalesOpsLead) => void;
   onOpenSale?: (saleId: string) => void;
   showDaysBadge?: boolean;
+  showLostReason?: boolean;
   fieldSet?: LeadFieldSet;
 };
 
@@ -230,6 +232,7 @@ function SortableLeadCard({
   onMove,
   onOpenSale,
   showDaysBadge,
+  showLostReason,
   fieldSet,
 }: SortableCardProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -255,6 +258,7 @@ function SortableLeadCard({
         fieldSet={fieldSet}
         onOpenSale={onOpenSale}
         showDaysBadge={showDaysBadge}
+        showLostReason={showLostReason}
       />
     </div>
   );
@@ -453,6 +457,7 @@ export function LeadsBoard({
   const [activeLeadId, setActiveLeadId] = React.useState<string | null>(null);
   const activeLead =
     activeLeadId === null ? null : (visibleLeads.find((row) => row.id === activeLeadId) ?? null);
+  const activeStage = activeLead ? stages.find((stage) => stage.id === activeLead.stageId) : undefined;
 
   const [moveLeadId, setMoveLeadId] = React.useState<string | null>(null);
   const [moveSeedStageId, setMoveSeedStageId] = React.useState<string | null>(null);
@@ -839,6 +844,7 @@ export function LeadsBoard({
                                   onOpen={onOpenLead}
                                   onOpenSale={onOpenSale}
                                   showDaysBadge={stageIsNormal(stage) && !leadIsConverted(lead)}
+                                  showLostReason={stageIsLost(stage)}
                                 />
                               );
                             }
@@ -854,6 +860,7 @@ export function LeadsBoard({
                                 onOpen={onOpenLead}
                                 onOpenSale={onOpenSale}
                                 showDaysBadge={stageIsNormal(stage) && !leadIsConverted(lead)}
+                                showLostReason={stageIsLost(stage)}
                               />
                             );
                           })}
@@ -904,6 +911,7 @@ export function LeadsBoard({
                 now={now}
                 onDelete={onDeleteLead}
                 showDaysBadge={false}
+                showLostReason={activeStage ? stageIsLost(activeStage) : false}
               />
             </div>
           ) : null}

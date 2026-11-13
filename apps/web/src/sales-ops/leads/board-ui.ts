@@ -290,6 +290,17 @@ export function stageIsNormal(stage: Pick<ColorableStage, 'kind' | 'type' | 'exi
   return !KIND_COLORS[colorKeyOf(stage)];
 }
 
+/** The lost stage, by its pipeline exit or its legacy kind. Object lookup, like the colours. */
+const LOST_KEYS: Partial<Record<ColorKey, true>> = { perdido: true, lost: true };
+
+/**
+ * A lead that leaves Perdido keeps its stored reason; the card shows it only while
+ * the lead sits in a lost stage.
+ */
+export function stageIsLost(stage: Pick<ColorableStage, 'kind' | 'type' | 'exitKind'>): boolean {
+  return LOST_KEYS[colorKeyOf(stage)] === true;
+}
+
 export function dayBadgeTone(days: number): string {
   if (days <= 7) return 'bg-[#f1f1f4] text-[#6a6a72]';
   if (days <= 14) return 'bg-[#fbf1d9] text-[#8a6210]';

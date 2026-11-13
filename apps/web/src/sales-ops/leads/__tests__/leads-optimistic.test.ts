@@ -87,6 +87,12 @@ describe('moveLeadInList', () => {
     expect(next.filter((row) => row.id !== 'L2').every((row) => row.stageChangedAt === ORIGINAL_STAMP)).toBe(true);
   });
 
+  it('keeps the stored lostReason on a cross-stage move without a reason (a lead leaving Perdido)', () => {
+    const lost = board().map((row) => (row.id === 'L2' ? { ...row, lostReason: 'sem orçamento' } : row));
+    const next = moveLeadInList(lost, { leadId: 'L2', toStageId: 'S2', toIndex: 0 }, NOW);
+    expect(next.find((row) => row.id === 'L2')?.lostReason).toBe('sem orçamento');
+  });
+
   it('leaves stageChangedAt byte-identical when the move is a reorder inside the same column', () => {
     const next = moveLeadInList(
       board(),

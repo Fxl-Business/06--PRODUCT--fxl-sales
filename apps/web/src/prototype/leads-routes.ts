@@ -204,7 +204,8 @@ function moveLead(ctx: RouteContext, lead: SalesOpsLead, body: Record<string, un
   place(ctx, lead, toStageId, position);
   if (crossing) {
     lead.stageChangedAt = ctx.world.tick();
-    lead.lostReason = stage.requiresReason ? (reason ?? null) : null;
+    // Like the API: leaving Perdido keeps the stored reason.
+    if (stage.requiresReason) lead.lostReason = reason ?? null;
     pushTimeline(ctx, lead.id, {
       kind: 'stage_changed',
       at: lead.stageChangedAt,
@@ -243,7 +244,7 @@ function advanceLead(ctx: RouteContext, lead: SalesOpsLead, body: Record<string,
   const at = ctx.world.tick();
   place(ctx, lead, toStageId, Number.MAX_SAFE_INTEGER);
   lead.stageChangedAt = at;
-  lead.lostReason = stage.requiresReason ? (reason ?? null) : null;
+  if (stage.requiresReason) lead.lostReason = reason ?? null;
   pushTimeline(ctx, lead.id, {
     kind: 'stage_changed',
     at,
