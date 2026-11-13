@@ -13,7 +13,7 @@
 // It cannot prove a clean-clone build succeeds - only actually running one does that. It pins
 // the config shape that made the clean-clone build impossible.
 
-import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -24,8 +24,10 @@ const readJson = (path) => JSON.parse(readFileSync(join(ROOT, path), 'utf8'))
 
 const listDirs = (dir) => {
   try {
-    return readdirSync(join(ROOT, dir)).filter((entry) =>
-      statSync(join(ROOT, dir, entry)).isDirectory(),
+    return readdirSync(join(ROOT, dir)).filter(
+      (entry) =>
+        statSync(join(ROOT, dir, entry)).isDirectory() &&
+        existsSync(join(ROOT, dir, entry, 'package.json')),
     )
   } catch {
     return []
