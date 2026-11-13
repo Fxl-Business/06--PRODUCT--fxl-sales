@@ -24,6 +24,8 @@ import {
 const BREAKPOINT = '--> statement-breakpoint';
 const TAG_0029 = '0029_crm_unificado_modelo';
 const TAG_0030 = '0030_crm_legacy_copy';
+/** Stop at 0031: a later migration that adds edges (0033) would read here as edges 0031 wrote. */
+const TAG_0031 = '0031_crm_cutover_resync';
 const FILE_0030 = '0030_crm_legacy_copy.sql';
 const FILE_0031 = '0031_crm_cutover_resync.sql';
 const START = "SELECT set_config('app.fxl_admin'";
@@ -132,7 +134,7 @@ describe('migration 0031 (cutover resync) on a database that took old-table writ
     });
     sourceBeforeResync = await fingerprint(SOURCE_TABLES);
     transitionsBeforeResync = await rows(`SELECT from_stage_id, to_stage_id FROM sales_ops_pipeline_transitions WHERE org_id = 'orgA'`);
-    await runDatabaseMigrations({ databaseUrl: scratch.ownerUrl, migrationsFolder: MIGRATIONS_FOLDER });
+    await runDatabaseMigrations({ databaseUrl: scratch.ownerUrl, migrationsFolder: MIGRATIONS_FOLDER, throughTag: TAG_0031 });
   }, 120000);
 
   afterAll(async () => {

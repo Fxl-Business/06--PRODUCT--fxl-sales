@@ -74,6 +74,7 @@ afterAll(async () => {
     // Delete and restore write hash-chained audit entries; the chain-order oracles need it free of leftovers.
     await sql`DELETE FROM audit_log WHERE actor_org_id = ${orgId}`;
     await deleteCrmForOrgs([orgId]);
+    await sql`DELETE FROM sales_ops_sales WHERE org_id = ${orgId}`;
     await sql`DELETE FROM sales_ops_person_funcoes WHERE org_id = ${orgId}`;
     await sql`DELETE FROM sales_ops_people WHERE org_id = ${orgId}`;
     await sql`DELETE FROM sales_ops_funcoes WHERE org_id = ${orgId}`;
@@ -101,11 +102,11 @@ async function world(label: string) {
 }
 
 describe('GET /pipelines and GET /field-definitions', () => {
-  it('seed the default pipeline (7 stages, 22 transitions) and the Cliente field on first read, scoped to the org', async () => {
+  it('seed the default pipeline (7 stages, 30 transitions) and the Cliente field on first read, scoped to the org', async () => {
     const a = await world('seed-a');
     const b = await world('seed-b');
     expect(a.pipeline.stages.map((s) => s.name)).toEqual(['Novo', 'Qualificação', 'Em negociação', 'Proposta', 'Ganho', 'Perdido', 'Pausado']);
-    expect(a.pipeline.transitions).toHaveLength(22);
+    expect(a.pipeline.transitions).toHaveLength(30);
     const res = await call(a.app, 'GET', '/pipelines');
     expect(res.json.pipelines).toHaveLength(1);
     expect(res.json.pipelines[0]).toMatchObject({ name: 'Funil CRM padrão', isDefault: true, status: 'active' });
@@ -241,6 +242,93 @@ describe('the transition graph on move', () => {
     const [foreign] = await sql<{ id: string }[]>`INSERT INTO sales_ops_pipeline_stages (org_id, pipeline_id, name, position) VALUES (${w.orgId}, ${other!.id}, 'Novo', 1) RETURNING id`;
     const res = await call(w.app, 'POST', `/leads/${lead.id}/move`, { stageId: foreign!.id, position: 0 });
     expect(res).toMatchObject({ status: 409, json: { error: 'transition_not_allowed' } });
+  });
+});
+
+describe('a lead leaves the Ganho and Perdido exits into an open etapa', () => {
+  /** The org-created normal etapa of the reported case, created through the real route. */
+  async function faturada(w: Awaited<ReturnType<typeof world>>) {
+    const created = await call(w.app, 'POST', '/lead-stages', { name: 'Venda faturada' });
+    expect(created.status, JSON.stringify(created.json)).toBe(201);
+    return created.json.stage.id as string;
+  }
+  const edgesOf = async (orgId: string, toStageId: string) =>
+    sql<{ from_stage_id: string }[]>`
+      SELECT from_stage_id FROM sales_ops_pipeline_transitions WHERE org_id = ${orgId} AND to_stage_id = ${toStageId}`;
+
+  it('a new org-created etapa gets the edges from Ganho and Perdido (and Pausado) through the shared rule', async () => {
+    const w = await world('exit-new-stage');
+    const stageId = await faturada(w);
+    const froms = new Set((await edgesOf(w.orgId, stageId)).map((r) => r.from_stage_id));
+    for (const exit of ['Ganho', 'Perdido', 'Pausado']) expect(froms.has(w.stage(exit)), exit).toBe(true);
+  });
+
+  it('a lead in Ganho moves to an org-created normal etapa (200, one stage_changed event); Ganho to Perdido stays 409', async () => {
+    const w = await world('exit-ganho');
+    const stageId = await faturada(w);
+    const lead = await w.create();
+    expect((await call(w.app, 'POST', `/leads/${lead.id}/move`, { stageId: w.stage('Ganho'), position: 0 })).status).toBe(200);
+
+    const refused = await call(w.app, 'POST', `/leads/${lead.id}/move`, { stageId: w.stage('Perdido'), position: 0, reason: 'Desistiu' });
+    expect(refused).toMatchObject({ status: 409, json: { error: 'transition_not_allowed' } });
+    expect(await w.events(lead.id)).toHaveLength(2);
+
+    const moved = await call(w.app, 'POST', `/leads/${lead.id}/move`, { stageId, position: 0 });
+    expect(moved.status, JSON.stringify(moved.json)).toBe(200);
+    expect(moved.json.lead).toMatchObject({ id: lead.id, stageId, saleId: null });
+    const events = await w.events(lead.id);
+    expect(events).toHaveLength(3);
+    expect(events[2]).toMatchObject({ from_stage_id: w.stage('Ganho'), to_stage_id: stageId, reason: null, actor_name_snapshot: 'Gestora Ana' });
+  });
+
+  it('a lead in Perdido moves back out (move and advance) and keeps the stored lost reason', async () => {
+    const w = await world('exit-perdido');
+    const stageId = await faturada(w);
+    const lead = await w.create();
+    const lost = await call(w.app, 'POST', `/leads/${lead.id}/move`, { stageId: w.stage('Perdido'), position: 0, reason: 'Sem orçamento' });
+    expect(lost.status, JSON.stringify(lost.json)).toBe(200);
+
+    const reopened = await call(w.app, 'POST', `/leads/${lead.id}/move`, { stageId, position: 0 });
+    expect(reopened.status, JSON.stringify(reopened.json)).toBe(200);
+    expect(reopened.json.lead).toMatchObject({ stageId, lostReason: 'Sem orçamento' });
+    const [row] = await sql<{ lost_reason: string | null }[]>`SELECT lost_reason FROM sales_ops_crm_leads WHERE id = ${lead.id}`;
+    expect(row!.lost_reason).toBe('Sem orçamento');
+    const events = await w.events(lead.id);
+    expect(events).toHaveLength(3);
+    expect(events[2]).toMatchObject({ from_stage_id: w.stage('Perdido'), to_stage_id: stageId, reason: null });
+
+    // The same through Avançar: out of Perdido into Novo with a follow-up.
+    const other = await w.create({ contactName: 'Dois' });
+    expect((await call(w.app, 'POST', `/leads/${other.id}/advance`, { toStageId: w.stage('Perdido'), reason: 'Preço' })).status).toBe(200);
+    const advanced = await call(w.app, 'POST', `/leads/${other.id}/advance`, { toStageId: w.stage('Novo'), nextStep: 'Retomar', dueOn: '2026-11-20' });
+    expect(advanced.status, JSON.stringify(advanced.json)).toBe(200);
+    expect(advanced.json.lead).toMatchObject({ stageId: w.stage('Novo'), lostReason: 'Preço' });
+    expect(await w.events(other.id)).toHaveLength(3);
+  });
+
+  it('a converted card stays read-only: it cannot move into an exit or the org-created etapa', async () => {
+    const w = await world('exit-converted');
+    const stageId = await faturada(w);
+    const lead = await w.create();
+    const [sale] = await sql<{ id: string }[]>`
+      INSERT INTO sales_ops_sales
+        (org_id, sequence, code, client_name_snapshot, seller_name_snapshot, payment_method,
+         condition, base_date, total_brl, seller_commission_pct, finder_commission_pct, tax_pct,
+         other_costs_brl, net_margin_brl, net_margin_pct)
+      VALUES (${w.orgId}, 1, 'PROP-EXIT-1', 'Empresa A', 'Vendedor A', 'pix', 'cash', now(),
+              100000, 10, 3, 6, 0, 0, 0)
+      RETURNING id`;
+    for (const name of ['Qualificação', 'Em negociação']) {
+      expect((await call(w.app, 'POST', `/leads/${lead.id}/move`, { stageId: w.stage(name), position: 0 })).status).toBe(200);
+    }
+    const converted = await call(w.app, 'POST', `/leads/${lead.id}/move`, { stageId: w.stage('Proposta'), position: 0, saleId: sale!.id });
+    expect(converted.status, JSON.stringify(converted.json)).toBe(200);
+    for (const to of [w.stage('Ganho'), stageId]) {
+      const res = await call(w.app, 'POST', `/leads/${lead.id}/move`, { stageId: to, position: 0 });
+      expect(res).toMatchObject({ status: 409, json: { error: 'conflict', reason: 'lead_already_converted' } });
+    }
+    const [row] = await sql<{ stage_id: string; sale_id: string }[]>`SELECT stage_id, sale_id FROM sales_ops_crm_leads WHERE id = ${lead.id}`;
+    expect(row).toEqual({ stage_id: w.stage('Proposta'), sale_id: sale!.id });
   });
 });
 

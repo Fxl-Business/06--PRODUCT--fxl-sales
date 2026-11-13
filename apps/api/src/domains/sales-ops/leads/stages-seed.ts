@@ -37,7 +37,7 @@ export const LEAD_STAGE_SEEDS = [
 export const SYSTEM_LEAD_STAGE_KINDS = ['conversion', 'lost'] as const;
 
 /**
- * Seeds the org's default CRM pipeline (7 stages, 22 transitions, the Cliente field) when the org
+ * Seeds the org's default CRM pipeline (7 stages, 30 transitions, the Cliente field) when the org
  * has NO pipeline row and returns the DEFAULT pipeline's stages in board order, in the legacy
  * `kind` / `isSystem` shape. MUST be called inside an already tenant-scoped transaction; see
  * {@link ensureLeadStagesForOrg} for the entry point that opens one.

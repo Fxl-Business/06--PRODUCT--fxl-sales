@@ -43,8 +43,8 @@ export type DefaultPipelineStageKey = (typeof DEFAULT_PIPELINE_STAGES)[number]['
  * - forward one open step
  * - back one open step (`novo` has no back)
  * - any open stage to any exit
- * - `pausado` back to any open stage
- * `ganho` and `perdido` are terminal.
+ * - every exit (`ganho`, `perdido`, `pausado`) back to any open stage
+ * An exit never leads to another exit.
  */
 export const DEFAULT_PIPELINE_TRANSITIONS: readonly (readonly [DefaultPipelineStageKey, DefaultPipelineStageKey])[] = [
   ['novo', 'qualificacao'],
@@ -69,6 +69,14 @@ export const DEFAULT_PIPELINE_TRANSITIONS: readonly (readonly [DefaultPipelineSt
   ['pausado', 'qualificacao'],
   ['pausado', 'em-negociacao'],
   ['pausado', 'proposta'],
+  ['ganho', 'novo'],
+  ['ganho', 'qualificacao'],
+  ['ganho', 'em-negociacao'],
+  ['ganho', 'proposta'],
+  ['perdido', 'novo'],
+  ['perdido', 'qualificacao'],
+  ['perdido', 'em-negociacao'],
+  ['perdido', 'proposta'],
 ];
 
 /** Today's four LEAD_STAGE_SEEDS names -> their counterpart key in the default pipeline. */

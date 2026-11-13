@@ -32,6 +32,14 @@ const EXPECTED_TRANSITIONS: readonly (readonly [string, string])[] = [
   ['pausado', 'qualificacao'],
   ['pausado', 'em-negociacao'],
   ['pausado', 'proposta'],
+  ['ganho', 'novo'],
+  ['ganho', 'qualificacao'],
+  ['ganho', 'em-negociacao'],
+  ['ganho', 'proposta'],
+  ['perdido', 'novo'],
+  ['perdido', 'qualificacao'],
+  ['perdido', 'em-negociacao'],
+  ['perdido', 'proposta'],
 ];
 
 const OPEN_KEYS = ['novo', 'qualificacao', 'em-negociacao', 'proposta'] as const;
@@ -68,11 +76,11 @@ describe('default CRM pipeline', () => {
     }
   });
 
-  it('transitions are exactly the documented 22', () => {
+  it('transitions are exactly the documented 30', () => {
     expect(DEFAULT_PIPELINE_TRANSITIONS.map(([a, b]) => [a, b])).toEqual(EXPECTED_TRANSITIONS);
-    expect(DEFAULT_PIPELINE_TRANSITIONS).toHaveLength(22);
+    expect(DEFAULT_PIPELINE_TRANSITIONS).toHaveLength(30);
     const pairs = new Set(DEFAULT_PIPELINE_TRANSITIONS.map(([a, b]) => `${a}>${b}`));
-    expect(pairs.size).toBe(22);
+    expect(pairs.size).toBe(30);
     const known = new Set<string>(DEFAULT_PIPELINE_STAGES.map((s) => s.key));
     for (const [a, b] of DEFAULT_PIPELINE_TRANSITIONS) {
       expect(known.has(a)).toBe(true);
@@ -87,17 +95,16 @@ describe('default CRM pipeline', () => {
       if (i > 0) derived.add(`${key}>${OPEN_KEYS[i - 1]}`);
       for (const exit of EXIT_KEYS) derived.add(`${key}>${exit}`);
     });
-    for (const target of OPEN_KEYS) derived.add(`pausado>${target}`);
+    for (const exit of EXIT_KEYS) for (const target of OPEN_KEYS) derived.add(`${exit}>${target}`);
     const actual = new Set(DEFAULT_PIPELINE_TRANSITIONS.map(([a, b]) => `${a}>${b}`));
     expect(actual).toEqual(derived);
   });
 
-  it('ganho and perdido are terminal, pausado returns only to open stages', () => {
-    const froms = DEFAULT_PIPELINE_TRANSITIONS.map(([a]) => a);
-    expect(froms).not.toContain('ganho');
-    expect(froms).not.toContain('perdido');
-    const pausadoTargets = DEFAULT_PIPELINE_TRANSITIONS.filter(([a]) => a === 'pausado').map(([, b]) => b);
-    expect([...pausadoTargets].sort()).toEqual([...OPEN_KEYS].sort());
+  it('every exit (ganho, perdido, pausado) returns to every open stage and never to another exit', () => {
+    for (const exit of EXIT_KEYS) {
+      const targets = DEFAULT_PIPELINE_TRANSITIONS.filter(([a]) => a === exit).map(([, b]) => b);
+      expect([...targets].sort(), exit).toEqual([...OPEN_KEYS].sort());
+    }
     const exitToExit = DEFAULT_PIPELINE_TRANSITIONS.filter(
       ([a, b]) => (EXIT_KEYS as readonly string[]).includes(a) && (EXIT_KEYS as readonly string[]).includes(b),
     );

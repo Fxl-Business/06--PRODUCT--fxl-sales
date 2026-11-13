@@ -102,11 +102,11 @@ export interface TransitionPlanStage {
 }
 
 /**
- * The transition rule migration 0030 applies in SQL, over the ACTIVE stages of one pipeline.
+ * The transition rule migrations 0030 and 0033 apply in SQL, over the ACTIVE stages of one pipeline.
  * open = type normal|orcamento ordered by (position, name); exits = type saida.
  *   open[i] -> open[i+1]; open[i+1] -> open[i]; every open -> every exit;
- *   every exit with exitKind pausado -> every open.
- * Returns unique [fromId, toId] pairs in a stable order.
+ *   every exit (ganho, perdido and pausado alike) -> every open.
+ * An exit never leads to another exit. Returns unique [fromId, toId] pairs in a stable order.
  */
 export function planPipelineTransitions(stages: readonly TransitionPlanStage[]): [string, string][] {
   const active = stages.filter((stage) => stage.status === 'active');
@@ -121,7 +121,7 @@ export function planPipelineTransitions(stages: readonly TransitionPlanStage[]):
     add(open[i + 1]!.id, open[i]!.id);
   }
   for (const from of open) for (const to of exits) add(from.id, to.id);
-  for (const from of exits) if (from.exitKind === 'pausado') for (const to of open) add(from.id, to.id);
+  for (const from of exits) for (const to of open) add(from.id, to.id);
   return [...pairs.values()];
 }
 

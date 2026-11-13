@@ -209,8 +209,8 @@ async function restoreTransitionsIfDisconnected(
 /**
  * A new open stage must be reachable: the explicit transition graph says "a pair that is absent is
  * not allowed". The pairs the shared rule (`planPipelineTransitions`) gives the new stage - to and
- * from the previous open stage, to every exit, and from the pausado exit - are inserted; pairs
- * between OTHER stages are never touched, so a graph the org shaped stays as it is.
+ * from the previous open stage, to every exit, and from every exit (ganho, perdido and pausado) - are
+ * inserted; pairs between OTHER stages are never touched, so a graph the org shaped stays as it is.
  */
 async function addTransitionsForNewStage(
   tx: Db,

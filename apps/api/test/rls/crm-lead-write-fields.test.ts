@@ -235,7 +235,7 @@ describe('unified lead write: dynamic fields and legacy keys', () => {
     const orgId = newOrg('transitions');
     const stages = await ensureLeadStagesForOrg(db, orgId);
     const [{ n: before } = { n: 0 }] = await adminClient<{ n: number }[]>`SELECT count(*)::int AS n FROM sales_ops_pipeline_transitions WHERE org_id = ${orgId}`;
-    expect(before).toBe(22);
+    expect(before).toBe(30);
     const created = await createLeadStage(db, orgId, LeadStageSchema.parse({ name: 'Diagnóstico' }));
     if (typeof created === 'string') throw new Error('dup');
     const pairs = await adminClient<{ from_stage_id: string; to_stage_id: string }[]>`
@@ -244,10 +244,15 @@ describe('unified lead write: dynamic fields and legacy keys', () => {
     const byName = (id: string) => stages.find((s) => s.id === id)?.name ?? 'Diagnóstico';
     const label = pairs.map((p) => `${byName(p.from_stage_id)}>${byName(p.to_stage_id)}`).sort();
     // The new stage is the last open one by position (after the exits): previous open is Proposta.
+    // Every exit (Ganho, Perdido and Pausado) returns to it.
     expect(label).toEqual(
-      ['Proposta>Diagnóstico', 'Diagnóstico>Proposta', 'Diagnóstico>Ganho', 'Diagnóstico>Perdido', 'Diagnóstico>Pausado', 'Pausado>Diagnóstico'].sort(),
+      [
+        'Proposta>Diagnóstico', 'Diagnóstico>Proposta',
+        'Diagnóstico>Ganho', 'Diagnóstico>Perdido', 'Diagnóstico>Pausado',
+        'Ganho>Diagnóstico', 'Perdido>Diagnóstico', 'Pausado>Diagnóstico',
+      ].sort(),
     );
     const [{ n: after } = { n: 0 }] = await adminClient<{ n: number }[]>`SELECT count(*)::int AS n FROM sales_ops_pipeline_transitions WHERE org_id = ${orgId}`;
-    expect(after).toBe(22 + 6);
+    expect(after).toBe(30 + 8);
   });
 });

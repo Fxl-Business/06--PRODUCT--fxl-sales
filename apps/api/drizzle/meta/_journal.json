@@ -232,6 +232,13 @@
       "when": 1794399993336,
       "tag": "0032_lead_delete_batch",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1794500000000,
+      "tag": "0033_crm_exit_reopen_transitions",
+      "breakpoints": true
     }
   ]
 }

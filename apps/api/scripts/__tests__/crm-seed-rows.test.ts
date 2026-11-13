@@ -17,7 +17,7 @@ function plan() {
 }
 
 describe('buildCrmSeedRows', () => {
-  it('projects the etapas keeping their ids, adds Ganho and Pausado, and builds the graph from the shared rule', () => {
+  it('projects the etapas keeping their ids, adds Ganho and Pausado, and builds the graph from the shared rule (every exit reopens)', () => {
     const p = plan();
     const orgId = ORGS[0]!;
     const crm = buildCrmSeedRows(orgId, p.rows.salesOpsLeadStages, p.rows.salesOpsLeads, p.rows.salesOpsLeadProducts)!;
@@ -34,7 +34,16 @@ describe('buildCrmSeedRows', () => {
     ]);
     const plan2: TransitionPlanStage[] = crm.stages.map((s) => ({ id: s.id, name: s.name, position: s.position, type: s.type, exitKind: s.exitKind, status: s.status }));
     expect(crm.transitions).toHaveLength(planPipelineTransitions(plan2).length);
-    expect(crm.transitions).toHaveLength(16);
+    // 4 open-chain pairs, 3 open x 3 exits, and every exit (Ganho, Perdido, Pausado) back to the 3 open etapas.
+    expect(crm.transitions).toHaveLength(22);
+    const byId = new Map(crm.stages.map((s) => [s.id, s.name]));
+    const pairs = crm.transitions.map((t) => `${byId.get(t.fromStageId)}>${byId.get(t.toStageId)}`);
+    for (const exit of ['Ganho', 'Perdido', 'Pausado']) {
+      expect(pairs.filter((pair) => pair.startsWith(`${exit}>`)).sort(), exit).toEqual(['Em negociação', 'Novo', 'Proposta'].map((to) => `${exit}>${to}`));
+    }
+    for (const from of ['Ganho', 'Perdido', 'Pausado']) {
+      for (const to of ['Ganho', 'Perdido', 'Pausado']) expect(pairs).not.toContain(`${from}>${to}`);
+    }
   });
 
   it('keeps every lead with its id, value and etapa, with one first event each and descricao and produtos values', () => {

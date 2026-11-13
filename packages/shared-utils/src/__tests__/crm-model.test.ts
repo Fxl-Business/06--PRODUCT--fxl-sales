@@ -37,7 +37,7 @@ describe('crm-model', () => {
     const planned = planPipelineTransitions(defaultStages).map(([a, b]) => `${a}>${b}`).sort();
     const expected = DEFAULT_PIPELINE_TRANSITIONS.map(([a, b]) => `${a}>${b}`).sort();
     expect(planned).toEqual(expected);
-    expect(planned).toHaveLength(22);
+    expect(planned).toHaveLength(30);
   });
 
   it('planPipelineTransitions ignores archived stages and adapts to a legacy-shaped pipeline', () => {
@@ -51,13 +51,35 @@ describe('crm-model', () => {
       { id: 'z', name: 'Pausado', position: 7, type: 'saida', exitKind: 'pausado', status: 'active' },
     ];
     const planned = planPipelineTransitions(legacy);
-    expect(planned).toHaveLength(16);
+    expect(planned).toHaveLength(22);
     expect(planned.some(([a, b]) => a === 'x' || b === 'x')).toBe(false);
     expect(planned).toContainEqual(['n', 'e']);
     expect(planned).toContainEqual(['e', 'n']);
     expect(planned).toContainEqual(['z', 'p']);
-    expect(planned).not.toContainEqual(['l', 'n']);
-    expect(planned).not.toContainEqual(['g', 'n']);
+    expect(planned).toContainEqual(['l', 'n']);
+    expect(planned).toContainEqual(['g', 'n']);
+  });
+
+  it('planPipelineTransitions links every active ganho and perdido exit to every active open stage, and no exit to an exit', () => {
+    const stages: TransitionPlanStage[] = [
+      { id: 'n', name: 'Novo', position: 1, type: 'normal', exitKind: null, status: 'active' },
+      { id: 'p', name: 'Proposta', position: 2, type: 'orcamento', exitKind: null, status: 'active' },
+      { id: 'g', name: 'Ganho', position: 3, type: 'saida', exitKind: 'ganho', status: 'active' },
+      { id: 'l', name: 'Perdido', position: 4, type: 'saida', exitKind: 'perdido', status: 'active' },
+      { id: 'z', name: 'Pausado', position: 5, type: 'saida', exitKind: 'pausado', status: 'active' },
+      { id: 'f', name: 'Venda faturada', position: 6, type: 'normal', exitKind: null, status: 'active' },
+      { id: 'x', name: 'Antiga', position: 7, type: 'normal', exitKind: null, status: 'archived' },
+      { id: 'a', name: 'Ganho antigo', position: 8, type: 'saida', exitKind: 'ganho', status: 'archived' },
+    ];
+    const planned = planPipelineTransitions(stages).map(([a, b]) => `${a}>${b}`);
+    const open = ['n', 'p', 'f'];
+    const exits = ['g', 'l', 'z'];
+    for (const exit of exits) {
+      expect(planned.filter((pair) => pair.startsWith(`${exit}>`)).sort(), exit).toEqual(open.map((to) => `${exit}>${to}`).sort());
+    }
+    for (const from of exits) for (const to of exits) expect(planned).not.toContain(`${from}>${to}`);
+    expect(planned.some((pair) => pair.includes('x') || pair.includes('a'))).toBe(false);
+    expect(new Set(planned).size).toBe(planned.length);
   });
 
   it('default stage behavior and reason rules', () => {

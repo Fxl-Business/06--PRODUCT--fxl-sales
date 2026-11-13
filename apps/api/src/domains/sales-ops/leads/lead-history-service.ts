@@ -256,7 +256,8 @@ export function advanceLead(
       .set({
         stageId: destination.id,
         stageChangedAt: sql`now()`,
-        lostReason: destination.exitKind === 'perdido' ? (input.reason ?? null) : null,
+        // Same rule as moveLead: leaving Perdido keeps the stored reason.
+        ...(destination.exitKind === 'perdido' ? { lostReason: input.reason ?? null } : {}),
         ...(claimed ? { sellerPersonId: claimed.id, sellerNameSnapshot: claimed.displayName } : {}),
         updatedAt: new Date(),
       })

@@ -1302,7 +1302,9 @@ export async function moveLead(
         // A stage change is stamped by the DATABASE clock (`now()`), the clock the
         // create path's column default uses, never by the Node clock.
         ...(stageChanged ? { stageChangedAt: sql`now()` } : {}),
-        lostReason: destination.exitKind === 'perdido' ? (input.reason ?? null) : null,
+        // Entering (or reordering inside) Perdido writes the reason. Any other destination OMITS the
+        // key, so a lead that leaves Perdido keeps the reason it was lost for.
+        ...(destination.exitKind === 'perdido' ? { lostReason: input.reason ?? null } : {}),
         ...(opensOrcamento ? { saleId: input.saleId! } : {}),
         ...(claimed ? { sellerPersonId: claimed.id, sellerNameSnapshot: claimed.displayName } : {}),
         updatedAt: new Date(),

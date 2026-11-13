@@ -80,7 +80,7 @@ describe('CRM defaults: ensureDefaultPipeline and the Cliente system field', () 
     const [counts] = await adminRows<{ s: number; t: number }>(
       `SELECT (SELECT count(*) FROM sales_ops_pipeline_stages WHERE org_id='org_def_2')::int s, (SELECT count(*) FROM sales_ops_pipeline_transitions WHERE org_id='org_def_2')::int t`,
     );
-    expect(counts).toEqual({ s: 7, t: 22 });
+    expect(counts).toEqual({ s: 7, t: 30 });
   });
 
   it('three concurrent first callers never error and leave exactly one complete pipeline', async () => {
@@ -91,7 +91,7 @@ describe('CRM defaults: ensureDefaultPipeline and the Cliente system field', () 
       `SELECT (SELECT count(*) FROM sales_ops_pipelines WHERE org_id='org_def_3')::int p, (SELECT count(*) FROM sales_ops_pipeline_stages WHERE org_id='org_def_3')::int s,
               (SELECT count(*) FROM sales_ops_pipeline_transitions WHERE org_id='org_def_3')::int t, (SELECT count(*) FROM sales_ops_field_definitions WHERE org_id='org_def_3')::int f`,
     );
-    expect(counts).toEqual({ p: 1, s: 7, t: 22, f: 1 });
+    expect(counts).toEqual({ p: 1, s: 7, t: 30, f: 1 });
   });
 
   it('"has any pipeline" is the guard: a renamed or archived pipeline is never reinserted', async () => {

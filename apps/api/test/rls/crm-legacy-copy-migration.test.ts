@@ -367,8 +367,9 @@ describe('migration 0030 on a database populated at 0029', () => {
       );
       expect(new Set(stored.map((t) => `${t.from_stage_id}>${t.to_stage_id}`)), org).toEqual(new Set(planned.map(([a, b]) => `${a}>${b}`)));
     }
+    // 16 from the 0030 rule plus the 6 that 0033 adds (Ganho and Perdido back to the 3 open etapas).
     const [a] = await rows<{ n: number }>(`SELECT count(*)::int n FROM sales_ops_pipeline_transitions WHERE org_id = 'orgA'`);
-    expect(a!.n).toBe(16);
+    expect(a!.n).toBe(22);
   });
 
   it('creates one default pipeline per org, named and keyed, and no module rows (the token is not in the database)', async () => {
