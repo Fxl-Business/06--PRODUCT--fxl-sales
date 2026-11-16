@@ -560,7 +560,7 @@ pnpm --filter @fxl-sales/api test:integration
 ## Shipping
 
 Follow the Nexo flow in `AGENTS.md`.
-Keep changes atomic, verify locally, capture the run under `nexo/`, commit with a Conventional Commit message, and push `master` after Gate 2 passes.
+Keep changes atomic, verify locally, capture the run under `nexo/`, commit with a Conventional Commit message, and push `main` after Gate 2 passes.
 
 <!-- nexo:managed:start version=4 sha256=02fd055249adb37ac71ec0db87e5e313c575eadc762d972ac81c07a1a398a84b -->
 ## Nexo workflow contract

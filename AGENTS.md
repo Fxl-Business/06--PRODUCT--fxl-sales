@@ -32,9 +32,9 @@ A blocker or exhausted budget is recorded in `AUDIT.md`, unfinished work is park
 
 These facts are repo-local and override the generic wording above wherever they differ.
 
-- The trunk of this repository is **`master`**, not `main`. Every "trunk" statement in the managed block above means `master` here, as declared by `delivery.trunk` in `nexo/state.json`.
-- Promotion is opted in: `master` -> `staging` -> `production`, fast-forward-only, never force-pushed, never reset, never merged with `--no-ff`.
-- `staging` and `production` are deployment pointers, never integration branches. The deploy platform watches those two branches; `master` deploys are disabled in `vercel.json`.
-- Per slice: a short-lived local `feat/*` or `fix/*` branch, a separate-agent Verify PASS, `git merge --no-ff` into `master`, delete the branch, then `git push origin master`.
-- Gate 3a cuts and tags on `master` and fast-forwards `staging`; Gate 3b fast-forwards `production` to that same tagged commit. Both are human-approved and never automatic.
+- The trunk of this repository is **`main`**, as declared by `delivery.trunk` in `nexo/state.json`. The former trunk `master` was frozen on 2026-11-16 at the commit `main` was created from and receives nothing more.
+- Promotion is opted in: `main` -> `staging` -> `production`, fast-forward-only, never force-pushed, never reset, never merged with `--no-ff`.
+- `staging` and `production` are deployment pointers, never integration branches. The deploy platform watches those two branches; trunk deploys are disabled in `vercel.json`.
+- Per slice: a short-lived local `feat/*` or `fix/*` branch, a separate-agent Verify PASS, `git merge --no-ff` into `main`, delete the branch, then `git push origin main`.
+- Gate 3a cuts and tags on `main` and fast-forwards `staging`; Gate 3b fast-forwards `production` to that same tagged commit. Both are human-approved and never automatic.
 - Artifacts live only under `nexo/`: `ROADMAP.md`, `state.json`, `plans/`, `runs/`, `milestones/`, `knowledge/{decisions,doubts}/`, `playbooks/`.
