@@ -132,11 +132,15 @@ describe('GET /pipelines and GET /field-definitions', () => {
       ['DELETE', `/field-definitions/${def!.id}`, undefined],
       ['POST', `/field-definitions/${def!.id}/archive`, {}],
       ['DELETE', '/pipelines', undefined],
-      ['PATCH', `/pipelines/${w.pipeline.id}`, { status: 'archived' }],
     ] as const) {
       const res = await call(w.app, method, path, body);
       expect(res.status, `${method} ${path}`).toBe(404);
     }
+    // PATCH /pipelines/:id exists since vários funis, but the default pipeline cannot be archived.
+    const archiveDefault = await call(w.app, 'PATCH', `/pipelines/${w.pipeline.id}`, { status: 'archived' });
+    expect([archiveDefault.status, archiveDefault.json]).toEqual([409, { error: 'conflict', reason: 'pipeline_is_default' }]);
+    const [pipelineRow] = await sql<{ status: string }[]>`SELECT status FROM sales_ops_pipelines WHERE id = ${w.pipeline.id}`;
+    expect(pipelineRow).toEqual({ status: 'active' });
     const [still] = await sql<{ status: string; removable: boolean }[]>`SELECT status, removable FROM sales_ops_field_definitions WHERE id = ${def!.id}`;
     expect(still).toEqual({ status: 'active', removable: false });
     // The database refuses a removable non-system row and the service re-seeds a missing Cliente.
