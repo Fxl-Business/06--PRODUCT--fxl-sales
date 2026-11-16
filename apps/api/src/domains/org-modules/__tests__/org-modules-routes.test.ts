@@ -48,6 +48,10 @@ vi.mock('../../sales-ops/service.js', async (importOriginal) => {
   return { ...actual, getSalesOpsSummary: vi.fn(async () => ({ stub: true })) };
 });
 
+// The summary handler calls getDb() before the stubbed service; a placeholder keeps
+// the file independent of the machine's apps/api/.env (the stub never touches it).
+vi.mock('../../../db/client.js', () => ({ getDb: () => ({}) }));
+
 const OPERATOR = 'acc_operator';
 
 let orgSeq = 0;
