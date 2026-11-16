@@ -100,7 +100,7 @@ async function deleteCrmLeadRows(tx: postgres.TransactionSql, ids: string[]): Pr
 
 /**
  * Removes the whole unified CRM model (migrations 0029 and 0030) of the given orgs
- * from the LOCAL test database: lead rows, then transitions, stages, pipelines,
+ * from the LOCAL test database: lead rows, then pipeline funções, transitions, stages, pipelines,
  * field definitions and org modules. Ordinary superuser transaction, foreign keys
  * enforced, so a new CRM reference fails loudly. Phase 2 test files reuse it.
  */
@@ -117,6 +117,7 @@ export async function deleteCrmForOrgs(orgIds: readonly string[]): Promise<void>
         throw new Error('deleteCrmForOrgs needs the local superuser (TEST_MIGRATE_DATABASE_URL)');
       }
       await deleteCrmLeadRows(tx, ids);
+      await tx`DELETE FROM sales_ops_pipeline_funcoes WHERE org_id = ANY(${ids})`;
       await tx`DELETE FROM sales_ops_pipeline_transitions WHERE org_id = ANY(${ids})`;
       await tx`DELETE FROM sales_ops_pipeline_stages WHERE org_id = ANY(${ids})`;
       await tx`DELETE FROM sales_ops_pipelines WHERE org_id = ANY(${ids})`;

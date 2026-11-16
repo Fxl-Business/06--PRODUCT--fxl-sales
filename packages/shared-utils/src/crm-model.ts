@@ -196,3 +196,39 @@ export function effectiveStageBehavior(
 ): StageBehavior {
   return stageActsAsOrcamento(stage, modules) ? 'opens_orcamentos' : 'none';
 }
+
+// ---------------------------------------------------------------------------
+// Pipeline access by função (vários funis por organização). Pure; shared by the
+// API predicate and the web seller picker, so the two can never disagree.
+// ---------------------------------------------------------------------------
+
+/** One pipeline as the access rule reads it: its flags and the funções linked to it. */
+export interface PipelineAccessCandidate {
+  readonly id: string;
+  readonly isDefault: boolean;
+  readonly status: CrmStatus;
+  readonly funcaoIds: readonly string[];
+}
+
+/**
+ * The pipelines a NON-ADMIN pessoa reaches, in the input order (callers pass the board order,
+ * `position` then `name`). An admin is not asked: an admin reaches every active pipeline.
+ *
+ *  - Every ACTIVE pipeline linked to at least one of the pessoa's funções.
+ *  - When no active pipeline is linked to any of them, only the default pipeline: the `is_default`
+ *    one, else the first active one (the same order `defaultPipelineId` reads on the server).
+ *
+ * So a pessoa holding only the system `vendedor` função keeps exactly the default pipeline, as
+ * before pipelines could be linked at all. Archived pipelines are never reachable.
+ */
+export function accessiblePipelineIds(
+  pipelines: readonly PipelineAccessCandidate[],
+  personFuncaoIds: readonly string[],
+): string[] {
+  const active = pipelines.filter((pipeline) => pipeline.status === 'active');
+  const held = new Set(personFuncaoIds);
+  const linked = active.filter((pipeline) => pipeline.funcaoIds.some((funcaoId) => held.has(funcaoId)));
+  if (linked.length > 0) return linked.map((pipeline) => pipeline.id);
+  const fallback = active.find((pipeline) => pipeline.isDefault) ?? active[0];
+  return fallback ? [fallback.id] : [];
+}

@@ -66,12 +66,14 @@ function selectLeadStages(data: LeadStagesResponse): SalesOpsLeadStage[] {
   return Array.isArray(data.stages) ? data.stages : [];
 }
 
-export function useLeadStages() {
+/** One pipeline's etapas; without an id the org's default pipeline (the pre-funis read). */
+export function useLeadStages(pipelineId?: string, enabled = true) {
   const { getToken } = useAccessToken();
   return useQuery({
-    queryKey: queryKeys.leads.stages(),
-    queryFn: async () => leadsApi.listStages(await requireToken(getToken)),
+    queryKey: queryKeys.leads.stages(pipelineId),
+    queryFn: async () => leadsApi.listStages(await requireToken(getToken), pipelineId),
     select: selectLeadStages,
+    enabled,
   });
 }
 

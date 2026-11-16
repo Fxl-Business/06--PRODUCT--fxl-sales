@@ -7,7 +7,9 @@ import type {
   FollowupsResponse,
   LeadSummaryResponse,
   ListFollowupsParams,
+  PipelineResponse,
   PipelinesResponse,
+  SavePipelinePayload,
 } from './crm-types';
 import type { LeadResponse } from './types';
 
@@ -24,7 +26,19 @@ const LEADS = '/api/v1/sales-ops/leads';
  * advance envelope, body-less writes) are confined to this file and crm-types.ts.
  */
 export const crmApi = {
-  listPipelines: (token: Token) => apiFetch<PipelinesResponse>(PIPELINES_PATH, { method: 'GET', token }),
+  /** `includeArchived` adds the archived pipelines; the API honours it for an admin only. */
+  listPipelines: (token: Token, options: { includeArchived?: boolean } = {}) =>
+    apiFetch<PipelinesResponse>(options.includeArchived ? `${PIPELINES_PATH}?includeArchived=true` : PIPELINES_PATH, {
+      method: 'GET',
+      token,
+    }),
+  /** Create without an `id` (born with the seven default etapas), patch with one. Never a DELETE. */
+  savePipeline: ({ id, ...body }: SavePipelinePayload, token: Token) =>
+    apiFetch<PipelineResponse>(id ? `${PIPELINES_PATH}/${id}` : PIPELINES_PATH, {
+      method: id ? 'PATCH' : 'POST',
+      token,
+      body: JSON.stringify(body),
+    }),
   listFieldDefinitions: (token: Token) =>
     apiFetch<FieldDefinitionsResponse>(FIELD_DEFINITIONS_PATH, { method: 'GET', token }),
   getLeadSummary: (leadId: string, token: Token) =>

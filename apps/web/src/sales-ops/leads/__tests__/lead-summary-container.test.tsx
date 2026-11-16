@@ -186,7 +186,7 @@ beforeEach(() => {
   conversionDoor.mockReset();
   conversionDoor.mockResolvedValue(null);
   mocks.pipelines = [{
-    id: 'pipe-1', name: 'Funil padrão', isDefault: true, position: 0, status: 'active', transitions: [],
+    id: 'pipe-1', name: 'Funil padrão', isDefault: true, position: 0, status: 'active', funcaoIds: [], transitions: [],
     stages: [
       { id: 'stage-contato', name: 'Contato', position: 1, type: 'normal', behavior: 'none', exitKind: null, requiresReason: false, status: 'active' },
       { id: 'stage-proposta', name: 'Proposta', position: 2, type: 'orcamento', behavior: 'opens_orcamentos', exitKind: null, requiresReason: false, status: 'active' },

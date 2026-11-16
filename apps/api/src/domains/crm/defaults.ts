@@ -66,32 +66,69 @@ export async function ensureDefaultPipeline(tx: Db, orgId: string): Promise<Pipe
     .onConflictDoNothing()
     .returning({ id: salesOpsPipelines.id });
 
-  if (inserted.length > 0) {
-    const stageIds = new Map(DEFAULT_PIPELINE_STAGES.map((stage) => [stage.key as string, randomUUID()] as const));
-    await tx.insert(salesOpsPipelineStages).values(
-      DEFAULT_PIPELINE_STAGES.map((stage) => ({
-        id: stageIds.get(stage.key)!,
-        orgId,
-        pipelineId,
-        name: stage.label,
-        position: stage.order,
-        type: stage.type,
-        behavior: defaultStageBehavior(stage),
-        exitKind: stage.exitKind,
-        requiresReason: defaultStageRequiresReason(stage),
-      })),
-    );
-    await tx.insert(salesOpsPipelineTransitions).values(
-      DEFAULT_PIPELINE_TRANSITIONS.map(([from, to]) => ({
-        orgId,
-        pipelineId,
-        fromStageId: stageIds.get(from)!,
-        toStageId: stageIds.get(to)!,
-      })),
-    );
-  }
+  if (inserted.length > 0) await insertDefaultStages(tx, orgId, pipelineId);
 
   return selectPipelines(tx, orgId);
+}
+
+/**
+ * The seven default etapas and their transition graph (the shared constants, which equal
+ * `planPipelineTransitions` over those etapas) for ONE pipeline that has no stage yet. The ONE
+ * writer of the default stage set: the org's first pipeline (`ensureDefaultPipeline`) and every
+ * pipeline an admin creates (`createPipelineWithDefaultStages`) go through it.
+ */
+async function insertDefaultStages(tx: Db, orgId: string, pipelineId: string): Promise<void> {
+  const stageIds = new Map(DEFAULT_PIPELINE_STAGES.map((stage) => [stage.key as string, randomUUID()] as const));
+  await tx.insert(salesOpsPipelineStages).values(
+    DEFAULT_PIPELINE_STAGES.map((stage) => ({
+      id: stageIds.get(stage.key)!,
+      orgId,
+      pipelineId,
+      name: stage.label,
+      position: stage.order,
+      type: stage.type,
+      behavior: defaultStageBehavior(stage),
+      exitKind: stage.exitKind,
+      requiresReason: defaultStageRequiresReason(stage),
+    })),
+  );
+  await tx.insert(salesOpsPipelineTransitions).values(
+    DEFAULT_PIPELINE_TRANSITIONS.map(([from, to]) => ({
+      orgId,
+      pipelineId,
+      fromStageId: stageIds.get(from)!,
+      toStageId: stageIds.get(to)!,
+    })),
+  );
+}
+
+/**
+ * An admin-created pipeline (`POST /pipelines`): never the default, appended after every pipeline
+ * of the org (archived included, so a restore never collides), born with the seven default etapas
+ * and their graph. MUST run inside the request's tenant transaction.
+ *
+ * The org's own default pipeline is seeded FIRST when it has none, so an org whose first act is to
+ * create a pipeline still gets its default one, and the new pipeline never becomes it.
+ *
+ * The INSERT is a bare ON CONFLICT DO NOTHING (the (org_id, name) unique index): a name taken by a
+ * concurrent writer answers `'duplicate'` instead of a 23505.
+ */
+export async function createPipelineWithDefaultStages(
+  tx: Db,
+  orgId: string,
+  name: string,
+): Promise<PipelineRow | 'duplicate'> {
+  const existing = await ensureDefaultPipeline(tx, orgId);
+  if (existing.some((pipeline) => pipeline.name === name)) return 'duplicate';
+  const position = existing.reduce((highest, pipeline) => Math.max(highest, pipeline.position), -1) + 1;
+  const [created] = await tx
+    .insert(salesOpsPipelines)
+    .values({ orgId, name, systemKey: null, position, isDefault: false })
+    .onConflictDoNothing()
+    .returning();
+  if (!created) return 'duplicate';
+  await insertDefaultStages(tx, orgId, created.id);
+  return created;
 }
 
 /**

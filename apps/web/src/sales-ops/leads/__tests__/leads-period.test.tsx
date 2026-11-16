@@ -35,6 +35,7 @@ const PIPELINES: CrmPipeline[] = [
     isDefault: true,
     position: 1,
     status: 'active',
+    funcaoIds: [],
     stages: [stage(NOVO, 'Novo', 1), stage(PROPOSTA, 'Proposta', 2)],
     transitions: [],
   },

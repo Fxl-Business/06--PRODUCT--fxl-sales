@@ -15,7 +15,7 @@ import { stageOpensConversion } from './board-move';
 import { mutedStateClass, noticeClass } from './board-ui';
 import { boardStages } from './calculations';
 import { useFieldDefinitions, usePipelines } from './crm-hooks';
-import { isTransitionAllowed, pickPipeline, pipelineStagesAsBoardStages } from './crm-pipeline';
+import { isTransitionAllowed, pickPipeline, pipelineStagesAsBoardStages, sellersReachingPipeline } from './crm-pipeline';
 import { LeadDeleteDialog } from './LeadDeleteDialog';
 import { LeadForm } from './LeadForm';
 import { LeadsBoard, type LeadConversionRequest } from './LeadsBoard';
@@ -265,6 +265,12 @@ export function LeadsBoardContainer({
 
   const definitionsQuery = useFieldDefinitions();
   const definitions = definitionsQuery.data ?? [];
+  // The new lead is born in the SELECTED pipeline, so the admin is offered only the vendedores
+  // who reach it (the API's own access rule); anyone else would never see the lead.
+  const formSellers = React.useMemo(
+    () => sellersReachingPipeline(sellers, people, pipelines, pipelineId),
+    [sellers, people, pipelines, pipelineId],
+  );
 
   // `useLeadsBoard` is disabled while there are zero stage rows, so its query
   // stays pending forever; waiting on it would leave a fresh leads-edition org
@@ -380,7 +386,7 @@ export function LeadsBoardContainer({
           pending={saveLead.isPending}
           pipelineId={pipelineId ?? undefined}
           products={products}
-          sellers={sellers}
+          sellers={formSellers}
           showSellerPicker={isAdmin}
         />
       ) : null}

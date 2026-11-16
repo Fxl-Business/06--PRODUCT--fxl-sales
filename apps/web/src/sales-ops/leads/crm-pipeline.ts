@@ -1,4 +1,11 @@
-import { defaultStageBehavior, effectiveStageBehavior, type OrgModules } from '@fxl-sales/shared-utils/crm-model';
+import {
+  accessiblePipelineIds,
+  defaultStageBehavior,
+  effectiveStageBehavior,
+  type OrgModules,
+} from '@fxl-sales/shared-utils/crm-model';
+import type { ComboboxOption } from '@/components/ui/combobox';
+import type { SalesOpsPerson } from '../types';
 import type { CrmPipeline, CrmPipelineStage, PipelineExitKind, PipelineStageType } from './crm-types';
 import type { LeadStageKind, SalesOpsLeadStage } from './types';
 
@@ -85,4 +92,26 @@ export function allowedTargetIds(pipeline: CrmPipeline | undefined, fromStageId:
 
 export function stageOpensOrcamentos(stage: Pick<CrmPipelineStage, 'behavior'> | undefined): boolean {
   return stage?.behavior === OPENS_ORCAMENTOS_BEHAVIOR;
+}
+
+/**
+ * The vendedor options of a lead in `pipelineId`, narrowed to the pessoas who reach that pipeline
+ * (vários funis), through the SAME pure rule the API's lead scope applies
+ * (`accessiblePipelineIds`). An admin assigning a lead is offered only a vendedor who will see it.
+ * `pipelines` are the ones the admin's board read returns (every active pipeline). With no
+ * pipeline in hand the options pass through unchanged; an option whose pessoa is unknown is
+ * dropped.
+ */
+export function sellersReachingPipeline(
+  sellers: readonly ComboboxOption[],
+  people: readonly Pick<SalesOpsPerson, 'id' | 'funcaoIds'>[],
+  pipelines: readonly CrmPipeline[],
+  pipelineId: string | null | undefined,
+): ComboboxOption[] {
+  if (!pipelineId) return [...sellers];
+  const byId = new Map(people.map((person) => [person.id, person]));
+  return sellers.filter((option) => {
+    const person = byId.get(option.value);
+    return person !== undefined && accessiblePipelineIds(pipelines, person.funcaoIds).includes(pipelineId);
+  });
 }

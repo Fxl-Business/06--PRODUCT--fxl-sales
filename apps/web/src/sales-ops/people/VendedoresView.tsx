@@ -27,9 +27,10 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import type { SavePersonPayload } from '../api';
+import { FuncaoMultiPicker } from '../leads/FuncaoMultiPicker';
 import { isOptimisticId } from '../optimistic';
 import type { SalesOpsFuncao, SalesOpsPerson } from '../types';
-import { VENDEDORES_COPY, buildVendedorPayload } from './vendedores';
+import { VENDEDORES_COPY, buildVendedorPayload, extraFuncaoIdsOf } from './vendedores';
 
 /*
   Intentional local copies of the SalesOpsApp.tsx style constants, as in
@@ -141,7 +142,10 @@ export function VendedoresView(props: {
             const optimistic = isOptimisticId(person.id);
             return (
               <TableRow key={person.id}>
-                <TableCell className="px-4 py-3 text-sm font-semibold">{name}</TableCell>
+                <TableCell className="px-4 py-3 text-sm font-semibold">
+                  {name}
+                  <ExtraFuncoesLine person={person} />
+                </TableCell>
                 <TableCell className={tableCellClass}>{email}</TableCell>
                 <TableCell className="px-4 py-3 text-center">
                   <div className="flex items-center justify-center gap-1.5">
@@ -208,19 +212,34 @@ export function VendedoresView(props: {
   );
 }
 
+/** The vendedor's extra funções under the name, muted; nothing for a vendedor-only pessoa. */
+function ExtraFuncoesLine({ person }: { person: SalesOpsPerson }) {
+  const extras = person.funcoes.filter((funcao) => !funcao.isSystem).map((funcao) => funcao.name);
+  if (extras.length === 0) return null;
+  return (
+    <span className="block text-[12px] font-normal text-[#8b8b92]" data-vendedor-extra-funcoes="">
+      {extras.sort((a, b) => a.localeCompare(b, 'pt-BR')).join(', ')}
+    </span>
+  );
+}
+
 type VendedorDialogProps = {
   open: boolean;
   person: SalesOpsPerson | null;
   funcoes: readonly SalesOpsFuncao[];
+  /** Inline função create from the extras picker; absent hides the create row. */
+  onCreateFuncao?: (name: string) => Promise<SalesOpsFuncao | null>;
   onClose: () => void;
   onSave: (payload: SavePersonPayload) => void;
   saving: boolean;
 };
 
 /**
- * The leads-edition person dialog: Nome and E-mail only. Remounted per record, the
- * same pattern as `PersonDialog`. It holds no Combobox and no InfoHint, so there is no
- * inline layer to register.
+ * The leads-edition person dialog: Nome, E-mail and the EXTRA funções (vários funis:
+ * each função linked to a funil gives access to it; vendedor is always kept by the
+ * server and never offered). Remounted per record, the same pattern as
+ * `PersonDialog`. The extras picker is the one `Combobox`, which registers its own
+ * inline layer, so Escape closes its panel and not the dialog.
  */
 export function VendedorDialog({ open, ...props }: VendedorDialogProps) {
   if (!open) return null;
@@ -230,19 +249,37 @@ export function VendedorDialog({ open, ...props }: VendedorDialogProps) {
 function VendedorDialogBody({
   person,
   funcoes,
+  onCreateFuncao,
   onClose,
   onSave,
   saving,
 }: Omit<VendedorDialogProps, 'open'>) {
   const [displayName, setDisplayName] = useState(person?.displayName ?? '');
   const [contactEmail, setContactEmail] = useState(person?.contactEmail ?? '');
+  const [extraFuncaoIds, setExtraFuncaoIds] = useState<string[]>(() => extraFuncaoIdsOf(person));
+  /**
+   * The pessoa's own archived extras are not in the active offer but must keep a named
+   * chip, so the catalogue the picker reads is the org's plus her own entries.
+   */
+  const pickerFuncoes: SalesOpsFuncao[] = [
+    ...funcoes,
+    ...(person?.funcoes ?? [])
+      .filter((own) => !own.isSystem && !funcoes.some((funcao) => funcao.id === own.id))
+      .map((own) => ({
+        ...own,
+        orgId: '',
+        status: 'archived' as const,
+        createdAt: '',
+        updatedAt: null,
+      })),
+  ];
   // The whole gate: no função check, the client-side `funcao_required` bypass for this edition.
   const canSave = !saving && displayName.trim().length > 0;
 
   function submit(event: FormEvent) {
     event.preventDefault();
     if (!displayName.trim()) return;
-    onSave(buildVendedorPayload({ person, displayName, contactEmail, funcoes }));
+    onSave(buildVendedorPayload({ person, displayName, contactEmail, funcoes, extraFuncaoIds }));
   }
 
   return (
@@ -283,6 +320,22 @@ function VendedorDialogBody({
               {VENDEDORES_COPY.emailHelper}
             </span>
           </label>
+          <div className="flex flex-col gap-[6px]" data-vendedor-extra-funcoes-field="">
+            <span className="text-xs font-semibold text-[#8b8b92]">
+              {VENDEDORES_COPY.extraFuncoesLabel}
+            </span>
+            <FuncaoMultiPicker
+              aria-label={VENDEDORES_COPY.extraFuncoesLabel}
+              emptyHint={VENDEDORES_COPY.extraFuncoesEmpty}
+              funcoes={pickerFuncoes}
+              onChange={setExtraFuncaoIds}
+              onCreateFuncao={onCreateFuncao}
+              placeholder={VENDEDORES_COPY.extraFuncoesPlaceholder}
+              selectable={(funcao) => !funcao.isSystem}
+              value={extraFuncaoIds}
+            />
+            <span className="text-[12.5px] text-[#8b8b92]">{VENDEDORES_COPY.extraFuncoesHelper}</span>
+          </div>
           <div className="flex justify-end gap-3 border-t border-[#e8e8ec] pt-4">
             <button className={secondaryButtonClass} onClick={onClose} type="button">
               {VENDEDORES_COPY.cancel}

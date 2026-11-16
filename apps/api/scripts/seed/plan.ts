@@ -177,6 +177,7 @@ export const SEED_DELETE_ORDER = [
   'salesOpsCrmLeadFieldValues',
   'salesOpsCrmLeadEvents',
   'salesOpsCrmLeads',
+  'salesOpsPipelineFuncoes',
   'salesOpsPipelineTransitions',
   'salesOpsPipelineStages',
   'salesOpsPipelines',

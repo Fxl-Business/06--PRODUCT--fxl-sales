@@ -89,8 +89,8 @@ export const DELETED_LEADS_COPY = {
     'Sua sessão do FXL Hub expirou ou não pôde ser renovada. Atualize a página para entrar novamente.',
   restored: (name: string) => `O lead "${name}" voltou para o quadro de prospecção.`,
   noOpenStage:
-    'Não há etapa aberta para receber este lead. Crie uma etapa em Cadastros > Etapas do funil e restaure de novo.',
-  goToStages: 'Ir para Etapas do funil',
+    'Não há etapa aberta para receber este lead. Crie uma etapa em Cadastros > Funis e etapas e restaure de novo.',
+  goToStages: 'Ir para Funis e etapas',
   gone: 'Este lead já não está entre os excluídos. A lista foi atualizada.',
 } as const;
 

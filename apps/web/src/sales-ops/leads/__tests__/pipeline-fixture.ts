@@ -25,7 +25,7 @@ export function pipelineFixtureFor(stages: readonly FixtureStage[]) {
   );
   return {
     pipelines: [
-      { id: 'pipe-default', name: 'Vendas padrão', isDefault: true, position: 1, status: 'active', stages: mapped, transitions },
+      { id: 'pipe-default', name: 'Vendas padrão', isDefault: true, position: 1, status: 'active', funcaoIds: [], stages: mapped, transitions },
     ],
   };
 }

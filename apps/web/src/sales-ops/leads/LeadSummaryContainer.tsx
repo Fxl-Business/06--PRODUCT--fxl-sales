@@ -5,7 +5,7 @@ import { useAuthProfile } from '@/auth/react';
 import type { ComboboxOption } from '@/components/ui/combobox';
 import { Skeleton } from '@/components/ui/skeleton';
 import { buildSalesOpsPath, type SalesOpsWorkspace } from '../navigation';
-import type { SalesOpsClient, SalesOpsProduct } from '../types';
+import type { SalesOpsClient, SalesOpsPerson, SalesOpsProduct } from '../types';
 import type { LeadWritePayload } from './api';
 import { AdvanceDialog } from './AdvanceDialog';
 import { useSaveLead, useDeleteLead, useMoveLead } from './hooks';
@@ -19,7 +19,7 @@ import {
   usePipelines,
 } from './crm-hooks';
 import { leadIsConverted } from './calculations';
-import { pickPipeline, stageOpensOrcamentos } from './crm-pipeline';
+import { pickPipeline, sellersReachingPipeline, stageOpensOrcamentos } from './crm-pipeline';
 import { mutedStateClass, secondaryButtonClass } from './board-ui';
 import { LeadDeleteDialog } from './LeadDeleteDialog';
 import { LeadForm } from './LeadForm';
@@ -47,6 +47,11 @@ export type LeadSummaryContainerProps = {
   clients: SalesOpsClient[];
   products: SalesOpsProduct[];
   sellers: ComboboxOption[];
+  /**
+   * The pessoas behind `sellers`. When present the edit form offers only the vendedores who reach
+   * the lead's pipeline (plus its current vendedor, so the field never blanks); absent, every one.
+   */
+  people?: readonly SalesOpsPerson[];
   onCreateClient?: (name: string) => Promise<ComboboxOption | null>;
   onOpenSale?: (saleId: string) => void;
   /** The conversion door of the board, reused: a conversion destination opens the proposta wizard. */
@@ -63,6 +68,7 @@ export function LeadSummaryContainer({
   clients,
   products,
   sellers,
+  people,
   onCreateClient,
   onOpenSale,
   onRequestConversion,
@@ -96,6 +102,12 @@ export function LeadSummaryContainer({
     () => pickPipeline(pipelinesQuery.data ?? [], summaryQuery.data?.pipeline.id ?? null),
     [pipelinesQuery.data, summaryQuery.data?.pipeline.id],
   );
+  const formSellers = React.useMemo(() => {
+    if (!people || !lead) return sellers;
+    const reaching = sellersReachingPipeline(sellers, people, pipelinesQuery.data ?? [], lead.pipelineId);
+    const current = sellers.find((option) => option.value === lead.sellerPersonId);
+    return current && !reaching.includes(current) ? [...reaching, current] : reaching;
+  }, [sellers, people, pipelinesQuery.data, lead]);
   // The destinations that open the proposta: the same set the board's conversion door uses.
   const opensConversionIds = React.useMemo(
     () => new Set((pipeline?.stages ?? []).filter((stage) => stageOpensOrcamentos(stage)).map((stage) => stage.id)),
@@ -227,7 +239,7 @@ export function LeadSummaryContainer({
           open
           pending={saveLead.isPending}
           products={products}
-          sellers={sellers}
+          sellers={formSellers}
           showSellerPicker={isAdmin}
         />
       ) : null}

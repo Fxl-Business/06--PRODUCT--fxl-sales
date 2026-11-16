@@ -20,10 +20,15 @@ export type CrmPipeline = {
   isDefault: boolean;
   position: number;
   status: CrmStatus;
+  /** The funções whose pessoas reach this pipeline (vários funis). Empty: only the default rule. */
+  funcaoIds: string[];
   stages: CrmPipelineStage[];
   transitions: CrmPipelineTransition[];
 };
 export type PipelinesResponse = { pipelines: CrmPipeline[] };
+export type PipelineResponse = { pipeline: CrmPipeline };
+/** `POST /pipelines` without an `id`, `PATCH /pipelines/:id` with one. Admin only. */
+export type SavePipelinePayload = { id?: string; name?: string; funcaoIds?: string[]; status?: CrmStatus };
 export type FieldKind = 'text' | 'number' | 'money' | 'date' | 'options' | 'reference';
 export type FieldReferenceTarget = 'cliente' | 'contato' | 'produto' | 'servico' | 'venda';
 export type FieldOption = { key: string; label: string };

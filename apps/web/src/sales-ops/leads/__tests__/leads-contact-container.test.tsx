@@ -304,7 +304,7 @@ describe('LeadsBoardContainer, leads edition', () => {
     expect(lastBoardProps().stages).toEqual([]);
   });
 
-  it('the empty-state action navigates to Etapas do funil', async () => {
+  it('the empty-state action navigates to Funis e etapas', async () => {
     await renderContainer();
     await clickSelector('[data-stub="stages"]');
     expect(document.querySelector('[data-path]')?.getAttribute('data-path')).toBe(

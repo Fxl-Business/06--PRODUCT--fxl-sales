@@ -10,7 +10,7 @@ export const CONTACT_LEAD_COPY = {
   birthdayPrefix: 'Aniversário',
   noContact: 'Sem contato',
   emptyStagesAdmin: 'Nenhuma etapa configurada. Crie as etapas do funil em Cadastros.',
-  emptyStagesAdminAction: 'Ir para Etapas do funil',
+  emptyStagesAdminAction: 'Ir para Funis e etapas',
   emptyStagesSeller: 'Nenhuma etapa configurada. Fale com o gestor.',
 } as const;
 

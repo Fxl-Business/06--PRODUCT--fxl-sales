@@ -452,11 +452,12 @@ describe('sale wizard UI contract', () => {
       sales-ops picker. The create ROW is asserted in the DOM by
       sale-wizard-funcao-costs.test.tsx; what is pinned here is the wiring, because a
       substring test cannot see a rendered row.
-      Two occurrences: PersonDialog and SaleWizardDialog. A count rather than
-      `toContain`, which would still pass if the wizard's line were deleted.
+      Four occurrences: PersonDialog, SaleWizardDialog, and since vários funis the
+      leads-edition VendedorDialog and Funis e etapas (LeadStagesContainer). A count
+      rather than `toContain`, which would still pass if the wizard's line were deleted.
     */
     expect(source).toContain('createFuncaoForProfessional');
-    expect(source.match(/onCreateFuncao=\{createFuncaoByName\}/g)).toHaveLength(2);
+    expect(source.match(/onCreateFuncao=\{createFuncaoByName\}/g)).toHaveLength(4);
   });
 
   it('puts FUNÇÃO NO PROJETO ahead of PROFISSIONAL and gates the person picker on it', () => {

@@ -91,7 +91,7 @@ Slice 06 gave the leads edition a contact-only board on the web, with the full e
 - The birthday is an `<Input type="date">` with `max={todayInSaoPaulo()}`, validated by `validateContactLeadDraft` with `isIsoDay` and a string comparison with today, and displayed only through `displayDate`, never `new Date`.
 - At this slice the contact card and the Lista showed phone, email and the birthday (`leadContactLine`, `leadBirthdayLabel`) and never empresa, produtos, valor, any R$ total, `% do total`, the proportion bar or the footer `TOTAL`.
   Superseded on 2026-10-08: the card shows Nome, Cliente and birthday, and every R$ figure renders in both editions (see the construbom-leads-ajustes section below); the Lista still shows phone and email.
-- Zero active etapas render `[data-no-stages]`: the gestor (`admin` role) gets the copy plus `Ir para Etapas do funil`, which navigates to `/cadastros/etapas`, and the vendedor gets `Fale com o gestor`; `Novo lead` is disabled in both. After seed-on-read this state is reachable only when every normal etapa was archived.
+- Zero active etapas render `[data-no-stages]`: the gestor (`admin` role) gets the copy plus `Ir para Funis e etapas` (renamed from `Ir para Etapas do funil` on 2026-11-16), which navigates to `/cadastros/etapas`, and the vendedor gets `Fale com o gestor`; `Novo lead` is disabled in both. After seed-on-read this state is reachable only when every normal etapa was archived.
 - The container no longer waits on the board query when there are zero etapas, because `useLeadsBoard` is disabled without stage rows and would leave the Skeleton up forever.
 - In the leads edition the board is never handed `onRequestConversion` or `onOpenSale`, so even a stray conversion-kind etapa opens no proposta door.
 - A contact save uses `mutateAsync`; a `400` with `reason: 'no_open_stage'` (read from `ApiError.reason`, set by `apiFetch` only when the body sends one) renders the `[data-lead-save-error]` no-etapa notice and any other failure the generic save notice; the full edition keeps `mutate`.
@@ -108,7 +108,7 @@ A later change (this one) gave the leads edition a Funil view, a captured empres
 - The `Cliente` combobox creates a client by name INLINE. The one create seam stays `SalesOpsApp`'s `createClientByName`, handed to `LeadsBoardContainer` as the `onCreateClient` prop (never a hook inside the container, so the slice's mock boundary holds); the container forwards it to the dialog. `leadToContactSeed` normalizes an empty `client_name_snapshot` to null so the draft round-trips.
   Since 2026-10-08 its trigger and search field read `Buscar ou criar novo cliente` (see below).
 - The name label is `Nome do contato (comprador)` (`CONTACT_LEAD_COPY.nameLabel`).
-- Capabilities: `clients` is a NEW capability split out of `catalog`; `LEADS_CAPABILITIES = ['clients', 'import']`. `/clients/*` is re-gated to `requireCapability('clients')`, so the Clientes cadastro works in the leads edition while produtos/areas/funcoes (still `catalog`) 403. The importer was already `requireCapability('import')`; granting `import` exposes it. The navigation catalogue shows `clientes` and `importacao` behind their modules (`requires`), and the compact profile moves `pessoas` first (`compactFirst`), labelled Vendedores.
+- Capabilities: `clients` is a NEW capability split out of `catalog`; `LEADS_CAPABILITIES = ['clients', 'import']`. `/clients/*` is re-gated to `requireCapability('clients')`, so the Clientes cadastro works in the leads edition while produtos/areas (still `catalog`) 403; funções were gated the same way until vários funis (2026-11-16) opened `/funcoes` in every edition. The importer was already `requireCapability('import')`; granting `import` exposes it. The navigation catalogue shows `clientes` and `importacao` behind their modules (`requires`), and the compact profile moves `pessoas` first (`compactFirst`), labelled Vendedores.
 - KNOWN GAP: the spreadsheet importer is edition-agnostic - its template still carries produto/cliente/proposta tabs, so a leads-edition org could import full-product rows. Exposing the screen is admin- and org-scoped and safe for vendedores/leads; locking the importer to the edition is a follow-up on `nexo/ROADMAP.md`.
 - Oracles: `leads/__tests__/lead-funnel.test.tsx`, updated `contact-lead.test.ts`, `contact-lead-dialog.test.tsx`, `contact-lead-contract.test.ts`, `lead-routes-edition.test.ts`, `navigation-edition.test.ts`, `leads-routing.test.tsx`, `edition-gate-map.test.ts`, `require-capability.test.ts`, `sales-edition.test.ts`.
 - Oracles: `leads/__tests__/leads-contact-board.test.tsx`, `leads/__tests__/leads-contact-container.test.tsx`, `leads/__tests__/leads-full-edition.test.tsx` (innerHTML equality with `fieldSet` omitted and `'full'`), `leads/__tests__/contact-lead.test.ts`, `leads/__tests__/contact-lead-dialog.test.tsx` and `lib/__tests__/api-client-reason.test.ts`.
@@ -457,3 +457,42 @@ The free-text company path of the old dialogs is intentionally gone, because the
 - The board publishes `Desfazer` for a stage move only when the graph allows the reverse edge (a move to `Perdido` has none).
 - An edit undo of a lead with no contact omits `contactPhone`/`contactEmail`, like the edit itself.
 - An edit that gives a contactless lead its first contact offers no undo, because the inverse cannot clear the only contact.
+
+## Vários funis por organização, acesso por função (2026-11-16)
+
+Why: the Construbom runs a Comercial and a Financeiro funil over ONE shared clientes base, and each vendedor must see only the funil of her own work.
+Before this, an org had exactly the seeded default pipeline (no route created another) and every vendedor saw it.
+
+Data and migration:
+- `sales_ops_pipeline_funcoes (id, org_id, pipeline_id, funcao_id, created_at)`, migration `0034_crm_pipeline_funcoes`: unique `(org_id, pipeline_id, funcao_id)`, index `(org_id, funcao_id)`, both FKs composite with `org_id` first and `ON DELETE RESTRICT` (a pipeline is never deleted; a linked archived função is skipped by the nightly purge through `23503`), FORCE RLS with the two policies spelled like 0029.
+  Additive, ordinary migration through the shared runner, no data statement: every org starts with no link.
+  `deleteCrmForOrgs` and the dev seed (`SEED_DELETE_ORDER`) delete it before the pipelines and the funções.
+
+The access rule (ONE predicate):
+- Pure: `accessiblePipelineIds(pipelines, personFuncaoIds)` in `packages/shared-utils/src/crm-model.ts`.
+  A non-admin reaches every ACTIVE pipeline linked to one of her funções; when none is linked, ONLY the default pipeline (the `is_default` one, else the first active one).
+  So a vendedor-only pessoa keeps exactly the default funil, and a função linked to the Funil Financeiro reaches only that funil (not the default too, unless vendedor is also linked to it).
+  Every função the pessoa holds counts, archived ones included, because `person.funcaoIds` on the web reads them all and the two sides must agree.
+  An admin is never asked: an admin reaches every pipeline.
+- Server: `personPipelineAccess` in `apps/api/src/domains/crm/pipeline-access.ts` loads the inputs; `resolveLeadScopePredicate` puts the result on the gate (`pipelineIds`, null for an admin) and `leadPipelineCondition` ANDs it into `leadIdentityConditions` and `leadBoardConditions`.
+  Through those two every lead read and write follows: get, PATCH, move, advance, delete, notes and follow-ups on a lead, the summary page, the board read and `GET /leads/summary`.
+  A lead of an unreachable pipeline is `not_found`, never `forbidden`, and the unassigned pool and the first-write claim shrink to the reachable pipelines by the same conjunction.
+  `GET /followups` (through `resolveCallerPipelineAccess`) and `POST /followups/:id/done` apply it too, even for the follow-up's own owner.
+  A create naming an unreachable pipeline is `400 pipeline_not_found` (the same answer as a pipeline that does not exist); a create or a summary without `pipelineId` uses `defaultAccessiblePipelineId` (the default pipeline when reachable, else the caller's first).
+  `GET /pipelines` lists only the reachable pipelines; `?includeArchived=true` adds the archived ones for an admin only.
+- What it does NOT do: the admin may still assign a vendedor who does not reach the pipeline through the API (the import and every pre-funis lead rely on it); the web narrows the admin's picker instead (below). `GET /lead-stages?pipelineId=` stays readable by every board caller, like before.
+
+Pipeline writes:
+- `POST /pipelines {name, funcaoIds?}` and `PATCH /pipelines/:id {name?, funcaoIds?, status?}` in `crm-routes.ts`, both `requireAdmin`, strict bodies (`pipeline-schemas.ts`), service `apps/api/src/domains/crm/pipeline-admin-service.ts`, no `audit_log` entry, no DELETE verb.
+- A new pipeline is never the default, appended after every pipeline (archived included) and born with the seven default etapas and the default graph by `createPipelineWithDefaultStages` in `crm/defaults.ts`, which seeds the org's default pipeline first when it has none and shares `insertDefaultStages` with `ensureDefaultPipeline`.
+  `crm-seed-callers.test.ts` is unchanged: no new caller of the seed functions exists outside `defaults.ts`.
+- `409 pipeline_is_default` for archiving the default pipeline, `409 pipeline_name_taken` for a taken name (pre-check plus the unique index caught in a savepoint), `400 unknown_funcao` for a função that is not the org's own and active (or already linked), `404` for an unknown id.
+  The funções are a full set replacement.
+- Etapas: `POST /lead-stages` and `POST /lead-stages/reorder` already took `pipelineId` (without it, the default pipeline); `PATCH /lead-stages/:id` addresses the etapa by id.
+
+Web:
+- `Cadastros > Funis e etapas` (route `cadastros/etapas`, the nav label and title renamed from `Etapas do funil`): `LeadStagesContainer` reads `usePipelines({ includeArchived: true })`, keeps the chosen funil as component state, and renders `PipelinesPanel` (Combobox selector, `Novo funil`, `Editar funil`, `Arquivar funil` never for the default one, the access line, `Funis arquivados` with `Restaurar`, the dialog with Nome and `Funções com acesso` through `FuncaoMultiPicker`) above `LeadStagesView` for the selected funil, every etapa create and reorder carrying its `pipelineId`.
+  Copy in `pipeline-settings.ts`.
+- The board's `Funil` selector lists `GET /pipelines`, so a vendedor sees only her funis; a new lead is born in the selected funil (`LeadForm` `pipelineId`), and the admin's vendedor picker (new lead and the summary's edit form) offers only the pessoas who reach that funil through `sellersReachingPipeline` (the same pure rule; the summary keeps the lead's current vendedor).
+- Oracles: `apps/api/test/rls/pipeline-access.test.ts`, `apps/api/src/domains/sales-ops/__tests__/pipeline-routes.test.ts`, `apps/api/src/db/__tests__/pipeline-funcoes-schema.test.ts`, `packages/shared-utils/src/__tests__/crm-model.test.ts`, `leads/__tests__/pipelines-settings.test.tsx`, `leads/__tests__/pipeline-dialog-inline-layer.test.tsx`, `leads/__tests__/leads-pipeline-container.test.tsx`, `leads/__tests__/crm-pipeline.test.ts`.
+

@@ -547,8 +547,8 @@ function titleForView(view: SalesOpsView, workspace: SalesOpsWorkspace) {
       subtitle: 'Todos os leads de prospecção por etapa',
     },
     etapas: {
-      title: 'Etapas do funil',
-      subtitle: 'Etapas configuráveis do quadro de prospecção, na ordem em que aparecem nele',
+      title: 'Funis e etapas',
+      subtitle: 'Os funis da prospecção, quem trabalha em cada um e as etapas de cada funil, na ordem do quadro',
     },
     importacao: {
       title: 'Importação',
@@ -2490,12 +2490,18 @@ export function SalesOpsApp() {
                       }}
                       onOpenSale={openSaleFromBoard}
                       onRequestConversion={requestLeadConversion}
+                      people={persistedBootstrap.people}
                       products={persistedBootstrap.products}
                       sellers={leadSellerOptions}
                       workspace={workspace}
                     />
                   ) : null}
-                  {view === 'etapas' ? <LeadStagesContainer /> : null}
+                  {view === 'etapas' ? (
+                    <LeadStagesContainer
+                      funcoes={persistedBootstrap.funcoes}
+                      onCreateFuncao={createFuncaoByName}
+                    />
+                  ) : null}
                   {view === 'follow-ups' ? <FollowupsContainer workspace={workspace} /> : null}
                   {view === 'importacao' ? <ImportContainer /> : null}
                   {view === 'leads-excluidos' ? <DeletedLeadsContainer /> : null}
@@ -2579,6 +2585,7 @@ export function SalesOpsApp() {
           <VendedorDialog
             funcoes={persistedBootstrap.funcoes}
             onClose={() => setModal(null)}
+            onCreateFuncao={createFuncaoByName}
             onSave={(payload) => {
               savePerson.mutate(payload, { onSuccess: () => setModal(null) });
             }}

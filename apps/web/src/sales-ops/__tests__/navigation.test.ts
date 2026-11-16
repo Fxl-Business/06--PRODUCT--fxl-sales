@@ -84,7 +84,7 @@ describe('sales operations navigation', () => {
       'Clientes',
       'Pessoas',
       'Funções',
-      'Etapas do funil',
+      'Funis e etapas',
       'Importação',
       'Leads excluídos',
       'Geral',

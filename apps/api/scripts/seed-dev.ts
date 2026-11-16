@@ -68,6 +68,7 @@ const EXPECTED_DELETE_ORDER = [
   'salesOpsCrmLeadFieldValues',
   'salesOpsCrmLeadEvents',
   'salesOpsCrmLeads',
+  'salesOpsPipelineFuncoes',
   'salesOpsPipelineTransitions',
   'salesOpsPipelineStages',
   'salesOpsPipelines',
@@ -306,6 +307,7 @@ async function main(): Promise<void> {
       await tx.delete(schema.salesOpsCrmLeadFieldValues).where(eq(schema.salesOpsCrmLeadFieldValues.orgId, orgId));
       await tx.delete(schema.salesOpsCrmLeadEvents).where(eq(schema.salesOpsCrmLeadEvents.orgId, orgId));
       await tx.delete(schema.salesOpsCrmLeads).where(eq(schema.salesOpsCrmLeads.orgId, orgId));
+      await tx.delete(schema.salesOpsPipelineFuncoes).where(eq(schema.salesOpsPipelineFuncoes.orgId, orgId));
       await tx.delete(schema.salesOpsPipelineTransitions).where(eq(schema.salesOpsPipelineTransitions.orgId, orgId));
       await tx.delete(schema.salesOpsPipelineStages).where(eq(schema.salesOpsPipelineStages.orgId, orgId));
       await tx.delete(schema.salesOpsPipelines).where(eq(schema.salesOpsPipelines.orgId, orgId));

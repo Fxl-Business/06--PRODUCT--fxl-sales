@@ -286,7 +286,7 @@ describe('lead screens inside the Sales Ops shell', () => {
     await renderRoute('/cadastros/etapas', ['admin']);
     expect(container.querySelector('[data-lead-stages]')).not.toBeNull();
     expect(container.querySelector('[data-leads-board]')).toBeNull();
-    expect(container.querySelector('h1')?.textContent?.trim()).toBe('Etapas do funil');
+    expect(container.querySelector('h1')?.textContent?.trim()).toBe('Funis e etapas');
 
     // An unconditional mount is the mutation that would fire `useLeadStages()`
     // and `useLeadsBoard()` from the dashboard, which is why both containers exist.
@@ -376,9 +376,9 @@ describe('the leads edition inside the Sales Ops shell', () => {
     expect(navLabel('Comissões')).toBeNull();
   });
 
-  it('shows Vendedores, Clientes, Etapas do funil, Importação and Leads excluídos in cadastros', async () => {
+  it('shows Vendedores, Clientes, Funis e etapas, Importação and Leads excluídos in cadastros', async () => {
     await renderRoute('/cadastros/etapas', gestor, 'leads');
-    for (const label of ['Vendedores', 'Clientes', 'Etapas do funil', 'Importação', 'Leads excluídos']) {
+    for (const label of ['Vendedores', 'Clientes', 'Funis e etapas', 'Importação', 'Leads excluídos']) {
       expect(navLabel(label), label).not.toBeNull();
     }
     for (const label of ['Pessoas', 'Produtos & Serviços', 'Funções', 'Geral']) {

@@ -1587,6 +1587,39 @@ export const salesOpsPipelineTransitions = pgTable(
   ],
 );
 
+// ─────────────────────────────────────────────────────────────────────────────
+// sales_ops_pipeline_funcoes (migration 0034) - which funções reach a pipeline.
+// A non-admin pessoa reaches every active pipeline linked to one of her funções,
+// and only the default pipeline when none is linked (`accessiblePipelineIds` in
+// `@fxl-sales/shared-utils/crm-model`). Written only by the pipeline admin service,
+// as a full set replacement. Both FKs are composite with org_id first and restrict:
+// a linked função is never purged and a pipeline is never deleted.
+// ─────────────────────────────────────────────────────────────────────────────
+export const salesOpsPipelineFuncoes = pgTable(
+  'sales_ops_pipeline_funcoes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orgId: text('org_id').notNull(),
+    pipelineId: uuid('pipeline_id').notNull(),
+    funcaoId: uuid('funcao_id').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex('sales_ops_pipeline_funcoes_org_pipeline_funcao_idx').on(t.orgId, t.pipelineId, t.funcaoId),
+    index('sales_ops_pipeline_funcoes_org_funcao_idx').on(t.orgId, t.funcaoId),
+    foreignKey({
+      columns: [t.orgId, t.pipelineId],
+      foreignColumns: [salesOpsPipelines.orgId, salesOpsPipelines.id],
+      name: 'sales_ops_pipeline_funcoes_org_pipeline_fk',
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [t.orgId, t.funcaoId],
+      foreignColumns: [salesOpsFuncoes.orgId, salesOpsFuncoes.id],
+      name: 'sales_ops_pipeline_funcoes_org_funcao_fk',
+    }).onDelete('restrict'),
+  ],
+);
+
 export const salesOpsFieldDefinitions = pgTable(
   'sales_ops_field_definitions',
   {

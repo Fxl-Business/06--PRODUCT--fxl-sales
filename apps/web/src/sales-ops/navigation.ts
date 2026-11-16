@@ -143,7 +143,7 @@ const cadastros: NavEntry[] = [
     compactFirst: true,
   },
   { id: 'funcoes', label: 'Funções', icon: Tags, requires: ['catalogo'] },
-  { id: 'etapas', label: 'Etapas do funil', icon: ListChecks, requires: [] },
+  { id: 'etapas', label: 'Funis e etapas', icon: ListChecks, requires: [] },
   { id: 'importacao', label: 'Importação', icon: FileSpreadsheet, requires: ['importacao'] },
   // The lead lixeira (AC9): the gestor restores a deleted lead here.
   { id: 'leads-excluidos', label: 'Leads excluídos', icon: Trash2, requires: [] },

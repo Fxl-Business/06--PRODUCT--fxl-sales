@@ -15,7 +15,9 @@ import type {
   FollowupsResponse,
   LeadSummaryResponse,
   ListFollowupsParams,
+  PipelineResponse,
   PipelinesResponse,
+  SavePipelinePayload,
 } from './crm-types';
 import type { LeadResponse } from './types';
 
@@ -32,12 +34,31 @@ function selectFieldDefinitions(data: FieldDefinitionsResponse): FieldDefinition
   return Array.isArray(data.fields) ? data.fields : [];
 }
 
-export function usePipelines() {
+/**
+ * The pipelines the caller reaches (the API filters them by the caller's funções; an admin gets
+ * every one). `includeArchived` is the admin's Funis e etapas list, archived pipelines included,
+ * under its own key so the board's read never carries an archived pipeline.
+ */
+export function usePipelines(options: { includeArchived?: boolean } = {}) {
   const { getToken } = useAccessToken();
+  const includeArchived = options.includeArchived === true;
   return useQuery({
-    queryKey: queryKeys.leads.pipelines(),
-    queryFn: async () => crmApi.listPipelines(await requireToken(getToken)),
+    queryKey: includeArchived ? queryKeys.leads.pipelinesWithArchived() : queryKeys.leads.pipelines(),
+    queryFn: async () => crmApi.listPipelines(await requireToken(getToken), { includeArchived }),
     select: selectPipelines,
+  });
+}
+
+/**
+ * Creates (no `id`) or patches a pipeline: name, the funções that reach it, archive and restore.
+ * No optimistic write: a low-frequency admin act. The whole `['leads']` root is refreshed, so the
+ * board's pipeline selector, the etapas and the access-filtered reads follow at once.
+ */
+export function useSavePipeline() {
+  const { getToken } = useAccessToken();
+  return useAppMutation<PipelineResponse, Error, SavePipelinePayload>({
+    mutationFn: async (payload) => crmApi.savePipeline(payload, await requireToken(getToken)),
+    invalidates: [queryKeys.leads.all],
   });
 }
 

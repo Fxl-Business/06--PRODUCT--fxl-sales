@@ -214,7 +214,9 @@ Full reference: `nexo/knowledge/reference/pessoas-e-funcoes.md`.
   The guard is per absent system slug: an existing função, active or archived, is never recreated or written. A custom função squatting the name raises `system_funcao_seed_failed`, which the bootstrap logs and survives.
   Only the bootstrap route, the import routes and the leads-edition person writes may call it (oracles `sales-ops/__tests__/funcoes-seed-callers.test.ts` and `test/rls/bootstrap-system-funcoes-seed.test.ts`).
 - Web code checks funções through `hasFuncao` (in `apps/web/src/sales-ops/calculations.ts`), never through the deprecated `is_seller` / `is_finder` / `is_collaborator` mirrors. Do not reintroduce `isCollaboratorPerson`.
-- Person writes send `funcaoIds` as a full set replacement; empty is `funcao_required`.
+- Person writes send `funcaoIds` as a full set replacement; empty is `funcao_required` (the full edition; the leads edition reads empty as vendedor only, see Edição Leads).
+- The funções routes (`GET/POST /funcoes`, `PATCH /funcoes/:id`) are open in EVERY edition (no `requireCapability`); writes stay `requireAdmin`.
+  A função linked to a funil decides which funis a pessoa reaches (see CRM unificado, access by função).
 - Hub `AppRole` values are unrelated to funções.
 
 ## Produtos & Serviços
@@ -361,6 +363,7 @@ Full reference: `nexo/knowledge/reference/kanban-de-leads.md`.
 - Stage moves write nothing to `audit_log`.
 - Seller scoping stays server-side inside `withTenant`, never a client filter.
   A non-admin whose pessoa is an ACTIVE vendedor sees own leads plus unassigned ones (`seller_person_id IS NULL`) through the one predicate `leadSellerCondition`; any other non-admin keeps own leads only.
+  Both are ANDed with the pipeline predicate `leadPipelineCondition` (see CRM unificado, access by função), so the unassigned pool is also only the reachable funis'.
   The first write (move or any PATCH) by such a vendedor claims an unassigned lead in the same transaction, after the `FOR UPDATE` and the `already_converted` refusal; an admin never claims.
   The claim race loser answers `not_found`.
   Oracle: `apps/api/test/rls/leads-unassigned-claim.test.ts`.
@@ -368,7 +371,8 @@ Full reference: `nexo/knowledge/reference/kanban-de-leads.md`.
   Any new writer of `stage_id` or `position` must do the same.
   Oracle: `apps/api/test/rls/leads-move-concurrency.test.ts`.
 - An open lead with no vendedor renders `Sem vendedor - disponível` (`leadIsUnassigned`, `UNASSIGNED_LEAD_LABEL`, `data-unassigned-lead`) on the card and the Lista; a converted one keeps `Sem vendedor`.
-- Routes: `operacional/leads` (team), `meus-dados/leads` (seller), `cadastros/etapas`. Nav entries are appended, never prepended, because the first entry is the landing route.
+- Routes: `operacional/leads` (team), `meus-dados/leads` (seller), `cadastros/etapas` (labelled `Funis e etapas`: the funil selector, `Novo funil`, the name and funções of the selected funil, its etapas).
+  Nav entries are appended, never prepended, because the first entry is the landing route.
 - Lead screens live in `apps/web/src/sales-ops/leads/`, never inside `SalesOpsApp.tsx`, mounted through `LeadStagesContainer` / `LeadsBoardContainer`, and use `mutateAsync`.
 - The Quadro FILLS the page content area (a flex column only for `view === 'leads'`) and never grows with its cards: each column scrolls its own cards in `[data-stage-scroll]` under a fixed header, the board scroller hides its native scrollbar, and `BoardScrollbar` sits ABOVE the columns, the scroller its only source of truth, keeping its height while `invisible`.
   Drag is `MouseSensor` plus a press-and-hold `TouchSensor` (`DRAG_ACTIVATION` in `board-move.ts`) with `touch-manipulation` on the card, never `PointerSensor` plus `touch-none`: a swipe scrolls, a hold drags.
@@ -396,7 +400,7 @@ Full reference: `nexo/knowledge/reference/kanban-de-leads.md` (section Edição 
   Oracle: `leads-contact-board.test.tsx`.
 - Lead writes use ONE strict schema, `LeadWriteSchema` (`LeadPatchSchema` for PATCH), through `createLead` / `updateLead`, in BOTH editions: `contactName` plus at least one of `contactPhone`/`contactEmail` on create, `null` or `''` clears an optional, `fields: [{ fieldId | key, value }]` writes dynamic values (`null` clears, an omitted field stays). The spreadsheet import writes through `LeadWriteBaseSchema` (no contact rule). `leadFieldSet` no longer picks a schema. The web writes it through the single LeadForm (`apps/web/src/sales-ops/leads/LeadForm.tsx`, logic in `lead-form.ts`): nome and one contact (telefone or e-mail) are required, dynamic fields come from `GET /field-definitions`, the Cliente is always present and not removable.
   A lead MAY carry an empresa (`clientId` resolves the snapshot, else the free-text `clientName`), an `estimatedValueBrl` and the legacy `description`, `contactBirthDate`, `products` keys, stored as the `descricao`, `nascimento`, `produtos` field values.
-- An org with only the `clientes` and `importacao` modules (the Construbom backfill, `LEADS_CAPABILITIES` in `sales-edition.ts`) is granted exactly the capabilities `clients` and `import`; `clients` is its OWN capability split from `catalog`, so `/clients/*` is `requireCapability('clients')` while produtos/areas/funcoes stay `catalog` (403 in leads).
+- An org with only the `clientes` and `importacao` modules (the Construbom backfill, `LEADS_CAPABILITIES` in `sales-edition.ts`) is granted exactly the capabilities `clients` and `import`; `clients` is its OWN capability split from `catalog`, so `/clients/*` is `requireCapability('clients')` while produtos and areas stay `catalog` (403 in leads); `/funcoes` is open in every edition since vários funis.
 - LeadForm's empresa picker creates a client by name inline: the seam is `SalesOpsApp`'s `createClientByName` handed to `LeadsBoardContainer` as `onCreateClient`; the copy is `clientPickerCopy` (oracle `client-picker-copy.test.ts`). Choosing a cliente prefills only blank contact fields; a cliente has no responsible seller, so the vendedor is never prefilled. A vendedor may create (POST `/clients` carries no `requireAdmin`).
   Its trigger and search read `Buscar ou criar novo cliente` only while `onCreateClient` is wired, else `Buscar cliente cadastrado`, through `clientPickerCopy` in `apps/web/src/sales-ops/leads/client-picker-copy.ts` (oracle `client-picker-copy.test.ts`).
 - The funil (`LeadsBoard` third view `funnel`, builders take per-stage aggregates, `BOARD_VIEW_LABEL.funnel`) has TWO shapes behind a `FUNNEL_SHAPE_LABEL` toggle (`Acumulado`/`Composição`, component state, default `cumulative`), plus the `Faturamento`/`Volume` metric toggle (`FUNNEL_METRIC_LABEL`, component state) that applies to both. `Acumulado` is the pure `buildCumulativeFunnel`: a lead in a stage counts in every earlier progression stage (linear assumption by design: the funil keeps it even though the CRM now records stage history in `sales_ops_crm_lead_events`, so it does not read those events), so rows taper monotonically from a full-width top and the share is retention from the top (`% do topo`, label `PERCENT_OF_TOP`). The progression is board order with the `lost` stage REMOVED (a lost lead has no known path); the lost stage is reported apart in a `[data-funnel-lost]` aside, never in the taper. `Composição` is the older pure `buildLeadFunnel`: each stage sized by its own magnitude/max, share of the sum (`% do total`, `PERCENT_OF_TOTAL`), every stage - lost included - an ordinary row, no aside. Bar width is rounded to an integer percent (so in `Acumulado` the bar equals the `% do topo`). The footer grand totals always read `buildLeadFunnel` (all leads, lost included) and are identical across both shapes. The two metrics are never mixed in one bar. Oracle: `lead-funnel.test.tsx`.
@@ -407,8 +411,12 @@ Full reference: `nexo/knowledge/reference/kanban-de-leads.md` (section Edição 
   Only `GET /lead-stages`, the bootstrap route, the import routes (`apps/api/src/domains/import/routes.ts`) and the seed module itself may seed on a request path (oracles `leads/__tests__/stages-seed-callers.test.ts` and `test/rls/lead-stages-seed-on-read.test.ts`).
   Creating a lead when every `normal` etapa is archived still answers the existing `400` `reason: 'no_open_stage'`; the web keys on status 400 plus `ApiError.reason`.
   The board shows `[data-no-stages]` in that case and never receives `onRequestConversion` / `onOpenSale`.
-- In the leads edition `POST/PATCH /people` force exactly `[vendedor]` (seeding the system funções in the same transaction) before `planPersonFuncoes`; a status-only PATCH leaves funções untouched.
-  The Vendedores screen (`apps/web/src/sales-ops/people/VendedoresView.tsx`) lists inactive vendedores with `Reativar`, because Geral and `GET /history` are gated.
+- In the leads edition `POST/PATCH /people` ALWAYS keep the system `vendedor` (seeding the system funções in the same transaction) before `planPersonFuncoes`, and `funcaoIds` adds EXTRA funções after it: active and non-system, or already held by the pessoa.
+  The vendedor id is absorbed; finder, an unknown or another org's id is `400 unknown_funcao` and nothing is written.
+  Empty `funcaoIds` and the deprecated booleans mean vendedor only; a status-only PATCH leaves funções untouched.
+  `resolveLeadsPersonFuncoes` in `service.ts` is the one rule.
+  The Vendedores screen (`apps/web/src/sales-ops/people/VendedoresView.tsx`) lists inactive vendedores with `Reativar`, because Geral and `GET /history` are gated, and shows each vendedor's extra funções under the name.
+  Its dialog picks the extras through `FuncaoMultiPicker` (system funções never offered, inline create wired), and `buildVendedorPayload` sends `[vendedor, ...extras]`.
   Oracle: `vendedores-routing.test.tsx`.
 - A non-admin vendedor creating a lead sends no `sellerPersonId` in EITHER edition: `createLead` assigns the caller's own pessoa, the Vendedor picker is hidden for non-admins, and an explicit other id is still `403 seller_scope`.
 - LeadForm stays open with the typed values and an inline error when a save is refused; the `Mover para` dialog shows no refusal before the operator interacts.
@@ -431,7 +439,23 @@ Full reference: `nexo/knowledge/reference/kanban-de-leads.md` (section CRM unifi
 - The board offers `Desfazer` for a stage move only when the reverse edge exists in the graph; an edit undo of a contactless legacy lead omits the contact keys. Their period is on `due_on`, a civil `date`, compared as written.
 - Period filters on a timestamp column go through `saoPauloDayRangeToInstants` (`@fxl-sales/shared-utils/sao-paulo-day`): `[from 00:00 -03:00, to+1 00:00 -03:00)`, so a lead created at 02:30Z on day D+1 belongs to day D. Never `slice(0, 10)` of an instant.
 - `GET /leads` and `GET /leads/summary` accept `pipelineId`, `from`, `to` and `f.<fieldKey>[.min|.max]` for FILTERABLE definitions only (cliente by id, options by key, text contains, number/money/date by min/max); an unknown, non-filterable or ill-typed key is `400 {"error":"validation_error","reason":"invalid_filter"}`. The summary defaults to the org's default pipeline.
-- `GET /pipelines` and `GET /field-definitions` are read-only and seed the org's defaults on first read (registered in `crm-seed-callers.test.ts`). There is no route that creates, edits, archives or deletes a pipeline or a definition, so the Cliente definition (`removable = false`, backed by `client_id`) can never be removed. Onboarding of pipelines and fields is out of scope.
+- `GET /pipelines` and `GET /field-definitions` seed the org's defaults on first read (registered in `crm-seed-callers.test.ts`).
+  There is no route that creates, edits, archives or deletes a field definition, so the Cliente definition (`removable = false`, backed by `client_id`) can never be removed.
+  Onboarding of fields is out of scope.
+- Pipelines are written ONLY by `apps/api/src/domains/crm/pipeline-admin-service.ts`, behind `requireAdmin`: `POST /pipelines {name, funcaoIds?}` and `PATCH /pipelines/:id {name?, funcaoIds?, status?}` (strict bodies, org only from the token, no DELETE verb).
+  A new pipeline is never the default, is appended last and is born with the seven default etapas and the default graph through `createPipelineWithDefaultStages` in `defaults.ts`, which shares `insertDefaultStages` with the org's first pipeline (no second implementation).
+  The default pipeline cannot be archived (`409 pipeline_is_default`); a taken name is `409 pipeline_name_taken`; a função that is not the org's own and active (or already linked) is `400 unknown_funcao`.
+  Archive and restore are `status`.
+  The etapa routes take `pipelineId` (create and reorder; without it, the default pipeline).
+- Access by função (vários funis): `sales_ops_pipeline_funcoes (org_id, pipeline_id, funcao_id)` (migration `0034_crm_pipeline_funcoes`, composite restrict FKs, two-policy RLS) links funções to pipelines as a full set.
+  The ONE rule is the pure `accessiblePipelineIds` in `@fxl-sales/shared-utils/crm-model`: an admin reaches every active pipeline; a non-admin every ACTIVE pipeline linked to one of her funções (archived funções count), and when none is linked ONLY the default pipeline, so a vendedor-only pessoa keeps exactly what she had.
+  On the server it is resolved once per request inside the scope gate (`resolveLeadScopePredicate` sets `gate.pipelineIds`, null for an admin, through `personPipelineAccess` in `crm/pipeline-access.ts`) and ANDed by `leadPipelineCondition` into `leadIdentityConditions` and `leadBoardConditions`.
+  So get, PATCH, move, advance, delete, notes, follow-ups on a lead, the board read and `GET /leads/summary` all answer a lead of an unreachable pipeline as `not_found` or absent, and the unassigned pool and the claim shrink with it.
+  `GET /followups` and `POST /followups/:id/done` apply it too, even to the follow-up's owner.
+  `GET /pipelines` lists only the reachable pipelines (`?includeArchived=true` adds archived ones for an admin only).
+  A create naming an unreachable pipeline is `400 pipeline_not_found`; without a `pipelineId` a create and the summary use `defaultAccessiblePipelineId` (the default pipeline when reachable, else the caller's first one).
+  The web mirrors the rule only to narrow the admin's vendedor picker of the LeadForm to the pessoas who reach the lead's pipeline (`sellersReachingPipeline` in `crm-pipeline.ts`); a new lead is born in the board's selected pipeline.
+  Oracles: `test/rls/pipeline-access.test.ts`, `pipeline-routes.test.ts`, `pipelines-settings.test.tsx`, `leads-pipeline-container.test.tsx`.
 - Tests that create CRM rows delete them with `deleteCrmForOrgs` BEFORE deleting clientes, pessoas, produtos or propostas.
 
 ## Integração Sales-Finance (plano de controle)

@@ -45,6 +45,7 @@ const PIPELINE: CrmPipeline = {
   isDefault: true,
   position: 1,
   status: 'active',
+  funcaoIds: [],
   stages: [],
   transitions: [],
 };

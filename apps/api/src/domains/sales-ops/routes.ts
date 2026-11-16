@@ -83,7 +83,9 @@ export const salesOpsRouter = new Hono();
 // this file: Hono runs matched handlers in registration order, so a gate
 // registered below a handler never runs before it. `/x/*` also matches `/x`.
 // Open in every edition, deliberately: /bootstrap, GET /settings, /people,
-// /lead-stages and /leads. The capability set per organization lives in
+// /funcoes, /lead-stages, /pipelines and /leads. Funções are open since vários
+// funis: a pessoa's extra funções decide which pipelines she reaches, so the
+// leads edition lists, creates, renames and archives them too (writes admin only). The capability set per organization lives in
 // `sales_ops_org_modules`; `CAPABILITY_MODULES` in `@fxl-sales/shared-utils/crm-model`
 // maps each capability to its modules, and the full product passes every gate.
 // PUT /settings is gated inline on its route below because GET /settings stays open.
@@ -93,10 +95,9 @@ salesOpsRouter.use('/sales/*', requireCapability('proposals'));
 salesOpsRouter.use('/settlements/*', requireCapability('proposals'));
 salesOpsRouter.use('/products/*', requireCapability('catalog'));
 // Clients are a capability of their own: the leads edition grants `clients` but
-// not `catalog`, so the Clientes cadastro works there while produtos/areas/funcoes stay out.
+// not `catalog`, so the Clientes cadastro works there while produtos and areas stay out.
 salesOpsRouter.use('/clients/*', requireCapability('clients'));
 salesOpsRouter.use('/areas/*', requireCapability('catalog'));
-salesOpsRouter.use('/funcoes/*', requireCapability('catalog'));
 salesOpsRouter.use('/import/*', requireCapability('import'));
 salesOpsRouter.use('/history/*', requireCapability('history'));
 
@@ -175,8 +176,9 @@ salesOpsRouter.post('/people', requireAdmin, async (c) => {
   if (!parsed.success) {
     return c.json({ error: 'validation_error', issues: parsed.error.flatten() }, 400);
   }
-  // The leads edition forces the função set to exactly [vendedor] in the service.
-  // The full edition keeps today's exact three-argument call.
+  // The leads edition always keeps the system vendedor função and accepts extra
+  // active, non-system funções in the service. The full edition keeps today's
+  // exact three-argument call.
   const edition = await getSalesEdition(c);
   const person =
     edition === 'leads'

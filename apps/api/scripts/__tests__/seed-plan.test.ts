@@ -221,6 +221,10 @@ describe('buildDevSeedPlan - idempotence, structurally', () => {
     expect(index('salesOpsCrmLeadEvents')).toBeLessThan(index('salesOpsCrmLeads'));
     expect(index('salesOpsCrmLeads')).toBeLessThan(index('salesOpsPipelineStages'));
     expect(index('salesOpsPipelineTransitions')).toBeLessThan(index('salesOpsPipelineStages'));
+    // The pipeline funções (0034) restrict-reference both the pipelines and the funções.
+    expect(index('salesOpsPipelineFuncoes')).toBeGreaterThan(-1);
+    expect(index('salesOpsPipelineFuncoes')).toBeLessThan(index('salesOpsPipelines'));
+    expect(index('salesOpsPipelineFuncoes')).toBeLessThan(index('salesOpsFuncoes'));
     expect(index('salesOpsPipelineStages')).toBeLessThan(index('salesOpsPipelines'));
     expect(index('salesOpsCrmLeadFieldValues')).toBeLessThan(index('salesOpsFieldDefinitions'));
     for (const target of ['salesOpsSales', 'salesOpsClients', 'salesOpsPeople', 'salesOpsProducts']) {

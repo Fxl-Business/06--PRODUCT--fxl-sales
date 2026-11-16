@@ -404,7 +404,7 @@ describe('contact board with no active etapa', () => {
     expect(newLeadButton().disabled).toBe(true);
 
     const action = required('[data-open-stages-cadastro]');
-    expect(action.textContent).toBe('Ir para Etapas do funil');
+    expect(action.textContent).toBe('Ir para Funis e etapas');
     await click('[data-open-stages-cadastro]');
     expect(onOpenStagesCadastro).toHaveBeenCalledTimes(1);
   });

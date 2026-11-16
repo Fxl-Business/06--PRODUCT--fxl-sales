@@ -37,12 +37,17 @@ function stage(id: string, name: string, position: number): CrmPipelineStage {
 }
 
 function pipeline(id: string, name: string, isDefault: boolean, stages: CrmPipelineStage[]): CrmPipeline {
-  return { id, name, isDefault, position: isDefault ? 1 : 2, status: 'active', stages, transitions: [] };
+  return { id, name, isDefault, position: isDefault ? 1 : 2, status: 'active', funcaoIds: [], stages, transitions: [] };
 }
+
+const FUNCAO_PARCEIROS = 'funcao-parceiros';
 
 const PIPELINES = [
   pipeline(PIPE_A, 'Vendas padrão', true, [stage(A_NOVO, 'Novo', 1), stage(A_PROPOSTA, 'Proposta', 2)]),
-  pipeline(PIPE_B, 'Parceiros', false, [stage(B_PRIMEIRO, 'Primeiro contato', 1), stage(B_FECHAMENTO, 'Fechamento', 2)]),
+  {
+    ...pipeline(PIPE_B, 'Parceiros', false, [stage(B_PRIMEIRO, 'Primeiro contato', 1), stage(B_FECHAMENTO, 'Fechamento', 2)]),
+    funcaoIds: [FUNCAO_PARCEIROS],
+  },
 ];
 
 const mocks = vi.hoisted(() => ({
@@ -50,7 +55,15 @@ const mocks = vi.hoisted(() => ({
   summaryFilters: [] as unknown[],
   moveFilters: [] as unknown[],
   boardProps: [] as Record<string, unknown>[],
+  formProps: [] as Record<string, unknown>[],
   moveMutateAsync: vi.fn(),
+}));
+
+vi.mock('../LeadForm', () => ({
+  LeadForm: (props: Record<string, unknown>) => {
+    mocks.formProps.push(props);
+    return null;
+  },
 }));
 
 vi.mock('@/auth/react', () => ({
@@ -105,6 +118,11 @@ vi.mock('../LeadsBoard', async () => {
         ReactModule.createElement('p', { 'data-stub-columns': 'true' }, stages.map((s) => s.name).join('|')),
         ReactModule.createElement(
           'button',
+          { 'data-stub-create': 'true', onClick: () => (props.onCreateLead as () => void)(), type: 'button' },
+          'stub-create',
+        ),
+        ReactModule.createElement(
+          'button',
           {
             'data-stub-move': 'true',
             onClick: () => onMove({ leadId: 'l1', toStageId: A_PROPOSTA, toIndex: 0 }),
@@ -133,6 +151,7 @@ beforeEach(() => {
   mocks.summaryFilters.length = 0;
   mocks.moveFilters.length = 0;
   mocks.boardProps.length = 0;
+  mocks.formProps.length = 0;
   mocks.moveMutateAsync.mockReset();
   container = document.createElement('div');
   document.body.append(container);
@@ -195,5 +214,40 @@ describe('LeadsBoardContainer move refusal', () => {
     expect(container.querySelector('[data-mutation-error]')?.textContent).toContain(
       'Esse movimento não é permitido neste funil.',
     );
+  });
+});
+
+describe('LeadsBoardContainer new lead (vários funis)', () => {
+  const ana = { id: 'person-ana', funcaoIds: ['funcao-vendedor'] };
+  const bia = { id: 'person-bia', funcaoIds: ['funcao-vendedor', FUNCAO_PARCEIROS] };
+  const props = {
+    ...BASE_PROPS,
+    people: [ana, bia] as never[],
+    sellers: [
+      { value: ana.id, label: 'Ana' },
+      { value: bia.id, label: 'Bia' },
+    ],
+  };
+
+  async function openNewLead() {
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-stub-create]')!.click();
+    });
+    return mocks.formProps.at(-1)!;
+  }
+
+  it('is born in the selected pipeline and offers only the vendedores who reach it', async () => {
+    await render(<LeadsBoardContainer {...props} />);
+    let form = await openNewLead();
+    expect(form.pipelineId).toBe(PIPE_A);
+    // Bia's função is linked to Parceiros only, so the default pipeline is out of her reach.
+    expect((form.sellers as { value: string }[]).map((option) => option.value)).toEqual([ana.id]);
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>(`[data-pick-pipeline="${PIPE_B}"]`)!.click();
+    });
+    form = mocks.formProps.at(-1)!;
+    expect(form.pipelineId).toBe(PIPE_B);
+    expect((form.sellers as { value: string }[]).map((option) => option.value)).toEqual([bia.id]);
   });
 });

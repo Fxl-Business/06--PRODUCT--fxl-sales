@@ -123,10 +123,17 @@ export const queryKeys = {
       refreshes it with no extra key on any mutation.
     */
     summary: (filters: LeadBoardFilters) => ['leads', 'summary', filters ?? null] as const,
-    stages: () => ['leads', 'stages'] as const,
+    /**
+      One pipeline's etapas. Without an id it is the org's default pipeline, the pre-funis
+      read, and its key is unchanged; a pipeline's key nests under it.
+    */
+    stages: (pipelineId?: string) =>
+      pipelineId ? (['leads', 'stages', pipelineId] as const) : (['leads', 'stages'] as const),
     deleted: () => ['leads', 'deleted'] as const,
     stageDeletePreview: (stageId: string) => ['leads', 'stage-delete-preview', stageId] as const,
     pipelines: () => ['leads', 'pipelines'] as const,
+    /** The admin's Funis e etapas list, archived pipelines included. Under the same root. */
+    pipelinesWithArchived: () => ['leads', 'pipelines', 'with-archived'] as const,
     fieldDefinitions: () => ['leads', 'field-definitions'] as const,
     detail: (leadId: string) => ['leads', 'detail', leadId] as const,
     followups: (filters: FollowupFilters) => ['leads', 'followups', filters] as const,

@@ -5,7 +5,8 @@ import type { SalesOpsFuncao, SalesOpsPerson } from '../types';
 /**
  * Every user-facing string of the leads-edition Vendedores screen, in one place so
  * the tests can pin them and scan them. pt-BR, no em dash, and no word that belongs
- * to the full product (função, finder, comissão, proposta).
+ * to the full product (finder, comissão, proposta). Função belongs to this edition
+ * since vários funis: an extra função decides which funis a vendedor works in.
  */
 export const VENDEDORES_COPY = {
   pageTitle: {
@@ -21,6 +22,11 @@ export const VENDEDORES_COPY = {
   nameLabel: 'Nome',
   emailLabel: 'E-mail',
   emailHelper: 'Use o mesmo e-mail com que o vendedor entra no sistema.',
+  extraFuncoesLabel: 'Funções extras',
+  extraFuncoesPlaceholder: 'Adicionar função',
+  extraFuncoesEmpty: 'Nenhuma função extra: o vendedor trabalha no funil padrão.',
+  extraFuncoesHelper:
+    'Cada função ligada a um funil em Funis e etapas dá acesso a esse funil. Vendedor é sempre mantido.',
   cancel: 'Cancelar',
   save: 'Salvar',
   editLabel: (name: string) => `Editar ${name}`,
@@ -43,26 +49,36 @@ export function vendedorFuncaoId(funcoes: readonly SalesOpsFuncao[]): string | n
 }
 
 /**
- * The leads-edition person write. The server ignores `funcaoIds` in this edition and
- * assigns exactly [vendedor] itself (seeding the system funções when the org has
- * none). The id is still sent when the catalogue knows it, so the optimistic row
- * already carries the vendedor badge data the lead board's seller picker filters on;
- * with an empty catalogue it is [] and the server alone decides.
- * Never an id the catalogue does not hold.
+ * A vendedor's EXTRA funções: every função the pessoa holds that is not a system one.
+ * They are what the dialog edits; the system vendedor is never shown as removable.
+ */
+export function extraFuncaoIdsOf(person: SalesOpsPerson | null): string[] {
+  return (person?.funcoes ?? []).filter((funcao) => !funcao.isSystem).map((funcao) => funcao.id);
+}
+
+/**
+ * The leads-edition person write. The server always keeps the system vendedor in this
+ * edition (seeding the system funções when the org has none) and accepts the EXTRA
+ * active, non-system funções after it. The vendedor id is still sent when the catalogue
+ * knows it, so the optimistic row already carries the vendedor badge data the lead
+ * board's seller picker filters on; with an empty catalogue only the extras are sent
+ * and the server adds vendedor. Never an id the catalogue does not hold.
  */
 export function buildVendedorPayload(input: {
   person: SalesOpsPerson | null;
   displayName: string;
   contactEmail: string;
   funcoes: readonly SalesOpsFuncao[];
+  extraFuncaoIds?: readonly string[];
 }): SavePersonPayload {
   const vendedorId = vendedorFuncaoId(input.funcoes);
+  const extras = (input.extraFuncaoIds ?? []).filter((id) => id !== vendedorId);
   return {
     id: input.person?.id,
     displayName: input.displayName.trim(),
     contactEmail: input.contactEmail.trim() || undefined,
     // The stored status, never a value this dialog owns, exactly like PersonDialog.
     status: input.person?.status ?? 'active',
-    funcaoIds: vendedorId ? [vendedorId] : [],
+    funcaoIds: vendedorId ? [vendedorId, ...extras] : [...extras],
   };
 }

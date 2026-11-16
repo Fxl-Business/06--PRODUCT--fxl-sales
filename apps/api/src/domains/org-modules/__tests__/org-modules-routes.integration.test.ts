@@ -116,7 +116,7 @@ describe('org modules: the leads token backfills exactly the leads capabilities'
     expect(first.status).toBe(403);
     expect(await first.text()).toBe(FORBIDDEN_EDITION_TEXT);
 
-    for (const path of ['/sales', '/products', '/areas', '/funcoes', '/history']) {
+    for (const path of ['/sales', '/products', '/areas', '/history']) {
       const res = await send(app, 'GET', path);
       expect(res.status, path).toBe(403);
       expect(await res.text(), path).toBe(FORBIDDEN_EDITION_TEXT);
@@ -125,7 +125,8 @@ describe('org modules: the leads token backfills exactly the leads capabilities'
     expect(settings.status).toBe(403);
     expect(await settings.text()).toBe(FORBIDDEN_EDITION_TEXT);
 
-    for (const path of ['/clients', '/import/template', '/people', '/bootstrap']) {
+    // `/funcoes` is open in every edition since vários funis (extra funções decide pipeline access).
+    for (const path of ['/clients', '/import/template', '/people', '/funcoes', '/pipelines', '/bootstrap']) {
       expect((await send(app, 'GET', path)).status, path).toBe(200);
     }
 

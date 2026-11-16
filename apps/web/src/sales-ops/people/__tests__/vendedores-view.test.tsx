@@ -322,7 +322,7 @@ describe('VendedoresView', () => {
 });
 
 describe('VendedorDialog', () => {
-  it('renders only Nome and E-mail with the e-mail helper', async () => {
+  it('renders Nome, E-mail with its helper and one picker of extra funções', async () => {
     await render(<VendedorDialog {...dialogProps()} />);
 
     expect(container.querySelector('h2')?.textContent).toBe('Vendedor');
@@ -335,9 +335,47 @@ describe('VendedorDialog', () => {
     expect(container.querySelector('#vendedor-email-helper')?.textContent).toBe(
       'Use o mesmo e-mail com que o vendedor entra no sistema.',
     );
-    expect(container.querySelector('button[role="combobox"]')).toBeNull();
-    expect(container.textContent).not.toContain('Funções');
+    // Vários funis: exactly one picker, the extra funções, and vendedor never offered as a chip.
+    const pickers = container.querySelectorAll('button[role="combobox"]');
+    expect(pickers).toHaveLength(1);
+    expect(pickers[0]?.getAttribute('aria-label')).toBe(VENDEDORES_COPY.extraFuncoesLabel);
+    expect(container.textContent).toContain(VENDEDORES_COPY.extraFuncoesEmpty);
+    expect(container.querySelector('[data-funcao-chip]')).toBeNull();
     expect(container.textContent).not.toContain('Atribua ao menos uma função.');
+  });
+
+  it('offers only active non-system funções and sends the chosen extra after vendedor', async () => {
+    const financeiro: SalesOpsFuncao = { ...vendedor, id: 'fc000003-0000-4000-8000-000000000003', name: 'Financeiro', slug: 'financeiro', isSystem: false };
+    const antiga: SalesOpsFuncao = { ...financeiro, id: 'fc000004-0000-4000-8000-000000000004', name: 'Antiga', slug: 'antiga', status: 'archived' };
+    const props = dialogProps({ funcoes: [vendedor, finder, financeiro, antiga] });
+    await render(<VendedorDialog {...props} />);
+    await change(input('displayName'), 'Ana Lima');
+
+    await click(container.querySelector('button[role="combobox"]')!);
+    const offered = [...container.querySelectorAll('[role="option"]')].map((option) => option.textContent?.trim());
+    expect(offered).toEqual(['Financeiro']);
+    await click(container.querySelector('[role="option"]')!);
+    expect(container.querySelector('[data-funcao-chip]')?.textContent).toContain('Financeiro');
+
+    await submit();
+    expect(props.onSave.mock.calls[0]?.[0]).toMatchObject({ funcaoIds: [vendedor.id, financeiro.id] });
+  });
+
+  it('prefills the extra funções of the pessoa and drops one on remove', async () => {
+    const financeiro: SalesOpsFuncao = { ...vendedor, id: 'fc000003-0000-4000-8000-000000000003', name: 'Financeiro', slug: 'financeiro', isSystem: false };
+    const bia: SalesOpsPerson = {
+      ...ana,
+      funcaoIds: [vendedor.id, financeiro.id],
+      funcoes: [asPersonFuncao(vendedor), asPersonFuncao(financeiro)],
+    };
+    const props = dialogProps({ person: bia, funcoes: [vendedor, financeiro] });
+    await render(<VendedorDialog {...props} />);
+    expect([...container.querySelectorAll('[data-funcao-chip]')].map((chip) => chip.getAttribute('data-funcao-chip'))).toEqual([
+      financeiro.id,
+    ]);
+    await click(requireButton('Remover função Financeiro'));
+    await submit();
+    expect(props.onSave.mock.calls[0]?.[0]).toMatchObject({ id: bia.id, funcaoIds: [vendedor.id] });
   });
 
   it('saves with a name alone', async () => {

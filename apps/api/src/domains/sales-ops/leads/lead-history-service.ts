@@ -22,12 +22,14 @@ import { recordStageChange, stageTransitionAllowed } from './lead-history.js';
 import {
   claimantFor,
   leadIdentityConditions,
+  leadPipelineCondition,
   leadSellerCondition,
   liveLeadCondition,
   lockLeadBoard,
   readLeadView,
   renumberStage,
   resolveCallerPersonId,
+  resolveCallerPipelineAccess,
   resolveLeadScopePredicate,
   resolveSellerPersonId,
   scopeActorName,
@@ -416,6 +418,8 @@ export function markFollowupDone(db: Db, orgId: string, followupId: string, scop
           eq(salesOpsCrmLeadFollowups.id, followupId),
           liveLeadCondition(),
           ...(gate.sellerPersonId ? [followupCompletionCondition(gate.sellerPersonId, gate.canClaimUnassigned)] : []),
+          // Even the follow-up's own owner completes it only while the lead's pipeline is in reach.
+          leadPipelineCondition(gate.pipelineIds) ?? undefined,
         ),
       )
       .limit(1)
@@ -448,11 +452,15 @@ export type ListFollowupsResult =
 /**
  * `mine`: the caller's pessoa owns it, or the caller created it. `team`: every follow-up of the org
  * (the route admits only an admin). The period is on `due_on`, a civil `date`, so the days are
- * compared as written and no timezone is involved. Deleted leads' follow-ups are not listed.
+ * compared as written and no timezone is involved. Deleted leads' follow-ups are not listed, and
+ * neither are the follow-ups of a lead whose pipeline the caller does not reach (vários funis): the
+ * same set `resolveCallerPipelineAccess` gives the board, an admin seeing every pipeline.
  */
 export function listFollowups(db: Db, orgId: string, query: ListFollowupsQuery, scope: LeadScope): Promise<ListFollowupsResult> {
   return withTenant(db, orgId, async (tx) => {
     const conditions: SQL[] = [eq(salesOpsCrmLeadFollowups.orgId, orgId), liveLeadCondition()];
+    const pipeline = leadPipelineCondition(await resolveCallerPipelineAccess(tx, orgId, scope));
+    if (pipeline) conditions.push(pipeline);
     if (query.scope === 'mine') {
       const personId = await resolveCallerPersonId(tx, orgId, scope);
       const mine: SQL[] = [eq(salesOpsCrmLeadFollowups.createdByUserId, scope.userId)];

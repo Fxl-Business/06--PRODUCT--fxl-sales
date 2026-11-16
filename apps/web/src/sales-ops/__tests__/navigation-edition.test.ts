@@ -88,7 +88,7 @@ const PREFERRED_PATH_FULL: Record<ComboName, [string, string, string, string]> =
 const TEAM_NAV_FULL: Record<'tatico' | 'operacional' | 'cadastros', Array<[SalesOpsView, string]>> = {
   'tatico': [['dashboard', 'Visão geral']],
   'operacional': [['vendas', 'Propostas'], ['vendas-abertas', 'Em aberto'], ['vendas-ganhas', 'Vendidas'], ['vendas-encerradas', 'Perdidas e canceladas'], ['comissoes', 'Comissões'], ['leads', 'Prospecção'], ['funil', 'Funil'], ['follow-ups', 'Follow-ups']],
-  'cadastros': [['produtos', 'Produtos & Serviços'], ['areas', 'Áreas'], ['clientes', 'Clientes'], ['pessoas', 'Pessoas'], ['funcoes', 'Funções'], ['etapas', 'Etapas do funil'], ['importacao', 'Importação'], ['leads-excluidos', 'Leads excluídos'], ['geral', 'Geral']],
+  'cadastros': [['produtos', 'Produtos & Serviços'], ['areas', 'Áreas'], ['clientes', 'Clientes'], ['pessoas', 'Pessoas'], ['funcoes', 'Funções'], ['etapas', 'Funis e etapas'], ['importacao', 'Importação'], ['leads-excluidos', 'Leads excluídos'], ['geral', 'Geral']],
 };
 
 const MEUS_DADOS_NAV_FULL: Record<ComboName, Array<[SalesOpsView, string]>> = {
@@ -302,7 +302,7 @@ const TEAM_NAV_LEADS: Record<'tatico' | 'operacional' | 'cadastros', Array<[Sale
   'cadastros': [
     ['pessoas', 'Vendedores'],
     ['clientes', 'Clientes'],
-    ['etapas', 'Etapas do funil'],
+    ['etapas', 'Funis e etapas'],
     ['importacao', 'Importação'],
     ['leads-excluidos', 'Leads excluídos'],
   ],

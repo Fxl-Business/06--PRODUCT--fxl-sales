@@ -454,19 +454,28 @@ export function planPersonFuncoes(
 export type PersonWriteOptions = { edition?: SalesEdition };
 
 /**
+ * The leads-edition plan: the system `vendedor` função plus the EXTRA funções the
+ * body names (vários funis: an extra função decides which pipelines the pessoa
+ * reaches). Resolved by `resolveLeadsPersonFuncoes`.
+ */
+type LeadsFuncaoPlan = { kind: 'leads'; extraIds: string[] };
+
+/**
  * In the leads edition a pessoa IS a vendedor (edicao-leads D4): the server
- * assigns the system `vendedor` função itself and ignores any funcaoIds or
- * deprecated booleans in the body. This override runs BEFORE
- * `planPersonFuncoes` (SEAM A3), so an empty `funcaoIds` never answers
- * `funcao_required`. An UPDATE that carries no função key at all (the
- * status-only `{status}` PATCH of Inativar / Reativar, or a name-only edit)
- * leaves the função set untouched. The full edition plans exactly as today.
+ * always assigns the system `vendedor` função itself, and `funcaoIds` may add
+ * EXTRA funções, active and non-system (the vendedor id itself is tolerated and
+ * absorbed; any other system função is `unknown_funcao`). The deprecated
+ * booleans add nothing. This override runs BEFORE `planPersonFuncoes` (SEAM A3),
+ * so an empty `funcaoIds` never answers `funcao_required`: it means "vendedor
+ * only". An UPDATE that carries no função key at all (the status-only `{status}`
+ * PATCH of Inativar / Reativar, or a name-only edit) leaves the função set
+ * untouched. The full edition plans exactly as today.
  */
 function planPersonFuncoesForEdition(
   input: Partial<PersonInput>,
   mode: 'create' | 'update',
   edition: SalesEdition,
-): PersonFuncaoPlan {
+): PersonFuncaoPlan | LeadsFuncaoPlan {
   if (edition === 'leads') {
     const touchesFuncoes =
       input.funcaoIds !== undefined ||
@@ -474,9 +483,57 @@ function planPersonFuncoesForEdition(
       input.isFinder !== undefined ||
       input.isCollaborator !== undefined;
     if (mode === 'update' && !touchesFuncoes) return { kind: 'unchanged' };
-    return { kind: 'slugs', slugs: ['vendedor'] };
+    return { kind: 'leads', extraIds: [...new Set(input.funcaoIds ?? [])] };
   }
   return planPersonFuncoes(input, mode);
+}
+
+/**
+ * The leads-edition função set: the system `vendedor` (seeded on demand through
+ * the same race-safe path as every other caller) first, then each extra id. An
+ * extra must be a função of the org, non-system, and active, or already held by
+ * this pessoa (an archived função she carries stays until an admin removes it).
+ * Anything else is `unknown_funcao` and nothing is written.
+ */
+async function resolveLeadsPersonFuncoes(
+  tx: Db,
+  orgId: string,
+  plan: LeadsFuncaoPlan,
+  personId: string | null,
+): Promise<FuncaoRow[] | 'unknown_funcao'> {
+  const vendedor = await resolvePersonFuncoes(tx, orgId, { kind: 'slugs', slugs: ['vendedor'] });
+  if (vendedor === 'unknown_funcao') return vendedor;
+  const vendedorId = vendedor[0]!.id;
+  const extraIds = plan.extraIds.filter((id) => id !== vendedorId);
+  const extras = await selectFuncoesByIds(tx, orgId, extraIds);
+  if (extras.length !== extraIds.length || extras.some((funcao) => funcao.isSystem)) return 'unknown_funcao';
+  const archived = extras.filter((funcao) => funcao.status !== 'active').map((funcao) => funcao.id);
+  if (archived.length > 0) {
+    if (personId === null) return 'unknown_funcao';
+    const held = await tx
+      .select({ funcaoId: salesOpsPersonFuncoes.funcaoId })
+      .from(salesOpsPersonFuncoes)
+      .where(
+        and(
+          eq(salesOpsPersonFuncoes.orgId, orgId),
+          eq(salesOpsPersonFuncoes.personId, personId),
+          inArray(salesOpsPersonFuncoes.funcaoId, archived),
+        ),
+      );
+    if (held.length !== archived.length) return 'unknown_funcao';
+  }
+  return [...vendedor, ...extras];
+}
+
+/** Resolves either plan shape to concrete rows (`unchanged` and `funcao_required` never reach it). */
+function resolvePlannedFuncoes(
+  tx: Db,
+  orgId: string,
+  plan: Exclude<PersonFuncaoPlan, 'funcao_required' | { kind: 'unchanged' }> | LeadsFuncaoPlan,
+  personId: string | null,
+): Promise<FuncaoRow[] | 'unknown_funcao'> {
+  if (plan.kind === 'leads') return resolveLeadsPersonFuncoes(tx, orgId, plan, personId);
+  return resolvePersonFuncoes(tx, orgId, plan);
 }
 
 export const SettingsSchema = z.object({
@@ -1688,7 +1745,7 @@ export async function createPersonTx(
   if (edition === 'leads') await ensureSystemFuncoes(tx, orgId);
   const plan = planPersonFuncoesForEdition(data, 'create', edition);
   if (plan === 'funcao_required' || plan.kind === 'unchanged') return 'funcao_required';
-  const resolved = await resolvePersonFuncoes(tx, orgId, plan);
+  const resolved = await resolvePlannedFuncoes(tx, orgId, plan, null);
   if (resolved === 'unknown_funcao') return 'unknown_funcao';
 
   const [person] = await tx
@@ -1737,7 +1794,7 @@ export async function updatePerson(
 
     let resolved: FuncaoRow[] | null = null;
     if (plan.kind !== 'unchanged') {
-      const outcome = await resolvePersonFuncoes(tx, orgId, plan);
+      const outcome = await resolvePlannedFuncoes(tx, orgId, plan, id);
       if (outcome === 'unknown_funcao') return 'unknown_funcao';
       resolved = outcome;
     }

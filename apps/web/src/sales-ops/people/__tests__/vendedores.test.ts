@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { SalesOpsFuncao, SalesOpsPerson } from '../../types';
-import { VENDEDORES_COPY, buildVendedorPayload, vendedorFuncaoId } from '../vendedores';
+import { VENDEDORES_COPY, buildVendedorPayload, extraFuncaoIdsOf, vendedorFuncaoId } from '../vendedores';
 
 const orgId = '99999999-9999-4999-8999-999999999999';
 
@@ -89,6 +89,31 @@ describe('buildVendedorPayload', () => {
     ).toEqual([]);
   });
 
+  it('sends the extra funções after vendedor, never vendedor twice', () => {
+    const base = { person: null, displayName: 'Ana Lima', contactEmail: '' };
+    expect(
+      buildVendedorPayload({ ...base, funcoes: [vendedor, designer], extraFuncaoIds: [designer.id, vendedor.id] }).funcaoIds,
+    ).toEqual([vendedor.id, designer.id]);
+    // With no vendedor in the catalogue yet the server adds it; only the extras travel.
+    expect(buildVendedorPayload({ ...base, funcoes: [designer], extraFuncaoIds: [designer.id] }).funcaoIds).toEqual([
+      designer.id,
+    ]);
+  });
+
+  it('extraFuncaoIdsOf keeps only the non-system funções of the pessoa', () => {
+    expect(extraFuncaoIdsOf(null)).toEqual([]);
+    expect(
+      extraFuncaoIdsOf(
+        pessoa({
+          funcoes: [
+            { id: vendedor.id, name: 'Vendedor', slug: 'vendedor', isSystem: true },
+            { id: designer.id, name: designer.name, slug: designer.slug, isSystem: false },
+          ],
+        }),
+      ),
+    ).toEqual([designer.id]);
+  });
+
   it("keeps the edited pessoa's id and stored status", () => {
     const person = pessoa({ status: 'inactive' });
     const payload = buildVendedorPayload({
@@ -119,7 +144,8 @@ describe('VENDEDORES_COPY', () => {
     expect(strings.length).toBeGreaterThan(15);
     for (const text of strings) {
       expect(text).not.toMatch(/\u2014/);
-      expect(text).not.toMatch(/fun[cç][aã]o|finder|comiss|proposta|Cadastros > Geral|hist[oó]rico/i);
+      // Função is leads vocabulary since vários funis (extra funções decide the funis).
+      expect(text).not.toMatch(/finder|comiss|proposta|Cadastros > Geral|hist[oó]rico/i);
     }
   });
 });

@@ -403,7 +403,7 @@ describe('Leads excluídos: the screen', () => {
     expect(restoreButtonFor('Bruno Lima').disabled).toBe(false);
   });
 
-  it('400 no_open_stage keeps the row and sends the gestor to Etapas do funil', async () => {
+  it('400 no_open_stage keeps the row and sends the gestor to Funis e etapas', async () => {
     server.restoreAnswer = {
       status: 400,
       body: { error: 'validation_error', reason: 'no_open_stage' },
@@ -541,7 +541,7 @@ describe('Leads excluídos: Restaurar lote', () => {
     );
   });
 
-  it('400 no_open_stage sends the gestor to Etapas do funil', async () => {
+  it('400 no_open_stage sends the gestor to Funis e etapas', async () => {
     server.batchAnswer = { status: 400, body: { error: 'validation_error', reason: 'no_open_stage' } };
     await renderScreen();
     await act(async () => restoreBatchButtonFor('Bruno Lima')?.click());

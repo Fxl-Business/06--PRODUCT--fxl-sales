@@ -4,6 +4,7 @@ import {
   DEFAULT_PIPELINE_TRANSITIONS,
 } from '../default-pipeline.js';
 import {
+  accessiblePipelineIds,
   ALL_MODULES_ENABLED,
   CAPABILITY_MODULES,
   CRM_MODULE_KEYS,
@@ -164,5 +165,37 @@ describe('org modules (phase 3)', () => {
         }
       }
     }
+  });
+});
+
+describe('accessiblePipelineIds (pipeline access by função)', () => {
+  const comercial = { id: 'p-comercial', isDefault: true, status: 'active', funcaoIds: [] as string[] } as const;
+  const financeiro = { id: 'p-financeiro', isDefault: false, status: 'active', funcaoIds: ['f-fin'] } as const;
+  const pos = { id: 'p-pos', isDefault: false, status: 'active', funcaoIds: ['f-fin', 'f-pos'] } as const;
+  const antigo = { id: 'p-antigo', isDefault: false, status: 'archived', funcaoIds: ['f-vendedor'] } as const;
+
+  it('a pessoa with only the vendedor função keeps exactly the default pipeline', () => {
+    expect(accessiblePipelineIds([comercial, financeiro, pos], ['f-vendedor'])).toEqual(['p-comercial']);
+    expect(accessiblePipelineIds([comercial, financeiro], [])).toEqual(['p-comercial']);
+  });
+
+  it('a linked função reaches only the pipelines linked to it, never the default by itself', () => {
+    expect(accessiblePipelineIds([comercial, financeiro, pos], ['f-vendedor', 'f-fin'])).toEqual(['p-financeiro', 'p-pos']);
+    expect(accessiblePipelineIds([comercial, financeiro, pos], ['f-pos'])).toEqual(['p-pos']);
+  });
+
+  it('the default pipeline is reached through a link like any other', () => {
+    const linkedDefault = { ...comercial, funcaoIds: ['f-vendedor'] };
+    expect(accessiblePipelineIds([linkedDefault, financeiro], ['f-vendedor', 'f-fin'])).toEqual(['p-comercial', 'p-financeiro']);
+  });
+
+  it('an archived pipeline is never reached, linked or as the fallback', () => {
+    expect(accessiblePipelineIds([comercial, antigo], ['f-vendedor'])).toEqual(['p-comercial']);
+    expect(accessiblePipelineIds([{ ...comercial, status: 'archived' }, financeiro], ['f-x'])).toEqual(['p-financeiro']);
+    expect(accessiblePipelineIds([antigo], ['f-vendedor'])).toEqual([]);
+  });
+
+  it('without an is_default row the fallback is the first active pipeline in the given order', () => {
+    expect(accessiblePipelineIds([financeiro, pos].map((p) => ({ ...p, funcaoIds: [] })), ['f-x'])).toEqual(['p-financeiro']);
   });
 });

@@ -9,6 +9,7 @@ import {
   pipelineStagesAsBoardStages,
   stageOpensOrcamentos,
   summaryStageKind,
+  sellersReachingPipeline,
 } from '../crm-pipeline';
 
 function pipeline(overrides: Partial<CrmPipeline> = {}): CrmPipeline {
@@ -18,6 +19,7 @@ function pipeline(overrides: Partial<CrmPipeline> = {}): CrmPipeline {
     isDefault: true,
     position: 1,
     status: 'active',
+    funcaoIds: [],
     stages: [],
     transitions: [],
     ...overrides,
@@ -111,5 +113,28 @@ describe('crm-pipeline', () => {
     expect(stageOpensOrcamentos({ behavior: 'opens_orcamentos' })).toBe(true);
     expect(stageOpensOrcamentos({ behavior: 'none' })).toBe(false);
     expect(stageOpensOrcamentos(undefined)).toBe(false);
+  });
+});
+
+describe('sellersReachingPipeline (vários funis)', () => {
+  const comercial = pipeline({ id: 'P-com', isDefault: true });
+  const financeiro = pipeline({ id: 'P-fin', isDefault: false, position: 2, funcaoIds: ['F-fin'] });
+  const sellers = [
+    { value: 'ana', label: 'Ana' },
+    { value: 'bia', label: 'Bia' },
+    { value: 'ghost', label: 'Sem pessoa' },
+  ];
+  const people = [
+    { id: 'ana', funcaoIds: ['F-vendedor'] },
+    { id: 'bia', funcaoIds: ['F-vendedor', 'F-fin'] },
+  ];
+
+  it('keeps only the vendedores who reach the pipeline, by the shared access rule', () => {
+    expect(sellersReachingPipeline(sellers, people, [comercial, financeiro], 'P-com').map((o) => o.value)).toEqual(['ana']);
+    expect(sellersReachingPipeline(sellers, people, [comercial, financeiro], 'P-fin').map((o) => o.value)).toEqual(['bia']);
+  });
+
+  it('passes every option through when no pipeline is in hand', () => {
+    expect(sellersReachingPipeline(sellers, people, [comercial, financeiro], null)).toEqual(sellers);
   });
 });

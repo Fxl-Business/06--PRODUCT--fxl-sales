@@ -121,9 +121,6 @@ const GATED: readonly RouteCase[] = [
   r('salesOps', 'GET', '/areas', `${SO}/areas`),
   r('salesOps', 'POST', '/areas', `${SO}/areas`),
   r('salesOps', 'PATCH', '/areas/:id', `${SO}/areas/${ID}`),
-  r('salesOps', 'GET', '/funcoes', `${SO}/funcoes`),
-  r('salesOps', 'POST', '/funcoes', `${SO}/funcoes`),
-  r('salesOps', 'PATCH', '/funcoes/:id', `${SO}/funcoes/${ID}`),
   r('salesOps', 'PUT', '/settings', `${SO}/settings`),
   r('salesOps', 'GET', '/history', `${SO}/history`),
   r('commissions', 'GET', '/', '/api/v1/commissions'),
@@ -175,6 +172,11 @@ const OPEN: readonly RouteCase[] = [
   r('salesOps', 'GET', '/people', `${SO}/people`),
   r('salesOps', 'POST', '/people', `${SO}/people`),
   r('salesOps', 'PATCH', '/people/:id', `${SO}/people/${ID}`),
+  // Vários funis: a pessoa's extra funções decide which pipelines she reaches, so the funções
+  // cadastro is open in every edition (writes stay admin only).
+  r('salesOps', 'GET', '/funcoes', `${SO}/funcoes`),
+  r('salesOps', 'POST', '/funcoes', `${SO}/funcoes`),
+  r('salesOps', 'PATCH', '/funcoes/:id', `${SO}/funcoes/${ID}`),
   r('salesOps', 'GET', '/lead-stages', `${SO}/lead-stages`),
   r('salesOps', 'POST', '/lead-stages/reorder', `${SO}/lead-stages/reorder`),
   r('salesOps', 'POST', '/lead-stages', `${SO}/lead-stages`),
@@ -194,6 +196,9 @@ const OPEN: readonly RouteCase[] = [
   r('salesOps', 'POST', '/leads/batches/:batchId/restore', `${SO}/leads/batches/${ID}/restore`),
   // Phase 2b: the CRM reads, the lead history acts and the follow-ups. Ungated like /leads.
   r('salesOps', 'GET', '/pipelines', `${SO}/pipelines`),
+  // Vários funis: the admin pipeline writes, ungated like the etapa cadastro.
+  r('salesOps', 'POST', '/pipelines', `${SO}/pipelines`),
+  r('salesOps', 'PATCH', '/pipelines/:id', `${SO}/pipelines/${ID}`),
   r('salesOps', 'GET', '/field-definitions', `${SO}/field-definitions`),
   r('salesOps', 'GET', '/leads/:id/summary', `${SO}/leads/${ID}/summary`),
   r('salesOps', 'POST', '/leads/:id/advance', `${SO}/leads/${ID}/advance`),

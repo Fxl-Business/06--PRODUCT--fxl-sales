@@ -1,6 +1,6 @@
 import { ALL_MODULES_ENABLED, stageActsAsOrcamento, type OrgModules } from '@fxl-sales/shared-utils/crm-model';
 import type { SalesEdition } from '@fxl-sales/shared-utils/sales-edition';
-import { and, asc, eq, isNull, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
 import type { getDb } from '../../../db/client.js';
 import {
   salesOpsCrmLeadEvents,
@@ -20,6 +20,7 @@ import {
   type LeadFieldValue,
 } from '../../crm/lead-fields.js';
 import { LeadInputError } from '../../crm/lead-input-error.js';
+import { personPipelineAccess } from '../../crm/pipeline-access.js';
 import { defaultPipelineId, pipelineExists } from '../../crm/pipeline-read.js';
 import { boardNarrowingConditions } from './lead-filters.js';
 import { recordStageChange, stageTransitionAllowed } from './lead-history.js';
@@ -199,6 +200,14 @@ export type LeadScopeGate =
        * is an ACTIVE vendedor; always false for an admin, who never claims.
        */
       canClaimUnassigned: boolean;
+      /**
+       * The pipelines the caller reaches (vários funis): null for an admin, who reaches every
+       * pipeline and carries no pipeline predicate; for anyone else the ids `personPipelineAccess`
+       * returns, in board order. Every lead read and write ANDs it in through
+       * `leadPipelineCondition`, so a lead of another pipeline is `not_found`, the unassigned pool
+       * shrinks to the same pipelines, and a create outside them is refused.
+       */
+      pipelineIds: string[] | null;
     }
   | { ok: false; reason: 'seller_person_unmapped' };
 
@@ -224,7 +233,7 @@ export async function resolveLeadScopePredicate(
   orgId: string,
   scope: LeadScope,
 ): Promise<LeadScopeGate> {
-  if (scope.isAdmin) return { ok: true, sellerPersonId: null, canClaimUnassigned: false };
+  if (scope.isAdmin) return { ok: true, sellerPersonId: null, canClaimUnassigned: false, pipelineIds: null };
   const personId = await resolveCallerPersonId(tx, orgId, scope);
   if (personId) return sellerGate(tx, orgId, personId);
   // The full edition never reaches the provisioning code: an FXL seller without
@@ -248,7 +257,52 @@ async function sellerGate(tx: Db, orgId: string, personId: string): Promise<Lead
     ok: true,
     sellerPersonId: personId,
     canClaimUnassigned: (await findActiveVendedor(tx, orgId, personId)) !== null,
+    pipelineIds: await personPipelineAccess(tx, orgId, personId),
   };
+}
+
+/**
+ * The pipelines a caller reaches, for a read that must not refuse an unmapped caller (`GET
+ * /pipelines`, `GET /followups`): null for an admin (every pipeline), the gate's set for a resolved
+ * caller, and for a caller the gate cannot map the set of a pessoa with no função, which is the
+ * default pipeline alone. Always through `resolveLeadScopePredicate`, so it is the same set the
+ * board reads.
+ */
+export async function resolveCallerPipelineAccess(
+  tx: Db,
+  orgId: string,
+  scope: LeadScope,
+): Promise<string[] | null> {
+  const gate = await resolveLeadScopePredicate(tx, orgId, scope);
+  if (gate.ok) return gate.pipelineIds;
+  return personPipelineAccess(tx, orgId, null);
+}
+
+/**
+ * The pipeline a request that names none lands on: the org's default pipeline when the caller
+ * reaches it, else the first pipeline the caller reaches (board order), else null. An admin always
+ * gets the default one, exactly as before pipelines had access.
+ */
+export async function defaultAccessiblePipelineId(
+  tx: Db,
+  orgId: string,
+  pipelineIds: string[] | null,
+): Promise<string | null> {
+  const fallback = await defaultPipelineId(tx, orgId);
+  if (pipelineIds === null) return fallback;
+  if (fallback !== null && pipelineIds.includes(fallback)) return fallback;
+  return pipelineIds[0] ?? null;
+}
+
+/**
+ * The pipeline predicate, and the ONE place it is spelled: null for an admin, else the lead's
+ * pipeline must be one the caller reaches. An empty set matches nothing (`false`), never
+ * everything.
+ */
+export function leadPipelineCondition(pipelineIds: string[] | null): SQL | null {
+  if (pipelineIds === null) return null;
+  if (pipelineIds.length === 0) return sql`false`;
+  return inArray(salesOpsCrmLeads.pipelineId, pipelineIds);
 }
 
 /** `sales_ops_people.display_name` is capped by `PersonSchema` at this length. */
@@ -678,7 +732,14 @@ export async function summarizeLeadStages(
       .where(
         and(
           ...leadBoardConditions(orgId, gate, query.sellerPersonId),
-          ...(await boardNarrowingConditions(tx, orgId, query, { defaultToDefaultPipeline: true })),
+          // Without a pipelineId the summary covers the pipeline the board opens on: the default one,
+          // or the caller's first pipeline when the default is out of their reach.
+          ...(await boardNarrowingConditions(
+            tx,
+            orgId,
+            { ...query, pipelineId: query.pipelineId ?? (await defaultAccessiblePipelineId(tx, orgId, gate.pipelineIds)) ?? undefined },
+            { defaultToDefaultPipeline: true },
+          )),
         ),
       )
       .groupBy(salesOpsCrmLeads.stageId)
@@ -755,6 +816,8 @@ export function leadIdentityConditions(orgId: string, id: string, gate: LeadScop
   if (gate.sellerPersonId) {
     conditions.push(leadSellerCondition(gate.sellerPersonId, gate.canClaimUnassigned));
   }
+  const pipeline = leadPipelineCondition(gate.pipelineIds);
+  if (pipeline) conditions.push(pipeline);
   return conditions;
 }
 
@@ -781,6 +844,8 @@ function leadBoardConditions(
   } else if (requestedSellerPersonId) {
     conditions.push(eq(salesOpsCrmLeads.sellerPersonId, requestedSellerPersonId));
   }
+  const pipeline = leadPipelineCondition(gate.pipelineIds);
+  if (pipeline) conditions.push(pipeline);
   return conditions;
 }
 
@@ -946,13 +1011,19 @@ async function resolveCreateStage(
   tx: Db,
   orgId: string,
   input: Pick<LeadWriteInput, 'pipelineId' | 'stageId'>,
+  gate: LeadScopeAllowed,
 ): Promise<{ id: string; pipelineId: string }> {
   let pipelineId: string | null;
   if (input.pipelineId !== undefined) {
-    if (!(await pipelineExists(tx, orgId, input.pipelineId))) throw new LeadInputError('pipeline_not_found');
+    // A pipeline out of the caller's reach reads exactly like one that does not exist: a seller
+    // never creates a lead in it, and the answer confirms nothing about it.
+    const reachable = gate.pipelineIds === null || gate.pipelineIds.includes(input.pipelineId);
+    if (!reachable || !(await pipelineExists(tx, orgId, input.pipelineId))) {
+      throw new LeadInputError('pipeline_not_found');
+    }
     pipelineId = input.pipelineId;
   } else {
-    pipelineId = await defaultPipelineId(tx, orgId);
+    pipelineId = await defaultAccessiblePipelineId(tx, orgId, gate.pipelineIds);
   }
   // The edition-independent "no etapa yet" answer: an org with no pipeline, or a pipeline with no
   // open etapa, cannot take a new lead.
@@ -1014,7 +1085,7 @@ async function insertLead(
       ? await resolveClientName(tx, orgId, clientId)
       : (input.clientName ?? '');
 
-    const stage = await resolveCreateStage(tx, orgId, input);
+    const stage = await resolveCreateStage(tx, orgId, input, gate);
     const next = await nextLeadPosition(tx, orgId, stage.id);
 
     const [lead] = await tx

@@ -77,9 +77,11 @@ export type MoveLeadPayload = {
   saleId?: string;
 };
 
-export type SaveLeadStagePayload = { id?: string; name: string; status?: LeadStageStatus };
+/** `pipelineId` is read on create only (the etapa joins that pipeline); a rename never moves one. */
+export type SaveLeadStagePayload = { id?: string; name: string; status?: LeadStageStatus; pipelineId?: string };
 export type SetLeadStageStatusPayload = { id: string; status: LeadStageStatus };
-export type ReorderLeadStagesPayload = { stageIds: string[] };
+/** Without `pipelineId` the API reorders the org's default pipeline. */
+export type ReorderLeadStagesPayload = { stageIds: string[]; pipelineId?: string };
 
 export type ListLeadsParams = {
   /**
@@ -172,14 +174,19 @@ export const leadsApi = {
       }),
     }),
 
-  listStages: (token: Token) =>
-    apiFetch<LeadStagesResponse>(LEAD_STAGES_PATH, { method: 'GET', token }),
+  /** One pipeline's etapas, both statuses; without `pipelineId` the org's default pipeline. */
+  listStages: (token: Token, pipelineId?: string) =>
+    apiFetch<LeadStagesResponse>(
+      pipelineId ? `${LEAD_STAGES_PATH}?pipelineId=${encodeURIComponent(pipelineId)}` : LEAD_STAGES_PATH,
+      { method: 'GET', token },
+    ),
 
-  saveStage: ({ id, ...body }: SaveLeadStagePayload, token: Token) =>
+  /** `PATCH /lead-stages/:id` is strict about its keys, so a rename never carries `pipelineId`. */
+  saveStage: ({ id, pipelineId, ...body }: SaveLeadStagePayload, token: Token) =>
     apiFetch<LeadStageResponse>(id ? `${LEAD_STAGES_PATH}/${id}` : LEAD_STAGES_PATH, {
       method: id ? 'PATCH' : 'POST',
       token,
-      body: JSON.stringify(body),
+      body: JSON.stringify(id || !pipelineId ? body : { ...body, pipelineId }),
     }),
 
   /**

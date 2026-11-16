@@ -239,6 +239,13 @@
       "when": 1794500000000,
       "tag": "0033_crm_exit_reopen_transitions",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1794835143099,
+      "tag": "0034_crm_pipeline_funcoes",
+      "breakpoints": true
     }
   ]
 }

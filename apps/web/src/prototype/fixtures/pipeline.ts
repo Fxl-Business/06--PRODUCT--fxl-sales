@@ -31,6 +31,7 @@ export function buildPipeline(orgNumber: number): CrmPipeline {
     isDefault: true,
     position: 1,
     status: 'active',
+    funcaoIds: [],
     stages,
     transitions,
   };

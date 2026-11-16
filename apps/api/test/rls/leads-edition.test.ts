@@ -37,9 +37,13 @@ import {
 } from '../../src/domains/sales-ops/leads/stage-service.js';
 import { ensureLeadStagesForOrg } from '../../src/domains/sales-ops/leads/stages-seed.js';
 import {
+  FuncaoSchema,
   PersonSchema,
+  UpdateFuncaoSchema,
   UpdatePersonSchema,
+  createFuncao,
   createPerson,
+  updateFuncao,
   updatePerson,
   withTenant,
 } from '../../src/domains/sales-ops/service.js';
@@ -563,18 +567,28 @@ describe('sales operations leads edition: contact leads, vendedor-only pessoas, 
     ]);
   });
 
-  it('ignores body funcaoIds in the leads edition', async () => {
+  it('keeps vendedor and refuses a system or unknown extra função in the leads edition', async () => {
     const orgId = newOrg('ignore');
     await leadsVendedor(orgId, 'Ana');
     const finderId = await funcaoIdBySlug(orgId, 'finder');
     const vendedorId = await funcaoIdBySlug(orgId, 'vendedor');
 
-    const bodies = [
+    // An extra função must be non-system and the org's own: anything else writes nothing.
+    for (const body of [
       { displayName: 'Bruno', funcaoIds: [finderId] },
       { displayName: 'Caio', funcaoIds: ['99999999-9999-4999-8999-999999999999'] },
+    ]) {
+      expect(await createPerson(db, orgId, PersonSchema.parse(body), LEADS)).toBe('unknown_funcao');
+    }
+    const [people] = await adminClient<Array<{ n: number }>>`
+      SELECT count(*)::int AS n FROM sales_ops_people WHERE org_id = ${orgId}`;
+    expect(people!.n).toBe(1);
+
+    // The deprecated booleans add nothing, and the vendedor id itself is absorbed.
+    for (const body of [
       { displayName: 'Davi', isFinder: true, isCollaborator: true },
-    ];
-    for (const body of bodies) {
+      { displayName: 'Eva', funcaoIds: [vendedorId] },
+    ]) {
       const person = await createPerson(db, orgId, PersonSchema.parse(body), LEADS);
       if (typeof person === 'string') throw new Error(`unexpected person outcome: ${person}`);
       expect(slugsOf(person)).toEqual(['vendedor']);
@@ -583,7 +597,7 @@ describe('sales operations leads edition: contact leads, vendedor-only pessoas, 
     }
   });
 
-  it('forces exactly vendedor on update in the leads edition', async () => {
+  it('always keeps vendedor on update in the leads edition and refuses a system extra', async () => {
     const orgId = newOrg('force');
     await leadsVendedor(orgId, 'Ana');
     const finderId = await funcaoIdBySlug(orgId, 'finder');
@@ -596,12 +610,26 @@ describe('sales operations leads edition: contact leads, vendedor-only pessoas, 
     );
     if (typeof both === 'string') throw new Error(`unexpected person outcome: ${both}`);
     expect(slugsOf(both)).toEqual(['finder', 'vendedor']);
+    const rowsBefore = await personFuncaoRows(orgId, both.id);
 
+    expect(
+      await updatePerson(
+        db,
+        orgId,
+        both.id,
+        UpdatePersonSchema.parse({ displayName: 'Bruno B', funcaoIds: [finderId] }),
+        ADMIN_ACTOR,
+        LEADS,
+      ),
+    ).toBe('unknown_funcao');
+    expect(await personFuncaoRows(orgId, both.id)).toEqual(rowsBefore);
+
+    // An empty set means vendedor only: the full edition's finder is dropped, vendedor stays.
     const updated = await updatePerson(
       db,
       orgId,
       both.id,
-      UpdatePersonSchema.parse({ displayName: 'Bruno B', funcaoIds: [finderId] }),
+      UpdatePersonSchema.parse({ displayName: 'Bruno B', funcaoIds: [] }),
       ADMIN_ACTOR,
       LEADS,
     );
@@ -627,6 +655,54 @@ describe('sales operations leads edition: contact leads, vendedor-only pessoas, 
     const funcoesAfter =
       await adminClient`SELECT id FROM sales_ops_funcoes WHERE org_id = ${orgId}`;
     expect(funcoesAfter.length).toBe(funcoesBefore.length);
+  });
+
+  it('accepts extra active non-system funções in the leads edition, vendedor always in the set', async () => {
+    const orgId = newOrg('extras');
+    await leadsVendedor(orgId, 'Ana');
+    const vendedorId = await funcaoIdBySlug(orgId, 'vendedor');
+    const financeiro = await createFuncao(db, orgId, FuncaoSchema.parse({ name: 'Financeiro' }));
+    const cobranca = await createFuncao(db, orgId, FuncaoSchema.parse({ name: 'Cobrança' }));
+    if (typeof financeiro === 'string' || typeof cobranca === 'string') throw new Error('unexpected função outcome');
+
+    const bruno = await createPerson(
+      db,
+      orgId,
+      PersonSchema.parse({ displayName: 'Bruno', funcaoIds: [financeiro.id] }),
+      LEADS,
+    );
+    if (typeof bruno === 'string') throw new Error(`unexpected person outcome: ${bruno}`);
+    expect(slugsOf(bruno)).toEqual(['financeiro', 'vendedor']);
+    expect((await personFuncaoRows(orgId, bruno.id)).map((row) => row.funcao_id).sort()).toEqual(
+      [financeiro.id, vendedorId].sort(),
+    );
+
+    // An archived extra the pessoa already holds is kept; one she does not hold is refused.
+    await updateFuncao(db, orgId, financeiro.id, UpdateFuncaoSchema.parse({ status: 'archived' }), ADMIN_ACTOR);
+    await updateFuncao(db, orgId, cobranca.id, UpdateFuncaoSchema.parse({ status: 'archived' }), ADMIN_ACTOR);
+    const kept = await updatePerson(
+      db,
+      orgId,
+      bruno.id,
+      UpdatePersonSchema.parse({ displayName: 'Bruno', funcaoIds: [financeiro.id] }),
+      ADMIN_ACTOR,
+      LEADS,
+    );
+    if (kept === null || typeof kept === 'string') throw new Error(`unexpected person outcome: ${String(kept)}`);
+    expect(slugsOf(kept)).toEqual(['financeiro', 'vendedor']);
+    expect(
+      await updatePerson(
+        db,
+        orgId,
+        bruno.id,
+        UpdatePersonSchema.parse({ displayName: 'Bruno', funcaoIds: [financeiro.id, cobranca.id] }),
+        ADMIN_ACTOR,
+        LEADS,
+      ),
+    ).toBe('unknown_funcao');
+    expect((await personFuncaoRows(orgId, bruno.id)).map((row) => row.funcao_id).sort()).toEqual(
+      [financeiro.id, vendedorId].sort(),
+    );
   });
 
   it('accepts an empty funcaoIds and a status-only PATCH in the leads edition (SEAM A3)', async () => {
