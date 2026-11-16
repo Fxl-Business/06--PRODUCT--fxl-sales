@@ -186,7 +186,7 @@ Full reference: `nexo/knowledge/reference/arquivamento-e-historico.md`.
 - Restore lives only in `Histórico de arquivamentos`, except the leads edition's `cadastros/funcoes`, which lists archived funções with `Reativar` (the same status PATCH, so the same `cadastro.restored` ledger entry) because that edition has no Geral.
 - The only hard delete is the nightly `runArchivedCadastroPurge()`: archived, older than 30 days, not a system função, unreferenced. It relies on Postgres `23503` to skip referenced rows; never hand-write a reference check and never add `ON DELETE CASCADE` to the history FKs.
 - Each purge is one transaction writing the `cadastro.purged` ledger entry first (`actor_user_id = 'system'`, `actor_org_id` = the row's org).
-- Archived rows are hidden from lists and pickers only; they still render where referenced. Restore lives only in `Histórico de arquivamentos`.
+- Archived rows are hidden from lists and pickers only; they still render where referenced.
 - A cliente cannot be archived (no `status` column); do not add the control before the column.
 - Archive and restore write a hash-chained `audit_log` entry with the SAME transaction `tx`, never the pooled `db`. Ordinary edits write nothing.
 - The actor name is snapshotted from the token (`name`, `email`, `null`).
