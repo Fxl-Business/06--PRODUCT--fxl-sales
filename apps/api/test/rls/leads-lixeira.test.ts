@@ -648,6 +648,7 @@ describe('sales operations leads: the lixeira', () => {
     expect(all.items.map((item) => item.id)).not.toContain(live.id);
     for (const item of all.items) {
       expect(Object.keys(item).sort()).toEqual([
+        'batchId',
         'clientName',
         'contactName',
         'deletedAt',

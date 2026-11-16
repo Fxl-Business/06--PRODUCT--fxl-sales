@@ -10,7 +10,7 @@
 import { randomUUID } from 'node:crypto';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { closeDb } from '../../src/db/client.js';
 import * as schema from '../../src/db/schema.js';
@@ -39,6 +39,10 @@ vi.mock('../../src/domains/audit/service.js', async (importOriginal) => {
   return { ...original, writeAuditEntries: vi.fn(original.writeAuditEntries) };
 });
 const auditEntries = vi.mocked(writeAuditEntries);
+// The spy is shared by every test of the file; each test counts only its own calls.
+beforeEach(() => {
+  auditEntries.mockClear();
+});
 
 const { appUrl: APP_DB_URL, adminUrl: ADMIN_DB_URL } = testDatabaseUrls();
 const ADMIN_CONNECTION_OPTIONS = { connection: { 'app.fxl_admin': 'true' } } as const;

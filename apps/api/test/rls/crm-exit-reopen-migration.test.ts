@@ -110,7 +110,8 @@ describe('migration 0033 (exits Ganho and Perdido reopen into every open etapa)'
   it('is additive only: one INSERT into the transitions with ON CONFLICT DO NOTHING, no UPDATE and no DELETE', () => {
     const sql = source();
     expect(scanSql(sql)).toEqual([]);
-    expect(sql).not.toMatch(/\bUPDATE\b/i);
+    // The header comment says "no UPDATE"; only the statements are judged.
+    expect(sql.replace(/--[^\n]*/g, '')).not.toMatch(/\bUPDATE\b/i);
     const chunks = sql.split(BREAKPOINT).map((c) => c.trim()).filter(Boolean);
     expect(chunks).toHaveLength(2);
     expect(chunks[1]).toMatch(/^INSERT INTO "sales_ops_pipeline_transitions"/);
