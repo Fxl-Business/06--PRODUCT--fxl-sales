@@ -14,14 +14,14 @@ import { MUTATION_ERROR_COPY } from '../mutation-error-copy';
 import { exportErrorMessage, IMPORT_COPY, importErrorMessage } from './import-copy';
 import { ImportCountsTable } from './ImportCountsTable';
 import { ImportIssueList } from './ImportIssueList';
+import { StageMapStep } from './StageMapStep';
 import {
   allStagesResolved,
   defaultChoice,
-  StageMapStep,
   toStageMap,
   type StageChoice,
   type StageChoices,
-} from './StageMapStep';
+} from './stage-map';
 import { groupImportIssues, recognizedClientCount, totalCount } from './issues';
 import {
   isImportPreviewBody,

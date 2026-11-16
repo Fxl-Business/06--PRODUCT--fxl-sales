@@ -1,56 +1,16 @@
 import { Combobox, type ComboboxOption } from '@/components/ui/combobox';
 import { formSelectClass } from '../leads/board-ui';
 import { IMPORT_COPY } from './import-copy';
-import type {
-  ImportLeadStage,
-  ImportStageTarget,
-  StageMap,
-  StageMapEntry,
-} from './types';
-
-/** What the operator decided for one spreadsheet etapa. `sheet`: the Etapas tab of the same file creates it. */
-export type StageChoice = StageMapEntry | { sheet: true };
-export type StageChoices = Record<string, StageChoice>;
-
-const CREATE_VALUE = '__create';
-const FIRST_VALUE = '__first';
-const SHEET_VALUE = '__sheet';
-const STAGE_PREFIX = 'stage:';
-
-function choiceValue(choice: StageChoice | undefined): string | null {
-  if (!choice) return null;
-  if ('stageId' in choice) return `${STAGE_PREFIX}${choice.stageId}`;
-  if ('create' in choice) return CREATE_VALUE;
-  if ('first' in choice) return FIRST_VALUE;
-  return SHEET_VALUE;
-}
-
-function valueChoice(value: string): StageChoice | null {
-  if (value === CREATE_VALUE) return { create: true };
-  if (value === FIRST_VALUE) return { first: true };
-  if (value.startsWith(STAGE_PREFIX)) return { stageId: value.slice(STAGE_PREFIX.length) };
-  return null;
-}
-
-/** The choices a fresh preview starts with: etapas already matched by name; the rest stay empty. */
-export function defaultChoice(stage: ImportLeadStage): StageChoice | undefined {
-  if (stage.resolution.kind !== 'existing') return undefined;
-  return stage.resolution.stageId === null ? { sheet: true } : { stageId: stage.resolution.stageId };
-}
-
-/** The `stageMap` to send: every choice except the one the Etapas tab already covers. */
-export function toStageMap(stages: ImportLeadStage[], choices: StageChoices): StageMap {
-  const map: StageMap = {};
-  for (const stage of stages) {
-    const choice = choices[stage.name];
-    if (choice && !('sheet' in choice)) map[stage.name] = choice;
-  }
-  return map;
-}
-
-export function allStagesResolved(stages: ImportLeadStage[], choices: StageChoices): boolean {
-  return stages.every((stage) => choices[stage.name] !== undefined);
-}
+import {
+  CREATE_VALUE,
+  FIRST_VALUE,
+  STAGE_PREFIX,
+  choiceValue,
+  valueChoice,
+  type StageChoice,
+  type StageChoices,
+} from './stage-map';
+import type { ImportLeadStage, ImportStageTarget } from './types';
 
 type StageMapStepProps = {
   choices: StageChoices;
