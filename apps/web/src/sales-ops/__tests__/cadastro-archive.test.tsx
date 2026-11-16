@@ -50,6 +50,15 @@ vi.mock('@/components/ui/dialog', () => ({
 }));
 
 /*
+  `FuncoesView` reads the edition through `useSalesEdition()`, which needs the Hub provider.
+  These tests cover the full edition.
+*/
+vi.mock('@/auth/react', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/auth/react')>()),
+  useSalesEdition: () => 'full',
+}));
+
+/*
   The CloseCtx version, copied from sales-transition-actions.test.tsx: without it
   `AlertDialogCancel` renders as an inert button and "cancelling writes nothing"
   would pass even if the cancel never closed the confirmation.

@@ -359,7 +359,6 @@ describe('the leads edition inside the Sales Ops shell', () => {
       '/tatico/dashboard',
       '/operacional/comissoes',
       '/cadastros/produtos',
-      '/cadastros/funcoes',
       '/cadastros/geral',
       '/meus-dados/funil',
       '/meus-dados/vendedores',
@@ -376,12 +375,12 @@ describe('the leads edition inside the Sales Ops shell', () => {
     expect(navLabel('Comissões')).toBeNull();
   });
 
-  it('shows Vendedores, Clientes, Funis e etapas, Importação and Leads excluídos in cadastros', async () => {
+  it('shows Vendedores, Clientes, Funções, Funis e etapas, Importação and Leads excluídos in cadastros', async () => {
     await renderRoute('/cadastros/etapas', gestor, 'leads');
-    for (const label of ['Vendedores', 'Clientes', 'Funis e etapas', 'Importação', 'Leads excluídos']) {
+    for (const label of ['Vendedores', 'Clientes', 'Funções', 'Funis e etapas', 'Importação', 'Leads excluídos']) {
       expect(navLabel(label), label).not.toBeNull();
     }
-    for (const label of ['Pessoas', 'Produtos & Serviços', 'Funções', 'Geral']) {
+    for (const label of ['Pessoas', 'Produtos & Serviços', 'Geral']) {
       expect(navLabel(label), label).toBeNull();
     }
     expect(container.querySelector('[data-lead-stages]')).not.toBeNull();

@@ -302,6 +302,7 @@ const TEAM_NAV_LEADS: Record<'tatico' | 'operacional' | 'cadastros', Array<[Sale
   'cadastros': [
     ['pessoas', 'Vendedores'],
     ['clientes', 'Clientes'],
+    ['funcoes', 'Funções'],
     ['etapas', 'Funis e etapas'],
     ['importacao', 'Importação'],
     ['leads-excluidos', 'Leads excluídos'],

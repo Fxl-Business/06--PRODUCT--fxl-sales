@@ -138,10 +138,11 @@ Full reference: `nexo/knowledge/reference/sales-ops-routing.md`.
 - An unknown or other-org id renders `Proposta não encontrada` without the id; closing pops history when opened in-app (`SALE_DETAIL_OPENED_IN_APP`) and otherwise replaces the URL with the list.
 - `cadastros/vendedores` and `cadastros/finders` redirect to `/cadastros/pessoas`; `aliasLegacyView` only fires in `cadastros`.
 - Visibility comes only from `profile.roles` via `getVisibleWorkspaces`: `admin` sees `tatico`, `operacional`, `cadastros`; `seller` or `finder` adds `meus-dados`; no roles keeps `/no-role`. `admin` is synthesized from the Hub workspace `owner`/`admin` flag in `getRolesFromHubClaims`.
+- The `funcoes` entry has no `requires`: `cadastros/funcoes` shows in every edition (it needed `catalogo` before vários funis), in its original menu position.
 - Navigation is ONE catalogue filtered by the organization's modules (`org-modules.ts`, `hasModule`): every entry in `navigation.ts` carries `requires`, there are no parallel per-edition lists, and every navigation function takes a trailing `modules` (default every module).
   With `orcamentos` off (the compact profile, today's leads edition) `admin` sees only `operacional` and `cadastros` (`pessoas` first and labelled Vendedores), a non-admin `seller` only `meus-dados`, and the entries that need a disabled module are absent.
   A deep link is never rewritten while the bootstrap is loading.
-  Oracles: `navigation-edition.test.ts` (exact equivalence with both former editions), `navigation-modules.test.ts`, `org-modules-shell.test.tsx`.
+  Oracles: `navigation-edition.test.ts` (exact equivalence with both former editions, except the deliberate `funcoes` entry now open in the leads edition), `navigation-modules.test.ts`, `org-modules-shell.test.tsx`.
 - OPEN PRODUCT QUESTION: every admin-bearing claim shape also returns `seller` and `finder`, so "team-only without `meus-dados`" is unreachable. Do not resolve it by changing `claims.ts` without a product decision.
 - `meus-dados` reuses existing panels; `MeuPainelView` is read-only. Pessoa and função editing live only under Cadastros.
 - Keep the legacy trees `/admin/*`, `/finder/*`, `/seller/*`, `/no-role` unchanged. `/no-role` is wrapped in `NoRoleGuard` (inside `<Protected>`), keyed on `getVisibleWorkspaces(roles).length > 0`, never `roles.length > 0`.
@@ -182,6 +183,7 @@ Convites de vendedor:
 Full reference: `nexo/knowledge/reference/arquivamento-e-historico.md`.
 
 - `salesOpsRouter` has no DELETE verb. "Arquivar" is a status-only PATCH (body carries `status` only), reversible from `cadastros/geral`. Produto, área, função go to `archived`; pessoa goes to `inactive`.
+- Restore lives only in `Histórico de arquivamentos`, except the leads edition's `cadastros/funcoes`, which lists archived funções with `Reativar` (the same status PATCH, so the same `cadastro.restored` ledger entry) because that edition has no Geral.
 - The only hard delete is the nightly `runArchivedCadastroPurge()`: archived, older than 30 days, not a system função, unreferenced. It relies on Postgres `23503` to skip referenced rows; never hand-write a reference check and never add `ON DELETE CASCADE` to the history FKs.
 - Each purge is one transaction writing the `cadastro.purged` ledger entry first (`actor_user_id = 'system'`, `actor_org_id` = the row's org).
 - Archived rows are hidden from lists and pickers only; they still render where referenced. Restore lives only in `Histórico de arquivamentos`.
@@ -210,6 +212,7 @@ Full reference: `nexo/knowledge/reference/pessoas-e-funcoes.md`.
 - A Pessoa is the single people cadastro; a Função is an org-scoped role assigned to a pessoa.
 - `vendedor` and `finder` are the only system funções: not renamable or archivable (`409 funcao_is_system`), no edit affordance. Everything else, `Prestador` included, is org-created.
 - Funções are archived, never deleted.
+- `FuncoesView` is the one função screen in every edition. Only in the leads edition (`useSalesEdition() === 'leads'`) it hides the predefined `finder`, uses the vendedor-and-funis empty copy, and lists ARCHIVED funções last with `Reativar` (`PATCH /funcoes/:id { status: 'active' }`, same audited restore path as Geral), because that edition has no Geral. System funções stay locked; the full edition lists no archived função.
 - `GET /bootstrap` seeds the missing system funções (`vendedor`, `finder`) on read, in a `withTenant` transaction before the snapshot, through the ONE `ensureSystemFuncoes` (no second implementation).
   The guard is per absent system slug: an existing função, active or archived, is never recreated or written. A custom função squatting the name raises `system_funcao_seed_failed`, which the bootstrap logs and survives.
   Only the bootstrap route, the import routes and the leads-edition person writes may call it (oracles `sales-ops/__tests__/funcoes-seed-callers.test.ts` and `test/rls/bootstrap-system-funcoes-seed.test.ts`).

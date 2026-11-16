@@ -42,9 +42,9 @@ describe('every module off hides exactly the entries that require it', () => {
     ]);
   });
 
-  it('catalogo hides Produtos, Áreas and Funções', () => {
+  it('catalogo hides Produtos and Áreas, never Funções (open in every edition)', () => {
     expect(ids(getSalesOpsNavigation('cadastros', ['admin'], OFF('catalogo')))).toEqual([
-      'clientes', 'pessoas', 'etapas', 'importacao', 'leads-excluidos', 'geral',
+      'clientes', 'pessoas', 'funcoes', 'etapas', 'importacao', 'leads-excluidos', 'geral',
     ]);
   });
 
@@ -106,7 +106,7 @@ describe('the compact profile (orcamentos off)', () => {
     ]);
   });
 
-  it('the leads module set plus catalogo adds Produtos, Áreas and Funções after Pessoas', () => {
+  it('the leads module set plus catalogo adds Produtos and Áreas after Pessoas', () => {
     expect(ids(getSalesOpsNavigation('cadastros', ['admin'], { ...LEADS, catalogo: true }))).toEqual([
       'pessoas', 'produtos', 'areas', 'clientes', 'funcoes', 'etapas', 'importacao', 'leads-excluidos',
     ]);

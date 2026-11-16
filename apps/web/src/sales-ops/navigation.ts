@@ -142,7 +142,8 @@ const cadastros: NavEntry[] = [
     compactLabel: 'Vendedores',
     compactFirst: true,
   },
-  { id: 'funcoes', label: 'Funções', icon: Tags, requires: ['catalogo'] },
+  // Open in every edition since vários funis: a função decides which funis a pessoa reaches.
+  { id: 'funcoes', label: 'Funções', icon: Tags, requires: [] },
   { id: 'etapas', label: 'Funis e etapas', icon: ListChecks, requires: [] },
   { id: 'importacao', label: 'Importação', icon: FileSpreadsheet, requires: ['importacao'] },
   // The lead lixeira (AC9): the gestor restores a deleted lead here.

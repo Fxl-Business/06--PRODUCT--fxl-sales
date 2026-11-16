@@ -34,6 +34,16 @@ vi.mock('@/components/ui/dialog', () => ({
   ),
 }));
 
+/*
+  `FuncoesView` reads the edition through `useSalesEdition()`; the real hook needs the Hub
+  provider, so the tests drive it through this switch (default: the full edition).
+*/
+const editionState = vi.hoisted(() => ({ edition: 'full' as 'full' | 'leads' }));
+vi.mock('@/auth/react', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/auth/react')>()),
+  useSalesEdition: () => editionState.edition,
+}));
+
 import { FuncaoDialog, FuncoesView, PersonDialog, PessoasView } from '../SalesOpsApp';
 
 const act = (
@@ -524,6 +534,10 @@ describe('pessoas cadastro', () => {
 });
 
 describe('funções cadastro', () => {
+  beforeEach(() => {
+    editionState.edition = 'full';
+  });
+
   it('lists funções marking predefinidas and counting assigned pessoas', async () => {
     const one = withFuncoes({ id: '55555555-5555-4555-8555-555555555555', displayName: 'Sig' }, [
       vendedor,
@@ -723,6 +737,111 @@ describe('funções cadastro', () => {
     expect(text()).toContain('Função predefinida do app');
     await submit();
     expect(onSave).not.toHaveBeenCalled();
+  });
+});
+
+describe('funções cadastro, edição leads', () => {
+  const archivedTester = funcao({
+    id: 'fc00000a-0000-4000-8000-00000000000a',
+    name: 'Tester',
+    slug: 'tester',
+    isSystem: false,
+    status: 'archived',
+  });
+
+  beforeEach(() => {
+    editionState.edition = 'leads';
+  });
+
+  it('hides the predefined finder and keeps vendedor locked', async () => {
+    await act(async () => {
+      root.render(
+        <FuncoesView
+          bootstrap={bootstrap({ funcoes: [vendedor, finder, designer] })}
+          onArchive={vi.fn()}
+          onEdit={vi.fn()}
+        />,
+      );
+    });
+
+    expect(text()).toContain('Vendedor');
+    expect(text()).toContain('Designer');
+    expect(text()).not.toContain('Finder');
+    expect(buttonByAriaLabel('Função predefinida do app')!.disabled).toBe(true);
+    expect(buttonByAriaLabel('Arquivar função Vendedor')).toBeNull();
+  });
+
+  it('uses the leads empty copy, with no finder or prestadores', async () => {
+    await act(async () => {
+      root.render(
+        <FuncoesView bootstrap={bootstrap({ funcoes: [finder] })} onArchive={vi.fn()} onEdit={vi.fn()} />,
+      );
+    });
+
+    expect(text()).toContain('Nenhuma função cadastrada');
+    expect(text()).toContain('funis');
+    expect(text().toLowerCase()).not.toContain('finder');
+    expect(text()).not.toContain('prestadores');
+  });
+
+  it('lists an archived função as Arquivada and Reativar sends status active', async () => {
+    const onArchive = vi.fn();
+    await act(async () => {
+      root.render(
+        <FuncoesView
+          bootstrap={bootstrap({ funcoes: [vendedor, designer, archivedTester] })}
+          onArchive={onArchive}
+          onEdit={vi.fn()}
+        />,
+      );
+    });
+
+    const row = container.querySelector('[data-funcao-archived]');
+    expect(row?.textContent).toContain('Tester');
+    expect(row?.textContent).toContain('Arquivada');
+    // No edit and no archive on an archived row.
+    expect(buttonByAriaLabel('Editar Tester')).toBeNull();
+
+    await click(buttonByAriaLabel('Reativar função Tester')!);
+    expect(onArchive).toHaveBeenCalledWith({
+      cadastro: 'funcao',
+      id: archivedTester.id,
+      name: 'Tester',
+      status: 'active',
+    });
+    expect(text()).not.toContain(archivedTester.id);
+  });
+
+  it('lists archived funções last, behind the active ones', async () => {
+    await act(async () => {
+      root.render(
+        <FuncoesView
+          bootstrap={bootstrap({ funcoes: [archivedTester, vendedor, designer] })}
+          onArchive={vi.fn()}
+          onEdit={vi.fn()}
+        />,
+      );
+    });
+    const names = [...container.querySelectorAll('tbody tr')].map((row) =>
+      row.querySelector('td')?.textContent?.replace('Arquivada', '').trim(),
+    );
+    expect(names).toEqual(['Vendedor', 'Designer', 'Tester']);
+  });
+
+  it('the full edition never lists an archived função or offers Reativar', async () => {
+    editionState.edition = 'full';
+    await act(async () => {
+      root.render(
+        <FuncoesView
+          bootstrap={bootstrap({ funcoes: [vendedor, finder, designer, archivedTester] })}
+          onArchive={vi.fn()}
+          onEdit={vi.fn()}
+        />,
+      );
+    });
+    expect(text()).toContain('Finder');
+    expect(text()).not.toContain('Tester');
+    expect(container.querySelector('[data-funcao-archived]')).toBeNull();
   });
 });
 

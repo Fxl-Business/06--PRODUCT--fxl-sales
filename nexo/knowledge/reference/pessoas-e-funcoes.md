@@ -51,5 +51,10 @@ In the leads edition a função was invisible until now, so a pessoa had to be a
 - Web: `VendedorDialog` adds `Funções extras`, the shared `FuncaoMultiPicker` (`apps/web/src/sales-ops/leads/FuncaoMultiPicker.tsx`: chips plus ONE `Combobox`, system funções never offered, inline create through the shell's `createFuncaoByName`).
   `buildVendedorPayload` sends `[vendedor, ...extras]` (only the extras when the catalogue has no vendedor yet) and `extraFuncaoIdsOf` reads the pessoa's non-system funções.
   The copy scan in `vendedores.test.ts` no longer forbids the word função in this edition.
+- `cadastros/funcoes` shows in every edition (the nav entry has no `requires`) and reuses the one `FuncoesView`.
+  Only when `useSalesEdition() === 'leads'`: the predefined `finder` is not listed (the edition has no finders), the empty-list copy talks about vendedor and custom funções that give access to funis (no finder, no prestadores), and ARCHIVED funções are listed after the active ones (`data-funcao-archived`, badge `Arquivada`, muted text, `Nº pessoas` as `-`) with `Reativar`, because that edition has no `Geral` and so no `Histórico de arquivamentos`.
+  `Reativar` has no confirmation and no `Editar`; it calls the same `onArchive` seam with `status: 'active'`, i.e. the ordinary `PATCH /funcoes/:id { status: 'active' }`, so `updateFuncao` writes the `cadastro.restored` ledger entry exactly as the restore in Geral does (no second path).
+  The system `vendedor` stays locked: no edit, no archive. The full edition is unchanged: archived funções are not listed on the screen.
+  Oracle: `apps/web/src/sales-ops/__tests__/pessoas-funcoes-view.test.tsx` (`funções cadastro, edição leads`).
 - A vendedor-only pessoa changes nothing: she reaches the default funil exactly as before.
 - Oracles: `apps/api/test/rls/leads-edition.test.ts` (extras accepted, vendedor always kept, system or unknown refused, archived extra kept only when held), `apps/api/test/rls/pipeline-access.test.ts`, `people/__tests__/vendedores.test.ts`, `people/__tests__/vendedores-view.test.tsx`.

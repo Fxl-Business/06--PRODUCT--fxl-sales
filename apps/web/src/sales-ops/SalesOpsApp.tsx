@@ -35,7 +35,7 @@ import {
   type ReactNode,
 } from 'react';
 import { Navigate, useLocation, useNavigate, useParams } from 'react-router-dom';
-import { useAuthProfile, useLogout, useOrganizations } from '@/auth/react';
+import { useAuthProfile, useLogout, useOrganizations, useSalesEdition } from '@/auth/react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -756,10 +756,13 @@ function CadastroArchiveConfirm({
   target,
   onCancel,
   onConfirm,
+  bodyOverride,
 }: {
   target: CadastroArchiveTarget | null;
   onCancel: () => void;
   onConfirm: () => void;
+  /** Replaces the table's `confirmBody` where its restore pointer would be false. */
+  bodyOverride?: string;
 }) {
   const copy = target ? cadastroArchive[target.cadastro] : null;
   return (
@@ -769,7 +772,7 @@ function CadastroArchiveConfirm({
           <AlertDialogTitle>
             {copy && target ? copy.confirmTitle(target.name) : ''}
           </AlertDialogTitle>
-          <AlertDialogDescription>{copy ? copy.confirmBody : ''}</AlertDialogDescription>
+          <AlertDialogDescription>{copy ? (bodyOverride ?? copy.confirmBody) : ''}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Voltar</AlertDialogCancel>
@@ -4200,6 +4203,10 @@ export function PessoasView({
   );
 }
 
+/** The leads edition has no Geral, so its função archive confirmation points at this screen. */
+const LEADS_FUNCAO_ARCHIVE_BODY =
+  'Ela sai das listas de seleção de novas atribuições, mas continua nas pessoas que já a utilizam. Nada é apagado e você pode reativá-la nesta tela, na lista de funções arquivadas.';
+
 /**
  * The funções cadastro. `vendedor` and `finder` are predefined app roles: the API
  * answers `409 funcao_is_system` to any rename or archive, so this table offers no
@@ -4221,13 +4228,26 @@ export function FuncoesView({
 }) {
   // Above the early return: `react-hooks/rules-of-hooks` fails lint otherwise.
   const archive = useCadastroArchive(onArchive);
+  const isLeadsEdition = useSalesEdition() === 'leads';
   // v2.6.0: an archived função is not listed at all. Keyed on the FILTERED list for
   // the same reason as `AreasView` - see the note there.
-  const listed = bootstrap.funcoes.filter((funcao) => funcao.status === 'active');
+  // The leads edition differs in two ways: `finder` is not offered (that edition has
+  // no finders), and archived funções are listed last with `Reativar`, because it has
+  // no `Geral` and so no `Histórico de arquivamentos` to restore from.
+  const visible = bootstrap.funcoes.filter(
+    (funcao) => !(isLeadsEdition && funcao.isSystem && funcao.slug === FUNCAO_SLUG_FINDER),
+  );
+  const active = visible.filter((funcao) => funcao.status === 'active');
+  const archived = isLeadsEdition ? visible.filter((funcao) => funcao.status !== 'active') : [];
+  const listed = [...active, ...archived];
   if (listed.length === 0) {
     return (
       <EmptyPanel
-        text="Vendedor e finder são funções predefinidas do app; crie funções personalizadas para prestadores como designer, desenvolvedor ou P.O."
+        text={
+          isLeadsEdition
+            ? 'Vendedor é a função predefinida do app; crie funções personalizadas para dar acesso a funis específicos.'
+            : 'Vendedor e finder são funções predefinidas do app; crie funções personalizadas para prestadores como designer, desenvolvedor ou P.O.'
+        }
         title="Nenhuma função cadastrada"
       />
     );
@@ -4247,6 +4267,47 @@ export function FuncoesView({
         </TableHeader>
         <TableBody>
           {listed.map((funcao) => {
+            if (funcao.status !== 'active') {
+              return (
+                /*
+                  Muted through the TEXT colour, never a row opacity (see VendedoresView).
+                  No confirmation: a restore loses nothing. The write is the ordinary
+                  status PATCH, so the API writes the same restore ledger entry as Geral.
+                */
+                <TableRow data-funcao-archived key={funcao.id}>
+                  <TableCell className="px-4 py-3 text-sm font-semibold text-[#9b9ba3]">
+                    {funcao.name}
+                    <span className="ml-2 inline-flex items-center rounded-full bg-[#eeeef1] px-2 py-0.5 align-middle text-[11px] font-semibold text-[#6a6a72]">
+                      Arquivada
+                    </span>
+                  </TableCell>
+                  <TableCell className="px-4 py-3 text-center">
+                    <Badge className={neutralBadgeClass}>Personalizada</Badge>
+                  </TableCell>
+                  <TableCell className="px-4 py-3 text-center text-[13.5px] text-[#9b9ba3]">-</TableCell>
+                  <TableCell className="px-4 py-3 text-center">
+                    <div className="flex items-center justify-center gap-1.5">
+                      <button
+                        aria-label={`Reativar função ${funcao.name}`}
+                        className={iconButtonClass}
+                        onClick={() =>
+                          onArchive({
+                            cadastro: 'funcao',
+                            id: funcao.id,
+                            name: funcao.name,
+                            status: 'active',
+                          })
+                        }
+                        title="Reativar"
+                        type="button"
+                      >
+                        <RotateCcw className="h-[15px] w-[15px]" />
+                      </button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              );
+            }
             /*
               The join key on a person's nested entry is `id`, not `funcaoId`.
               Active pessoas only, for the same reason as `Nº produtos` in AreasView: an
@@ -4316,6 +4377,7 @@ export function FuncoesView({
         </TableBody>
       </Table>
       <CadastroArchiveConfirm
+        bodyOverride={isLeadsEdition ? LEADS_FUNCAO_ARCHIVE_BODY : undefined}
         onCancel={archive.cancel}
         onConfirm={archive.confirm}
         target={archive.pending}
