@@ -3,9 +3,9 @@
   "current_milestone_id": "v4.8.0",
   "delivery": {
     "mode": "promotion",
-    "trunk": "master",
+    "trunk": "main",
     "chain": [
-      "master",
+      "main",
       "staging",
       "production"
     ],

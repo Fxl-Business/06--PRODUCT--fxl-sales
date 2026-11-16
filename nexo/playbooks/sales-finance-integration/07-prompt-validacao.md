@@ -8,7 +8,7 @@ Você vai auditar o estado da integração de duas vias entre FXL Sales e FXL Fi
 SOMENTE LEITURA. Não edite, crie, apague, commite, faça push, publique, promova nem remova nada. Não suba servidores. Pode rodar suítes de teste uma vez, em modo run-once (nunca watch), e deve encerrar pelo PID/grupo qualquer processo que você mesmo iniciar.
 
 Repositórios:
-- Sales: /Users/cauetpinciara/Documents/fxl/projects/06--PRODUCT--fxl-sales (trunk master)
+- Sales: /Users/cauetpinciara/Documents/fxl/projects/06--PRODUCT--fxl-sales (trunk main)
 - Finance: /Users/cauetpinciara/Documents/fxl/projects/01--PRODUCT--fxl-finance (trunk main)
 - Hub: /Users/cauetpinciara/Documents/fxl/projects/16--INTERNAL--fxl-hub (trunk main)
 

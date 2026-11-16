@@ -10,11 +10,11 @@ Rodar no repo do Sales, em autopilot (`/nexo --feature --autopilot` com o bloco 
 >
 > **Passo 0: valide o estado do repo ANTES de planejar ou escrever qualquer coisa.** Relate o resultado de cada item no início da run.
 >
-> 1. Você está no checkout principal, no `master`, e `git status` só mostra `.vscode/` como não rastreado. Qualquer outra mudança sem commit: PARE e relate, não faça stash, commit nem descarte.
-> 2. `master` contém `origin/master` (pode estar à frente, sem push; isso é esperado). Se estiver atrás ou divergente: PARE e relate.
+> 1. Você está no checkout principal, no `main`, e `git status` só mostra `.vscode/` como não rastreado. Qualquer outra mudança sem commit: PARE e relate, não faça stash, commit nem descarte.
+> 2. `main` contém `origin/main` (pode estar à frente, sem push; isso é esperado). Se estiver atrás ou divergente: PARE e relate.
 > 3. Nenhuma run viva: todo `.nexo/runs/*/status.json` tem `state = done`. Se houver outra, PARE e relate (pode ser um worker em andamento).
-> 4. A worktree que sobrou em `.worktrees/20260924T013019Z-finance-prereqs/run`: confirme que a run está `done`, que o branch `nexo/20260924T013019Z-finance-prereqs` já está contido no `master` e que a worktree não tem mudanças. Só então remova a worktree e apague o branch. Se qualquer condição falhar, deixe como está e relate.
-> 5. Os slices 01 a 06 estão no `master`: confirme os merges de `01-sao-paulo-day`, `02-liquidacao-reducer`, `03-ledger-schema`, `04-update-sale-in-place`, `05-wizard-row-ids` e `06-settlements-api`, e que os três reverts da onda 1 foram desfeitos pelos "Reapply" (a árvore tem de ter o conteúdo dos slices).
+> 4. A worktree que sobrou em `.worktrees/20260924T013019Z-finance-prereqs/run`: confirme que a run está `done`, que o branch `nexo/20260924T013019Z-finance-prereqs` já está contido no `main` e que a worktree não tem mudanças. Só então remova a worktree e apague o branch. Se qualquer condição falhar, deixe como está e relate.
+> 5. Os slices 01 a 06 estão no `main`: confirme os merges de `01-sao-paulo-day`, `02-liquidacao-reducer`, `03-ledger-schema`, `04-update-sale-in-place`, `05-wizard-row-ids` e `06-settlements-api`, e que os três reverts da onda 1 foram desfeitos pelos "Reapply" (a árvore tem de ter o conteúdo dos slices).
 > 6. Os planos 07, 08 e 09 ainda valem contra o código atual. Para cada um, confira as afirmações do plano no código de hoje (arquivo:linha), por exemplo:
 >    - 07: quais das rotas POST `/sales`, POST `/sales/:id/transition`, POST `/sales/:id/cancel-contract`, PUT `/sales/:id` e PUT `/settings` ainda não têm `requireAdmin`, e se a UI ainda oferece USD;
 >    - 08: onde as parcelas e contas a pagar aparecem hoje e se as rotas de baixa, estorno e histórico existem como o plano diz;
