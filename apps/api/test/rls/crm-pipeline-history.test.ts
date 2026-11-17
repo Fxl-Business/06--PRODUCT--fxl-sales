@@ -206,6 +206,21 @@ describe('a restored stage that never had edges', () => {
   });
 });
 
+describe('archiving an etapa in the middle of the chain', () => {
+  it('links its neighbours, so a lead in one of them still moves to the other', async () => {
+    const w = await world('archive-bridge');
+    const [first, middle, third] = ['Novo', 'Qualificação', 'Em negociação'] as const;
+    const lead = await w.create({});
+    expect(lead.stageId).toBe(w.stage(first));
+    const archived = await call(w.app, 'PATCH', `/lead-stages/${w.stage(middle)}`, { status: 'archived' });
+    expect(archived.status, JSON.stringify(archived.json)).toBe(200);
+    const forward = await call(w.app, 'POST', `/leads/${lead.id}/move`, { stageId: w.stage(third), position: 0 });
+    expect(forward.status, JSON.stringify(forward.json)).toBe(200);
+    const back = await call(w.app, 'POST', `/leads/${lead.id}/move`, { stageId: w.stage(first), position: 0 });
+    expect(back.status, JSON.stringify(back.json)).toBe(200);
+  });
+});
+
 describe('the transition graph on move', () => {
   it('an absent pair is 409 transition_not_allowed and writes nothing; an allowed pair writes exactly one event', async () => {
     const w = await world('move');

@@ -246,6 +246,13 @@
       "when": 1794835143099,
       "tag": "0034_crm_pipeline_funcoes",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1794900000000,
+      "tag": "0035_crm_reconnect_open_stages",
+      "breakpoints": true
     }
   ]
 }

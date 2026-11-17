@@ -228,6 +228,39 @@ async function addTransitionsForNewStage(
     .onConflictDoNothing();
 }
 
+/**
+ * Archiving an open stage in the middle of the chain would leave its two active open neighbours
+ * with no edge between them, so a lead in either could only reach the exits (Perdido, Pausado).
+ * The previous and the next active open stage (board order) are linked both ways. Edges that
+ * already exist are kept, and an exit never has neighbours here.
+ */
+async function bridgeNeighboursOfArchivedStage(
+  tx: Db,
+  orgId: string,
+  pipelineId: string,
+  archivedId: string,
+): Promise<void> {
+  const stages = await listPipelineStages(tx, orgId, pipelineId);
+  const byOrder = (a: { position: number; name: string }, b: { position: number; name: string }) =>
+    a.position - b.position || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+  const archived = stages.find((stage) => stage.id === archivedId);
+  if (!archived || archived.type === 'saida') return;
+  const open = stages
+    .filter((stage) => stage.type !== 'saida' && (stage.status === 'active' || stage.id === archivedId))
+    .sort(byOrder);
+  const index = open.findIndex((stage) => stage.id === archivedId);
+  const previous = open[index - 1];
+  const next = open[index + 1];
+  if (!previous || !next) return;
+  await tx
+    .insert(salesOpsPipelineTransitions)
+    .values([
+      { orgId, pipelineId, fromStageId: previous.id, toStageId: next.id },
+      { orgId, pipelineId, fromStageId: next.id, toStageId: previous.id },
+    ])
+    .onConflictDoNothing();
+}
+
 export function updateLeadStage(
   db: Db,
   orgId: string,
@@ -280,6 +313,9 @@ export function updateLeadStage(
     }
     if (current.status === 'archived' && stage?.status === 'active') {
       await restoreTransitionsIfDisconnected(tx, orgId, current.pipelineId, id);
+    }
+    if (current.status === 'active' && stage?.status === 'archived') {
+      await bridgeNeighboursOfArchivedStage(tx, orgId, current.pipelineId, id);
     }
     // Deliberately NO auditCadastroLifecycle call. The ledger is a closed wire
     // contract whose CadastroEntityTypeSchema is the four audited cadastros, and
