@@ -8,7 +8,6 @@ import {
   salesOpsCrmLeads,
   salesOpsPeople,
   salesOpsPipelineStages,
-  salesOpsPipelineTransitions,
   salesOpsPipelines,
 } from '../../../db/schema.js';
 import { LeadInputError } from '../../crm/lead-input-error.js';
@@ -18,7 +17,7 @@ import type {
   LeadNoteInput,
   ListFollowupsQuery,
 } from './lead-schemas.js';
-import { recordStageChange, stageTransitionAllowed } from './lead-history.js';
+import { recordStageChange } from './lead-history.js';
 import {
   claimantFor,
   leadIdentityConditions,
@@ -109,20 +108,9 @@ export function getLeadSummary(db: Db, orgId: string, id: string, scope: LeadSco
     const current = stages.find((stage) => stage.id === row.stageId)!;
     const nameOf = new Map(stages.map((stage) => [stage.id, stage.name]));
 
-    // Only the stages the explicit graph allows from the current one, and only active ones.
-    const edges = await tx
-      .select({ toStageId: salesOpsPipelineTransitions.toStageId })
-      .from(salesOpsPipelineTransitions)
-      .where(
-        and(
-          eq(salesOpsPipelineTransitions.orgId, orgId),
-          eq(salesOpsPipelineTransitions.pipelineId, row.pipelineId),
-          eq(salesOpsPipelineTransitions.fromStageId, row.stageId),
-        ),
-      );
-    const reachable = new Set(edges.map((edge) => edge.toStageId));
+    // Every other active etapa of the lead's pipeline: there is no transition graph.
     const nextStages = stages
-      .filter((stage) => reachable.has(stage.id) && stage.status === 'active')
+      .filter((stage) => stage.id !== row.stageId && stage.status === 'active')
       .map((stage) => ({ id: stage.id, name: stage.name, type: stage.type, exitKind: stage.exitKind, requiresReason: stage.requiresReason }));
 
     const events = await tx
@@ -189,13 +177,13 @@ export function getLeadSummary(db: Db, orgId: string, id: string, scope: LeadSco
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Moves a lead along an edge of its pipeline graph and records why, in ONE transaction:
+ * Moves a lead to any other active etapa of its pipeline and records why, in ONE transaction:
  *  - the move (end of the destination column, `stage_changed_at = now()`, the claim of a pool lead),
  *  - exactly one `stage_changed` event (actor name from the token),
  *  - the note (linked to that event) and the follow-up, when given.
  * Same lock order as `moveLead`: scope gate, board lock, then the card row.
  *
- * Refusals: `409 transition_not_allowed` (pair absent, or a stage of another pipeline);
+ * Refusals: `409 transition_not_allowed` (a stage of another pipeline, or the current one);
  * `409 sale_required_for_conversion` (the destination opens a proposta, owned by the wizard);
  * `400 followup_required` (a non-exit destination without próximo passo AND data, or only one of the two);
  * `400 reason_required` (the destination requires a reason).
@@ -235,8 +223,7 @@ export function advanceLead(
     if (
       !destination ||
       destination.pipelineId !== current.pipelineId ||
-      destination.id === current.stageId ||
-      !(await stageTransitionAllowed(tx, orgId, current.pipelineId, current.stageId, destination.id))
+      destination.id === current.stageId
     ) {
       return { ok: false, reason: 'transition_not_allowed' } as const;
     }

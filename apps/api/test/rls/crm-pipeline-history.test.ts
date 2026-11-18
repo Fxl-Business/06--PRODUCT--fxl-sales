@@ -221,25 +221,30 @@ describe('archiving an etapa in the middle of the chain', () => {
   });
 });
 
-describe('the transition graph on move', () => {
-  it('an absent pair is 409 transition_not_allowed and writes nothing; an allowed pair writes exactly one event', async () => {
+describe('a move reaches any etapa of the pipeline (no transition graph)', () => {
+  it('skips forward, jumps back and goes exit to exit, one event each, even with every stored edge gone', async () => {
     const w = await world('move');
     const lead = await w.create();
-    const before = await w.events(lead.id);
-    expect(before).toHaveLength(1);
-
-    const refused = await call(w.app, 'POST', `/leads/${lead.id}/move`, { stageId: w.stage('Em negociação'), position: 0 });
-    expect(refused.status).toBe(409);
-    expect(refused.json).toEqual({ error: 'transition_not_allowed' });
     expect(await w.events(lead.id)).toHaveLength(1);
-    const [stuck] = await sql<{ stage_id: string }[]>`SELECT stage_id FROM sales_ops_crm_leads WHERE id = ${lead.id}`;
-    expect(stuck!.stage_id).toBe(lead.stageId);
+    // A stale or empty stored graph must not restrict anything.
+    await sql`DELETE FROM sales_ops_pipeline_transitions WHERE org_id = ${w.orgId}`;
 
-    const ok = await call(w.app, 'POST', `/leads/${lead.id}/move`, { stageId: w.stage('Qualificação'), position: 0 });
-    expect(ok.status).toBe(200);
-    const events = await w.events(lead.id);
-    expect(events).toHaveLength(2);
-    expect(events[1]).toMatchObject({ from_stage_id: lead.stageId, to_stage_id: w.stage('Qualificação'), actor_name_snapshot: 'Gestora Ana' });
+    const path: Array<[string, string | undefined]> = [
+      ['Em negociação', undefined],
+      ['Ganho', undefined],
+      ['Perdido', 'Desistiu'],
+      ['Pausado', undefined],
+      ['Novo', undefined],
+    ];
+    let from = lead.stageId;
+    for (const [name, reason] of path) {
+      const res = await call(w.app, 'POST', `/leads/${lead.id}/move`, { stageId: w.stage(name), position: 0, ...(reason ? { reason } : {}) });
+      expect(res.status, `${name}: ${JSON.stringify(res.json)}`).toBe(200);
+      const events = await w.events(lead.id);
+      expect(events.at(-1)).toMatchObject({ from_stage_id: from, to_stage_id: w.stage(name), actor_name_snapshot: 'Gestora Ana' });
+      from = w.stage(name);
+    }
+    expect(await w.events(lead.id)).toHaveLength(1 + path.length);
   });
 
   it('a reorder inside one column writes no event and never moves stage_changed_at', async () => {
@@ -282,15 +287,11 @@ describe('a lead leaves the Ganho and Perdido exits into an open etapa', () => {
     for (const exit of ['Ganho', 'Perdido', 'Pausado']) expect(froms.has(w.stage(exit)), exit).toBe(true);
   });
 
-  it('a lead in Ganho moves to an org-created normal etapa (200, one stage_changed event); Ganho to Perdido stays 409', async () => {
+  it('a lead in Ganho moves to an org-created normal etapa (200, one stage_changed event); Ganho to Perdido is allowed too', async () => {
     const w = await world('exit-ganho');
     const stageId = await faturada(w);
     const lead = await w.create();
     expect((await call(w.app, 'POST', `/leads/${lead.id}/move`, { stageId: w.stage('Ganho'), position: 0 })).status).toBe(200);
-
-    const refused = await call(w.app, 'POST', `/leads/${lead.id}/move`, { stageId: w.stage('Perdido'), position: 0, reason: 'Desistiu' });
-    expect(refused).toMatchObject({ status: 409, json: { error: 'transition_not_allowed' } });
-    expect(await w.events(lead.id)).toHaveLength(2);
 
     const moved = await call(w.app, 'POST', `/leads/${lead.id}/move`, { stageId, position: 0 });
     expect(moved.status, JSON.stringify(moved.json)).toBe(200);
@@ -298,6 +299,11 @@ describe('a lead leaves the Ganho and Perdido exits into an open etapa', () => {
     const events = await w.events(lead.id);
     expect(events).toHaveLength(3);
     expect(events[2]).toMatchObject({ from_stage_id: w.stage('Ganho'), to_stage_id: stageId, reason: null, actor_name_snapshot: 'Gestora Ana' });
+
+    expect((await call(w.app, 'POST', `/leads/${lead.id}/move`, { stageId: w.stage('Ganho'), position: 0 })).status).toBe(200);
+    const lost = await call(w.app, 'POST', `/leads/${lead.id}/move`, { stageId: w.stage('Perdido'), position: 0, reason: 'Desistiu' });
+    expect(lost.status, JSON.stringify(lost.json)).toBe(200);
+    expect(await w.events(lead.id)).toHaveLength(5);
   });
 
   it('a lead in Perdido moves back out (move and advance) and keeps the stored lost reason', async () => {
@@ -352,14 +358,14 @@ describe('a lead leaves the Ganho and Perdido exits into an open etapa', () => {
 });
 
 describe('POST /leads/:id/advance and GET /leads/:id/summary', () => {
-  it('lists only the graph-allowed next stages and the timeline of the lead', async () => {
+  it('lists every other active etapa as a next stage and the timeline of the lead', async () => {
     const w = await world('summary');
     const lead = await w.create();
     const res = await call(w.app, 'GET', `/leads/${lead.id}/summary`);
     expect(res.status).toBe(200);
     expect(res.json.pipeline).toEqual({ id: w.pipeline.id, name: 'Funil CRM padrão' });
     expect(res.json.stage).toMatchObject({ name: 'Novo', type: 'normal', exitKind: null });
-    expect(res.json.nextStages.map((s: { name: string }) => s.name)).toEqual(['Qualificação', 'Ganho', 'Perdido', 'Pausado']);
+    expect(res.json.nextStages.map((s: { name: string }) => s.name)).toEqual(['Qualificação', 'Em negociação', 'Proposta', 'Ganho', 'Perdido', 'Pausado']);
     expect(res.json.nextStages.find((s: { name: string }) => s.name === 'Perdido')).toMatchObject({ type: 'saida', exitKind: 'perdido', requiresReason: true });
     expect(res.json.timeline).toEqual([expect.objectContaining({ kind: 'stage_changed', fromStageName: null, toStageName: 'Novo', actorName: 'Gestora Ana' })]);
     expect(res.json.followups).toEqual([]);
@@ -388,7 +394,7 @@ describe('POST /leads/:id/advance and GET /leads/:id/summary', () => {
     // The card is at the END of the destination column and stage_changed_at moved.
     const summary = await call(w.app, 'GET', `/leads/${lead.id}/summary`);
     expect(summary.json.timeline.map((t: { kind: string }) => t.kind).sort()).toEqual(['followup', 'note', 'stage_changed', 'stage_changed']);
-    expect(summary.json.nextStages.map((s: { name: string }) => s.name)).toEqual(['Novo', 'Em negociação', 'Ganho', 'Perdido', 'Pausado']);
+    expect(summary.json.nextStages.map((s: { name: string }) => s.name)).toEqual(['Novo', 'Em negociação', 'Proposta', 'Ganho', 'Perdido', 'Pausado']);
   });
 
   it('a follow-up with a date is mandatory unless the destination is an exit', async () => {
@@ -427,18 +433,17 @@ describe('POST /leads/:id/advance and GET /leads/:id/summary', () => {
     expect((await call(w.app, 'POST', `/leads/${won.id}/advance`, { toStageId: w.stage('Ganho') })).status).toBe(200);
   });
 
-  it('an invalid transition is 409, and Proposta (opens a proposta) is 409 sale_required_for_conversion', async () => {
+  it('advance skips etapas freely, refuses only the own etapa (409), and Proposta is 409 sale_required_for_conversion', async () => {
     const w = await world('invalid');
     const lead = await w.create();
-    const bad = await call(w.app, 'POST', `/leads/${lead.id}/advance`, { toStageId: w.stage('Em negociação'), nextStep: 'x', dueOn: '2026-10-26' });
-    expect(bad).toMatchObject({ status: 409, json: { error: 'transition_not_allowed' } });
+    const same = await call(w.app, 'POST', `/leads/${lead.id}/advance`, { toStageId: lead.stageId, nextStep: 'x', dueOn: '2026-10-26' });
+    expect(same).toMatchObject({ status: 409, json: { error: 'transition_not_allowed' } });
     expect(await w.events(lead.id)).toHaveLength(1);
-    for (const to of ['Qualificação', 'Em negociação']) {
-      expect((await call(w.app, 'POST', `/leads/${lead.id}/advance`, { toStageId: w.stage(to), nextStep: 'x', dueOn: '2026-10-26' })).status).toBe(200);
-    }
+    const skipped = await call(w.app, 'POST', `/leads/${lead.id}/advance`, { toStageId: w.stage('Em negociação'), nextStep: 'x', dueOn: '2026-10-26' });
+    expect(skipped.status, JSON.stringify(skipped.json)).toBe(200);
     const conversion = await call(w.app, 'POST', `/leads/${lead.id}/advance`, { toStageId: w.stage('Proposta'), nextStep: 'x', dueOn: '2026-10-26' });
     expect(conversion).toMatchObject({ status: 409, json: { error: 'sale_required_for_conversion' } });
-    expect(await w.events(lead.id)).toHaveLength(3);
+    expect(await w.events(lead.id)).toHaveLength(2);
   });
 
   it('a restore into another etapa writes the event too', async () => {
@@ -645,8 +650,8 @@ describe('the board lock order', () => {
   it('advance and cross-stage moves on the SAME lead run concurrently for 15 rounds without deadlock and keep positions dense', async () => {
     const w = await world('concurrent');
     const lead = await w.create({ contactName: 'Mesmo lead' });
-    // Novo, Qualificação and Pausado are pairwise connected in both directions by the default graph,
-    // so the lead can keep moving among them and every round has two valid cross-stage targets.
+    // Any etapa is reachable, so the lead can keep moving among these three and every round has
+    // two valid cross-stage targets (a race onto the stage it already sits in answers 409).
     const cycle = ['Novo', 'Qualificação', 'Pausado'].map((name) => w.stage(name));
     const answersAllowed = (res: { status: number; json: Record<string, any> }) =>
       (res.status === 200) || (res.status === 409 && res.json.error === 'transition_not_allowed');

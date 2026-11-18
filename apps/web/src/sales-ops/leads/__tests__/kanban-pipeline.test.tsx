@@ -6,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PERIOD_ALL_SELECTION } from '../../period';
 import { LeadsBoard } from '../LeadsBoard';
 import { buildLabelLookups } from '../board-labels';
-import type { CrmPipeline } from '../crm-types';
 import type { SalesOpsLeadStage } from '../types';
 
 /**
@@ -38,17 +37,6 @@ function stage(id: string, name: string, kind: SalesOpsLeadStage['kind'], positi
 }
 
 const STAGES = [stage(NOVO, 'Novo', 'normal', 1), stage(PROPOSTA, 'Proposta', 'conversion', 2)];
-
-const PIPELINE: CrmPipeline = {
-  id: 'pipe-a',
-  name: 'Vendas padrão',
-  isDefault: true,
-  position: 1,
-  status: 'active',
-  funcaoIds: [],
-  stages: [],
-  transitions: [],
-};
 
 const OPTIONS = [
   { value: 'pipe-a', label: 'Vendas padrão' },
@@ -92,7 +80,7 @@ function trigger(label: string): HTMLButtonElement | null {
 describe('pipeline selector', () => {
   it('shows the Funil selector when there is a choice, and reports the picked pipeline', async () => {
     const onChange = vi.fn();
-    await renderBoard({ pipeline: PIPELINE, pipelineSelector: { value: 'pipe-a', options: OPTIONS, onChange } });
+    await renderBoard({ pipelineSelector: { value: 'pipe-a', options: OPTIONS, onChange } });
     expect(trigger('Funil')).not.toBeNull();
     await act(async () => trigger('Funil')!.click());
     const option = [...document.querySelectorAll<HTMLElement>('[role="listbox"] [role="option"]')].find(
@@ -103,7 +91,7 @@ describe('pipeline selector', () => {
   });
 
   it('renders no selector when there is only one pipeline', async () => {
-    await renderBoard({ pipeline: PIPELINE, pipelineSelector: { value: 'pipe-a', options: OPTIONS.slice(0, 1), onChange: vi.fn() } });
+    await renderBoard({ pipelineSelector: { value: 'pipe-a', options: OPTIONS.slice(0, 1), onChange: vi.fn() } });
     expect(trigger('Funil')).toBeNull();
   });
 });

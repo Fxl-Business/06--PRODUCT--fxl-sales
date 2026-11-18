@@ -77,19 +77,6 @@ export function pipelineStagesAsBoardStages(pipeline: CrmPipeline | undefined): 
     }));
 }
 
-/** A stage always "allows" itself (reorder inside the column). */
-export function isTransitionAllowed(pipeline: CrmPipeline | undefined, fromStageId: string, toStageId: string): boolean {
-  if (fromStageId === toStageId) return true;
-  if (!pipeline) return false;
-  return pipeline.transitions.some((t) => t.fromStageId === fromStageId && t.toStageId === toStageId);
-}
-
-export function allowedTargetIds(pipeline: CrmPipeline | undefined, fromStageId: string): Set<string> {
-  const ids = new Set<string>([fromStageId]);
-  for (const t of pipeline?.transitions ?? []) if (t.fromStageId === fromStageId) ids.add(t.toStageId);
-  return ids;
-}
-
 export function stageOpensOrcamentos(stage: Pick<CrmPipelineStage, 'behavior'> | undefined): boolean {
   return stage?.behavior === OPENS_ORCAMENTOS_BEHAVIOR;
 }

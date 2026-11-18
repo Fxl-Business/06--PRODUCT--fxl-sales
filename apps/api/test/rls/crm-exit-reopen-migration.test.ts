@@ -4,7 +4,7 @@
  *
  * A scratch database is migrated through 0032 and seeded with SYNTHETIC pipelines whose graph an org
  * already shaped (one Ganho edge on purpose, an org-created normal etapa, archived etapas, a second
- * pipeline and a second org), then migrated to the head. No real data is read.
+ * pipeline and a second org), then migrated through 0033. No real data is read.
  *
  * Run: pnpm --filter @fxl-sales/api exec env VITEST_INTEGRATION=1 vitest run test/rls/crm-exit-reopen-migration.test.ts
  */
@@ -24,6 +24,8 @@ import {
 
 const BREAKPOINT = '--> statement-breakpoint';
 const TAG_0032 = '0032_lead_delete_batch';
+// Stop at 0033 so a later migration that also adds edges (0035) does not blur this oracle.
+const TAG_0033 = '0033_crm_exit_reopen_transitions';
 const FILE_0033 = '0033_crm_exit_reopen_transitions.sql';
 
 const id = (n: string) => `e0000000-0000-4000-8000-000000000${n}`;
@@ -99,7 +101,7 @@ describe('migration 0033 (exits Ganho and Perdido reopen into every open etapa)'
     });
     before = await edges();
     expect(before).toHaveLength(5);
-    await runDatabaseMigrations({ databaseUrl: scratch.ownerUrl, migrationsFolder: MIGRATIONS_FOLDER });
+    await runDatabaseMigrations({ databaseUrl: scratch.ownerUrl, migrationsFolder: MIGRATIONS_FOLDER, throughTag: TAG_0033 });
   }, 120000);
 
   afterAll(async () => {

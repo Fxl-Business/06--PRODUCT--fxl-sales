@@ -1,5 +1,4 @@
 import type { SalesOpsClient, SalesOpsPerson, SalesOpsProduct, SalesOpsStatus } from '../types';
-import { MUTATION_ERROR_COPY } from '../mutation-error-copy';
 import type { SalesOpsLead } from './types';
 
 /**
@@ -140,8 +139,6 @@ export const LIST_HEADERS = {
   actions: 'Ações',
 } as const;
 export const MOVE_LABEL = 'Mover';
-/** The one refusal a move outside the pipeline's graph gets, shared by the drop notice and the banner. */
-export const MOVE_NOT_ALLOWED_COPY = MUTATION_ERROR_COPY.moveNotAllowed;
 export const OPEN_LABEL = 'Abrir';
 export const TOTAL_LABEL = 'TOTAL';
 export const NO_PRODUCTS_DASH = '-';

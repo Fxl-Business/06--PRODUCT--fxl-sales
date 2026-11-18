@@ -23,7 +23,7 @@ import { LeadInputError } from '../../crm/lead-input-error.js';
 import { personPipelineAccess } from '../../crm/pipeline-access.js';
 import { defaultPipelineId, pipelineExists } from '../../crm/pipeline-read.js';
 import { boardNarrowingConditions } from './lead-filters.js';
-import { recordStageChange, stageTransitionAllowed } from './lead-history.js';
+import { recordStageChange } from './lead-history.js';
 import type {
   LeadPatchInput,
   LeadStageSummaryQuery,
@@ -1257,18 +1257,11 @@ async function applyLeadUpdate(
   });
 }
 
-export type MoveLeadOptions = {
-  /**
-   * The spreadsheet import places a historical lead straight into its etapa; there is no path to
-   * walk. Only the import executor passes it. Every other caller is held to the transition graph.
-   */
-  skipTransitionGraph?: boolean;
-};
-
 /**
  * The writer of `stage_id`, `position`, `stage_changed_at`, `lost_reason` and `sale_id` for the
- * board (`advanceLead` in lead-history-service.ts is the other one, sharing the lock order, the
- * transition rule and the history event).
+ * board (`advanceLead` in lead-history-service.ts is the other one, sharing the lock order and the
+ * history event). Any active etapa of the lead's own pipeline is a valid destination: there is no
+ * transition graph.
  */
 export async function moveLead(
   db: Db,
@@ -1276,7 +1269,6 @@ export async function moveLead(
   id: string,
   input: MoveLeadInput,
   scope: LeadScope,
-  options: MoveLeadOptions = {},
 ): Promise<WriteLeadResult> {
   return withTenant(db, orgId, async (tx) => {
     const gate = await resolveLeadScopePredicate(tx, orgId, scope);
@@ -1321,16 +1313,10 @@ export async function moveLead(
     if (!destination) throw new LeadInputError('stage_not_found');
 
     const stageChanged = destination.id !== current.stageId;
-    // A reorder inside one column is always allowed. A cross-stage move must be an edge of the
-    // pipeline's explicit transition graph (a stage of another pipeline is never reachable).
-    if (stageChanged && !options.skipTransitionGraph) {
-      const allowed =
-        destination.pipelineId === current.pipelineId &&
-        (await stageTransitionAllowed(tx, orgId, current.pipelineId, current.stageId, destination.id));
-      if (!allowed) return { ok: false, reason: 'transition_not_allowed' } as const;
-    } else if (destination.pipelineId !== current.pipelineId) {
-      // Only the import can get here (graph skipped); the composite FK would refuse it anyway.
-      throw new LeadInputError('stage_not_found');
+    // Any active etapa of the lead's own pipeline is reachable, in any direction. Only a stage of
+    // another pipeline is refused (the composite FK (org, pipeline, stage) would refuse it anyway).
+    if (destination.pipelineId !== current.pipelineId) {
+      return { ok: false, reason: 'transition_not_allowed' } as const;
     }
 
     // This cannot be a zod refine: the requirement depends on the DESTINATION

@@ -397,7 +397,7 @@ The tables, the migrations 0029 to 0031 and the decisions are in `nexo/knowledge
 - A non-admin seller who names no vendedor files the lead as their own in both editions (the full edition used to answer `403 seller_scope`).
 - The default pipeline has seven etapas (Novo, Qualificação, Em negociação, Proposta, Ganho, Perdido, Pausado) and 22 transitions.
   A new etapa created through `POST /lead-stages` is an ordinary open etapa and receives the transitions the shared rule gives it; a reorder never regenerates the graph.
-- Moves: cross-stage moves must be an edge of the graph (`409 transition_not_allowed`), a same-column reorder is free and writes no event.
+- Moves: since 2026-11-18 there is no transition restriction. A lead moves to any active etapa of its own pipeline in any direction; only a stage of another pipeline is `409 transition_not_allowed`. The stored graph (`sales_ops_pipeline_transitions`) is legacy data that no move reads. A same-column reorder is free and writes no event.
   Every stage change writes one history event in the same transaction; the actor name is the token name, then the e-mail, then null.
 - Avançar adds the human layer on top of the move: próximo passo plus date (a follow-up) unless the destination is an exit, a reason where the etapa requires it, an optional note linked to the event.
 - Why `409 sale_required_for_conversion` on Avançar: the proposta wizard owns the conversion, so an etapa of type `orcamento` is entered through `POST /leads/:id/move` with the `saleId` the wizard got from `POST /sales`.
@@ -443,8 +443,10 @@ The free-text company path of the old dialogs is intentionally gone, because the
 - O seletor `Funil` aparece só com mais de um pipeline ativo; a escolha é estado de componente (não URL), e uma etapa roteada (`?etapa=`) abre o pipeline que a contém.
 - O filtro de período (`PeriodFilter`, dias civis de São Paulo) é compartilhado por Quadro, Lista e Funil.
   Leitura do quadro, resumo e movimento recebem o MESMO objeto de filtros (`pipelineId`, `from`, `to`, `sellerPersonId`).
-- Movimento fora do grafo de transições do pipeline não é oferecido no `Mover para` (`moveTargetsFor` com `allowedTargetIds`).
-  Um arrasto sem aresta mostra `MOVE_NOT_ALLOWED_COPY`, e o `409 transition_not_allowed` da API mostra o mesmo texto pelo `MutationErrorBanner`.
+- Decisão de produto (2026-11-18): não existe trava de movimentação entre etapas.
+  O `Mover para` oferece todas as etapas do funil e o arrasto aceita qualquer coluna, em qualquer direção.
+  O usuário já tinha pedido isso uma vez; as migrações 0033 e 0035 só acrescentaram arestas ao grafo e a trava continuou aparecendo ("Esse movimento não é permitido neste funil."), então a checagem foi removida da API, do resumo do lead, do quadro e do fake do protótipo.
+  O `409 transition_not_allowed` da API agora só aparece para uma etapa de outro funil e ainda mostra `MUTATION_ERROR_COPY.moveNotAllowed` pelo `MutationErrorBanner`.
 - O funil `Acumulado` tira da progressão as saídas `perdido` e `pausado` (`NON_PROGRESSION_EXIT`) e as reporta em separado (`[data-funnel-lost]`, `[data-funnel-parked]`).
   A saída `ganho` continua na progressão, porque é o fim do caminho de venda.
 - Os totais do rodapé do funil continuam lendo todos os leads, inclusive perdidos e pausados.
@@ -454,7 +456,7 @@ The free-text company path of the old dialogs is intentionally gone, because the
 - The default pipeline is resolved `is_default` first.
 - Restoring an archived etapa with no transition in either direction inserts its default edges (the `planPipelineTransitions` rule, restricted to edges touching it); an etapa with edges is left as the org shaped it.
 - `POST /followups/:id/done` is allowed to whoever can access the lead under the seller scope, to an admin, and to the follow-up's own owner pessoa; anyone else gets 404.
-- The board publishes `Desfazer` for a stage move only when the graph allows the reverse edge (a move to `Perdido` has none).
+- The board publishes `Desfazer` for every stage move (not into the conversion etapa); there is no graph to consult.
 - An edit undo of a lead with no contact omits `contactPhone`/`contactEmail`, like the edit itself.
 - An edit that gives a contactless lead its first contact offers no undo, because the inverse cannot clear the only contact.
 

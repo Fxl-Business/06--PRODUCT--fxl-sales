@@ -342,7 +342,7 @@ export async function executeImportPlan(
         });
         if (!move.success) throw new ImportExecutionError(operation, 'invalid_lead');
         // A historical lead is placed straight into its etapa: there is no path to walk.
-        const moved = await moveLead(tx, orgId, created.lead.id, move.data, scope, { skipTransitionGraph: true });
+        const moved = await moveLead(tx, orgId, created.lead.id, move.data, scope);
         if (!moved.ok) throw new ImportExecutionError(operation, moved.reason);
         return;
       }

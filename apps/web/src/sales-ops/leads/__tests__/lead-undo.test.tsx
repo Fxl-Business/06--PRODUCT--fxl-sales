@@ -177,8 +177,8 @@ it('undoes a Mover write with the original stage and index', async () => {
   expect(rows[0]?.stageId).toBe('new');
 });
 
-it('offers no undo for a move to Perdido, whose reverse edge the graph does not allow', async () => {
-  // Forward edges only into Perdido: the reverse (Perdido -> Novo) is absent from the graph.
+it('offers undo for a move to Perdido even when the stored graph has no reverse edge', async () => {
+  // There is no transition graph: a stale stored edge set must not hide the undo.
   graphOverride = [
     { fromStageId: 'new', toStageId: 'next' },
     { fromStageId: 'next', toStageId: 'new' },
@@ -192,7 +192,9 @@ it('offers no undo for a move to Perdido, whose reverse edge the graph does not 
   await click('[data-move-confirm]');
   expect(calls[0]?.body).toMatchObject({ stageId: 'lost' });
   expect(rows[0]?.stageId).toBe('lost');
-  expect(document.querySelector('[data-undo-notice]')).toBeNull();
+  expect(document.querySelector('[data-undo-notice]')?.textContent).toContain('Lead movido');
+  await click('[data-undo-action]');
+  expect(calls[1]?.body).toMatchObject({ stageId: 'new' });
 });
 
 it('uses the visible source index when returning a lead to a populated column', async () => {

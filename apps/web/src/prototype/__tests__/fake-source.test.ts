@@ -107,23 +107,18 @@ describe('the prototype fake network', () => {
     expect((await leadsOf(ANA, novo.id)).leads).toHaveLength(before);
   });
 
-  it('moves a lead only along the pipeline graph and reports the refusal', async () => {
+  it('moves a lead to any etapa of its pipeline, skipping forward and jumping between exits', async () => {
     const { pipelines } = (await (await call('/pipelines', ANA)).json()) as {
       pipelines: Array<{ stages: Array<{ id: string; name: string }> }>;
     };
     const stage = (name: string) => pipelines[0]!.stages.find((row) => row.name === name)!.id;
     const [lead] = (await leadsOf(ANA, stage('Novo'))).leads;
-    const refused = await call(`/leads/${lead!.id}/move`, ANA, {
-      method: 'POST',
-      body: JSON.stringify({ stageId: stage('Proposta'), position: 0 }),
-    });
-    expect(refused.status).toBe(409);
-    expect(await refused.json()).toEqual({ error: 'transition_not_allowed' });
-    const allowed = await call(`/leads/${lead!.id}/move`, ANA, {
-      method: 'POST',
-      body: JSON.stringify({ stageId: stage('Qualificação'), position: 0 }),
-    });
-    expect(allowed.status).toBe(200);
+    const move = (stageId: string, extra: Record<string, unknown> = {}) =>
+      call(`/leads/${lead!.id}/move`, ANA, { method: 'POST', body: JSON.stringify({ stageId, position: 0, ...extra }) });
+    expect((await move(stage('Em negociação'))).status).toBe(200);
+    expect((await move(stage('Ganho'))).status).toBe(200);
+    expect((await move(stage('Perdido'), { reason: 'Desistiu' })).status).toBe(200);
+    expect((await move(stage('Novo'))).status).toBe(200);
   });
 
   it('scopes a vendedor to own and unassigned leads', async () => {

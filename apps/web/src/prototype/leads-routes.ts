@@ -172,18 +172,14 @@ function place(ctx: RouteContext, lead: SalesOpsLead, stageId: string, index: nu
 
 type MoveGate = { reply: Reply } | { target: { pipeline: CrmPipeline; stage: CrmPipelineStage } };
 
-/** The checks `moveLead` and `advanceLead` share: the graph, the reason and the conversion door. */
+/** The checks `moveLead` and `advanceLead` share: the reason and the conversion door (no transition graph). */
 function gateMove(ctx: RouteContext, lead: SalesOpsLead, toStageId: string, reason: string | undefined): MoveGate {
   const target = findStage(ctx.org, toStageId);
   if (!target) return { reply: badRequest('stage_not_found') };
+  // Any active etapa of the lead's own pipeline is reachable; only another pipeline is refused.
+  if (target.pipeline.id !== lead.pipelineId) return { reply: json(409, { error: 'transition_not_allowed' }) };
   const crossing = toStageId !== lead.stageId;
-  if (crossing) {
-    const edge = target.pipeline.transitions.some(
-      (transition) => transition.fromStageId === lead.stageId && transition.toStageId === toStageId,
-    );
-    if (!edge) return { reply: json(409, { error: 'transition_not_allowed' }) };
-    if (target.stage.requiresReason && !reason) return { reply: badRequest('lost_reason_required') };
-  }
+  if (crossing && target.stage.requiresReason && !reason) return { reply: badRequest('lost_reason_required') };
   return { target };
 }
 
@@ -372,10 +368,8 @@ function summaryOf(ctx: RouteContext, lead: SalesOpsLead): Reply {
   const found = findStage(ctx.org, lead.stageId);
   if (!found) return notFound();
   const { pipeline, stage } = found;
-  const nextStages: LeadNextStage[] = pipeline.transitions
-    .filter((transition) => transition.fromStageId === stage.id)
-    .map((transition) => pipeline.stages.find((candidate) => candidate.id === transition.toStageId))
-    .filter((target): target is CrmPipelineStage => target !== undefined && target.status === 'active')
+  const nextStages: LeadNextStage[] = pipeline.stages
+    .filter((target) => target.id !== stage.id && target.status === 'active')
     .map((target) => projectStage(ctx.org, target))
     .map((target) => ({
       id: target.id,
