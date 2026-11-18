@@ -440,7 +440,7 @@ The free-text company path of the old dialogs is intentionally gone, because the
 ## Quadro por pipeline, período e funil (10-web-kanban-funil-periodo, v4.8.0)
 
 - O Quadro é a visão do pipeline SELECIONADO: as colunas vêm de `GET /pipelines` por `pipelineStagesAsBoardStages`, e o `kind` legado é derivado por lookup.
-- O seletor `Funil` aparece só com mais de um pipeline ativo; a escolha é estado de componente (não URL), e uma etapa roteada (`?etapa=`) abre o pipeline que a contém.
+- O funil ativo é trocado pelo TÍTULO da página Funil (`PipelineTitleSwitcher`, `Funil ativo`), que só abre com mais de um pipeline ativo; a escolha é estado do shell (`leadPipelineChoice`, não URL). Não existe mais etapa roteada (`?etapa=` redireciona para o Funil).
 - O filtro de período (`PeriodFilter`, dias civis de São Paulo) é compartilhado por Quadro, Lista e Funil.
   Leitura do quadro, resumo e movimento recebem o MESMO objeto de filtros (`pipelineId`, `from`, `to`, `sellerPersonId`).
 - Decisão de produto (2026-11-18): não existe trava de movimentação entre etapas.

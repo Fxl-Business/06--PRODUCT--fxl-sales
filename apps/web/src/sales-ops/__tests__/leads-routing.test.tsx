@@ -153,6 +153,11 @@ const containerProps = vi.hoisted(() => ({
   stages: vi.fn(),
 }));
 
+// The Funil title's pipeline switch reads the pipelines itself; a marker here.
+vi.mock('../leads/PipelineTitleSwitcher', () => ({
+  PipelineTitleSwitcher: () => <span data-pipeline-title-stub />,
+}));
+
 vi.mock('../leads/LeadsBoardContainer', () => ({
   LeadsBoardContainer: (props: Record<string, unknown>) => {
     containerProps.board(props);
@@ -368,9 +373,13 @@ describe('the leads edition inside the Sales Ops shell', () => {
     }
   });
 
-  it('shows the gestor only Prospecção in operacional', async () => {
+  it('shows the gestor only Funil and Follow-ups in operacional, with no Prospecção group', async () => {
     await renderRoute('/operacional/funil', gestor, 'leads');
-    expect(navLabel('Prospecção')).not.toBeNull();
+    expect(navLabel('Funil')).not.toBeNull();
+    expect(navLabel('Follow-ups')).not.toBeNull();
+    expect(navLabel('Prospecção')).toBeNull();
+    // The Funil title carries the pipeline switch.
+    expect(document.querySelector('header [data-pipeline-title-stub]')).not.toBeNull();
     expect(navLabel('Propostas')).toBeNull();
     expect(navLabel('Comissões')).toBeNull();
   });

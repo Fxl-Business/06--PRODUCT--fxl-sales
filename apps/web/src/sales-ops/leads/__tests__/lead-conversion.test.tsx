@@ -465,7 +465,7 @@ async function moveIntoConversionColumn() {
   await click(row);
   await click(required('[data-move-confirm]'));
   // Back to Quadro, where the tests assert the card's column.
-  await click(required('aside button[aria-label="Funil"]'));
+  await click(required('[data-view-option="board"]'));
 }
 
 /**

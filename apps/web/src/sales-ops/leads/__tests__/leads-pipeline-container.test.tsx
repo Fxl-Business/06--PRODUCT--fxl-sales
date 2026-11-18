@@ -107,9 +107,6 @@ vi.mock('../LeadsBoard', async () => {
   return {
     LeadsBoard: (props: Record<string, unknown>) => {
       mocks.boardProps.push(props);
-      const selector = props.pipelineSelector as
-        | { options: { value: string; label: string }[]; onChange: (id: string) => void }
-        | undefined;
       const stages = props.stages as { name: string }[];
       const onMove = props.onMoveLead as (payload: unknown) => void;
       return ReactModule.createElement(
@@ -129,13 +126,6 @@ vi.mock('../LeadsBoard', async () => {
             type: 'button',
           },
           'stub-move',
-        ),
-        ...(selector?.options ?? []).map((option) =>
-          ReactModule.createElement(
-            'button',
-            { key: option.value, 'data-pick-pipeline': option.value, onClick: () => selector!.onChange(option.value), type: 'button' },
-            option.label,
-          ),
         ),
       );
     },
@@ -175,16 +165,33 @@ function columnNames(): string {
 
 const BASE_PROPS = { clients: [], people: [], products: [], sellers: [] };
 
+/**
+ * Stands in for the shell, which owns the pipeline choice because the Funil's
+ * title is the switch: one button per pipeline drives `pipelineChoice`.
+ */
+function WithShellChoice(props: Omit<React.ComponentProps<typeof LeadsBoardContainer>, 'pipelineChoice'>) {
+  const [choice, setChoice] = React.useState<string | null>(null);
+  return (
+    <>
+      {PIPELINES.map((candidate) => (
+        <button data-pick-pipeline={candidate.id} key={candidate.id} onClick={() => setChoice(candidate.id)} type="button">
+          {candidate.name}
+        </button>
+      ))}
+      <LeadsBoardContainer {...props} pipelineChoice={choice} />
+    </>
+  );
+}
+
 describe('LeadsBoardContainer pipeline selection', () => {
-  it('shows the default pipeline columns and offers both pipelines to the board', async () => {
+  it('shows the default pipeline columns without a choice, and the board renders no pipeline control', async () => {
     await render(<LeadsBoardContainer {...BASE_PROPS} />);
     expect(columnNames()).toBe('Novo|Proposta');
-    const selector = mocks.boardProps.at(-1)?.pipelineSelector as { options: { value: string }[] };
-    expect(selector.options.map((option) => option.value)).toEqual([PIPE_A, PIPE_B]);
+    expect(mocks.boardProps.at(-1)).not.toHaveProperty('pipelineSelector');
   });
 
   it('switches the columns and sends the selected pipeline id on the SAME filters object', async () => {
-    await render(<LeadsBoardContainer {...BASE_PROPS} />);
+    await render(<WithShellChoice {...BASE_PROPS} />);
     await act(async () => {
       container.querySelector<HTMLButtonElement>(`[data-pick-pipeline="${PIPE_B}"]`)!.click();
     });
@@ -196,10 +203,13 @@ describe('LeadsBoardContainer pipeline selection', () => {
     expect(mocks.moveFilters.at(-1)).toBe(board);
   });
 
-  it('opens the pipeline that owns a routed stage', async () => {
-    await render(<LeadsBoardContainer {...BASE_PROPS} routedMode="stage" selectedStageId={B_FECHAMENTO} />);
+  it('honours the shell choice and falls back to the default for an unreachable one', async () => {
+    await render(<LeadsBoardContainer {...BASE_PROPS} pipelineChoice={PIPE_B} />);
     expect(columnNames()).toBe('Primeiro contato|Fechamento');
     expect(mocks.boardFilters.at(-1)).toMatchObject({ pipelineId: PIPE_B });
+
+    await render(<LeadsBoardContainer {...BASE_PROPS} pipelineChoice="pipe-gone" />);
+    expect(columnNames()).toBe('Novo|Proposta');
   });
 });
 
@@ -237,7 +247,7 @@ describe('LeadsBoardContainer new lead (vários funis)', () => {
   }
 
   it('is born in the selected pipeline and offers only the vendedores who reach it', async () => {
-    await render(<LeadsBoardContainer {...props} />);
+    await render(<WithShellChoice {...props} />);
     let form = await openNewLead();
     expect(form.pipelineId).toBe(PIPE_A);
     // Bia's função is linked to Parceiros only, so the default pipeline is out of her reach.

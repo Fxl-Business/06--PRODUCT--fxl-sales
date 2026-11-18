@@ -73,8 +73,6 @@ export type SalesOpsRoute = Readonly<{
   view: SalesOpsView;
   /** The open proposta. Only ever present on the `vendas` view. */
   saleId?: string;
-  /** The selected lead stage, from the `?etapa=` query, only on the leads view. */
-  stageId?: string;
   /** The open lead summary. Only present on the leads view. */
   leadId?: string;
 }>;
@@ -83,7 +81,10 @@ export type SalesOpsRouteParams = Readonly<{
   workspace?: string;
   view?: string;
   saleId?: string;
-  /** The `?etapa=` query value, read by the caller. Only the leads view honours it. */
+  /**
+   * The legacy `?etapa=` query value, read by the caller. No view honours it any
+   * more: the stage list lives inside the Funil, so the URL is rewritten without it.
+   */
   etapa?: string;
 }>;
 
@@ -100,6 +101,11 @@ type NavEntry = SalesOpsNavigationItem & {
   compactLabel?: string;
   /** Moved to the front, stably, in the compact profile (its landing entry). */
   compactFirst?: true;
+  /**
+   * `false` keeps the entry ROUTABLE but out of the sidebar: `leads` carries the
+   * lead summary (`leads/:leadId`) and has no screen of its own to link to.
+   */
+  sidebar?: false;
 };
 
 /*
@@ -122,8 +128,8 @@ const operational: NavEntry[] = [
   { id: 'vendas-ganhas', label: 'Vendidas', icon: BadgeDollarSign, requires: ['orcamentos'] },
   { id: 'vendas-encerradas', label: 'Perdidas e canceladas', icon: Archive, requires: ['orcamentos'] },
   { id: 'comissoes', label: 'Comissões', icon: BadgeDollarSign, requires: ['comissoes'] },
-  // `leads` is the landing ROUTE of the compact profile (first visible entry there).
-  { id: 'leads', label: 'Prospecção', icon: LayoutGrid, requires: [] },
+  // `leads` only carries the lead summary: it is routable but never in the sidebar.
+  { id: 'leads', label: 'Prospecção', icon: LayoutGrid, requires: [], sidebar: false },
   { id: 'funil', label: 'Funil', icon: LayoutGrid, requires: [] },
   // The team's agenda of next steps (09e): needs no module.
   { id: 'follow-ups', label: 'Follow-ups', icon: CalendarClock, requires: [] },
@@ -155,8 +161,7 @@ const cadastros: NavEntry[] = [
 const meusDadosSeller: NavEntry[] = [
   { id: 'vendedores', label: 'Meu painel', icon: UsersRound, requires: ['orcamentos'] },
   { id: 'comissoes', label: 'Comissões', icon: BadgeDollarSign, requires: ['comissoes'] },
-  // `[0]` here is where a seller's session starts in the compact profile.
-  { id: 'leads', label: 'Minha prospecção', icon: LayoutGrid, requires: [], compactLabel: 'Prospecção' },
+  { id: 'leads', label: 'Minha prospecção', icon: LayoutGrid, requires: [], compactLabel: 'Prospecção', sidebar: false },
   { id: 'funil', label: 'Funil', icon: LayoutGrid, requires: [] },
   { id: 'follow-ups', label: 'Meus follow-ups', icon: CalendarClock, requires: [] },
 ];
@@ -217,6 +222,33 @@ function visibleEntries(entries: readonly NavEntry[], modules: OrgModules): Sale
 
 /** Memo of the navigation lists: the shell calls these on every render and must get the same arrays back. */
 const navigationCache = new Map<string, SalesOpsNavigationItem[]>();
+
+/** The views that are routable but never get a sidebar entry (see `NavEntry.sidebar`). */
+const ROUTE_ONLY_VIEWS: ReadonlySet<SalesOpsView> = new Set(
+  Object.values(NAVIGATION_CATALOGUE)
+    .flat()
+    .filter((entry) => entry.sidebar === false)
+    .map((entry) => entry.id),
+);
+
+const sidebarCache = new WeakMap<SalesOpsNavigationItem[], SalesOpsNavigationItem[]>();
+
+/**
+ * The sidebar of a workspace: its routable navigation minus the route-only views.
+ * Memoized on the navigation array, so the shell gets the same array back.
+ */
+export function getSidebarNavigation(
+  workspace: SalesOpsWorkspace,
+  roles: readonly AppRole[],
+  modules: OrgModules = ALL_MODULES_ENABLED,
+): SalesOpsNavigationItem[] {
+  const items = getSalesOpsNavigation(workspace, roles, modules);
+  const cached = sidebarCache.get(items);
+  if (cached) return cached;
+  const shown = items.filter((item) => !ROUTE_ONLY_VIEWS.has(item.id));
+  sidebarCache.set(items, shown);
+  return shown;
+}
 
 export function getSalesOpsNavigation(
   workspace: SalesOpsWorkspace,
@@ -285,14 +317,9 @@ export function canSettleInWorkspace(
 export function buildSalesOpsPath(route: SalesOpsRoute): string {
   const base = `/${route.workspace}/${route.view}`;
   if (route.view === 'leads') {
-    if (route.leadId !== undefined) return `${base}/${encodeURIComponent(route.leadId)}`;
-    return route.stageId === undefined ? base : `${base}?etapa=${encodeURIComponent(route.stageId)}`;
+    return route.leadId === undefined ? base : `${base}/${encodeURIComponent(route.leadId)}`;
   }
   return route.saleId === undefined ? base : `${base}/${encodeURIComponent(route.saleId)}`;
-}
-
-export function buildLeadStagePath(workspace: SalesOpsWorkspace, stageId: string): string {
-  return buildSalesOpsPath({ workspace, view: 'leads', stageId });
 }
 
 export function buildLeadSummaryPath(workspace: SalesOpsWorkspace, leadId: string): string {
@@ -315,14 +342,9 @@ export function getDefaultSalesOpsRoute(
 ): SalesOpsRoute {
   const visible = getVisibleWorkspaces(roles, modules);
 
-  // Prospecção leads the sidebar, while Funil remains the landing page because
-  // a bare leads URL has no stage to show and redirects there.
-  const landingView = (target: SalesOpsWorkspace) => {
-    const items = getSalesOpsNavigation(target, roles, modules);
-    return items[0]?.id === 'leads' && items.some((item) => item.id === 'funil')
-      ? 'funil'
-      : items[0]?.id;
-  };
+  // The landing page is the first SIDEBAR entry: a route-only view is never landed on.
+  const landingView = (target: SalesOpsWorkspace) =>
+    getSidebarNavigation(target, roles, modules)[0]?.id;
 
   if (preferredWorkspace && visible.includes(preferredWorkspace)) {
     const preferredView = landingView(preferredWorkspace);
@@ -373,25 +395,24 @@ export function resolveSalesOpsRoute(
     : undefined;
 
   if (workspace && view) {
-    if (view === 'leads' && !params.saleId && !params.etapa) {
+    // `leads` without a lead id (a bare or a legacy `?etapa=` URL) has no screen:
+    // the stage list lives inside the Funil.
+    if (view === 'leads' && !params.saleId) {
       const route: SalesOpsRoute = { workspace, view: 'funil' };
       return { route, path: buildSalesOpsPath(route), redirect: true };
     }
     // The third segment is the proposta id on `vendas` and the lead id on `leads`.
-    // The `?etapa=` query is the stage selection, on `leads` only. Never write a key
-    // as `undefined`: a present-but-undefined key trips `toStrictEqual`.
+    // Never write a key as `undefined`: a present-but-undefined key trips `toStrictEqual`.
     const saleId = isSalesListView(view) && params.saleId ? params.saleId : undefined;
     const leadId = view === 'leads' && params.saleId ? params.saleId : undefined;
-    const stageId = view === 'leads' && !leadId && params.etapa ? params.etapa : undefined;
     const route: SalesOpsRoute = {
       workspace,
       view,
       ...(saleId !== undefined ? { saleId } : {}),
       ...(leadId !== undefined ? { leadId } : {}),
-      ...(stageId !== undefined ? { stageId } : {}),
     };
     const droppedSaleId = params.saleId !== undefined && saleId === undefined && leadId === undefined;
-    const droppedEtapa = params.etapa !== undefined && stageId === undefined;
+    const droppedEtapa = params.etapa !== undefined;
     // An aliased view or a dropped id differs from what the URL asked for, which is
     // exactly when the caller must rewrite the address bar. A canonical route stays `false`.
     return {

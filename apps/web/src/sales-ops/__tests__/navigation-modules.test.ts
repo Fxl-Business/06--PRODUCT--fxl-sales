@@ -8,7 +8,6 @@ import {
   type OrgModules,
 } from '@fxl-sales/shared-utils/crm-model';
 import {
-  buildSalesOpsPath,
   canSettleInWorkspace,
   getSalesOpsNavigation,
   getSalesOpsWorkspaces,
@@ -174,17 +173,14 @@ describe('redirects and settlement follow the modules', () => {
     );
   });
 
-  it('the ?etapa= query survives the path builder unchanged', () => {
+  it('a legacy ?etapa= link lands on the Funil, where the stage list now lives', () => {
     expect(
       resolveSalesOpsRoute({ workspace: 'operacional', view: 'leads', etapa: 'stage-1' }, ['admin'], LEADS),
     ).toEqual({
-      route: { workspace: 'operacional', view: 'leads', stageId: 'stage-1' },
-      path: '/operacional/leads?etapa=stage-1',
-      redirect: false,
+      route: { workspace: 'operacional', view: 'funil' },
+      path: '/operacional/funil',
+      redirect: true,
     });
-    expect(buildSalesOpsPath({ workspace: 'operacional', view: 'leads', stageId: 'stage-1' })).toBe(
-      '/operacional/leads?etapa=stage-1',
-    );
   });
 
   it('follow-ups stays visible even with every module off', () => {

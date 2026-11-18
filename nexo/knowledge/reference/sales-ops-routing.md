@@ -41,7 +41,7 @@ Moved verbatim from `CLAUDE.md` on 2026-09-22 so the standing context stays shor
   Oracles: `navigation.test.ts` (`keeps a proposta id only on the vendas view`, `drops a proposta id for an operator who cannot see the workspace`), `sale-deep-link-route.test.ts`, `sale-deep-link.test.tsx`.
 - Sales edition (feature `edicao-leads`, v4.3.0). `profile.edition` comes from the token's `entitlements.modules` through `resolveSalesEdition` (`@fxl-sales/shared-utils/sales-edition`) in `profileFromToken`; `useSalesEdition()` reads it.
   Navigation is ONE catalogue filtered by the organization's modules (slice 12a): every entry in `navigation.ts` carries `requires`, and every navigation function takes a trailing `modules` (default every module).
-  The compact profile (`orcamentos` off) is today's leads edition: `admin` sees `operacional` [`leads` Prospecção, `funil` Funil, `follow-ups` Follow-ups] and `cadastros` [`pessoas` labelled Vendedores, `clientes`, `etapas`, `importacao`, `leads-excluidos`]; a non-admin `seller` sees `meus-dados` [`leads` Prospecção, `funil` Funil, `follow-ups` Meus follow-ups]; `finder` grants nothing; `tatico` is never visible.
+  The compact profile (`orcamentos` off) is today's leads edition: `admin` sees `operacional` [`funil` Funil, `follow-ups` Follow-ups, plus the route-only `leads`] and `cadastros` [`pessoas` labelled Vendedores, `clientes`, `etapas`, `importacao`, `leads-excluidos`]; a non-admin `seller` sees `meus-dados` [`funil` Funil, `follow-ups` Meus follow-ups, plus the route-only `leads`]; `finder` grants nothing; `tatico` is never visible.
   An admin does not get `meus-dados` in the compact profile, because every admin-bearing claim also yields `seller` and the gestor's visibility is pinned to `operacional` and `cadastros` by `getVisibleWorkspaces`.
   The shell takes the modules from the bootstrap (`orgModules`); `profile.edition` is the token-derived hint until the bootstrap settles, and `NoRoleGuard` still keys on that hint through `modulesHintFromEdition` (a leads-edition finder-only operator stays on `/no-role` with no loop, oracle `no-role-redirect.test.tsx`).
   No `<Navigate>` fires while the modules are unknown; a failed bootstrap settles on the hint (oracle `org-modules-shell.test.tsx`).
@@ -69,3 +69,13 @@ Moved verbatim from `CLAUDE.md` on 2026-09-22 so the standing context stays shor
   O link de Finanças `/operacional/vendas/<id>` continua igual.
 - Os grupos de status e o filtro ficam em `sales-views.ts`, e a rota de uma lista só entra no menu `operacional` (vendedor e finder não ganham listas de propostas).
 - O período das Propostas é estado de componente (`salesPeriod`, `PeriodFilter`), e cada proposta entra pelo dia civil de São Paulo: `won` pelo dia de `wonAt`, as demais pela criação (`filterSalesByPeriod`).
+
+## Sem grupo Prospecção (2026-11-18)
+
+The sidebar's Prospecção group (one link per etapa to `leads?etapa=<id>`) polluted the sidebar, so the product removed it.
+`leads` is now route-only (`NavEntry.sidebar: false`, filtered by `getSidebarNavigation`): it carries only the lead summary `leads/:leadId`, and the Funil stays lit in the sidebar while a summary is open.
+A bare or a legacy `?etapa=` leads URL redirects to `funil`; `buildLeadStagePath` and `SalesOpsRoute.stageId` are gone.
+The landing page is the first SIDEBAR entry, so a route-only view is never landed on.
+A column header's list icon opens the Lista on the same Funil screen, filtered to that etapa, with the Quadro/Lista/Funil toggle to go back (component state, not URL state).
+The pipeline choice moved from the board's filter row to the page title: `PipelineTitleSwitcher` names the active pipeline (`Funil ativo`, with a check on the active option) and the choice is hoisted to `SalesOpsApp` as `leadPipelineChoice`, because the shell header reads it.
+Oracles: `kanban-pipeline.test.tsx`, `pipeline-title-switcher.test.tsx`, `leads-pipeline-container.test.tsx`, `leads-routing.test.tsx`, `lead-routes.test.ts`.

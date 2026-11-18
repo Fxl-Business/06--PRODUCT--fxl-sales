@@ -7,13 +7,12 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { todayInSaoPaulo } from '@fxl-sales/shared-utils/sao-paulo-day';
 import { MutationErrorBanner } from '../MutationErrorBanner';
 import { PERIOD_ALL_SELECTION, periodQuery, selectionToRange, type PeriodSelection } from '../period';
-import { buildLeadStagePath, buildLeadSummaryPath, buildSalesOpsPath, type SalesOpsWorkspace } from '../navigation';
+import { buildLeadSummaryPath, buildSalesOpsPath, type SalesOpsWorkspace } from '../navigation';
 import type { SalesOpsClient, SalesOpsPerson, SalesOpsProduct } from '../types';
 import type { MoveLeadPayload } from './api';
 import { buildLabelLookups } from './board-labels';
 import { stageOpensConversion } from './board-move';
 import { mutedStateClass, noticeClass } from './board-ui';
-import { boardStages } from './calculations';
 import { useFieldDefinitions, usePipelines } from './crm-hooks';
 import { pickPipeline, pipelineStagesAsBoardStages, sellersReachingPipeline } from './crm-pipeline';
 import { LeadDeleteDialog } from './LeadDeleteDialog';
@@ -78,8 +77,12 @@ function boardLoadErrorCopy(error: unknown, fieldSet: LeadFieldSet): string {
 }
 
 export type LeadsBoardContainerProps = {
-  routedMode?: 'board' | 'stage';
-  selectedStageId?: string;
+  /**
+   * The pipeline choice, owned by the shell because the Funil's title is the
+   * switch (`PipelineTitleSwitcher`). `null` or an unreachable id falls back to
+   * the default pipeline through `pickPipeline`, exactly as the title does.
+   */
+  pipelineChoice?: string | null;
   workspace?: SalesOpsWorkspace;
   clients: SalesOpsClient[];
   people: SalesOpsPerson[];
@@ -115,8 +118,7 @@ export type LeadsBoardContainerProps = {
 };
 
 export function LeadsBoardContainer({
-  routedMode,
-  selectedStageId,
+  pipelineChoice = null,
   workspace,
   clients,
   people,
@@ -140,27 +142,14 @@ export function LeadsBoardContainer({
   // The columns are resolved FIRST: the board query fans out one request per
   // stage and the API requires a `stageId`, so without the pipeline there is
   // nothing to ask for. The Quadro is a view of ONE pipeline: its columns are
-  // that pipeline's stages, and the choice is component state (not URL state).
+  // that pipeline's stages, and the choice is the shell's (not URL state).
   const pipelinesQuery = usePipelines();
   const pipelines = React.useMemo(() => pipelinesQuery.data ?? [], [pipelinesQuery.data]);
-  const [pipelineChoice, setPipelineChoice] = React.useState<string | null>(null);
   const [period, setPeriod] = React.useState<PeriodSelection>(PERIOD_ALL_SELECTION);
   const [moveError, setMoveError] = React.useState<unknown>(null);
-  // A routed stage belongs to exactly one pipeline, so an `?etapa=` link lands on it.
-  const owningPipelineId = selectedStageId
-    ? pipelines.find((candidate) => candidate.stages.some((stage) => stage.id === selectedStageId))?.id
-    : undefined;
-  const pipeline = pickPipeline(pipelines, owningPipelineId ?? pipelineChoice);
+  const pipeline = pickPipeline(pipelines, pipelineChoice);
   const pipelineId = pipeline?.id ?? null;
   const stages = React.useMemo(() => pipelineStagesAsBoardStages(pipeline), [pipeline]);
-  const pipelineOptions = React.useMemo(
-    () =>
-      pipelines
-        .filter((candidate) => candidate.status === 'active')
-        .sort((a, b) => a.position - b.position)
-        .map((candidate) => ({ value: candidate.id, label: candidate.name })),
-    [pipelines],
-  );
   const range = React.useMemo(() => selectionToRange(period, todayInSaoPaulo()), [period]);
   const { from: periodFrom, to: periodTo } = range;
 
@@ -286,10 +275,6 @@ export function LeadsBoardContainer({
     return <p className={mutedStateClass}>{copy}</p>;
   }
 
-  if (routedMode === 'stage' && !boardStages(stages).some((stage) => stage.id === selectedStageId)) {
-    return <p className={mutedStateClass}>Esta etapa não está disponível.</p>;
-  }
-
   // One clock per render, handed down, so no presentational component reads it.
 
   return (
@@ -312,15 +297,7 @@ export function LeadsBoardContainer({
         </div>
       ) : null}
       <LeadsBoard
-        pipelineSelector={{
-          value: pipelineId,
-          options: pipelineOptions,
-          onChange: (id) => setPipelineChoice(id),
-        }}
         periodFilter={{ value: period, onChange: setPeriod }}
-        routedMode={routedMode}
-        selectedStageId={selectedStageId}
-        onOpenStage={workspace ? (stageId) => navigate(buildLeadStagePath(workspace, stageId)) : undefined}
         canManageStages={canManageStages}
         fieldSet={fieldSet}
         hasMore={boardQuery.data?.hasMore ?? false}

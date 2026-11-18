@@ -98,6 +98,7 @@ import {
   getDefaultSalesOpsRoute,
   getSalesOpsNavigation,
   getSalesOpsWorkspaces,
+  getSidebarNavigation,
   getVisibleWorkspaces,
   resolveSalesOpsRoute,
   workspaceForView,
@@ -170,7 +171,7 @@ import type { LeadConversionRequest } from './leads/LeadsBoard';
 import { LeadsBoardContainer } from './leads/LeadsBoardContainer';
 import { LeadSummaryContainer } from './leads/LeadSummaryContainer';
 import { FollowupsContainer } from './leads/FollowupsContainer';
-import { LeadSidebarNavigation } from './leads/LeadSidebarNavigation';
+import { PipelineTitleSwitcher } from './leads/PipelineTitleSwitcher';
 import { isNarrowViewport, subscribeNarrowViewport } from './narrow-viewport';
 import { LeadStagesContainer } from './leads/LeadStagesContainer';
 import { DeletedLeadsContainer } from './leads/DeletedLeadsContainer';
@@ -1396,6 +1397,11 @@ export function SalesOpsApp() {
    * `salesFilters` above.
    */
   const [productKind, setProductKind] = useState<SalesOpsProductKind>('product');
+  /*
+    The Funil's pipeline choice. Hoisted here (component state, never URL state)
+    because the shell's header READS it: the title is the pipeline switch.
+  */
+  const [leadPipelineChoice, setLeadPipelineChoice] = useState<string | null>(null);
   const mountedRef = useRef(true);
 
   const visibleWorkspaceIds = useMemo(
@@ -1515,6 +1521,7 @@ export function SalesOpsApp() {
         return true;
       });
   const navItems = getSalesOpsNavigation(workspace, profile.roles, modules);
+  const sidebarItems = getSidebarNavigation(workspace, profile.roles, modules);
   /*
     The leads edition renames the people cadastro to Vendedores. Overridden here
     rather than inside `titleForView` so the full-edition map stays byte-identical.
@@ -2030,18 +2037,11 @@ export function SalesOpsApp() {
               sidebarCollapsed ? 'mt-1 items-center gap-2' : ''
             }`}
           >
-            {navItems.map((item) => {
-              if (item.id === 'leads') {
-                return <LeadSidebarNavigation
-                  activeStageId={view === 'leads' ? resolution.route.stageId : undefined}
-                  collapsed={sidebarCollapsed}
-                  key={item.id}
-                  onExpand={() => setSidebarCollapsed(false)}
-                  workspace={workspace}
-                />;
-              }
+            {sidebarItems.map((item) => {
               const Icon = item.icon;
-              const active = view === item.id;
+              // The lead summary (`leads/:leadId`) has no entry of its own: it is
+              // reached from the Funil, so the Funil stays lit while it is open.
+              const active = view === item.id || (view === 'leads' && item.id === 'funil');
               const openPayablesCount = bootstrap.payables.filter((payable) => payable.status === 'open').length;
               return (
                 <button
@@ -2177,9 +2177,23 @@ export function SalesOpsApp() {
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden pl-1.5 md:pl-[10px]">
           <header className="flex flex-none items-center gap-4 rounded-t-2xl border border-[#e5e5ea] bg-[#f3f3f5] px-4 py-3 md:px-[22px] md:py-[15px]">
             <div className="min-w-0">
-              <h1 className="sales-ops-num text-[23px] font-bold tracking-normal text-[#201f24]">
-                {title.title}
-              </h1>
+              {view === 'funil' ? (
+                /*
+                  The Funil's title NAMES the active pipeline and is the switch
+                  itself: changing pipelines swaps every column, so the choice
+                  belongs to the page heading, not to a filter row.
+                */
+                <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1">
+                  <h1 className="sales-ops-num text-[23px] font-bold tracking-normal text-[#201f24]">
+                    {title.title}
+                  </h1>
+                  <PipelineTitleSwitcher onChange={setLeadPipelineChoice} value={leadPipelineChoice} />
+                </div>
+              ) : (
+                <h1 className="sales-ops-num text-[23px] font-bold tracking-normal text-[#201f24]">
+                  {title.title}
+                </h1>
+              )}
               <div className="mt-0.5 text-[12.5px] text-[#8b8b92]">{title.subtitle}</div>
             </div>
             <div className="ml-auto flex items-center gap-2">
@@ -2454,7 +2468,7 @@ export function SalesOpsApp() {
                       onEdit={(funcao) => setModal({ kind: 'funcao', funcao })}
                     />
                   ) : null}
-                  {(view === 'funil' || (view === 'leads' && !resolution.route.leadId)) ? (
+                  {view === 'funil' ? (
                     /*
                       ONE component for both routes. The difference between the team
                       board and a seller's board is NOT this boolean - the scope is
@@ -2467,8 +2481,7 @@ export function SalesOpsApp() {
                       picker on another page.
                     */
                     <LeadsBoardContainer
-                      routedMode={view === 'funil' ? 'board' : 'stage'}
-                      selectedStageId={resolution.route.stageId}
+                      pipelineChoice={leadPipelineChoice}
                       workspace={workspace}
                       clients={persistedBootstrap.clients}
                       onCreateClient={async (name) => {

@@ -203,6 +203,11 @@ vi.mock('../hooks', () => ({
   card's proposta link and calls the handler `SalesOpsApp` passes, exactly as `LeadCard`
   does (`leads-board-dropzones.test.tsx` pins the card half of that wire).
 */
+// The Funil title's pipeline switch reads the pipelines itself; a marker here.
+vi.mock('../leads/PipelineTitleSwitcher', () => ({
+  PipelineTitleSwitcher: () => <span data-pipeline-title-stub />,
+}));
+
 vi.mock('../leads/LeadsBoardContainer', () => ({
   LeadsBoardContainer: ({ onOpenSale }: { onOpenSale?: (saleId: string) => void }) => (
     <button onClick={() => onOpenSale?.(SALE_ID)} type="button">

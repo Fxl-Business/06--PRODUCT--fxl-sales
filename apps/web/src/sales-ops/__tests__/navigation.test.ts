@@ -570,12 +570,12 @@ describe('sales operations navigation', () => {
   });
 });
 
-describe('lead summary and stage query round trip', () => {
-  it('resolve and build round trip for the lead summary and the stage query', () => {
+describe('lead summary round trip', () => {
+  it('resolve and build round trip for the lead summary; a legacy stage query lands on the Funil', () => {
     const summary = resolveSalesOpsRoute({ workspace: 'operacional', view: 'leads', saleId: 'L1' }, ['admin']);
     expect(buildSalesOpsPath(summary.route)).toBe('/operacional/leads/L1');
     const stage = resolveSalesOpsRoute({ workspace: 'operacional', view: 'leads', etapa: 'S1' }, ['admin']);
-    expect(buildSalesOpsPath(stage.route)).toBe('/operacional/leads?etapa=S1');
+    expect(buildSalesOpsPath(stage.route)).toBe('/operacional/funil');
   });
 });
 

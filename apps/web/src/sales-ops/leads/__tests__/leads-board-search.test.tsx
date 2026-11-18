@@ -27,7 +27,7 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); });
 
 it('filters loaded cards immediately and restores them without changing server totals', async () => {
-  await act(async () => root.render(<LeadsBoard routedMode="board" leads={leads} stages={stages}
+  await act(async () => root.render(<LeadsBoard leads={leads} stages={stages}
     lookups={buildLabelLookups({ clients: [], people: [], products: [] })}
     now={new Date('2026-10-20')} onMoveLead={vi.fn()} hasMore onLoadMore={vi.fn()}
     stageSummary={{ stages: [

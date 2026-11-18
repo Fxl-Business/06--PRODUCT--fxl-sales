@@ -9,8 +9,8 @@ import { buildLabelLookups } from '../board-labels';
 import type { SalesOpsLeadStage } from '../types';
 
 /**
- * The board as a view of a pipeline, driven by props only: the pipeline selector
- * is shown only when there is a choice, and the period control is offered on
+ * The board as a view of a pipeline, driven by props only: the column header's
+ * list icon opens the Lista in place, and the period control is offered on
  * every view. The container's wiring of the same props is in
  * `leads-pipeline-container.test.tsx`.
  */
@@ -37,11 +37,6 @@ function stage(id: string, name: string, kind: SalesOpsLeadStage['kind'], positi
 }
 
 const STAGES = [stage(NOVO, 'Novo', 'normal', 1), stage(PROPOSTA, 'Proposta', 'conversion', 2)];
-
-const OPTIONS = [
-  { value: 'pipe-a', label: 'Vendas padrão' },
-  { value: 'pipe-b', label: 'Parceiros' },
-];
 
 let container: HTMLDivElement;
 let root: Root;
@@ -77,22 +72,23 @@ function trigger(label: string): HTMLButtonElement | null {
   return container.querySelector<HTMLButtonElement>(`[role="combobox"][aria-label="${label}"]`);
 }
 
-describe('pipeline selector', () => {
-  it('shows the Funil selector when there is a choice, and reports the picked pipeline', async () => {
-    const onChange = vi.fn();
-    await renderBoard({ pipelineSelector: { value: 'pipe-a', options: OPTIONS, onChange } });
-    expect(trigger('Funil')).not.toBeNull();
-    await act(async () => trigger('Funil')!.click());
-    const option = [...document.querySelectorAll<HTMLElement>('[role="listbox"] [role="option"]')].find(
-      (node) => node.textContent?.trim() === 'Parceiros',
-    );
-    await act(async () => option!.click());
-    expect(onChange).toHaveBeenCalledWith('pipe-b');
+describe('stage list from the column header', () => {
+  it('opens the Lista on the same screen, filtered to that etapa, with the view toggle to go back', async () => {
+    await renderBoard();
+    expect(container.querySelector('[data-leads-list]')).toBeNull();
+    await act(async () => container.querySelector<HTMLButtonElement>(`[data-view-in-list="${PROPOSTA}"]`)!.click());
+    expect(container.querySelector('[data-leads-list]')).not.toBeNull();
+    expect(container.querySelector(`[data-phase-chip="${PROPOSTA}"]`)?.getAttribute('aria-pressed')).toBe('true');
+    expect(container.querySelector('[data-view-option="list"]')?.getAttribute('aria-pressed')).toBe('true');
+
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-view-option="board"]')!.click());
+    expect(container.querySelector('[data-leads-list]')).toBeNull();
   });
 
-  it('renders no selector when there is only one pipeline', async () => {
-    await renderBoard({ pipelineSelector: { value: 'pipe-a', options: OPTIONS.slice(0, 1), onChange: vi.fn() } });
+  it('renders no pipeline control: the switch lives in the page title', async () => {
+    await renderBoard();
     expect(trigger('Funil')).toBeNull();
+    expect(trigger('Funil ativo')).toBeNull();
   });
 });
 

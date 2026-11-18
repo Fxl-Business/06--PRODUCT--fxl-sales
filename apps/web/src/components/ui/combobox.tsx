@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { ChevronDown, Search } from 'lucide-react';
+import { Check, ChevronDown, Search } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
   buildComboboxFilter,
@@ -45,6 +45,8 @@ export type ComboboxProps = {
   className?: string;
   /** Merged onto the floating panel through `cn`. */
   panelClassName?: string;
+  /** Marks the selected option with a check, for a switch whose current choice must read at a glance. */
+  markSelected?: boolean;
   'aria-label'?: string;
   'aria-labelledby'?: string;
   'aria-describedby'?: string;
@@ -75,6 +77,7 @@ export const Combobox = React.forwardRef<HTMLButtonElement, ComboboxProps>(
       disabled = false,
       className,
       panelClassName,
+      markSelected = false,
       'aria-label': ariaLabel,
       'aria-labelledby': ariaLabelledBy,
       'aria-describedby': ariaDescribedBy,
@@ -270,11 +273,23 @@ export const Combobox = React.forwardRef<HTMLButtonElement, ComboboxProps>(
         const index = renderIndex;
         renderIndex += 1;
         const isActive = index === activeRow && !createIsActive;
+        const isSelected = option.value === value;
+        const text = (
+          <>
+            <span className="line-clamp-1 font-medium">{option.label}</span>
+            {option.description ? (
+              <span className="line-clamp-1 text-xs text-muted-foreground">
+                {option.description}
+              </span>
+            ) : null}
+          </>
+        );
         return (
           <div
-            aria-selected={option.value === value}
+            aria-selected={isSelected}
             className={cn(
-              'flex cursor-pointer select-none flex-col gap-0.5 rounded-sm px-2 py-1.5 text-sm outline-none',
+              'flex cursor-pointer select-none gap-0.5 rounded-sm px-2 py-1.5 text-sm outline-none',
+              markSelected ? 'items-center gap-2' : 'flex-col',
               isActive && 'bg-accent text-accent-foreground',
             )}
             id={optionId(index)}
@@ -285,12 +300,17 @@ export const Combobox = React.forwardRef<HTMLButtonElement, ComboboxProps>(
             role="option"
             {...(isActive ? { 'data-active': 'true' } : {})}
           >
-            <span className="line-clamp-1 font-medium">{option.label}</span>
-            {option.description ? (
-              <span className="line-clamp-1 text-xs text-muted-foreground">
-                {option.description}
-              </span>
-            ) : null}
+            {markSelected ? (
+              <>
+                <span className="flex min-w-0 flex-1 flex-col gap-0.5">{text}</span>
+                <Check
+                  aria-hidden="true"
+                  className={cn('h-4 w-4 shrink-0', isSelected ? 'opacity-100' : 'opacity-0')}
+                />
+              </>
+            ) : (
+              text
+            )}
           </div>
         );
       });

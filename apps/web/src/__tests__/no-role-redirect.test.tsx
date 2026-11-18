@@ -112,6 +112,11 @@ vi.mock('@/sales-ops/hooks', () => ({
   board. This harness tests navigation only, and the real board needs a query client and
   a token, so it is a marker here exactly as in `leads-routing.test.tsx`.
 */
+// The Funil title's pipeline switch reads the pipelines itself; a marker here.
+vi.mock('@/sales-ops/leads/PipelineTitleSwitcher', () => ({
+  PipelineTitleSwitcher: () => <span data-pipeline-title-stub />,
+}));
+
 vi.mock('@/sales-ops/leads/LeadsBoardContainer', () => ({
   LeadsBoardContainer: () => <div data-leads-board />,
 }));

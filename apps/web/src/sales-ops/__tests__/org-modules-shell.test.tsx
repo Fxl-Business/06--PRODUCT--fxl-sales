@@ -101,6 +101,11 @@ vi.mock('../hooks', () => ({
   useSetSalesOpsCadastroStatus: () => mutation,
 }));
 
+// The Funil title's pipeline switch reads the pipelines itself; a marker here.
+vi.mock('../leads/PipelineTitleSwitcher', () => ({
+  PipelineTitleSwitcher: () => <span data-pipeline-title-stub />,
+}));
+
 vi.mock('../leads/LeadsBoardContainer', () => ({
   LeadsBoardContainer: () => <div data-leads-board />,
 }));
@@ -229,8 +234,7 @@ async function refreshBootstrap(path: string) {
 /** The sidebar's item labels in render order (the leads item is a labelled button too). */
 function sidebarLabels(): string[] {
   return [...container.querySelectorAll('aside nav [aria-label]')]
-    .map((node) => node.getAttribute('aria-label') ?? '')
-    .filter((label) => !label.startsWith('Abrir etapa'));
+    .map((node) => node.getAttribute('aria-label') ?? '');
 }
 
 describe('the shell reads the organization modules from the bootstrap', () => {
@@ -239,7 +243,8 @@ describe('the shell reads the organization modules from the bootstrap', () => {
     await render('/tatico/dashboard', ['admin', 'seller', 'finder']);
 
     expect(locationPath()).toBe('/operacional/funil');
-    expect(sidebarLabels()).toContain('Prospecção');
+    expect(sidebarLabels()).toContain('Funil');
+    expect(sidebarLabels()).not.toContain('Prospecção');
     expect(sidebarLabels()).not.toContain('Propostas');
   });
 
@@ -257,7 +262,7 @@ describe('the shell reads the organization modules from the bootstrap', () => {
 
     const labels = sidebarLabels();
     expect(labels).toContain('Comissões');
-    expect(labels.indexOf('Comissões')).toBeLessThan(labels.indexOf('Prospecção'));
+    expect(labels.indexOf('Comissões')).toBeLessThan(labels.indexOf('Funil'));
   });
 
   it('no redirect while the bootstrap is loading, even for a URL the leads hint would rewrite', async () => {

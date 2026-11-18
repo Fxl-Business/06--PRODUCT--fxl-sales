@@ -174,8 +174,6 @@ async function renderBoard(modules: OrgModules, onRequestConversion: ReturnType<
             onRequestConversion={onRequestConversion}
             people={[]}
             products={[]}
-            routedMode="stage"
-            selectedStageId={DRAFT_ID}
             sellers={[]}
             showSellerFilter={false}
             workspace="operacional"
@@ -185,6 +183,8 @@ async function renderBoard(modules: OrgModules, onRequestConversion: ReturnType<
     );
   });
   await settle();
+  // The Lista, where the `Mover` action lives.
+  await click(container.querySelector('[data-view-option="list"]')!);
 }
 
 /** Moves the lead through the Lista `Mover` action and the real dialog. */

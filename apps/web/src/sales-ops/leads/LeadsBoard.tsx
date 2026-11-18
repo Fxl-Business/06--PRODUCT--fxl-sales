@@ -127,20 +127,11 @@ export type LeadConversionRequest = {
 };
 
 export type LeadsBoardProps = {
-  routedMode?: 'board' | 'stage';
-  /** The pipeline choice. Rendered only when there is more than one to choose from. */
-  pipelineSelector?: {
-    value: string | null;
-    options: ComboboxOption[];
-    onChange: (pipelineId: string) => void;
-  };
   /** The period of the cards, shared by the Quadro, the Lista and the Funil. */
   periodFilter?: {
     value: PeriodSelection;
     onChange: (next: PeriodSelection) => void;
   };
-  selectedStageId?: string;
-  onOpenStage?: (stageId: string) => void;
   stages: SalesOpsLeadStage[];
   leads: SalesOpsLead[];
   /**
@@ -312,11 +303,7 @@ function StageDropZone({
 }
 
 export function LeadsBoard({
-  routedMode,
-  pipelineSelector,
   periodFilter,
-  selectedStageId,
-  onOpenStage,
   stages,
   leads,
   stageSummary,
@@ -359,12 +346,11 @@ export function LeadsBoard({
   const contact = fieldSet === 'contact';
   const noStages = contact && columns.length === 0;
 
-  const [localLeadView, setLeadView] = React.useState<'board' | 'list' | 'funnel'>('board');
-  const leadView = routedMode === 'stage' ? 'list' : routedMode === 'board' ? 'board' : localLeadView;
+  const [leadView, setLeadView] = React.useState<'board' | 'list' | 'funnel'>('board');
   const [rawStageFilter, setLeadStageFilter] = React.useState<string>('');
   // An archived stage drops out of `columns`; the filter then reads as "all"
   // (derived, so no effect-driven reset is needed).
-  const leadStageFilter = routedMode === 'stage' ? (selectedStageId ?? '') : columns.some((s) => s.id === rawStageFilter) ? rawStageFilter : '';
+  const leadStageFilter = columns.some((s) => s.id === rawStageFilter) ? rawStageFilter : '';
 
   const colors = React.useMemo(() => stageColors(columns), [columns]);
   /*
@@ -576,18 +562,7 @@ export function LeadsBoard({
     >
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2.5">
-          {pipelineSelector && pipelineSelector.options.length > 1 ? (
-            <div className="w-[200px]">
-              <Combobox
-                aria-label="Funil"
-                className={comboboxTriggerClass}
-                onChange={pipelineSelector.onChange}
-                options={pipelineSelector.options}
-                value={pipelineSelector.value ?? ''}
-              />
-            </div>
-          ) : null}
-          {!routedMode && <div
+          <div
             aria-label="Alternar visualização"
             className={segmentedContainerClass}
             data-view-toggle="true"
@@ -620,7 +595,7 @@ export function LeadsBoard({
             >
               <Filter aria-hidden size={15} /> {BOARD_VIEW_LABEL.funnel}
             </button>
-          </div>}
+          </div>
           {sellerFilter ? (
             <div className="w-[220px]">
               <Combobox
@@ -753,11 +728,8 @@ export function LeadsBoard({
                           className={iconButtonClass}
                           data-view-in-list={stage.id}
                           onClick={() => {
-                            if (routedMode) onOpenStage?.(stage.id);
-                            else {
-                              setLeadStageFilter(stage.id);
-                              setLeadView('list');
-                            }
+                            setLeadStageFilter(stage.id);
+                            setLeadView('list');
                           }}
                           type="button"
                         >
@@ -892,7 +864,7 @@ export function LeadsBoard({
         <LeadsFunnelView aggregates={aggregates} stages={stages} />
       ) : (
         <div className="flex flex-col gap-4" data-leads-list="true">
-          {!routedMode && <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
               aria-pressed={leadStageFilter === ''}
               className={phaseChipClassName(leadStageFilter === '')}
@@ -935,7 +907,7 @@ export function LeadsBoard({
                 </button>
               );
             })}
-          </div>}
+          </div>
 
           <div className={listTableCardClass}>
             <div className="min-w-[900px]">
