@@ -311,7 +311,7 @@ describe('import routes (real router, real database)', () => {
       const workbook = new ExcelJS.Workbook();
       await workbook.xlsx.load(Buffer.from(await response.arrayBuffer()) as unknown as ExcelJS.Buffer);
       const visible = workbook.worksheets.filter((w) => w.state === 'visible').map((w) => w.name);
-      expect(visible).toEqual(['Leia-me', ...WORKBOOK_SHEETS.map((s) => s.tab)]);
+      expect(visible).toEqual(['Leia-me', 'Funis e etapas', ...WORKBOOK_SHEETS.map((s) => s.tab)]);
     }
     await expectNothingWritten(orgId);
   });

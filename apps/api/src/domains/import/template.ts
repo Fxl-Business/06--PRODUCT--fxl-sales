@@ -3,6 +3,17 @@
 import ExcelJS from 'exceljs';
 import { coerceCell, normalizeLabel, rawCell } from './cells.js';
 import {
+  ETAPA_DO_FUNIL_LIST_ID,
+  ETAPA_FUNIL_LIST_ID,
+  activePipelines,
+  buildEtapaPairs,
+  buildFunisRows,
+  etapaDependentFormula,
+  hasSeveralFunis,
+  writeFunisSheet,
+} from './funis-sheet.js';
+import {
+  FUNIS_TAB,
   BOOL_LABELS,
   LEIAME_TAB,
   LISTAS_TAB,
@@ -67,6 +78,11 @@ export function listIdOf(column: ColumnDef): string | null {
 
 // ---------------------------------------------------------------- Leia-me
 
+/** The Funil column turns required on Leads and Etapas once the org has several active funis. */
+function isRequiredColumn(def: SheetDef, col: ColumnDef, several: boolean): boolean {
+  return col.required || (several && col.key === 'funil' && (def.key === 'leads' || def.key === 'etapas'));
+}
+
 const SHEET_PURPOSE: Record<SheetKey, string> = {
   areas: 'Áreas de atuação dos produtos e dos itens avulsos.',
   funcoes: 'Funções que as pessoas exercem, além de Vendedor e Finder, que já existem.',
@@ -74,8 +90,8 @@ const SHEET_PURPOSE: Record<SheetKey, string> = {
   custosProduto: 'Custo padrão de cada função em um produto.',
   pessoas: 'Vendedores, finders e profissionais com as suas funções.',
   clientes: 'Clientes das propostas e dos leads.',
-  etapas: 'Novas etapas do funil de leads.',
-  leads: 'Leads da prospecção, cada um numa etapa do funil.',
+  etapas: 'Novas etapas de um funil de leads, cada uma no funil da coluna Funil.',
+  leads: 'Leads da prospecção, cada um num funil e numa etapa dele.',
   propostas: 'Propostas, uma por linha, identificadas pelo Ref.',
   itens: 'Itens de cada proposta completa.',
   profissionais: 'Profissionais e custos de cada proposta completa.',
@@ -88,6 +104,7 @@ export function buildLeiameLines(catalog: ImportCatalog, opts: TemplateOptions):
   const T = (text: string) => lines.push({ kind: 'title', text });
   const H = (text: string) => lines.push({ kind: 'heading', text });
   const B = (text: string) => lines.push({ kind: 'body', text });
+  const funisRequired = hasSeveralFunis(catalog);
 
   T('Modelo de importação do FXL Vendas');
   if (opts.example) {
@@ -107,7 +124,18 @@ export function buildLeiameLines(catalog: ImportCatalog, opts: TemplateOptions):
   B('As listas suspensas mostram os cadastros que já existem na organização, mas você também pode digitar nomes criados nesta mesma planilha.');
   H('Ordem das abas');
   B('As abas estão na ordem em que são importadas, e cada aba pode usar o que foi criado nas abas anteriores.');
+  B(`${FUNIS_TAB}: referência somente de leitura com os funis, as etapas e as funções com acesso da organização, que não é importada.`);
   for (const def of WORKBOOK_SHEETS) B(`${def.tab}: ${SHEET_PURPOSE[def.key]}`);
+  H('Funis e etapas dos leads');
+  B(`A coluna Funil das abas Leads e Etapas diz em qual funil o lead ou a nova etapa entra, e os nomes certos estão na aba ${FUNIS_TAB}.`);
+  B(
+    funisRequired
+      ? 'Esta organização tem mais de um funil ativo, então a coluna Funil é obrigatória nas abas Leads e Etapas.'
+      : 'Esta organização tem um só funil ativo, então a coluna Funil pode ficar em branco e vale esse funil.',
+  );
+  B('Com mais de um funil ativo, uma linha com Funil em branco é recusada na conferência.');
+  B(`A aba ${FUNIS_TAB} mostra cada etapa com o tipo, se aceita lead na importação, se exige motivo da perda e quais funções têm acesso ao funil.`);
+  B('Um funil novo não é criado por esta planilha, e sim em Cadastros, Funis e etapas.');
   H('Ligação pelo Ref');
   B('Cada proposta tem um Ref que você escolhe, como P1 ou PROP-15, e que não pode se repetir na planilha.');
   B('As abas Itens da proposta, Profissionais da proposta, Parcelas e Pagamentos usam o mesmo Ref para dizer a qual proposta cada linha pertence.');
@@ -143,7 +171,8 @@ export function buildLeiameLines(catalog: ImportCatalog, opts: TemplateOptions):
   H('Preencher com um assistente de IA');
   B('Para preencher com um assistente de IA, como ChatGPT ou Claude, envie este arquivo e peça que ele siga as instruções desta seção.');
   B('Instruções para o assistente de IA: preencha as células desta mesma planilha, abrindo o arquivo com openpyxl.load_workbook e gravando com save, sem recriar a planilha do zero nem convertê-la para outro formato.');
-  B('Não renomeie, reordene nem apague abas, inclusive Leia-me e Listas, e não altere os cabeçalhos da linha 1.');
+  B('Não renomeie, reordene nem apague abas, inclusive Leia-me, Funis e etapas e Listas, e não altere os cabeçalhos da linha 1.');
+  B(`Não edite a aba ${FUNIS_TAB}, e copie dela os nomes dos funis e das etapas para as colunas Funil e Etapa.`);
   B('Escreva um registro por linha a partir da linha 2 da aba certa, sem linhas em branco no meio e sem fórmulas.');
   B('Digite datas como dd/mm/aaaa e valores em reais como 1.234,56, e escreva os nomes de cadastros exatamente como aparecem na aba Listas ou em outra aba desta planilha.');
   B('Devolva o resultado como um arquivo .xlsx para download, nunca como .xls, .csv, .ods ou tabela no texto da conversa.');
@@ -154,7 +183,7 @@ export function buildLeiameLines(catalog: ImportCatalog, opts: TemplateOptions):
   for (const def of WORKBOOK_SHEETS) {
     H(def.tab);
     for (const col of def.columns) {
-      B(col.required ? `${col.header} (obrigatória): ${col.help}` : `${col.header}: ${col.help}`);
+      B(isRequiredColumn(def, col, funisRequired) ? `${col.header} (obrigatória): ${col.help}` : `${col.header}: ${col.help}`);
     }
   }
   return lines;
@@ -202,6 +231,7 @@ export function buildListColumns(catalog: ImportCatalog): ListColumn[] {
     .filter((s) => s.kind !== 'conversion')
     .sort((a, b) => a.position - b.position || a.name.localeCompare(b.name, 'pt-BR'));
 
+  const pairs = hasSeveralFunis(catalog) ? buildEtapaPairs(catalog) : null;
   const columns: ListColumn[] = [
     { id: 'areas', header: 'Áreas', values: sortedUnique(active(catalog.areas).map((a) => a.name)) },
     { id: 'funcoes', header: 'Funções', values: sortedUnique(funcaoNames) },
@@ -220,8 +250,13 @@ export function buildListColumns(catalog: ImportCatalog): ListColumn[] {
     { id: 'clientes', header: 'Clientes', values: sortedUnique(catalog.clients.map((c) => c.name)) },
     { id: 'etapas', header: 'Etapas', values: dedupeByLabel(stages.map((s) => s.name)) },
     // The active funis in board order; the dependent Etapa dropdown is built from the same catalog by the template slice.
-    { id: 'funis', header: 'Funis', values: dedupeByLabel(active(catalog.pipelines).map((p) => p.name)) },
+    { id: 'funis', header: 'Funis', values: dedupeByLabel(activePipelines(catalog).map((p) => p.name)) },
   ];
+  // Two aligned helper columns behind the Etapa dropdown that depends on the row's Funil (several funis only).
+  if (pairs !== null) {
+    columns.push({ id: ETAPA_FUNIL_LIST_ID, header: 'Funil da etapa', values: pairs.funis });
+    columns.push({ id: ETAPA_DO_FUNIL_LIST_ID, header: 'Etapa do funil', values: pairs.etapas });
+  }
 
   const seen = new Set<string>();
   for (const def of WORKBOOK_SHEETS) {
@@ -351,9 +386,11 @@ function writeDataSheet(
   ranges: ReadonlyMap<string, string>,
   listValues: ReadonlyMap<string, readonly string[]>,
   rows: readonly ExampleRow[],
+  funisRequired: boolean,
 ): void {
   def.columns.forEach((c, idx) => {
     const j = idx + 1;
+    const required = isRequiredColumn(def, c, funisRequired);
     const col = ws.getColumn(j);
     col.width = Math.min(40, Math.max(14, [...c.header].length + 4));
     const fmt = numFmtOf(c.kind);
@@ -365,21 +402,29 @@ function writeDataSheet(
     head.fill = {
       type: 'pattern',
       pattern: 'solid',
-      fgColor: { argb: c.required ? REQUIRED_HEADER_ARGB : OPTIONAL_HEADER_ARGB },
+      fgColor: { argb: required ? REQUIRED_HEADER_ARGB : OPTIONAL_HEADER_ARGB },
     };
     head.alignment = { vertical: 'middle', wrapText: true };
     head.border = { bottom: { style: 'thin' } };
-    head.note = c.required ? REQUIRED_NOTE_PREFIX + c.help : c.help;
+    head.note = required ? REQUIRED_NOTE_PREFIX + c.help : c.help;
   });
   ws.views = [{ state: 'frozen', xSplit: 0, ySplit: 1, topLeftCell: 'A2', activeCell: 'A2' }];
 
   def.columns.forEach((c, idx) => {
     const id = listIdOf(c);
     if (id === null) return;
-    const formula = ranges.get(id);
-    if (formula === undefined) return;
+    let formula = ranges.get(id);
     const letter = ws.getColumn(idx + 1).letter;
     const range = `${letter}2:${letter}${def.maxRows + 1}`;
+    if (def.key === 'leads' && c.key === 'etapa' && funisRequired) {
+      const funilRange = ranges.get(ETAPA_FUNIL_LIST_ID);
+      const etapaRange = ranges.get(ETAPA_DO_FUNIL_LIST_ID);
+      const funilIdx = def.columns.findIndex((x) => x.key === 'funil');
+      if (funilRange === undefined || etapaRange === undefined || funilIdx < 0) return;
+      const funilLetter = ws.getColumn(funilIdx + 1).letter;
+      formula = etapaDependentFormula(`$${funilLetter}2`, funilRange, etapaRange.split(':')[0] ?? etapaRange);
+    }
+    if (formula === undefined) return;
     if (c.kind.type === 'enum' || c.kind.type === 'bool') {
       const labels = listValues.get(id) ?? [];
       addValidation(ws, range, {
@@ -509,12 +554,15 @@ function extraExampleRows(today: string): ExtraRows {
   };
 }
 
-export function buildExampleDataset(today: string): ExampleDataset {
+/** `funil` is the default funil's name: it is written in the Funil cell of every Leads and Etapas example row. */
+export function buildExampleDataset(today: string, funil: string | null = null): ExampleDataset {
   const extra = extraExampleRows(today);
+  const withFunil = (key: SheetKey, row: ExampleRow): ExampleRow =>
+    funil !== null && (key === 'leads' || key === 'etapas') ? { ...row, funil } : row;
   const entries = SHEET_KEYS.map((key): [SheetKey, ExampleRow[]] => {
     const def = getSheetDef(key);
     const rows: ReadonlyArray<Readonly<Record<string, CellValue | undefined>>> = extra[key];
-    return [key, [schemaExampleRow(def), ...rows.map((r) => fullRow(def, r))]];
+    return [key, [schemaExampleRow(def), ...rows.map((r) => fullRow(def, r))].map((r) => withFunil(key, r))];
   });
   // Object.fromEntries widens to a string-keyed record; the keys are exactly SHEET_KEYS.
   const dataset: Partial<Record<SheetKey, ExampleRow[]>> = Object.fromEntries(entries);
@@ -531,14 +579,17 @@ export function createTemplateWorkbook(catalog: ImportCatalog, opts: TemplateOpt
   wb.modified = stamp;
 
   writeLeiame(wb.addWorksheet(LEIAME_TAB), buildLeiameLines(catalog, opts));
+  writeFunisSheet(wb.addWorksheet(FUNIS_TAB), buildFunisRows(catalog));
   const dataSheets = WORKBOOK_SHEETS.map((def) => [def, wb.addWorksheet(def.tab)] as const);
   const listas = wb.addWorksheet(LISTAS_TAB, { state: 'hidden' });
   const listColumns = buildListColumns(catalog);
   const ranges = writeListas(listas, listColumns);
   const listValues = new Map(listColumns.map((c) => [c.id, c.values] as const));
-  const dataset = opts.example ? buildExampleDataset(catalog.today) : (opts.rows ?? null);
+  const defaultFunil = activePipelines(catalog).find((p) => p.isDefault)?.name ?? null;
+  const dataset = opts.example ? buildExampleDataset(catalog.today, defaultFunil) : (opts.rows ?? null);
+  const funisRequired = hasSeveralFunis(catalog);
   for (const [def, ws] of dataSheets) {
-    writeDataSheet(ws, def, ranges, listValues, dataset?.[def.key] ?? []);
+    writeDataSheet(ws, def, ranges, listValues, dataset?.[def.key] ?? [], funisRequired);
   }
   return wb;
 }

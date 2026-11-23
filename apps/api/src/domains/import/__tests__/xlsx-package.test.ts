@@ -16,9 +16,9 @@ function sourceDirOf(relsPath: string): string {
   return posix.dirname(posix.dirname(relsPath)).replace(/^\.$/, '');
 }
 
-/** exceljs numbers drawings by sheet (the first data tab is 2); the SDK counts from an unnumbered first. */
+/** exceljs numbers drawings by sheet (Leia-me and Funis e etapas come first, so the first data tab is 3); the SDK counts from an unnumbered first. */
 function sdkVmlName(path: string): string {
-  const n = Number(/vmlDrawing(\d+)\.vml$/.exec(path)?.[1]) - 1;
+  const n = Number(/vmlDrawing(\d+)\.vml$/.exec(path)?.[1]) - 2;
   return `xl/drawings/vmldrawing${n === 1 ? '' : String(n)}.vml`;
 }
 
@@ -55,12 +55,12 @@ async function toOpenXmlSdkShape(input: Buffer): Promise<Buffer> {
   return Buffer.from(await out.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }));
 }
 
-/** exceljs `xl/comments2.xml` and `vmlDrawing2.vml` are openpyxl's first: `comment1.xml`, `commentsDrawing1.vml`. */
+/** exceljs `xl/comments3.xml` and `vmlDrawing3.vml` are openpyxl's first: `comment1.xml`, `commentsDrawing1.vml`. */
 function openpyxlPartName(path: string): string {
   const comments = /^xl\/comments(\d+)\.xml$/.exec(path);
-  if (comments) return `xl/comments/comment${String(Number(comments[1]) - 1)}.xml`;
+  if (comments) return `xl/comments/comment${String(Number(comments[1]) - 2)}.xml`;
   const vml = /^xl\/drawings\/vmlDrawing(\d+)\.vml$/.exec(path);
-  if (vml) return `xl/drawings/commentsDrawing${String(Number(vml[1]) - 1)}.vml`;
+  if (vml) return `xl/drawings/commentsDrawing${String(Number(vml[1]) - 2)}.vml`;
   return path;
 }
 

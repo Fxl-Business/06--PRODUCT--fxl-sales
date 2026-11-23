@@ -13,7 +13,7 @@ import {
   createTemplateWorkbook,
   listIdOf,
 } from '../template.js';
-import { LEIAME_TAB, LISTAS_TAB, SHEET_KEYS, WORKBOOK_SHEETS, getSheetDef, type ColumnDef } from '../workbook-schema.js';
+import { FUNIS_TAB, LEIAME_TAB, LISTAS_TAB, SHEET_KEYS, WORKBOOK_SHEETS, getSheetDef, type ColumnDef } from '../workbook-schema.js';
 import type { ImportCatalog, ProductCatalogEntry } from '../types.js';
 
 function catalogFixture(overrides: Partial<ImportCatalog> = {}): ImportCatalog {
@@ -134,10 +134,10 @@ describe('template workbook', () => {
     expect(wb.getWorksheet(getSheetDef('clientes').tab)!.rowCount).toBe(1);
   });
 
-  it('writes Leia-me first, the 13 data tabs in contract order and a hidden Listas tab last', async () => {
+  it('writes Leia-me first, the visible Funis e etapas reference, the 13 data tabs in contract order and a hidden Listas tab last', async () => {
     for (const example of [false, true]) {
       const wb = await reload(await buildTemplateWorkbook(catalogFixture(), { example }));
-      expect(wb.worksheets.map((w) => w.name)).toEqual([LEIAME_TAB, ...WORKBOOK_SHEETS.map((s) => s.tab), LISTAS_TAB]);
+      expect(wb.worksheets.map((w) => w.name)).toEqual([LEIAME_TAB, FUNIS_TAB, ...WORKBOOK_SHEETS.map((s) => s.tab), LISTAS_TAB]);
       for (const ws of wb.worksheets) expect(ws.state).toBe(ws.name === LISTAS_TAB ? 'hidden' : 'visible');
     }
   });
@@ -305,7 +305,7 @@ describe('template workbook', () => {
     for (const today of ['2026-10-02', '2027-03-01']) {
       const parsed = await parseWorkbook(await buildTemplateWorkbook(catalogFixture({ today }), { example: true }));
       expect(parsed.issues).toEqual([]);
-      const dataset = buildExampleDataset(today);
+      const dataset = buildExampleDataset(today, 'Funil principal');
       for (const k of SHEET_KEYS) {
         expect(parsed.sheets[k].rows.map((r) => r.cells)).toEqual(dataset[k]);
         expect(parsed.sheets[k].rows.map((r) => r.row)).toEqual(dataset[k].map((_, i) => i + 2));
@@ -407,7 +407,7 @@ describe('template workbook', () => {
       'Instruções para o assistente de IA:',
       'openpyxl.load_workbook',
       'sem recriar a planilha do zero',
-      'inclusive Leia-me e Listas',
+      'inclusive Leia-me, Funis e etapas e Listas',
       'nunca como .xls, .csv, .ods',
       'Pasta de Trabalho do Excel (.xlsx)',
     ]) {
@@ -422,6 +422,117 @@ describe('template workbook', () => {
       expect(wb.created.getTime()).toBe(Date.parse('2026-10-02T12:00:00.000Z'));
     }
   });
+});
+
+describe('template workbook with funis', () => {
+  const SECOND = IDS.pipelineSecond;
+  function severalFunis(): ImportCatalog {
+    return catalogFixture({
+      pipelines: [pipelineRow(IDS.pipelineMain, 'Funil principal', 0), pipelineRow(SECOND, 'Parceiros *', 1)],
+      stages: [
+        stageRow(IDS.stageNovo, 'Novo', 'normal', 1),
+        stageRow(IDS.stageProposta, 'Proposta', 'conversion', 2),
+        stageRow(IDS.stagePerdido, 'Perdido', 'lost', 3),
+        stageRow('00000000-0000-4000-8000-0000000000e1', 'Novo', 'normal', 1, { pipelineId: SECOND }),
+        stageRow('00000000-0000-4000-8000-0000000000e2', 'Ganho', 'normal', 2, { pipelineId: SECOND, type: 'saida', exitKind: 'ganho' }),
+      ],
+    });
+  }
+  const colOf = (key: 'leads' | 'etapas', k: string) => getSheetDef(key).columns.findIndex((c) => c.key === k) + 1;
+
+  it('writes the Funis e etapas tab as a visible reference tab with the contract headers and rows', async () => {
+    const wb = await reload(await buildTemplateWorkbook(severalFunis(), { example: false }));
+    const ws = sheet(wb, FUNIS_TAB);
+    expect(ws.state).toBe('visible');
+    expect(ws.getRow(1).values).toEqual([
+      undefined, 'Funil', 'Etapa', 'Tipo', 'Aceita lead na importação', 'Exige motivo da perda', 'Funções com acesso',
+    ]);
+    expect(ws.rowCount).toBe(6);
+    expect(ws.getCell(4, 3).value).toBe('Saída: Perdido');
+    expect(ws.getCell(5, 1).value).toBe('Parceiros *');
+    expect(ws.getCell(5, 6).value).toBe('Só administradores');
+  });
+
+  it('keeps a plain static Etapa list with one active funil', async () => {
+    const cat = catalogFixture({ stages: [stageRow(IDS.stageNovo, 'Novo', 'normal', 1)] });
+    const wb = await reload(await buildTemplateWorkbook(cat, { example: false }));
+    const dv = sheet(wb, 'Leads').getCell(2, colOf('leads', 'etapa')).dataValidation;
+    expect(dv.formulae[0]).toMatch(/^'Listas'!\$[A-Z]+\$2:\$[A-Z]+\$2$/);
+    expect(buildListColumns(cat).some((c) => c.id === 'etapaFunil')).toBe(false);
+  });
+
+  it('writes the two aligned helper columns and a dependent Etapa validation with several funis', async () => {
+    const cat = severalFunis();
+    const cols = buildListColumns(cat);
+    const funisAt = cols.findIndex((c) => c.id === 'etapaFunil');
+    expect(cols[funisAt]).toMatchObject({ header: 'Funil da etapa', values: ['Funil principal', 'Funil principal', 'Parceiros *', 'Parceiros *'] });
+    expect(cols[funisAt + 1]).toMatchObject({ header: 'Etapa do funil', values: ['Novo', 'Perdido', 'Novo', 'Ganho'] });
+    const wb = await reload(await buildTemplateWorkbook(cat, { example: false }));
+    const listas = sheet(wb, LISTAS_TAB);
+    const fl = listas.getColumn(funisAt + 1).letter;
+    const el = listas.getColumn(funisAt + 2).letter;
+    const funilLetter = sheet(wb, 'Leads').getColumn(colOf('leads', 'funil')).letter;
+    const expected =
+      `OFFSET('Listas'!$${el}$2,MATCH(1,INDEX(--('Listas'!$${fl}$2:$${fl}$5=$${funilLetter}2),0),0)-1,0,` +
+      `SUMPRODUCT(--('Listas'!$${fl}$2:$${fl}$5=$${funilLetter}2)),1)`;
+    const leads = getSheetDef('leads');
+    for (const row of [2, leads.maxRows + 1]) {
+      const dv = sheet(wb, 'Leads').getCell(row, colOf('leads', 'etapa')).dataValidation;
+      expect(dv.type).toBe('list');
+      // One validation over the whole range: its formula is written for the first row and shifts by itself.
+      expect(dv.formulae[0]).toBe(expected);
+      expect(dv.showErrorMessage).toBeFalsy();
+    }
+    expect(expected.length).toBeLessThan(255);
+    expect(expected).not.toContain('COUNTIF');
+  });
+
+  it('never writes an invalid range when no etapa is importable', async () => {
+    const cat = catalogFixture({
+      pipelines: [pipelineRow(IDS.pipelineMain, 'A', 0), pipelineRow(SECOND, 'B', 1)],
+      stages: [],
+    });
+    const wb = await reload(await buildTemplateWorkbook(cat, { example: false }));
+    expect(sheet(wb, 'Leads').getCell(2, colOf('leads', 'etapa')).dataValidation?.type).toBeUndefined();
+  });
+
+  it('lists only active funis in the Funil dropdown and marks Funil required on both tabs with several funis', async () => {
+    const cat = severalFunis();
+    const wb = await reload(await buildTemplateWorkbook(cat, { example: false }));
+    for (const key of ['leads', 'etapas'] as const) {
+      const def = getSheetDef(key);
+      const ws = sheet(wb, def.tab);
+      const cell = ws.getCell(1, colOf(key, 'funil'));
+      const fill = cell.fill;
+      expect(fill && fill.type === 'pattern' ? fill.fgColor?.argb : undefined).toBe(REQUIRED_HEADER_ARGB);
+      expect(noteText(cell)).toBe(REQUIRED_NOTE_PREFIX + (def.columns.find((c) => c.key === 'funil')?.help ?? ''));
+      expect(ws.getCell(2, colOf(key, 'funil')).dataValidation.type).toBe('list');
+    }
+    const one = await reload(await buildTemplateWorkbook(catalogFixture(), { example: false }));
+    const fill = sheet(one, 'Leads').getCell(1, colOf('leads', 'funil')).fill;
+    expect(fill && fill.type === 'pattern' ? fill.fgColor?.argb : undefined).not.toBe(REQUIRED_HEADER_ARGB);
+    expect(buildListColumns(cat).find((c) => c.id === 'funis')?.values).toEqual(['Funil principal', 'Parceiros *']);
+  });
+
+  it('Leia-me explains the Funil column, says obrigatória with several funis and forbids editing the reference tab', () => {
+    const several = buildLeiameLines(severalFunis(), { example: false }).map((l) => l.text);
+    const text = several.join('\n');
+    expect(several).toContain('Funil (obrigatória): ' + (getSheetDef('leads').columns.find((c) => c.key === 'funil')?.help ?? ''));
+    expect(text).toContain('Cadastros, Funis e etapas');
+    expect(text).toContain('Não edite a aba Funis e etapas');
+    expect(text).toContain('inclusive Leia-me, Funis e etapas e Listas');
+    const single = buildLeiameLines(catalogFixture(), { example: false }).map((l) => l.text);
+    expect(single.some((t) => t.startsWith('Funil (obrigatória)'))).toBe(false);
+  });
+
+  it('writes the default funil name in Funil of the Leads and Etapas example rows', async () => {
+    const parsed = await parseWorkbook(await buildTemplateWorkbook(severalFunis(), { example: true }));
+    expect(parsed.issues).toEqual([]);
+    for (const key of ['leads', 'etapas'] as const) {
+      expect(parsed.sheets[key].rows.length).toBeGreaterThan(0);
+      for (const r of parsed.sheets[key].rows) expect(r.cells.funil).toBe('Funil principal');
+    }
+  }, 20_000);
 });
 
 type SheetKeyName = (typeof SHEET_KEYS)[number];
