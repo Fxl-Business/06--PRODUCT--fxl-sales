@@ -44,6 +44,9 @@ function twoFunis(): ImportCatalog {
         exitKind: 'pausado',
       }),
       stageRow('00000000-0000-4000-8000-0000000000e4', 'Arquivada', 'normal', 4, { pipelineId: SECOND, status: 'archived' }),
+      stageRow('00000000-0000-4000-8000-0000000000e6', 'Etapa do funil arquivado', 'normal', 1, {
+        pipelineId: '00000000-0000-4000-8000-0000000000d4',
+      }),
       stageRow('00000000-0000-4000-8000-0000000000e5', 'Orçamento', 'normal', 5, { pipelineId: THIRD, type: 'orcamento' }),
     ],
   };
