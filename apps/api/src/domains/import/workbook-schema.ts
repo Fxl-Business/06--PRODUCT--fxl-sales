@@ -164,8 +164,8 @@ export const WORKBOOK_SHEETS = [
     tab: 'Etapas',
     maxRows: 50,
     columns: [
-      { key: 'nome', header: 'Nome', kind: { type: 'text', max: 120 }, required: true, example: 'Diagnóstico', help: 'Nome de uma nova etapa do funil de leads, criada depois das etapas existentes.' },
-      { key: 'funil', header: 'Funil', kind: { type: 'text', max: 120 }, required: false, list: 'funis', example: null, help: 'Funil que recebe a nova etapa; em branco vale o único funil ativo e, havendo mais de um, a coluna é obrigatória.' },
+      { key: 'nome', header: 'Nome', kind: { type: 'text', max: 120 }, required: true, example: 'Diagnóstico', help: 'Nome de uma nova etapa do funil indicado na coluna Funil, criada depois das etapas existentes desse funil.' },
+      { key: 'funil', header: 'Funil', kind: { type: 'text', max: 120 }, required: false, list: 'funis', example: null, help: 'Funil que recebe a nova etapa, como está na aba Funis e etapas; em branco vale o único funil ativo e, havendo mais de um, a coluna é obrigatória.' },
     ],
   },
   {
@@ -179,8 +179,8 @@ export const WORKBOOK_SHEETS = [
       { key: 'descricao', header: 'Descrição', kind: { type: 'text', max: 4000 }, required: false, example: 'Quer trocar o sistema de caixa.', help: 'Observações sobre o lead.' },
       { key: 'vendedor', header: 'Vendedor', kind: { type: 'text', max: 120 }, required: false, list: 'vendedores', example: 'Ana Souza', help: 'Pessoa com a função Vendedor responsável pelo lead; em branco o lead fica sem vendedor.' },
       { key: 'produtos', header: 'Produtos', kind: { type: 'list', max: 50 }, required: false, list: 'produtos', freeText: true, example: 'Sistema de gestão', help: 'Produtos de interesse separados por ponto e vírgula; nomes fora do cadastro ficam como texto.' },
-      { key: 'funil', header: 'Funil', kind: { type: 'text', max: 120 }, required: false, list: 'funis', example: null, help: 'Funil do lead; em branco vale o único funil ativo e, havendo mais de um, a coluna é obrigatória.' },
-      { key: 'etapa', header: 'Etapa', kind: { type: 'text', max: 120 }, required: false, list: 'etapas', example: 'Diagnóstico', help: 'Etapa do funil; em branco o lead entra na primeira etapa, e a etapa de conversão não é aceita.' },
+      { key: 'funil', header: 'Funil', kind: { type: 'text', max: 120 }, required: false, list: 'funis', example: null, help: 'Funil do lead, como está na aba Funis e etapas; em branco vale o único funil ativo e, havendo mais de um, a coluna é obrigatória.' },
+      { key: 'etapa', header: 'Etapa', kind: { type: 'text', max: 120 }, required: false, list: 'etapas', example: 'Diagnóstico', help: 'Etapa do funil do lead, como está na aba Funis e etapas; em branco o lead entra na primeira etapa desse funil, e a etapa de conversão não é aceita.' },
       { key: 'motivoPerda', header: 'Motivo da perda', kind: { type: 'text', max: 500 }, required: false, example: null, help: 'Obrigatório quando a etapa é a de leads perdidos.' },
     ],
   },
