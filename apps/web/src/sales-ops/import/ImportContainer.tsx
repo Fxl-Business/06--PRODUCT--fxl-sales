@@ -18,10 +18,14 @@ export function ImportContainer() {
   const commit = useCommitImport();
   return (
     <ImportView
-      onCommit={(file, stageMap) => commit.mutateAsync({ file, stageMap })}
+      onCommit={(file, stageMap, pipelineMap) =>
+        commit.mutateAsync({ file, stageMap, pipelineMap })
+      }
       onExportLeads={() => exportLeads.mutateAsync()}
       onDownload={(example) => download.mutateAsync(example)}
-      onPreview={(file, stageMap) => preview.mutateAsync({ file, stageMap })}
+      onPreview={(file, stageMap, pipelineMap) =>
+        preview.mutateAsync({ file, stageMap, pipelineMap })
+      }
     />
   );
 }

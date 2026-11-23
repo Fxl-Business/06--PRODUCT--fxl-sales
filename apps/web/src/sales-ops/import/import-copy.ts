@@ -6,7 +6,7 @@ export const IMPORT_COPY = {
     'Use os modelos para trazer cadastros, leads e propostas de uma vez. A importação só cria registros novos: nada existente é alterado.',
   step1Title: '1. Baixe o modelo',
   step1Text:
-    'O modelo em branco já traz as listas com os cadastros atuais da organização. O modelo com exemplo mostra uma linha preenchida em cada aba.',
+    'O modelo em branco já traz as listas com os cadastros atuais da organização e a aba Funis e etapas, que mostra os funis e as etapas de hoje. O modelo com exemplo mostra uma linha preenchida em cada aba.',
   downloadBlank: 'Baixar modelo em branco',
   downloadExample: 'Baixar modelo com exemplo',
   exportLeads: 'Exportar leads',
@@ -20,6 +20,16 @@ export const IMPORT_COPY = {
   validate: 'Validar planilha',
   validating: 'Validando...',
   step3Title: '3. Confira e importe',
+  mapPipelinesTitle: 'Mapear funis',
+  mapPipelinesText:
+    'Diga para qual funil desta organização vão os leads de cada funil da planilha. Depois de escolher, valide novamente.',
+  mapPipelinesSheetColumn: 'Funil na planilha',
+  mapPipelinesTargetColumn: 'Vai para',
+  mapPipelinesPlaceholder: 'Escolher funil',
+  mapPipelinesSearch: 'Buscar funil',
+  mapPipelinesAriaLabel: 'Funil de destino',
+  mapStagesFunilHeading: (name: string) => `Funil: ${name}`,
+  mapStagesNoFunilHeading: 'Sem funil na planilha',
   mapStagesTitle: 'Mapear etapas',
   mapStagesText:
     'Diga para qual etapa desta organização vão os leads de cada etapa da planilha. Depois de escolher, valide novamente.',
@@ -34,6 +44,8 @@ export const IMPORT_COPY = {
   mapStagesConversion: 'Esta é a etapa de conversão: escolha outra.',
   mapStagesRevalidate: 'Validar novamente',
   mapStagesPending: 'Defina o destino de todas as etapas e valide novamente para importar.',
+  mapPipelinesPending:
+    'Defina o destino de todos os funis e etapas e valide novamente para importar.',
   countsSheet: 'Aba',
   countsToCreate: 'Registros a criar',
   countsCreated: 'Registros criados',
