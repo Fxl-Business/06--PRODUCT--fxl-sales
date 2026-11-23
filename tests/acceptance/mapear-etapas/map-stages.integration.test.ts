@@ -91,7 +91,11 @@ describe('preview: the etapas of the Leads tab', () => {
     expect(Object.values(novo!)).toContain(1);
     expect(Object.values(proposta!)).toContain(1);
     // not found / found by name / conversion are three different resolutions
-    const resolution = (row: Json, name: string) => stringValues(row).filter((v) => v !== name && v !== ids[name]);
+    // (the API nests it as `resolution: { kind, stageId }`, so the values are read one level down too)
+    const resolution = (row: Json, name: string) =>
+      [row, ...Object.values(row).filter((v): v is Json => typeof v === 'object' && v !== null)]
+        .flatMap(stringValues)
+        .filter((v) => v !== name && v !== ids[name]);
     const resolutions = [resolution(contato!, 'Contato'), resolution(novo!, 'Novo'), resolution(proposta!, 'Proposta')].map((r) => r.join('|'));
     expect(new Set(resolutions).size).toBe(3);
 

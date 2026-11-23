@@ -14,6 +14,7 @@ import ExcelJS from 'exceljs';
 import {
   LEIAME_TAB,
   LISTAS_TAB,
+  FUNIS_TAB,
   MAX_TOTAL_ROWS,
   SHEET_KEYS,
   WORKBOOK_SHEETS,
@@ -194,7 +195,7 @@ export async function parseWorkbook(input: Buffer | Uint8Array): Promise<ParsedW
 
 async function readLoaded(workbook: ExcelJS.Workbook, parsed: ParsedWorkbook): Promise<ParsedWorkbook> {
   const fileIssues: ImportIssue[] = [];
-  const skipTabs = new Set([normalizeLabel(LEIAME_TAB), normalizeLabel(LISTAS_TAB)]);
+  const skipTabs = new Set([normalizeLabel(LEIAME_TAB), normalizeLabel(FUNIS_TAB), normalizeLabel(LISTAS_TAB)]);
   const matchedByKey = new Map<SheetKey, MatchedSheet>();
   for (const ws of workbook.worksheets) {
     const n = normalizeLabel(ws.name);

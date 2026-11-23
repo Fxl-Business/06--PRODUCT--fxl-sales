@@ -7,8 +7,10 @@
  * Run: pnpm --filter @fxl-sales/api test:integration src/domains/import/__tests__/export-roundtrip.integration.test.ts
  */
 import { modulesForEdition } from '@fxl-sales/shared-utils/crm-model';
+import { DEFAULT_PIPELINE_NAME } from '@fxl-sales/shared-utils/default-pipeline';
 import { randomUUID } from 'node:crypto';
 import { and, asc, eq, isNull, sql } from 'drizzle-orm';
+import ExcelJS from 'exceljs';
 import { Hono } from 'hono';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { hubAuthContext } from '../../../auth/__tests__/hub-auth-context-fixture.js';
@@ -26,6 +28,7 @@ import {
   salesOpsPeople,
   salesOpsPersonFuncoes,
   salesOpsPipelineStages,
+  salesOpsPipelines,
   salesOpsProducts,
   salesOpsReceivables,
   salesOpsSaleItems,
@@ -125,6 +128,7 @@ type LeadView = {
   clientName: string | null;
   valor: number;
   vendedor: string | null;
+  funil: string;
   etapa: string;
   motivo: string | null;
   descricao: string | null;
@@ -142,6 +146,7 @@ async function liveLeads(orgId: string): Promise<LeadView[]> {
       value: salesOpsCrmLeads.estimatedValueBrl,
       seller: salesOpsPeople.displayName,
       stage: salesOpsPipelineStages.name,
+      pipeline: salesOpsPipelines.name,
       lostReason: salesOpsCrmLeads.lostReason,
     })
     .from(salesOpsCrmLeads)
@@ -156,6 +161,10 @@ async function liveLeads(orgId: string): Promise<LeadView[]> {
     .innerJoin(
       salesOpsPipelineStages,
       and(eq(salesOpsPipelineStages.orgId, salesOpsCrmLeads.orgId), eq(salesOpsPipelineStages.id, salesOpsCrmLeads.stageId)),
+    )
+    .innerJoin(
+      salesOpsPipelines,
+      and(eq(salesOpsPipelines.orgId, salesOpsCrmLeads.orgId), eq(salesOpsPipelines.id, salesOpsCrmLeads.pipelineId)),
     )
     .where(and(eq(salesOpsCrmLeads.orgId, orgId), isNull(salesOpsCrmLeads.deletedAt)))
     .orderBy(asc(salesOpsCrmLeads.contactName));
@@ -186,6 +195,7 @@ async function liveLeads(orgId: string): Promise<LeadView[]> {
       clientName: l.clientName,
       valor: l.value,
       vendedor: l.seller,
+      funil: l.pipeline,
       etapa: l.stage,
       motivo: l.lostReason,
       descricao: descricao === '' ? null : descricao,
@@ -355,5 +365,85 @@ describe('leads export round trip (real router, real database)', () => {
       .from(auditLog)
       .where(and(eq(auditLog.actorOrgId, orgA), eq(auditLog.action, 'import.completed')));
     expect(exportAudits).toHaveLength(1);
+  });
+});
+
+async function createPipeline(orgId: string, name: string): Promise<string> {
+  const res = await appFor(orgId).request('/pipelines', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+  expect(res.status).toBe(201);
+  const body = (await res.json()) as { id?: string; pipeline?: { id: string } };
+  return must(body.pipeline?.id ?? body.id);
+}
+
+async function exportedFunis(orgId: string): Promise<string[]> {
+  const res = await appFor(orgId).request(EXPORT_PATH);
+  expect(res.status).toBe(200);
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(Buffer.from(await res.arrayBuffer()) as unknown as ExcelJS.Buffer);
+  const ws = must(wb.getWorksheet('Leads'));
+  const col = must(
+    headerRow('leads')
+      .map((h, i) => [h, i + 1] as const)
+      .find(([h]) => h === 'Funil'),
+  )[1];
+  const out: string[] = [];
+  ws.eachRow((row, n) => {
+    if (n > 1) out.push(String(row.getCell(col).value ?? ''));
+  });
+  return out;
+}
+
+describe('leads export with several funis (real router, real database)', () => {
+  it('writes each lead under its funil and imports back into the same funis, same etapa name in both', async () => {
+    const orgA = newOrg('fa');
+    const orgB = newOrg('fb');
+    await commitOk(orgA, CATALOG_TABS());
+    await commitOk(orgB, CATALOG_TABS());
+    await createPipeline(orgA, 'Parceiros');
+    await createPipeline(orgB, 'Parceiros');
+    await commitOk(orgA, [
+      sheetTab('leads', [
+        { Contato: 'Lia Principal', Empresa: 'Alfa SA', Funil: DEFAULT_PIPELINE_NAME, Etapa: 'Novo' },
+        { Contato: 'Pedro Parceiro', Empresa: 'Beta SA', Funil: 'Parceiros', Etapa: 'Novo' },
+        { Contato: 'Rita Perdida', Empresa: 'Gama SA', Funil: 'Parceiros', Etapa: 'Perdido', 'Motivo da perda': 'Sem verba.' },
+      ]),
+    ]);
+
+    expect((await exportedFunis(orgA)).sort()).toEqual([DEFAULT_PIPELINE_NAME, 'Parceiros', 'Parceiros']);
+
+    const exported = await appFor(orgA).request(EXPORT_PATH);
+    const bytes = new Uint8Array(await exported.arrayBuffer());
+    const preview = await importInto(orgB, '/import/preview', bytes);
+    expect(preview.status).toBe(200);
+    const body = (await preview.json()) as { ok: boolean; issues: ImportIssue[] };
+    expect(body.issues.filter((i) => i.severity === 'error')).toEqual([]);
+    expect((await importInto(orgB, '/import/commit', bytes)).status).toBe(201);
+
+    const inA = await liveLeads(orgA);
+    const inB = await liveLeads(orgB);
+    expect(inB.map((l) => [l.contato, l.funil, l.etapa])).toEqual([
+      ['Lia Principal', DEFAULT_PIPELINE_NAME, 'Novo'],
+      ['Pedro Parceiro', 'Parceiros', 'Novo'],
+      ['Rita Perdida', 'Parceiros', 'Perdido'],
+    ]);
+    expect(inB).toEqual(inA);
+  });
+
+  it('writes the name of an archived funil instead of leaving the cell blank', async () => {
+    const orgA = newOrg('fz');
+    await commitOk(orgA, CATALOG_TABS());
+    const antigo = await createPipeline(orgA, 'Antigo');
+    await commitOk(orgA, [sheetTab('leads', [{ Contato: 'Ari Antigo', Empresa: 'Delta SA', Funil: 'Antigo', Etapa: 'Novo' }])]);
+    const archived = await appFor(orgA).request(`/pipelines/${antigo}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ status: 'archived' }),
+    });
+    expect(archived.status).toBe(200);
+    expect(await exportedFunis(orgA)).toEqual(['Antigo']);
   });
 });

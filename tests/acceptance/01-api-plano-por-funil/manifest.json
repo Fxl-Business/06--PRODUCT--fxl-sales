@@ -1,0 +1,14 @@
+{
+  "slice": "01-api-plano-por-funil",
+  "files": [
+    "tests/acceptance/01-api-plano-por-funil/_fixtures.ts",
+    "tests/acceptance/01-api-plano-por-funil/vitest.api.config.ts",
+    "tests/acceptance/01-api-plano-por-funil/leads-por-funil.integration.test.ts",
+    "tests/acceptance/01-api-plano-por-funil/mapas-de-funil.integration.test.ts",
+    "tests/acceptance/01-api-plano-por-funil/etapas-e-acesso.integration.test.ts"
+  ],
+  "commands": [
+    "VITEST_INTEGRATION=1 node_modules/.bin/vitest run -c tests/acceptance/01-api-plano-por-funil/vitest.api.config.ts"
+  ],
+  "notes": "Blind, written without a database. Red before implementation. Issue columns are read by header text (Funil, Etapa, Vendedor), as the planners emit them."
+}

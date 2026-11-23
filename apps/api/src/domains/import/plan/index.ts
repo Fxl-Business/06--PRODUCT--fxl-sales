@@ -1,3 +1,4 @@
+import { buildPipelineIndex, type PipelineMap } from '../pipeline-resolution.js';
 import { buildRefIndex } from '../refs.js';
 import type {
   ImportCatalog,
@@ -16,10 +17,16 @@ import { planLeads } from './leads.js';
 import { planPropostas } from './propostas.js';
 
 /** Pure: no I/O, no clock, no env. The four sheet planners run in contract order over one ref index. */
-export function planImport(parsed: ParsedWorkbook, catalog: ImportCatalog, stageMap?: StageMap): ImportPlan {
-  const refs = buildRefIndex(parsed, catalog);
-  const cadastros = planCadastros(parsed, catalog, refs);
-  const leads = planLeads(parsed, catalog, refs, stageMap);
+export function planImport(
+  parsed: ParsedWorkbook,
+  catalog: ImportCatalog,
+  stageMap?: StageMap,
+  pipelineMap?: PipelineMap,
+): ImportPlan {
+  const pipelines = buildPipelineIndex(catalog, pipelineMap, stageMap);
+  const refs = buildRefIndex(parsed, catalog, pipelines);
+  const cadastros = planCadastros(parsed, catalog, refs, pipelines);
+  const leads = planLeads(parsed, catalog, refs, pipelines);
   const propostas = planPropostas(parsed, catalog, refs);
   const desfechos = planDesfechos(parsed, catalog, refs, propostas);
   return {

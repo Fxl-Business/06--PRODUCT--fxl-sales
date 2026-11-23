@@ -1,8 +1,10 @@
 /**
  * Read-only. Turns the live, unconverted leads of ONE organization (and the clientes they point at) into rows
  * keyed by the column keys of workbook-schema.ts, so `createTemplateWorkbook` writes them under the import's own
- * headers. The export never emits a row the import would refuse: when that cannot be guaranteed it throws a
- * LeadsExportError the route answers as a 409 with a sentence for the operator.
+ * headers. When a lead cannot be written as a valid row (too many rows, a lead without company) it throws a
+ * LeadsExportError the route answers as a 409 with a sentence for the operator. The funil is always written by
+ * name, an archived one included: a blank would silently put the lead in another funil on re-import, while an
+ * unknown or archived name is asked on the screen (Mapear funis) instead of being decided for the operator.
  */
 import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import {
@@ -12,6 +14,7 @@ import {
   salesOpsFieldDefinitions,
   salesOpsPeople,
   salesOpsPipelineStages,
+  salesOpsPipelines,
 } from '../../db/schema.js';
 import { liveLeadCondition } from '../sales-ops/leads/lead-service.js';
 import type { Db } from '../sales-ops/service.js';
@@ -53,6 +56,7 @@ export async function readLeadsExport(tx: Db, orgId: string): Promise<LeadsExpor
       estimatedValueBrl: salesOpsCrmLeads.estimatedValueBrl,
       lostReason: salesOpsCrmLeads.lostReason,
       sellerName: salesOpsPeople.displayName,
+      pipelineName: salesOpsPipelines.name,
       stageName: salesOpsPipelineStages.name,
       stageType: salesOpsPipelineStages.type,
       stageExitKind: salesOpsPipelineStages.exitKind,
@@ -72,6 +76,13 @@ export async function readLeadsExport(tx: Db, orgId: string): Promise<LeadsExpor
       and(
         eq(salesOpsPipelineStages.orgId, salesOpsCrmLeads.orgId),
         eq(salesOpsPipelineStages.id, salesOpsCrmLeads.stageId),
+      ),
+    )
+    .innerJoin(
+      salesOpsPipelines,
+      and(
+        eq(salesOpsPipelines.orgId, salesOpsPipelineStages.orgId),
+        eq(salesOpsPipelines.id, salesOpsPipelineStages.pipelineId),
       ),
     )
     .where(and(eq(salesOpsCrmLeads.orgId, orgId), liveLeadCondition(), isNull(salesOpsCrmLeads.saleId)))
@@ -111,6 +122,7 @@ export async function readLeadsExport(tx: Db, orgId: string): Promise<LeadsExpor
       descricao: fields?.descricao ?? null,
       vendedor: lead.sellerName ?? null,
       produtos: fields !== undefined && fields.produtos.length > 0 ? fields.produtos : null,
+      funil: lead.pipelineName,
       etapa: stageImportable ? lead.stageName : null,
       motivoPerda: lost ? (lead.lostReason ?? null) : null,
     };

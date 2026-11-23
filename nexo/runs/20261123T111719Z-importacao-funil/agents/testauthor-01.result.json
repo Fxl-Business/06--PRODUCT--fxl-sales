@@ -1,0 +1,13 @@
+{
+  "agent": "test_author",
+  "slice": "01-api-plano-por-funil",
+  "status": "FAIL",
+  "report": "/Users/cauetpinciara/Documents/fxl/projects/06--PRODUCT--fxl-sales/.nexo/runs/20261123T111719Z-importacao-funil/scratch/test_author-01-api-plano-por-funil/stdout-r1.log",
+  "summary": "cli exited 1: Reading additional input from stdin...",
+  "done": true,
+  "ts": "2026-11-23T11:25:54Z",
+  "cli": "codex",
+  "model": "gpt-6.1-sol",
+  "exit": 1,
+  "threadId": "01a20827-b8e4-7590-873f-8f7a920594de"
+}

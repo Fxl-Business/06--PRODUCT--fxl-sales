@@ -16,6 +16,7 @@ import { LeadStageSchema } from '../../sales-ops/leads/schemas.js';
 import { normalizeLabel } from '../cells.js';
 import { documentDigits } from '../client-recognition.js';
 import { cellReader } from '../parse.js';
+import { buildPipelineIndex, type PipelineIndex } from '../pipeline-resolution.js';
 import { assignProductCodes, refKey, type ImportRefIndex } from '../refs.js';
 import type {
   EntityRef,
@@ -588,46 +589,58 @@ function planClientes(
 
 /**
  * The ONE etapa-creation rule: the name must not exist in the funil (active or archived) and must satisfy
- * LeadStageSchema. The Etapas tab and the Leads tab stage map (`{create: true}`) both go through it.
+ * LeadStageSchema. Duplicates are judged per funil: the same name in another funil is a different etapa.
+ * The Etapas tab and the Leads tab stage map (`{create: true}`) both go through it.
  */
-export function checkNewStage(nome: string, catalog: ImportCatalog) {
+export function checkNewStage(nome: string, catalog: ImportCatalog, pipelineId: string) {
   const key = normalizeLabel(nome);
-  const found = catalog.stages.find((s) => normalizeLabel(s.name) === key);
+  const found = catalog.stages.find((s) => s.pipelineId === pipelineId && normalizeLabel(s.name) === key);
+  const funil = catalog.pipelines.find((p) => p.id === pipelineId)?.name ?? '';
   const duplicate = found
     ? found.status === 'active'
-      ? { code: 'duplicate_existing', message: `A etapa "${nome}" já existe no funil; remova esta linha (os leads já podem usar a etapa existente).` }
-      : { code: 'duplicate_archived', message: `A etapa "${nome}" já existe arquivada; restaure em Cadastros > Etapas e remova esta linha.` }
+      ? { code: 'duplicate_existing', message: `A etapa "${nome}" já existe no funil "${funil}"; remova esta linha (os leads já podem usar a etapa existente).` }
+      : { code: 'duplicate_archived', message: `A etapa "${nome}" já existe arquivada no funil "${funil}"; restaure em Cadastros > Funis e etapas e remova esta linha.` }
     : null;
   const candidate = { name: nome, status: 'active' };
   return { duplicate, result: LeadStageSchema.safeParse(candidate), candidate };
 }
 
-function planEtapas(parsed: ParsedWorkbook, catalog: ImportCatalog, blocked: Set<string>): Part {
+function planEtapas(parsed: ParsedWorkbook, catalog: ImportCatalog, blocked: Set<string>, pipelines: PipelineIndex): Part {
   const out: Part = { operations: [], issues: [] };
   const seen = new Map<string, number>();
   for (const row of parsed.sheets.etapas.rows) {
-    const nome = cellReader('etapas', row).text('nome');
+    const cells = cellReader('etapas', row);
+    const nome = cells.text('nome');
     if (nome === null) continue;
-    const key = normalizeLabel(nome);
     const col = header('etapas', 'nome');
     const issues: ImportIssue[] = [];
 
-    const { duplicate, result, candidate } = checkNewStage(nome, catalog);
-    if (duplicate) issues.push(rowError('etapas', row.row, col, duplicate.code, duplicate.message));
-    const earlier = seen.get(key);
-    if (earlier !== undefined) {
-      issues.push(rowError('etapas', row.row, col, 'duplicate_in_sheet', `A etapa "${nome}" já aparece na linha ${earlier} desta aba.`));
+    // A failed Funil is its own error; the etapa cannot be judged against a funil that does not resolve.
+    const funil = pipelines.resolve(cells.text('funil'));
+    let checked: ReturnType<typeof checkNewStage> | null = null;
+    if (!funil.ok) {
+      issues.push(rowError('etapas', row.row, header('etapas', 'funil'), funil.code, funil.message));
+      checked = { duplicate: null, result: LeadStageSchema.safeParse({ name: nome, status: 'active' }), candidate: { name: nome, status: 'active' } };
     } else {
-      seen.set(key, row.row);
+      checked = checkNewStage(nome, catalog, funil.pipelineId);
+      if (checked.duplicate) issues.push(rowError('etapas', row.row, col, checked.duplicate.code, checked.duplicate.message));
+      const key = `${funil.pipelineId}|${normalizeLabel(nome)}`;
+      const earlier = seen.get(key);
+      if (earlier !== undefined) {
+        issues.push(rowError('etapas', row.row, col, 'duplicate_in_sheet', `A etapa "${nome}" já aparece na linha ${earlier} desta aba para o funil "${funil.name}".`));
+      } else {
+        seen.set(key, row.row);
+      }
     }
+    const { result, candidate } = checked;
     if (!result.success) {
       issues.push(
         ...zodIssuesToImportIssues(result.error, { sheet: 'etapas', row: row.row, columns: { name: col }, fallbackColumn: null, values: candidate }),
       );
     }
     out.issues.push(...issues);
-    if (result.success && allowed(blocked, 'etapas', row.row, issues)) {
-      out.operations.push({ op: 'createLeadStage', planKey: planKeyOf('etapas', row.row), input: result.data });
+    if (funil.ok && result.success && allowed(blocked, 'etapas', row.row, issues)) {
+      out.operations.push({ op: 'createLeadStage', planKey: planKeyOf('etapas', row.row), pipelineId: funil.pipelineId, input: result.data });
     }
   }
   return out;
@@ -654,7 +667,12 @@ function sheetOf(op: ImportOperation): SheetKey | null {
   }
 }
 
-export function planCadastros(parsed: ParsedWorkbook, catalog: ImportCatalog, refs: ImportRefIndex): SheetPlanResult {
+export function planCadastros(
+  parsed: ParsedWorkbook,
+  catalog: ImportCatalog,
+  refs: ImportRefIndex,
+  pipelines: PipelineIndex = buildPipelineIndex(catalog),
+): SheetPlanResult {
   const blocked = erroredRowKeys(parsed.issues);
   const produtos = planProdutos(parsed, catalog, refs, blocked);
   const clientes = planClientes(parsed, catalog, refs, blocked);
@@ -664,7 +682,7 @@ export function planCadastros(parsed: ParsedWorkbook, catalog: ImportCatalog, re
     produtos,
     planPessoas(parsed, catalog, refs, blocked),
     clientes,
-    planEtapas(parsed, catalog, blocked),
+    planEtapas(parsed, catalog, blocked, pipelines),
   ];
   const operations = parts.flatMap((p) => p.operations);
   const issues = parts.flatMap((p) => p.issues);
