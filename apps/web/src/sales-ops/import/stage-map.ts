@@ -8,7 +8,31 @@ import type { ImportLeadStage, StageMap, StageMapEntry } from './types';
 
 /** What the operator decided for one spreadsheet etapa. `sheet`: the Etapas tab of the same file creates it. */
 export type StageChoice = StageMapEntry | { sheet: true };
+/** Keyed by `stageKey`: (sheet funil, etapa name), never by the name alone. */
 export type StageChoices = Record<string, StageChoice>;
+
+/** Case, accent and spacing insensitive, like the API's `normalizeLabel`. */
+export function normalizeFunil(name: string | null): string {
+  return (name ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+}
+
+const KEY_SEPARATOR = '\u0000';
+
+/** The identity of one etapa choice: two sheet funis may both carry an etapa with the same name. */
+export function stageKey(stage: Pick<ImportLeadStage, 'name' | 'funil'>): string {
+  return `${normalizeFunil(stage.funil)}${KEY_SEPARATOR}${stage.name}`;
+}
+
+/** Drops every choice made inside one sheet funil. */
+export function dropFunilChoices(choices: StageChoices, funilKey: string): StageChoices {
+  const prefix = `${funilKey}${KEY_SEPARATOR}`;
+  return Object.fromEntries(Object.entries(choices).filter(([key]) => !key.startsWith(prefix)));
+}
 
 export const CREATE_VALUE = '__create';
 export const FIRST_VALUE = '__first';
@@ -36,16 +60,16 @@ export function defaultChoice(stage: ImportLeadStage): StageChoice | undefined {
   return stage.resolution.stageId === null ? { sheet: true } : { stageId: stage.resolution.stageId };
 }
 
-/** The `stageMap` to send: every choice except the one the Etapas tab already covers. */
+/** The etapa map of one group of stages: every choice except the one the Etapas tab already covers. */
 export function toStageMap(stages: ImportLeadStage[], choices: StageChoices): StageMap {
   const map: StageMap = {};
   for (const stage of stages) {
-    const choice = choices[stage.name];
+    const choice = choices[stageKey(stage)];
     if (choice && !('sheet' in choice)) map[stage.name] = choice;
   }
   return map;
 }
 
 export function allStagesResolved(stages: ImportLeadStage[], choices: StageChoices): boolean {
-  return stages.every((stage) => choices[stage.name] !== undefined);
+  return stages.every((stage) => choices[stageKey(stage)] !== undefined);
 }
