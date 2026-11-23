@@ -43,8 +43,7 @@ require_file pnpm-workspace.yaml
 require_file tsconfig.base.json
 require_file Makefile
 require_file CLAUDE.md
-require_file .nexo/config.json
-require_file .nexo/manifest.json
+require_file nexo/state.json
 require_file fxl-doctor.sh
 
 # --- fxlContractVersion present ---
@@ -57,7 +56,7 @@ fi
 check "pnpm install" pnpm install --frozen-lockfile=false
 
 # --- Type-check ---
-check "pnpm -r type-check" pnpm -r --if-present type-check
+check "pnpm run type-check" pnpm run type-check
 
 # --- Lint ---
 check "pnpm -r lint" pnpm -r --if-present lint
