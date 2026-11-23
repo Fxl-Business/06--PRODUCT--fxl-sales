@@ -175,6 +175,32 @@ describe('parseWorkbook', () => {
     expect(out.issues[0]?.message).toContain('Rascunho do João');
   });
 
+  it('ignores the Funis e etapas tab exactly like Leia-me and Listas', async () => {
+    const out = await parseWorkbook(
+      await buildXlsx([
+        { name: 'Funis e etapas', rows: [['Funil', 'Etapa'], ['Vendas', 'Novo']] },
+        { name: 'Áreas', rows: [['Nome'], ['A']] },
+      ]),
+    );
+    expect(out.issues).toEqual([]);
+    expect(out.sheets.areas.rows).toHaveLength(1);
+  });
+
+  it('reads the optional Funil column of Leads and Etapas, and a sheet without it as null', async () => {
+    const out = await parseWorkbook(
+      await buildXlsx([
+        { name: 'Etapas', rows: [['Nome', 'Funil'], ['Diagnóstico', 'Vendas']] },
+        { name: 'Leads', rows: [['Contato', 'Empresa', 'Funil', 'Etapa'], ['Ana', 'X', 'Pós-venda', 'Novo']] },
+      ]),
+    );
+    expect(out.issues).toEqual([]);
+    expect(out.sheets.etapas.rows[0]?.cells['funil']).toBe('Vendas');
+    expect(out.sheets.leads.rows[0]?.cells['funil']).toBe('Pós-venda');
+    const old = await parseWorkbook(await buildXlsx([{ name: 'Leads', rows: [['Contato', 'Empresa'], ['Ana', 'X']] }]));
+    expect(old.issues).toEqual([]);
+    expect(old.sheets.leads.rows[0]?.cells['funil']).toBeNull();
+  });
+
   it('refuses two tabs that map to the same sheet', async () => {
     const out = await parseWorkbook(
       await buildXlsx([

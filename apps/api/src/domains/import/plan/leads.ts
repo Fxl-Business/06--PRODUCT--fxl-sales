@@ -2,9 +2,11 @@
  * Leads sheet planner. Pure and deterministic: no I/O, no clock, no env, no database.
  * A lead never creates a cliente; the executor runs createLead and then moveLead.
  */
+import { accessiblePipelineIds } from '@fxl-sales/shared-utils/crm-model';
 import { LeadWriteBaseSchema, type LeadWriteInput } from '../../sales-ops/leads/lead-schemas.js';
 import { normalizeLabel } from '../cells.js';
 import { cellReader } from '../parse.js';
+import { buildPipelineIndex, type PipelineIndex } from '../pipeline-resolution.js';
 import type { ImportRefIndex } from '../refs.js';
 import type {
   EntityRef,
@@ -13,8 +15,6 @@ import type {
   ImportOperation,
   ParsedWorkbook,
   SheetPlanResult,
-  StageMap,
-  StageMapEntry,
 } from '../types.js';
 import { checkNewStage } from './cadastros.js';
 import {
@@ -57,47 +57,50 @@ function stageKind(ref: EntityRef, catalog: ImportCatalog): StageKind {
   return stage.kind;
 }
 
-function hasOpenStage(parsed: ParsedWorkbook, catalog: ImportCatalog): boolean {
-  return (
-    catalog.stages.some((s) => s.status === 'active' && s.kind === 'normal') ||
-    parsed.sheets.etapas.rows.some((r) => cellReader('etapas', r).text('nome') !== null)
-  );
-}
-
-/** The map keyed by normalized label, so "contato " and "Contato" are one entry (same matching as every other name). */
-function normalizeStageMap(stageMap: StageMap | undefined): Map<string, StageMapEntry> {
-  const byKey = new Map<string, StageMapEntry>();
-  for (const [name, entry] of Object.entries(stageMap ?? {})) byKey.set(normalizeLabel(name), entry);
-  return byKey;
+/** The funis a lead can enter: an active normal etapa of the funil, or an Etapas tab row that creates one in it. */
+function openStageFunis(parsed: ParsedWorkbook, catalog: ImportCatalog, pipelines: PipelineIndex): Set<string> {
+  const open = new Set<string>();
+  for (const s of catalog.stages) if (s.status === 'active' && s.kind === 'normal') open.add(s.pipelineId);
+  for (const row of parsed.sheets.etapas.rows) {
+    const cells = cellReader('etapas', row);
+    if (cells.text('nome') === null) continue;
+    const funil = pipelines.resolve(cells.text('funil'));
+    if (funil.ok) open.add(funil.pipelineId);
+  }
+  return open;
 }
 
 export function planLeads(
   parsed: ParsedWorkbook,
   catalog: ImportCatalog,
   refs: ImportRefIndex,
-  stageMap?: StageMap,
+  pipelines: PipelineIndex = buildPipelineIndex(catalog),
 ): SheetPlanResult {
   const rows = parsed.sheets.leads.rows;
   if (rows.length === 0) return { operations: [], issues: [], counts: {} };
 
   const issues: ImportIssue[] = [];
   const operations: ImportOperation[] = [];
-  const mapped = normalizeStageMap(stageMap);
-  // Etapas the map asks to create: normalized name -> planKey of the one createLeadStage op (emitted on first use).
+  // Etapas the map asks to create: (pipelineId, normalized name) -> planKey of the one createLeadStage op (emitted on first use).
   const createdStages = new Map<string, string>();
   const stageOperations: ImportOperation[] = [];
   const blocked = erroredRowKeys(parsed.issues);
   const seen = new Map<string, number>();
 
-  if (!hasOpenStage(parsed, catalog)) {
+  // One file-level error per funil the Leads tab uses that has no etapa a lead can enter.
+  const hasOpen = openStageFunis(parsed, catalog, pipelines);
+  const reported = new Set<string>();
+  for (const row of rows) {
+    const funil = pipelines.resolve(cellReader(SHEET, row).text('funil'));
+    if (!funil.ok || hasOpen.has(funil.pipelineId) || reported.has(funil.pipelineId)) continue;
+    reported.add(funil.pipelineId);
     issues.push({
       severity: 'error',
       sheet: SHEET,
       row: null,
       column: null,
       code: 'no_open_stage',
-      message:
-        'O funil de leads não tem nenhuma etapa ativa para receber leads; crie uma etapa na aba Etapas ou em Cadastros > Etapas.',
+      message: `O funil "${funil.name}" não tem nenhuma etapa ativa para receber leads; crie uma etapa na aba Etapas ou em Cadastros > Funis e etapas.`,
     });
   }
 
@@ -106,6 +109,14 @@ export function planLeads(
     const rowIssues: ImportIssue[] = [];
     const contato = c.text('contato');
     const empresa = c.text('empresa');
+
+    // Funil: a failed funil is the row's error on that column; its etapa is then not judged, every other column still is.
+    const funilCell = c.text('funil');
+    const funil = pipelines.resolve(funilCell);
+    if (!funil.ok) {
+      rowIssues.push(rowError(SHEET, row.row, header(SHEET, 'funil'), funil.code, funil.message));
+    }
+    const pipelineId = funil.ok ? funil.pipelineId : null;
 
     // Empresa: a lead never creates a cliente, an unmatched name stays free text.
     let clientRef: EntityRef | null = null;
@@ -135,8 +146,28 @@ export function planLeads(
     const vendedor = c.text('vendedor');
     if (vendedor !== null) {
       const l = refs.resolvePersonWithFuncao(vendedor, 'vendedor');
-      if (l.ok) sellerRef = l.ref;
-      else if (l.code === 'missing_funcao') {
+      if (l.ok) {
+        sellerRef = l.ref;
+        const seller = l.ref;
+        if (pipelineId !== null) {
+          const held = catalog.funcoes.filter((f) => refs.personHasFuncao(seller, { existingId: f.id })).map((f) => f.id);
+          const reach = accessiblePipelineIds(
+            catalog.pipelines.map((p) => ({ ...p, status: p.status === 'active' ? 'active' : 'archived' })),
+            held,
+          );
+          if (!reach.includes(pipelineId)) {
+            rowIssues.push(
+              rowError(
+                SHEET,
+                row.row,
+                header(SHEET, 'vendedor'),
+                'seller_without_pipeline_access',
+                `"${vendedor}" não tem acesso ao funil "${funil.ok ? funil.name : ''}"; ligue uma função dele ao funil em Cadastros > Funis e etapas ou escolha outro vendedor.`,
+              ),
+            );
+          }
+        }
+      } else if (l.code === 'missing_funcao') {
         rowIssues.push(
           rowError(
             SHEET,
@@ -192,15 +223,17 @@ export function planLeads(
     const motivo = c.text('motivoPerda');
     let stageRef: EntityRef | null = null;
     let kind: StageKind | null = null;
-    let etapaFailed = false;
-    const entry = etapa === null ? undefined : mapped.get(normalizeLabel(etapa));
+    let etapaFailed = !funil.ok;
+    const entry = etapa === null || pipelineId === null ? undefined : pipelines.stageEntry(funilCell, etapa);
     const etapaCol = header(SHEET, 'etapa');
-    if (etapa !== null && entry !== undefined && 'first' in entry) {
+    if (etapa === null || pipelineId === null) {
+      // No etapa to judge: a blank cell, or a funil that did not resolve (already reported on its own column).
+    } else if (entry !== undefined && 'first' in entry) {
       // {first: true} is the blank cell: the executor puts the lead in the first open etapa.
-    } else if (etapa !== null && entry !== undefined && 'stageId' in entry) {
-      // The server never trusts the id: it must be an active, non-conversion etapa of THIS org's default pipeline.
+    } else if (entry !== undefined && 'stageId' in entry) {
+      // The server never trusts the id: it must be an active, non-conversion etapa of THIS row's funil.
       const target = catalog.stages.find((s) => s.id === entry.stageId);
-      if (!target || target.status !== 'active' || target.kind === 'conversion') {
+      if (!target || target.pipelineId !== pipelineId || target.status !== 'active' || target.kind === 'conversion') {
         etapaFailed = true;
         rowIssues.push(
           rowError(
@@ -208,17 +241,17 @@ export function planLeads(
             row.row,
             etapaCol,
             'invalid_stage_target',
-            `A etapa escolhida para "${etapa}" não existe, está arquivada ou é a de conversão; escolha outra etapa de destino.`,
+            `A etapa escolhida para "${etapa}" não existe neste funil, está arquivada ou é a de conversão; escolha outra etapa de destino.`,
           ),
         );
       } else {
         kind = target.kind;
         stageRef = { existingId: target.id };
       }
-    } else if (etapa !== null && entry !== undefined && 'create' in entry) {
-      const key = normalizeLabel(etapa);
-      const { duplicate, result, candidate } = checkNewStage(etapa, catalog);
-      const tabStage = refs.resolve('stage', etapa);
+    } else if (entry !== undefined && 'create' in entry) {
+      const key = `${pipelineId}|${normalizeLabel(etapa)}`;
+      const { duplicate, result, candidate } = checkNewStage(etapa, catalog, pipelineId);
+      const tabStage = refs.resolveStage(pipelineId, etapa);
       if (duplicate) {
         etapaFailed = true;
         rowIssues.push(rowError(SHEET, row.row, etapaCol, duplicate.code, duplicate.message));
@@ -234,7 +267,7 @@ export function planLeads(
           }),
         );
       } else if (tabStage.ok && 'planKey' in tabStage.ref) {
-        // The Etapas tab already creates it: one creation, never a second.
+        // The Etapas tab already creates it in this funil: one creation, never a second.
         kind = 'normal';
         stageRef = tabStage.ref;
       } else {
@@ -242,13 +275,13 @@ export function planLeads(
         if (planKey === undefined) {
           planKey = `stageMap:${createdStages.size + 1}`;
           createdStages.set(key, planKey);
-          stageOperations.push({ op: 'createLeadStage', planKey, input: result.data });
+          stageOperations.push({ op: 'createLeadStage', planKey, pipelineId, input: result.data });
         }
         kind = 'normal';
         stageRef = { planKey };
       }
-    } else if (etapa !== null) {
-      const l = refs.resolve('stage', etapa);
+    } else {
+      const l = refs.resolveStage(pipelineId, etapa);
       if (!l.ok) {
         etapaFailed = true;
         rowIssues.push(lookupIssue(SHEET, row.row, etapaCol, l));
@@ -292,8 +325,8 @@ export function planLeads(
     const lostReason = kind === 'lost' ? motivo : null;
 
     // Duplicate inside the workbook
-    if (contato !== null && empresa !== null) {
-      const key = `${normalizeLabel(contato)}|${normalizeLabel(empresa)}`;
+    if (contato !== null && empresa !== null && pipelineId !== null) {
+      const key = `${normalizeLabel(contato)}|${normalizeLabel(empresa)}|${pipelineId}`;
       const first = seen.get(key);
       if (first === undefined) seen.set(key, row.row);
       else {
@@ -338,10 +371,11 @@ export function planLeads(
 
     issues.push(...rowIssues);
 
-    if (data && !blocked.has(planKeyOf(SHEET, row.row)) && !rowIssues.some((i) => i.severity === 'error')) {
+    if (data && pipelineId !== null && !blocked.has(planKeyOf(SHEET, row.row)) && !rowIssues.some((i) => i.severity === 'error')) {
       operations.push({
         op: 'createLead',
         planKey: planKeyOf(SHEET, row.row),
+        pipelineId,
         input: {
           contactName: data.contactName,
           clientName: data.clientName,

@@ -22,6 +22,7 @@ const throwing = (): never => {
 };
 const refs: ImportRefIndex = {
   resolve: throwing,
+  resolveStage: throwing,
   resolvePersonWithFuncao: throwing,
   personHasFuncaoSlug: throwing,
   personHasFuncao: throwing,

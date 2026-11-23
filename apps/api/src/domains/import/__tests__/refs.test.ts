@@ -32,9 +32,9 @@ describe('buildRefIndex', () => {
       expect(r).toMatchObject({ ok: false, code: 'archived_ref' });
       expect(r.ok ? '' : r.message).toContain('Histórico de arquivamentos');
     }
-    const stage = refs.resolve('stage', 'Etapa antiga');
+    const stage = refs.resolveStage(IDS.pipelineMain, 'Etapa antiga');
     expect(stage).toMatchObject({ ok: false, code: 'archived_ref' });
-    expect(stage.ok ? '' : stage.message).toContain('Cadastros > Etapas');
+    expect(stage.ok ? '' : stage.message).toContain('Cadastros > Funis e etapas');
   });
 
   it('reports an inactive pessoa as archived_ref saying inativa', () => {

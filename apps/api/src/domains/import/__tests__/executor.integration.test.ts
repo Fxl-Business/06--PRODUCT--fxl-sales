@@ -105,7 +105,7 @@ async function snapshot(orgId: string): Promise<Record<string, number>> {
   return out;
 }
 
-type Seeded = { orgId: string; areaId: string; vendedorId: string; perdidoId: string };
+type Seeded = { orgId: string; areaId: string; vendedorId: string; perdidoId: string; pipelineId: string };
 
 /** Seeds like the routes do (committed, separate transaction), plus one existing area. */
 async function seededOrg(tag: string): Promise<Seeded> {
@@ -122,10 +122,16 @@ async function seededOrg(tag: string): Promise<Seeded> {
     .from(salesOpsFuncoes)
     .where(and(eq(salesOpsFuncoes.orgId, orgId), eq(salesOpsFuncoes.slug, 'vendedor')));
   const [perdido] = await admin
-    .select({ id: salesOpsPipelineStages.id })
+    .select({ id: salesOpsPipelineStages.id, pipelineId: salesOpsPipelineStages.pipelineId })
     .from(salesOpsPipelineStages)
     .where(and(eq(salesOpsPipelineStages.orgId, orgId), eq(salesOpsPipelineStages.exitKind, 'perdido')));
-  return { orgId, areaId: area.id, vendedorId: must(vendedor).id, perdidoId: must(perdido).id };
+  return {
+    orgId,
+    areaId: area.id,
+    vendedorId: must(vendedor).id,
+    perdidoId: must(perdido).id,
+    pipelineId: must(perdido).pipelineId,
+  };
 }
 
 const PRODUCT_INPUT = {
@@ -203,10 +209,11 @@ function fullOperations(s: Seeded): ImportOperation[] {
       planKey: 'clientes:2',
       input: { name: 'Cliente Importado', document: '12.345.678/0001-90' } as never,
     },
-    { op: 'createLeadStage', planKey: 'etapas:2', input: { name: 'Diagnóstico', status: 'active' } as never },
+    { op: 'createLeadStage', planKey: 'etapas:2', pipelineId: s.pipelineId, input: { name: 'Diagnóstico', status: 'active' } as never },
     {
       op: 'createLead',
       planKey: 'leads:2',
+      pipelineId: s.pipelineId,
       input: { contactName: 'Bruno', clientName: 'Cliente Importado', estimatedValueBrl: 120000 } as never,
       clientRef: cliente,
       sellerRef: pessoa,
@@ -217,6 +224,7 @@ function fullOperations(s: Seeded): ImportOperation[] {
     {
       op: 'createLead',
       planKey: 'leads:3',
+      pipelineId: s.pipelineId,
       input: { contactName: 'Carla', clientName: 'Empresa Livre', estimatedValueBrl: 0 } as never,
       clientRef: null,
       sellerRef: null,
@@ -227,6 +235,7 @@ function fullOperations(s: Seeded): ImportOperation[] {
     {
       op: 'createLead',
       planKey: 'leads:4',
+      pipelineId: s.pipelineId,
       input: { contactName: 'Diego', clientName: 'Cliente Importado', estimatedValueBrl: 0 } as never,
       clientRef: cliente,
       sellerRef: pessoa,

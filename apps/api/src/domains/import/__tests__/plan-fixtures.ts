@@ -2,6 +2,8 @@ import { emptyParsedWorkbook } from '../parse.js';
 import type {
   CellValue,
   ImportCatalog,
+  ImportCatalogPipeline,
+  ImportCatalogStage,
   ImportIssue,
   ParsedWorkbook,
   ProductCatalogEntry,
@@ -27,7 +29,41 @@ export const IDS = {
   stageProposta: id('f3'),
   stagePerdido: id('f4'),
   stageArchived: id('f5'),
+  pipelineMain: id('9a'),
+  pipelineSecond: id('9b'),
 } as const;
+
+/** One etapa row of a hand-written catalog; type and exit derive from the legacy kind. */
+export function stageRow(
+  stageId: string,
+  name: string,
+  kind: ImportCatalogStage['kind'],
+  position: number,
+  overrides: Partial<ImportCatalogStage> = {},
+): ImportCatalogStage {
+  return {
+    id: stageId,
+    name,
+    kind,
+    status: 'active',
+    position,
+    pipelineId: IDS.pipelineMain,
+    type: kind === 'conversion' ? 'orcamento' : kind === 'lost' ? 'saida' : 'normal',
+    exitKind: kind === 'lost' ? 'perdido' : null,
+    requiresReason: kind === 'lost',
+    ...overrides,
+  };
+}
+
+/** One funil row of a hand-written catalog. */
+export function pipelineRow(
+  pipelineId: string,
+  name: string,
+  position: number,
+  overrides: Partial<ImportCatalogPipeline> = {},
+): ImportCatalogPipeline {
+  return { id: pipelineId, name, isDefault: position === 0, status: 'active', position, funcaoIds: [], ...overrides };
+}
 
 /** A catalog shaped like a seeded org (D11/D11b): Vendedor/Finder, the four default etapas, settings 10/3/6. */
 export function seededCatalog(overrides: Partial<ImportCatalog> = {}): ImportCatalog {
@@ -43,11 +79,12 @@ export function seededCatalog(overrides: Partial<ImportCatalog> = {}): ImportCat
     products: [],
     people: [],
     clients: [],
+    pipelines: [pipelineRow(IDS.pipelineMain, 'Funil principal', 0)],
     stages: [
-      { id: IDS.stageNovo, name: 'Novo', kind: 'normal', status: 'active', position: 1 },
-      { id: IDS.stageNegociacao, name: 'Em negociação', kind: 'normal', status: 'active', position: 2 },
-      { id: IDS.stageProposta, name: 'Proposta', kind: 'conversion', status: 'active', position: 3 },
-      { id: IDS.stagePerdido, name: 'Perdido', kind: 'lost', status: 'active', position: 4 },
+      stageRow(IDS.stageNovo, 'Novo', 'normal', 1),
+      stageRow(IDS.stageNegociacao, 'Em negociação', 'normal', 2),
+      stageRow(IDS.stageProposta, 'Proposta', 'conversion', 3),
+      stageRow(IDS.stagePerdido, 'Perdido', 'lost', 4),
     ],
     ...overrides,
   };
@@ -121,7 +158,7 @@ export function richCatalog(): ImportCatalog {
     clients: [{ id: IDS.clientPadaria, name: 'Padaria Pão Quente', document: '12.345.678/0001-90' }],
     stages: [
       ...base.stages,
-      { id: IDS.stageArchived, name: 'Etapa antiga', kind: 'normal', status: 'archived', position: 5 },
+      stageRow(IDS.stageArchived, 'Etapa antiga', 'normal', 5, { status: 'archived' }),
     ],
   });
 }

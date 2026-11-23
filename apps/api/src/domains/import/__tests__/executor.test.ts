@@ -190,6 +190,7 @@ describe('collectOperationRefs', () => {
       collectOperationRefs({
         op: 'createLead',
         planKey: 'leads:2',
+        pipelineId: 'p1',
         input: {} as never,
         clientRef: c,
         sellerRef: s,
@@ -205,6 +206,7 @@ describe('collectOperationRefs', () => {
       collectOperationRefs({
         op: 'createLead',
         planKey: 'leads:3',
+        pipelineId: 'p1',
         input: {} as never,
         clientRef: null,
         sellerRef: null,

@@ -29,6 +29,7 @@ const catalog: ImportCatalog = {
   products: [],
   people: [],
   clients: [],
+  pipelines: [],
   stages: [],
 };
 
@@ -56,7 +57,10 @@ describe('planImport', () => {
     mocks.planPropostas.mockReturnValue(propostas);
     planImport(parsed, catalog);
     expect(mocks.buildRefIndex).toHaveBeenCalledTimes(1);
-    expect(mocks.buildRefIndex).toHaveBeenCalledWith(parsed, catalog);
+    expect(mocks.buildRefIndex).toHaveBeenCalledWith(parsed, catalog, expect.anything());
+    const pipelines: unknown = mocks.buildRefIndex.mock.calls[0]?.[2];
+    expect(mocks.planCadastros.mock.calls[0]?.[3]).toBe(pipelines);
+    expect(mocks.planLeads.mock.calls[0]?.[3]).toBe(pipelines);
     expect(mocks.planCadastros.mock.calls[0]?.[2]).toBe(refsSentinel);
     expect(mocks.planLeads.mock.calls[0]?.[2]).toBe(refsSentinel);
     expect(mocks.planPropostas.mock.calls[0]?.[2]).toBe(refsSentinel);

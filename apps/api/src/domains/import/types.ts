@@ -108,13 +108,31 @@ export type ImportCatalog = {
     funcaoIds: string[];
   }>;
   clients: Array<{ id: string; name: string; document: string | null }>;
-  stages: Array<{
-    id: string;
-    name: string;
-    kind: 'normal' | 'conversion' | 'lost';
-    status: string;
-    position: number;
-  }>;
+  /** Every pipeline (funil) of the org, archived included, in board order (position, name). */
+  pipelines: ImportCatalogPipeline[];
+  /** The etapas of the ACTIVE pipelines (archived etapas included), pipeline board order then etapa order. */
+  stages: ImportCatalogStage[];
+};
+
+export type ImportCatalogPipeline = {
+  id: string;
+  name: string;
+  isDefault: boolean;
+  status: string;
+  position: number;
+  funcaoIds: string[];
+};
+
+export type ImportCatalogStage = {
+  id: string;
+  name: string;
+  kind: 'normal' | 'conversion' | 'lost';
+  status: string;
+  position: number;
+  pipelineId: string;
+  type: string;
+  exitKind: string | null;
+  requiresReason: boolean;
 };
 
 export type EntityRef = { existingId: string } | { planKey: string };
@@ -161,10 +179,11 @@ export type ImportOperation =
     }
   | { op: 'createPerson'; planKey: string; input: Omit<PersonInput, 'funcaoIds'>; funcaoRefs: EntityRef[] }
   | { op: 'createClient'; planKey: string; input: ClientInput }
-  | { op: 'createLeadStage'; planKey: string; input: LeadStageInput }
+  | { op: 'createLeadStage'; planKey: string; pipelineId: string; input: LeadStageInput }
   | {
       op: 'createLead';
       planKey: string;
+      pipelineId: string;
       input: Omit<LeadWriteInput, 'clientId' | 'sellerPersonId' | 'products'>;
       clientRef: EntityRef | null;
       sellerRef: EntityRef | null;
@@ -196,13 +215,15 @@ export type SheetPlanResult = {
   recognized?: ImportCounts;
 };
 
-export type RefKind = 'area' | 'funcao' | 'product' | 'person' | 'client' | 'stage';
+export type RefKind = 'area' | 'funcao' | 'product' | 'person' | 'client';
 export type RefLookupFailureCode = 'unknown_ref' | 'archived_ref' | 'ambiguous_ref';
 export type RefLookup =
   | { ok: true; ref: EntityRef; label: string }
   | { ok: false; code: RefLookupFailureCode; message: string };
 export interface RefIndex {
   resolve(kind: RefKind, name: string): RefLookup;
+  /** An etapa of ONE funil by name: the existing ones and the Etapas tab rows of that funil. */
+  resolveStage(pipelineId: string, name: string): RefLookup;
 }
 
 /** Wire bodies of POST /preview and POST /commit (slice 07 answers them, slice 09 mirrors them). */

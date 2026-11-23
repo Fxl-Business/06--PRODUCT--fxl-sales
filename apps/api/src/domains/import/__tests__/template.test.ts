@@ -1,6 +1,7 @@
 import ExcelJS from 'exceljs';
 import { describe, expect, it } from 'vitest';
 import { parseWorkbook } from '../parse.js';
+import { IDS, pipelineRow, stageRow } from './plan-fixtures.js';
 import {
   NUM_FMT,
   REQUIRED_HEADER_ARGB,
@@ -25,6 +26,7 @@ function catalogFixture(overrides: Partial<ImportCatalog> = {}): ImportCatalog {
     products: [],
     people: [],
     clients: [],
+    pipelines: [pipelineRow(IDS.pipelineMain, 'Funil principal', 0)],
     stages: [],
     ...overrides,
   };
@@ -83,11 +85,12 @@ function populatedCatalog(): ImportCatalog {
       { id: 'c2', name: 'padaria', document: null },
       { id: 'c3', name: 'Ótica', document: null },
     ],
+    pipelines: [pipelineRow(IDS.pipelineMain, 'Funil principal', 0)],
     stages: [
-      { id: 's1', name: 'Novo', kind: 'normal', status: 'active', position: 1 },
-      { id: 's2', name: 'Proposta', kind: 'conversion', status: 'active', position: 3 },
-      { id: 's3', name: 'Perdido', kind: 'lost', status: 'active', position: 4 },
-      { id: 's4', name: 'Arquivada', kind: 'normal', status: 'archived', position: 2 },
+      stageRow('s1', 'Novo', 'normal', 1),
+      stageRow('s2', 'Proposta', 'conversion', 3),
+      stageRow('s3', 'Perdido', 'lost', 4),
+      stageRow('s4', 'Arquivada', 'normal', 2, { status: 'archived' }),
     ],
   });
 }

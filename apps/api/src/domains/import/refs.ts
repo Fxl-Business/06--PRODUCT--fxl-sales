@@ -7,6 +7,7 @@ import { normalizeLabel } from './cells.js';
 import { recognizeClientRows } from './client-recognition.js';
 import { cellReader } from './parse.js';
 import { planKeyOf } from './plan/plan-helpers.js';
+import { buildPipelineIndex, type PipelineIndex } from './pipeline-resolution.js';
 import type {
   EntityRef,
   ImportCatalog,
@@ -101,14 +102,6 @@ const MESSAGES: Record<RefKind, KindInfo> = {
     archived: (x) => `O cliente "${x}" não está disponível; use outro.`,
     ambiguous: (x) =>
       `Há mais de um cliente com o nome "${x}" (no cadastro ou nesta planilha); deixe os nomes diferentes para indicar qual usar.`,
-  },
-  stage: {
-    sheet: 'etapas',
-    article: 'a',
-    noun: 'etapa',
-    tab: 'Etapas',
-    archived: (x) => `A etapa "${x}" está arquivada; restaure em Cadastros > Etapas ou use outra.`,
-    ambiguous: (x) => `Há mais de uma etapa com o nome "${x}".`,
   },
 };
 
@@ -223,14 +216,24 @@ function existingRows(kind: RefKind, catalog: ImportCatalog): ExistingRow[] {
       return catalog.people.map((r) => ({ id: r.id, name: r.displayName, active: r.status === 'active' }));
     case 'client':
       return catalog.clients.map((r) => ({ id: r.id, name: r.name, active: true }));
-    case 'stage':
-      return catalog.stages.map((r) => ({ id: r.id, name: r.name, active: r.status === 'active' }));
   }
 }
 
-const KINDS: readonly RefKind[] = ['area', 'funcao', 'product', 'person', 'client', 'stage'];
+const KINDS: readonly RefKind[] = ['area', 'funcao', 'product', 'person', 'client'];
 
-export function buildRefIndex(parsed: ParsedWorkbook, catalog: ImportCatalog): ImportRefIndex {
+const STAGE_MESSAGES = {
+  unknown: (x: string, funil: string) => `Não encontramos a etapa "${x}" no funil "${funil}" nem na aba Etapas.`,
+  archived: (x: string, funil: string) =>
+    `A etapa "${x}" do funil "${funil}" está arquivada; restaure em Cadastros > Funis e etapas ou use outra.`,
+  ambiguous: (x: string, funil: string) => `Há mais de uma etapa com o nome "${x}" no funil "${funil}".`,
+};
+
+/** `pipelines` defaults to the index without any map: the funil of a row is then its name, or the only active funil. */
+export function buildRefIndex(
+  parsed: ParsedWorkbook,
+  catalog: ImportCatalog,
+  pipelines: PipelineIndex = buildPipelineIndex(catalog),
+): ImportRefIndex {
   const clientRecognition = recognizeClientRows(parsed, catalog);
   const existing = new Map<RefKind, ExistingRow[]>();
   for (const kind of KINDS) existing.set(kind, existingRows(kind, catalog));
@@ -246,7 +249,7 @@ export function buildRefIndex(parsed: ParsedWorkbook, catalog: ImportCatalog): I
         .filter((r) => (kind === 'product' ? r.active : true))
         .map((r) => normalizeLabel(r.name)),
     );
-    const uniqueByName = kind === 'area' || kind === 'funcao' || kind === 'stage' || kind === 'product';
+    const uniqueByName = kind === 'area' || kind === 'funcao' || kind === 'product';
     for (const row of parsed.sheets[sheet].rows) {
       const nome = row.cells['nome'];
       if (typeof nome !== 'string') continue;
@@ -263,6 +266,50 @@ export function buildRefIndex(parsed: ParsedWorkbook, catalog: ImportCatalog): I
       else byKey.set(key, [entry]);
     }
   }
+
+  // ---- etapas: per funil. The Etapas tab rows register under the funil they resolve to; a row whose Funil failed is skipped.
+  const pipelineNameById = new Map(catalog.pipelines.map((p) => [p.id, p.name]));
+  const stageKey = (pipelineId: string, name: string): string => `${pipelineId}|${normalizeLabel(name)}`;
+  const existingStages = new Map<string, ExistingRow[]>();
+  for (const stage of catalog.stages) {
+    const key = stageKey(stage.pipelineId, stage.name);
+    const row: ExistingRow = { id: stage.id, name: stage.name, active: stage.status === 'active' };
+    const list = existingStages.get(key);
+    if (list) list.push(row);
+    else existingStages.set(key, [row]);
+  }
+  const workbookStages = new Map<string, Registered>();
+  for (const row of parsed.sheets.etapas.rows) {
+    const cells = cellReader('etapas', row);
+    const nome = cells.text('nome');
+    if (nome === null || normalizeLabel(nome) === '') continue;
+    const funil = pipelines.resolve(cells.text('funil'));
+    if (!funil.ok) continue;
+    const key = stageKey(funil.pipelineId, nome);
+    if (existingStages.has(key) || workbookStages.has(key)) continue;
+    workbookStages.set(key, { ref: { planKey: planKeyOf('etapas', row.row) }, label: nome });
+  }
+  const resolveStage = (pipelineId: string, name: string): RefLookup => {
+    const typed = name.trim();
+    const key = stageKey(pipelineId, name);
+    const funilName = pipelineNameById.get(pipelineId) ?? '';
+    const rows = existingStages.get(key) ?? [];
+    const active = rows.filter((r) => r.active);
+    const workbook = workbookStages.get(key);
+    if (typed !== '' && active.length + (workbook ? 1 : 0) === 1) {
+      if (active[0]) return { ok: true, ref: { existingId: active[0].id }, label: active[0].name };
+      if (workbook) return { ok: true, ref: workbook.ref, label: workbook.label };
+    }
+    const count = active.length + (workbook ? 1 : 0);
+    const code: RefLookupFailureCode = count > 1 ? 'ambiguous_ref' : rows.length > 0 ? 'archived_ref' : 'unknown_ref';
+    const message =
+      code === 'unknown_ref'
+        ? STAGE_MESSAGES.unknown(typed, funilName)
+        : code === 'archived_ref'
+          ? STAGE_MESSAGES.archived(typed, funilName)
+          : STAGE_MESSAGES.ambiguous(typed, funilName);
+    return { ok: false, code, message };
+  };
 
   // ---- workbook product codes
   const workbookCodes = new Map<number, string>();
@@ -386,6 +433,7 @@ export function buildRefIndex(parsed: ParsedWorkbook, catalog: ImportCatalog): I
 
   return {
     resolve,
+    resolveStage,
     personHasFuncaoSlug,
     personHasFuncao,
     funcaoIsSystem: (funcao) =>

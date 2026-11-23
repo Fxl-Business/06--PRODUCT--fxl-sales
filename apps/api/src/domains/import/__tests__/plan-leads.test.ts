@@ -44,6 +44,7 @@ describe('planLeads', () => {
     expect(leadOp(r.operations)).toEqual({
       op: 'createLead',
       planKey: 'leads:2',
+      pipelineId: IDS.pipelineMain,
       input: { contactName: 'Carlos Lima', clientName: 'Empresa Nova', estimatedValueBrl: 0, description: null },
       clientRef: null,
       sellerRef: null,

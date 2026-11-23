@@ -14,6 +14,7 @@ import { LEAD_STAGE_SEEDS } from '../../sales-ops/leads/stages-seed.js';
 import { coerceCell, normalizeLabel, rawCell } from '../cells.js';
 import {
   LEIAME_TAB,
+  FUNIS_TAB,
   LISTAS_TAB,
   MAX_RETURNED_ISSUES,
   MAX_TOTAL_ROWS,
@@ -62,6 +63,16 @@ describe('workbook schema', () => {
     expect(WORKBOOK_SHEETS.map((s) => s.key)).toEqual([...SHEET_KEYS]);
   });
 
+  it('puts the optional Funil column before Etapa on Leads and after Nome on Etapas', () => {
+    const leads = getSheetDef('leads').columns.map((c) => c.key);
+    expect(leads.indexOf('funil')).toBe(leads.indexOf('etapa') - 1);
+    expect(getSheetDef('etapas').columns.map((c) => c.key)).toEqual(['nome', 'funil']);
+    for (const sheet of ['leads', 'etapas'] as const) {
+      const funil = getSheetDef(sheet).columns.find((c) => c.key === 'funil');
+      expect(funil).toMatchObject({ header: 'Funil', required: false, list: 'funis', example: null, kind: { type: 'text', max: 120 } });
+    }
+  });
+
   it('has unique keys and headers per sheet', () => {
     for (const s of WORKBOOK_SHEETS) {
       const keys = s.columns.map((c) => c.key);
@@ -72,11 +83,12 @@ describe('workbook schema', () => {
     }
   });
 
-  it('has unique tab names that never collide with Leia-me or Listas', () => {
+  it('has unique tab names that never collide with Leia-me, Funis e etapas or Listas', () => {
     const tabs = WORKBOOK_SHEETS.map((s) => normalizeLabel(s.tab));
     expect(new Set(tabs).size).toBe(tabs.length);
     expect(tabs).not.toContain(normalizeLabel(LEIAME_TAB));
     expect(tabs).not.toContain(normalizeLabel(LISTAS_TAB));
+    expect(tabs).not.toContain(normalizeLabel(FUNIS_TAB));
   });
 
   it('gives every column a pt-BR help sentence', () => {
