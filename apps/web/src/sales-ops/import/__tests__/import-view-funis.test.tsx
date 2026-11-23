@@ -248,4 +248,112 @@ describe('Mapear funis', () => {
     expect(container.querySelector('[data-map-stage-funil-heading]')).toBeNull();
     expect(importButton().disabled).toBe(false);
   });
+
+  it('keeps Importar disabled when a sheet funil has no destination, even with ok:true', async () => {
+    await validatedWith(
+      preview({
+        leadPipelines: [{ name: 'Suporte', leads: 4, resolution: { kind: 'not_found' } }],
+        leadStages: [],
+      }),
+    );
+    expect(importButton().disabled).toBe(true);
+  });
+
+  it('after switching a funil away, the next validation carries no stages for it and shows no rows meanwhile', async () => {
+    await validatedWith(
+      preview({
+        leadPipelines: [{ name: 'Suporte', leads: 2, resolution: { kind: 'existing', pipelineId: 'p-pos' } }],
+        leadStages: [row('Suporte', 'Ativo', 's-ativo')],
+      }),
+    );
+    await pick('Funil de destino: Suporte', 'Vendas');
+    expect(container.querySelector('[data-map-stage-row]')).toBeNull();
+    api.preview.mockResolvedValue(
+      preview({
+        leadPipelines: [{ name: 'Suporte', leads: 2, resolution: { kind: 'existing', pipelineId: 'p-pos' } }],
+        leadStages: [row('Suporte', 'Ativo')],
+      }) as never,
+    );
+    await click(revalidate());
+    expect(lastSent()[1]).toEqual({ Suporte: { pipelineId: 'p-vendas' } });
+  });
+
+  it('switching a funil away and back leaves its etapas blank and Importar disabled', async () => {
+    await validatedWith(
+      preview({
+        leadPipelines: [{ name: 'Suporte', leads: 2, resolution: { kind: 'existing', pipelineId: 'p-pos' } }],
+        leadStages: [row('Suporte', 'Ativo', 's-ativo')],
+      }),
+    );
+    await pick('Funil de destino: Suporte', 'Vendas');
+    await pick('Funil de destino: Suporte', 'Pós-venda');
+    expect(importButton().disabled).toBe(true);
+    expect(container.querySelector('[data-map-stage-row]')).toBeNull();
+    api.preview.mockResolvedValue(
+      preview({
+        ok: false,
+        leadPipelines: [{ name: 'Suporte', leads: 2, resolution: { kind: 'existing', pipelineId: 'p-pos' } }],
+        leadStages: [row('Suporte', 'Contato')],
+      }) as never,
+    );
+    await click(revalidate());
+    expect(container.querySelector('[data-map-stage-row="Contato"]')).not.toBeNull();
+    expect(trigger('Vai para: Suporte - Contato').hasAttribute('data-placeholder')).toBe(true);
+    expect(importButton().disabled).toBe(true);
+  });
+
+  it('switching away and back keeps Importar disabled even when the maps end up identical (etapas the Etapas tab creates)', async () => {
+    await validatedWith(
+      preview({
+        leadPipelines: [{ name: 'Suporte', leads: 2, resolution: { kind: 'existing', pipelineId: 'p-pos' } }],
+        leadStages: [{ funil: 'Suporte', name: 'Ativo', leads: 2, resolution: { kind: 'existing', stageId: null } }],
+      }),
+    );
+    expect(importButton().disabled).toBe(false);
+    await pick('Funil de destino: Suporte', 'Vendas');
+    await pick('Funil de destino: Suporte', 'Pós-venda');
+    expect(container.querySelector('[data-map-stage-row]')).toBeNull();
+    expect(importButton().disabled).toBe(true);
+  });
+
+  it('commit sends both maps', async () => {
+    await validatedWith(
+      preview({
+        leadPipelines: [{ name: 'Suporte', leads: 2, resolution: { kind: 'not_found' } }],
+        leadStages: [],
+      }),
+    );
+    await pick('Funil de destino: Suporte', 'Pós-venda');
+    api.preview.mockResolvedValue(
+      preview({
+        leadPipelines: [{ name: 'Suporte', leads: 2, resolution: { kind: 'not_found' } }],
+        leadStages: [row('Suporte', 'Ativo', 's-ativo')],
+      }) as never,
+    );
+    await click(revalidate());
+    api.commit.mockResolvedValue({ counts: { leads: 2 } } as never);
+    await click(importButton());
+    await click(container.querySelector('[data-confirm-action]'));
+    expect(api.commit.mock.calls[0]!.slice(2)).toEqual([
+      {},
+      { Suporte: { pipelineId: 'p-pos', stages: { Ativo: { stageId: 's-ativo' } } } },
+    ]);
+  });
+
+  it('puts no overflow clipping wrapper between a Combobox and its step (the inline panel would be cut)', async () => {
+    await validatedWith(
+      preview({
+        ok: false,
+        leadPipelines: [{ name: 'Suporte', leads: 2, resolution: { kind: 'existing', pipelineId: 'p-pos' } }],
+        leadStages: [row('Suporte', 'Contato')],
+      }),
+    );
+    for (const sel of ['[data-import-map-pipelines]', '[data-import-map-stages]']) {
+      const step = container.querySelector(sel) as HTMLElement;
+      const combo = step.querySelector('[role="combobox"]') as HTMLElement;
+      for (let el = combo.parentElement; el && el !== step.parentElement; el = el.parentElement) {
+        expect(el.className).not.toMatch(/overflow-(hidden|auto|x-auto|y-auto|scroll|x-hidden)/);
+      }
+    }
+  });
 });
