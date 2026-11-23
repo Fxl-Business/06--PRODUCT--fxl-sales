@@ -18,6 +18,7 @@ The org is always the token's org; nothing in the file is trusted for tenancy.
 
 One `.xlsx`, fixed tabs, in dependency order.
 `Leia-me` is instructions only and is never parsed.
+`Funis e etapas` is a visible reference tab and is never parsed.
 A hidden `Listas` tab carries the dropdown sources and is ignored by the parser.
 
 | Tab | Sheet key | Child of |
@@ -86,7 +87,7 @@ Status mapping: Rascunho creates `draft`; Ganha creates `won`; blank or Aberta c
   Preview and commit take an optional multipart field `stageMap` (JSON): the name as written in the Leads tab maps to `{ stageId }`, `{ create: true }` or `{ first: true }`.
   Names are matched with `normalizeLabel`, like every other lookup.
   The planner applies the map in `plan/leads.ts` BEFORE `refs.resolve('stage')`; a name with no entry keeps the old behaviour, and a request with no `stageMap` plans exactly as before.
-  `{ stageId }` is never trusted: it must be an ACTIVE, non-conversion etapa found in the catalog, which holds only the default pipeline of the org read from the token.
+  `{ stageId }` is never trusted: it must be an ACTIVE, non-conversion etapa found in the catalog (the active funis of the org read from the token), of the row's own funil (D14).
   An id of another organization, an unknown id, an archived etapa or the conversion etapa is the row error `invalid_stage_target` on the Etapa column, and nothing is written (all or nothing, as always).
   `{ first: true }` is the same as a blank Etapa cell: the executor puts the lead in the first open etapa.
   `{ create: true }` goes through `checkNewStage` in `plan/cadastros.ts`, the one core that `planEtapas` (the Etapas tab) also uses, so the `duplicate_existing` and `duplicate_archived` rules and `LeadStageSchema` have no second implementation.
@@ -94,6 +95,16 @@ Status mapping: Rascunho creates `draft`; Ganha creates `won`; blank or Aberta c
   The loss reason rule still runs on the resolved etapa: mapping to the lost etapa without `Motivo da perda` is a row error.
   A malformed `stageMap` (not JSON, wrong shape, an unknown key inside an entry, or a file instead of text) is `400 { error: 'validation_error', reason: 'invalid_file' }` with no write; a blank field means no map.
   The commit re-parses, re-reads the catalog and re-plans WITH the map it receives, so it never relies on the preview.
+
+- D14. Funil per row (run 20261123T111719Z-importacao-funil).
+  After vários funis, every imported lead still landed in the default funil, and a new funil is born with the same seven etapa names, so a sheet meant for another funil validated with no error and wrote to the wrong one; a lead never moves between funis, so it could not be fixed afterwards.
+  The human chose the sheet over a screen selector: a `Funil` column in Leads and Etapas, plus a visible `Funis e etapas` tab with every funil, its etapas and who has access.
+  A blank Funil is accepted only while one funil is active, because a forgotten blank is the silent wrong-funil case; a one-funil organization and its old sheets keep working.
+  The sheet never creates a funil (access by função is part of creating one, and a typo would create a funil).
+  An unknown or archived funil is an error solved on the screen through `pipelineMap`, so leads exported from another organization still import when the funil names differ; the export therefore writes the name of an archived funil too instead of a blank.
+  A vendedor without access is an error, not a warning: the vendedor would not see the lead, and LeadForm does not offer that vendedor either.
+  `stageMap` keeps its old shape for blank-Funil rows only; `pipelineMap[funil].stages` holds the rest, so no key mixes a funil and an etapa name.
+  The dependent dropdown uses `MATCH(1,INDEX(--(range=cell),0),0)` and `SUMPRODUCT`, evaluated in LibreOffice for several funis, an asterisk in the name, another case, a blank and an unknown name. Google Sheets may not show it; the reference tab covers that.
 
 ## Preview versus commit
 
@@ -110,13 +121,14 @@ Base `/api/v1/sales-ops/import`, every route behind `requireAdmin`.
 | Route | Answer |
 | --- | --- |
 | `GET /template?example=0\|1` | `200` xlsx attachment (`fxl-vendas-importacao.xlsx` or `fxl-vendas-importacao-exemplo.xlsx`), `Cache-Control: no-store`, dropdowns from the org's active cadastros |
-| `POST /preview` (multipart `file`, optional `stageMap`) | `200 ImportPreviewBody { ok, counts, recognized, issues, truncated, leadStages, stageTargets }` |
-| `POST /commit` (the same file and the same `stageMap` again) | `201 { counts, recognized }`, `422 ImportPreviewBody`, or `409 { error: 'conflict', reason: 'import_execution_failed', message }` |
+| `POST /preview` (multipart `file`, optional `stageMap` and `pipelineMap`) | `200 ImportPreviewBody { ok, counts, recognized, issues, truncated, leadStages, stageTargets, leadPipelines, pipelineTargets }` |
+| `POST /commit` (the same file and the same maps again) | `201 { counts, recognized }`, `422 ImportPreviewBody`, or `409 { error: 'conflict', reason: 'import_execution_failed', message }` |
 
 Upload refusals: no file or not an xlsx is `400 { error: 'validation_error', reason: 'invalid_file' }`; over the limit is `413 { error: 'payload_too_large', reason: 'file_too_large' }`.
 A readable xlsx with no template tab is not a 400: it is a `no_known_sheets` error in a normal preview.
 `leadStages` lists the distinct names of the Etapa column of the Leads tab (first spelling wins, order of first appearance) as `{ name, leads, resolution }`; `resolution` is `{ kind: 'existing', stageId }` (an etapa with that name, `stageId: null` when the Etapas tab of the same file creates it), `{ kind: 'not_found' }` or `{ kind: 'conversion' }`.
-`stageTargets` lists the etapas a lead may be sent to (`{ id, name, kind: 'normal' | 'lost' }`): active, of the default pipeline, in board order, never the conversion etapa.
+`stageTargets` lists the etapas a lead may be sent to (`{ id, name, kind: 'normal' | 'lost', pipelineId }`): active, of every active funil, in board order, never the conversion etapa.
+`leadPipelines` lists the distinct Funil names of the Leads and Etapas tabs (`existing` with its `pipelineId`, or `not_found`, archived included), and `pipelineTargets` the active funis.
 Both are computed by `summarizeLeadStages` WITHOUT the map, so the table of the web screen keeps showing the sheet as written, while `issues` reflect the map that was sent.
 The `409` message is the pt-BR sentence of `ImportExecutionError` naming tab and row, with no ids.
 

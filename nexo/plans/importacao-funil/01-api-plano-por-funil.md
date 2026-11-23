@@ -1,7 +1,7 @@
 ---
 id: 01-api-plano-por-funil
 milestone: v4.8.0
-status: todo
+status: done
 depends_on: []
 files_modified: [apps/api/src/domains/import/types.ts, apps/api/src/domains/import/workbook-schema.ts, apps/api/src/domains/import/catalog.ts, apps/api/src/domains/import/pipeline-resolution.ts, apps/api/src/domains/import/refs.ts, apps/api/src/domains/import/parse.ts, apps/api/src/domains/import/plan/cadastros.ts, apps/api/src/domains/import/plan/leads.ts, apps/api/src/domains/import/plan/stage-map.ts, apps/api/src/domains/import/plan/index.ts, apps/api/src/domains/import/executor.ts, apps/api/src/domains/import/routes.ts, apps/api/src/domains/import/template.ts]
 affected_tests: [apps/api/src/domains/import, tests/acceptance/mapear-etapas, tests/acceptance/exportar-leads]

@@ -83,7 +83,7 @@ export function StageMapStep({
                     data-map-stage-funil-heading={group.funil ?? ''}
                   >
                     <th
-                      className="[overflow-wrap:anywhere] bg-[#f7f7f9] px-0 py-2 text-[12.5px] font-bold text-[#57575f]"
+                      className="[overflow-wrap:anywhere] bg-[#f7f7f9] px-2 py-2 text-[12.5px] font-bold text-[#57575f]"
                       colSpan={3}
                     >
                       {group.funil === null

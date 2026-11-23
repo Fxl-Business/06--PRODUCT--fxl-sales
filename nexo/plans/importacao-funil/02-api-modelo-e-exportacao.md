@@ -1,7 +1,7 @@
 ---
 id: 02-api-modelo-e-exportacao
 milestone: v4.8.0
-status: todo
+status: done
 depends_on: [01-api-plano-por-funil]
 files_modified: [apps/api/src/domains/import/template.ts, apps/api/src/domains/import/export.ts, apps/api/src/domains/import/funis-sheet.ts]
 affected_tests: [apps/api/src/domains/import, tests/acceptance/exportar-leads]

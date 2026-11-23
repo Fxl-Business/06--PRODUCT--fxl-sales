@@ -1,7 +1,7 @@
 ---
 id: 03-web-mapear-funis
 milestone: v4.8.0
-status: todo
+status: done
 depends_on: [01-api-plano-por-funil]
 files_modified: [apps/web/src/sales-ops/import/types.ts, apps/web/src/sales-ops/import/api.ts, apps/web/src/sales-ops/import/hooks.ts, apps/web/src/sales-ops/import/stage-map.ts, apps/web/src/sales-ops/import/pipeline-map.ts, apps/web/src/sales-ops/import/StageMapStep.tsx, apps/web/src/sales-ops/import/PipelineMapStep.tsx, apps/web/src/sales-ops/import/ImportView.tsx, apps/web/src/sales-ops/import/ImportContainer.tsx, apps/web/src/sales-ops/import/import-copy.ts]
 affected_tests: [apps/web/src/sales-ops/import, tests/acceptance/mapear-etapas, tests/acceptance/exportar-leads]
