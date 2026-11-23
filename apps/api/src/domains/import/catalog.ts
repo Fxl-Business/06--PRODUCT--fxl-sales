@@ -10,12 +10,14 @@ import {
   salesOpsClients,
   salesOpsFuncoes,
   salesOpsPeople,
+  salesOpsPipelines,
   salesOpsPersonFuncoes,
   salesOpsProductFuncaoCosts,
   salesOpsProducts,
   salesOpsSettings,
 } from '../../db/schema.js';
-import { defaultPipelineId, listPipelineStages } from '../crm/pipeline-read.js';
+import { readPipelineFuncaoLinks } from '../crm/pipeline-access.js';
+import { listPipelineStages } from '../crm/pipeline-read.js';
 import { legacyStageKindFor } from '../crm/stage-view.js';
 import { isProducerFlowLive } from '../integration/producer-gate.js';
 import {
@@ -177,18 +179,48 @@ export async function readImportCatalog(
     .where(eq(salesOpsClients.orgId, orgId))
     .orderBy(asc(salesOpsClients.name));
 
-  // The stages of the org's DEFAULT pipeline, in the legacy kind vocabulary the planner speaks
-  // (orcamento -> conversion, exit perdido -> lost). Read only: the import routes seed first.
-  const pipelineId = await defaultPipelineId(tx, orgId);
-  const stages: ImportCatalog['stages'] = (pipelineId === null ? [] : await listPipelineStages(tx, orgId, pipelineId)).map(
-    (row) => ({
-      id: row.id,
-      name: row.name,
-      kind: legacyStageKindFor(row, modules),
-      status: row.status,
-      position: row.position,
-    }),
+  // Every funil of the org (archived included, so a sheet naming one reads `archived_ref`), in board order, with
+  // the funções linked to each. Read only: the import routes seed first.
+  const pipelineRows = await tx
+    .select({
+      id: salesOpsPipelines.id,
+      name: salesOpsPipelines.name,
+      isDefault: salesOpsPipelines.isDefault,
+      status: salesOpsPipelines.status,
+      position: salesOpsPipelines.position,
+    })
+    .from(salesOpsPipelines)
+    .where(eq(salesOpsPipelines.orgId, orgId))
+    .orderBy(asc(salesOpsPipelines.position), asc(salesOpsPipelines.name));
+  const links = await readPipelineFuncaoLinks(
+    tx,
+    orgId,
+    pipelineRows.map((p) => p.id),
   );
+  const pipelines: ImportCatalog['pipelines'] = pipelineRows.map((row) => ({
+    ...row,
+    funcaoIds: links.get(row.id) ?? [],
+  }));
+
+  // The etapas of the ACTIVE funis in the legacy kind vocabulary the planner speaks (orcamento -> conversion,
+  // exit perdido -> lost), pipeline board order first.
+  const stages: ImportCatalog['stages'] = [];
+  for (const pipeline of pipelines) {
+    if (pipeline.status !== 'active') continue;
+    for (const row of await listPipelineStages(tx, orgId, pipeline.id)) {
+      stages.push({
+        id: row.id,
+        name: row.name,
+        kind: legacyStageKindFor(row, modules),
+        status: row.status,
+        position: row.position,
+        pipelineId: row.pipelineId,
+        type: row.type,
+        exitKind: row.exitKind,
+        requiresReason: row.requiresReason,
+      });
+    }
+  }
 
   const [settingsRow] = await tx
     .select({
@@ -218,6 +250,7 @@ export async function readImportCatalog(
     products,
     people,
     clients,
+    pipelines,
     stages,
   };
 }

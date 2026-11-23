@@ -219,6 +219,8 @@ export function buildListColumns(catalog: ImportCatalog): ListColumn[] {
     },
     { id: 'clientes', header: 'Clientes', values: sortedUnique(catalog.clients.map((c) => c.name)) },
     { id: 'etapas', header: 'Etapas', values: dedupeByLabel(stages.map((s) => s.name)) },
+    // The active funis in board order; the dependent Etapa dropdown is built from the same catalog by the template slice.
+    { id: 'funis', header: 'Funis', values: dedupeByLabel(active(catalog.pipelines).map((p) => p.name)) },
   ];
 
   const seen = new Set<string>();

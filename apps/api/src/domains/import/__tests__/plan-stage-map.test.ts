@@ -130,9 +130,9 @@ describe('summarizeLeadStages', () => {
     });
     const step = summarizeLeadStages(parsed, richCatalog());
     expect(step.leadStages).toEqual([
-      { name: 'Novo', leads: 2, resolution: { kind: 'existing', stageId: IDS.stageNovo } },
-      { name: 'Contato', leads: 1, resolution: { kind: 'not_found' } },
-      { name: 'Proposta', leads: 1, resolution: { kind: 'conversion' } },
+      { name: 'Novo', leads: 2, resolution: { kind: 'existing', stageId: IDS.stageNovo }, funil: null },
+      { name: 'Contato', leads: 1, resolution: { kind: 'not_found' }, funil: null },
+      { name: 'Proposta', leads: 1, resolution: { kind: 'conversion' }, funil: null },
     ]);
     expect(step.stageTargets.map((t) => t.id)).toEqual([IDS.stageNovo, IDS.stageNegociacao, IDS.stagePerdido]);
   });

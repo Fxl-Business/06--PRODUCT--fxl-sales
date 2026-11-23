@@ -334,7 +334,7 @@ describe('planCadastros', () => {
     });
     it('creates a new etapa', () => {
       const r = plan({ etapas: [{ nome: 'Diagnóstico' }] });
-      expect(r.operations).toEqual([{ op: 'createLeadStage', planKey: 'etapas:2', input: { name: 'Diagnóstico', status: 'active' } }]);
+      expect(r.operations).toEqual([{ op: 'createLeadStage', planKey: 'etapas:2', pipelineId: IDS.pipelineMain, input: { name: 'Diagnóstico', status: 'active' } }]);
     });
   });
 

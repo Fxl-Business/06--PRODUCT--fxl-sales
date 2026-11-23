@@ -47,7 +47,7 @@ import { applyBaixaTx } from '../sales-ops/settlements.js';
 import { LeadInputError, createLead, moveLead, type LeadScope } from '../sales-ops/leads/lead-service.js';
 import { LeadWriteBaseSchema, MoveLeadSchema } from '../sales-ops/leads/lead-schemas.js';
 import { LeadStageSchema } from '../sales-ops/leads/schemas.js';
-import { createLeadStage } from '../sales-ops/leads/stage-service.js';
+import { createLeadStageInPipeline } from '../sales-ops/leads/stage-service.js';
 import type { EntityRef, ImportCounts, ImportOperation, ImportPlan, SheetKey } from './types.js';
 import { SHEET_KEYS, getSheetDef } from './workbook-schema.js';
 
@@ -87,6 +87,7 @@ const REASON_MESSAGES: Record<string, string> = {
   funcao_not_found: 'a função informada não existe nesta organização',
   client_not_found: 'o cliente informado não existe nesta organização',
   stage_not_found: 'a etapa informada não existe ou está arquivada',
+  pipeline_not_found: 'o funil informado não existe nesta organização',
   no_open_stage: 'não há etapa ativa para receber o lead',
   lost_reason_required: 'a etapa de perda exige o motivo da perda',
   sale_required_for_conversion: 'um lead não pode ser importado na etapa de conversão',
@@ -313,14 +314,15 @@ export async function executeImportPlan(
       case 'createLeadStage': {
         const parsed = LeadStageSchema.safeParse(operation.input);
         if (!parsed.success) throw new ImportExecutionError(operation, 'invalid_lead_stage');
-        const created = await createLeadStage(tx, orgId, parsed.data);
-        if (created === 'duplicate') throw new ImportExecutionError(operation, 'duplicate');
+        const created = await createLeadStageInPipeline(tx, orgId, { ...parsed.data, pipelineId: operation.pipelineId });
+        if (created === 'duplicate' || created === 'pipeline_not_found') throw new ImportExecutionError(operation, created);
         register(operation, operation.planKey, created.id);
         return;
       }
       case 'createLead': {
         const parsed = LeadWriteBaseSchema.safeParse({
           ...operation.input,
+          pipelineId: operation.pipelineId,
           clientId: resolveOrNull(operation.clientRef, operation),
           sellerPersonId: resolveOrNull(operation.sellerRef, operation),
           products: operation.products.map((product) =>

@@ -78,7 +78,7 @@ describe('plan-helpers', () => {
     const ops: ImportOperation[] = [
       { op: 'createArea', planKey: 'areas:2', input: { name: 'A', status: 'active' } },
       { op: 'createArea', planKey: 'areas:3', input: { name: 'B', status: 'active' } },
-      { op: 'createLeadStage', planKey: 'etapas:2', input: { name: 'E', status: 'active' } },
+      { op: 'createLeadStage', planKey: 'etapas:2', pipelineId: 'p1', input: { name: 'E', status: 'active' } },
     ];
     const counts = countOperations(ops, (op) => (op.op === 'createArea' ? 'areas' : null));
     expect(counts).toEqual({ areas: 2 });

@@ -12,7 +12,8 @@ import { LeadsExportError, readLeadsExport } from './export.js';
 import { ImportExecutionError, executeImportPlan } from './executor.js';
 import { INVALID_FILE_CODE, parseWorkbook } from './parse.js';
 import { isPlanOk, planImport, toPreviewBody } from './plan/index.js';
-import { StageMapSchema, summarizeLeadStages } from './plan/stage-map.js';
+import { PipelineMapSchema, StageMapSchema, summarizeLeadStages } from './plan/stage-map.js';
+import type { PipelineMap } from './pipeline-resolution.js';
 import { buildTemplateWorkbook } from './template.js';
 import type { ImportCatalog, ImportCommitBody, ImportPlan, ParsedWorkbook, StageMap } from './types.js';
 import { MAX_UPLOAD_BYTES } from './workbook-schema.js';
@@ -72,10 +73,10 @@ const uploadBodyLimit = bodyLimit({
 });
 
 type UploadResult =
-  | { ok: true; parsed: ParsedWorkbook; stageMap: StageMap | undefined }
+  | { ok: true; parsed: ParsedWorkbook; stageMap: StageMap | undefined; pipelineMap: PipelineMap | undefined }
   | { ok: false; status: 400 | 413 };
 
-/** Reads the `file` field and parses it, plus the optional JSON `stageMap` field. Never throws for user input. */
+/** Reads the `file` field and parses it, plus the optional JSON `stageMap` and `pipelineMap` fields. Never throws for user input. */
 async function readUpload(c: Context): Promise<UploadResult> {
   let body: Record<string, string | File>;
   try {
@@ -87,14 +88,19 @@ async function readUpload(c: Context): Promise<UploadResult> {
   if (!(file instanceof File)) return { ok: false, status: 400 };
   const stageMap = readStageMap(body['stageMap']);
   if (stageMap === 'invalid') return { ok: false, status: 400 };
+  const pipelineMap = readPipelineMap(body['pipelineMap']);
+  if (pipelineMap === 'invalid') return { ok: false, status: 400 };
   if (file.size > MAX_UPLOAD_BYTES) return { ok: false, status: 413 };
   const parsed = await parseWorkbook(new Uint8Array(await file.arrayBuffer()));
   if (parsed.issues.some((i) => i.code === INVALID_FILE_CODE)) return { ok: false, status: 400 };
-  return { ok: true, parsed, stageMap };
+  return { ok: true, parsed, stageMap, pipelineMap };
 }
 
-/** A blank field means no map; anything that is not JSON of the StageMap shape is refused. */
-function readStageMap(raw: string | File | undefined): StageMap | undefined | 'invalid' {
+/** A blank field means no map; anything that is not JSON of the map's shape is refused. */
+function readJsonMap<T>(
+  raw: string | File | undefined,
+  schema: { safeParse(value: unknown): { success: true; data: T } | { success: false } },
+): T | undefined | 'invalid' {
   if (raw === undefined) return undefined;
   if (typeof raw !== 'string') return 'invalid';
   if (raw.trim() === '') return undefined;
@@ -104,9 +110,12 @@ function readStageMap(raw: string | File | undefined): StageMap | undefined | 'i
   } catch {
     return 'invalid';
   }
-  const parsed = StageMapSchema.safeParse(json);
+  const parsed = schema.safeParse(json);
   return parsed.success ? parsed.data : 'invalid';
 }
+
+const readStageMap = (raw: string | File | undefined) => readJsonMap<StageMap>(raw, StageMapSchema);
+const readPipelineMap = (raw: string | File | undefined) => readJsonMap<PipelineMap>(raw, PipelineMapSchema);
 
 function refusal(c: Context, status: 400 | 413): Response {
   return status === 413 ? c.json(FILE_TOO_LARGE_BODY, 413) : c.json(INVALID_FILE_BODY, 400);
@@ -161,8 +170,8 @@ importRouter.post('/preview', requireAdmin, uploadBodyLimit, async (c) => {
   const { plan, step } = await readOnlyTenant(orgId, async (tx) => {
     const catalog = await seededCatalog(tx, orgId, now, modules);
     return {
-      plan: planImport(upload.parsed, catalog, upload.stageMap),
-      step: summarizeLeadStages(upload.parsed, catalog),
+      plan: planImport(upload.parsed, catalog, upload.stageMap, upload.pipelineMap),
+      step: summarizeLeadStages(upload.parsed, catalog, upload.pipelineMap),
     };
   });
   return c.json({ ...toPreviewBody(plan), ...step }, 200);
@@ -178,7 +187,12 @@ importRouter.post('/commit', requireAdmin, uploadBodyLimit, async (c) => {
   try {
     const result = await withTenant(getDb(), orgId, async (tx) => {
       // The seed is part of the committed transaction (and rolls back with it on any failure).
-      const plan = planImport(upload.parsed, await seededCatalog(tx, orgId, now, modules), upload.stageMap);
+      const plan = planImport(
+        upload.parsed,
+        await seededCatalog(tx, orgId, now, modules),
+        upload.stageMap,
+        upload.pipelineMap,
+      );
       if (!isPlanOk(plan)) throw new ImportPlanRejected(plan);
       return executeImportPlan(tx, orgId, plan, actor, now, modules);
     });
