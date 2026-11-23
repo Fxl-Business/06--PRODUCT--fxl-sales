@@ -56,96 +56,95 @@ export function StageMapStep({
         <h3 className="text-[14px] font-bold text-[#201f24]">{IMPORT_COPY.mapStagesTitle}</h3>
         <p className="mt-1 text-[13.5px] text-[#8b8b92]">{IMPORT_COPY.mapStagesText}</p>
       </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-left text-[13.5px]">
-          <thead>
-            <tr className="text-[12px] font-semibold uppercase text-[#8b8b92]">
-              <th className="py-2 pr-3">{IMPORT_COPY.mapStagesSheetColumn}</th>
-              <th className="px-3 py-2 text-right">{IMPORT_COPY.mapStagesLeadsColumn}</th>
-              <th className="py-2 pl-3">{IMPORT_COPY.mapStagesTargetColumn}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {groups.map((group) => {
-              const options: ComboboxOption[] = [
-                ...targetsFor(group.funil).map((t) => ({
-                  value: `${STAGE_PREFIX}${t.id}`,
-                  label: t.name,
-                })),
-                { value: CREATE_VALUE, label: IMPORT_COPY.mapStagesCreate },
-                { value: FIRST_VALUE, label: IMPORT_COPY.mapStagesFirst },
-              ];
-              return (
-                <Fragment key={group.key}>
-                  {showHeadings ? (
-                    <tr
-                      className="border-t border-[#e8e8ec]"
-                      data-map-stage-funil-heading={group.funil ?? ''}
+      {/* No overflow wrapper: the Combobox panel is inline and would be clipped by it. */}
+      <table className="w-full text-left text-[13.5px]">
+        <thead>
+          <tr className="text-[12px] font-semibold uppercase text-[#8b8b92]">
+            <th className="py-2 pr-3">{IMPORT_COPY.mapStagesSheetColumn}</th>
+            <th className="px-3 py-2 text-right">{IMPORT_COPY.mapStagesLeadsColumn}</th>
+            <th className="py-2 pl-3">{IMPORT_COPY.mapStagesTargetColumn}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {groups.map((group) => {
+            const options: ComboboxOption[] = [
+              ...targetsFor(group.funil).map((t) => ({
+                value: `${STAGE_PREFIX}${t.id}`,
+                label: t.name,
+              })),
+              { value: CREATE_VALUE, label: IMPORT_COPY.mapStagesCreate },
+              { value: FIRST_VALUE, label: IMPORT_COPY.mapStagesFirst },
+            ];
+            return (
+              <Fragment key={group.key}>
+                {showHeadings ? (
+                  <tr
+                    className="border-t border-[#e8e8ec]"
+                    data-map-stage-funil-heading={group.funil ?? ''}
+                  >
+                    <th
+                      className="[overflow-wrap:anywhere] bg-[#f7f7f9] px-0 py-2 text-[12.5px] font-bold text-[#57575f]"
+                      colSpan={3}
                     >
-                      <th
-                        className="break-words bg-[#f7f7f9] px-0 py-2 text-[12.5px] font-bold text-[#57575f]"
-                        colSpan={3}
-                      >
-                        {group.funil === null
-                          ? IMPORT_COPY.mapStagesNoFunilHeading
-                          : IMPORT_COPY.mapStagesFunilHeading(group.funil)}
-                      </th>
+                      {group.funil === null
+                        ? IMPORT_COPY.mapStagesNoFunilHeading
+                        : IMPORT_COPY.mapStagesFunilHeading(group.funil)}
+                    </th>
+                  </tr>
+                ) : null}
+                {group.stages.map((stage) => {
+                  const choice = choices[stageKey(stage)];
+                  const unresolved = choice === undefined;
+                  const label = `${IMPORT_COPY.mapStagesTargetColumn}: ${
+                    stage.funil === null ? '' : `${stage.funil} - `
+                  }${stage.name}`;
+                  return (
+                    <tr
+                      className="border-t border-[#e8e8ec] align-top"
+                      data-map-stage-row={stage.name}
+                      data-map-stage-funil={stage.funil ?? undefined}
+                      data-unresolved={unresolved ? '' : undefined}
+                      key={stageKey(stage)}
+                    >
+                      <td className="[overflow-wrap:anywhere] py-2 pr-3 font-semibold text-[#201f24]">
+                        {stage.name}
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums">{stage.leads}</td>
+                      <td className="w-[55%] min-w-[150px] py-2 pl-3">
+                        <Combobox
+                          aria-label={label}
+                          className={
+                            unresolved
+                              ? `${formSelectClass} border-[#f1c9c4] bg-[#fdf2f1]`
+                              : formSelectClass
+                          }
+                          disabled={disabled}
+                          onChange={(value) => {
+                            const next = valueChoice(value);
+                            if (next) onChange(stage, next);
+                          }}
+                          options={options}
+                          placeholder={IMPORT_COPY.mapStagesPlaceholder}
+                          searchPlaceholder={IMPORT_COPY.mapStagesSearch}
+                          value={choiceValue(choice)}
+                          valueLabel={
+                            choice && 'sheet' in choice ? IMPORT_COPY.mapStagesFromSheet : undefined
+                          }
+                        />
+                        {stage.resolution.kind === 'conversion' && unresolved ? (
+                          <p className="mt-1 text-[12.5px] text-[#c93d32]">
+                            {IMPORT_COPY.mapStagesConversion}
+                          </p>
+                        ) : null}
+                      </td>
                     </tr>
-                  ) : null}
-                  {group.stages.map((stage) => {
-                    const choice = choices[stageKey(stage)];
-                    const unresolved = choice === undefined;
-                    const label = `${IMPORT_COPY.mapStagesTargetColumn}: ${
-                      stage.funil === null ? '' : `${stage.funil} - `
-                    }${stage.name}`;
-                    return (
-                      <tr
-                        className="border-t border-[#e8e8ec] align-top"
-                        data-map-stage-row={stage.name}
-                        data-map-stage-funil={stage.funil ?? undefined}
-                        data-unresolved={unresolved ? '' : undefined}
-                        key={stageKey(stage)}
-                      >
-                        <td className="break-words py-2 pr-3 font-semibold text-[#201f24]">
-                          {stage.name}
-                        </td>
-                        <td className="px-3 py-2 text-right tabular-nums">{stage.leads}</td>
-                        <td className="min-w-[180px] py-2 pl-3">
-                          <Combobox
-                            aria-label={label}
-                            className={
-                              unresolved
-                                ? `${formSelectClass} border-[#f1c9c4] bg-[#fdf2f1]`
-                                : formSelectClass
-                            }
-                            disabled={disabled}
-                            onChange={(value) => {
-                              const next = valueChoice(value);
-                              if (next) onChange(stage, next);
-                            }}
-                            options={options}
-                            placeholder={IMPORT_COPY.mapStagesPlaceholder}
-                            searchPlaceholder={IMPORT_COPY.mapStagesSearch}
-                            value={choiceValue(choice)}
-                            valueLabel={
-                              choice && 'sheet' in choice ? IMPORT_COPY.mapStagesFromSheet : undefined
-                            }
-                          />
-                          {stage.resolution.kind === 'conversion' && unresolved ? (
-                            <p className="mt-1 text-[12.5px] text-[#c93d32]">
-                              {IMPORT_COPY.mapStagesConversion}
-                            </p>
-                          ) : null}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </Fragment>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+                  );
+                })}
+              </Fragment>
+            );
+          })}
+        </tbody>
+      </table>
       <div>
         <button
           className="inline-flex cursor-pointer items-center gap-2 rounded-[11px] border border-[#dcdce2] bg-white px-5 py-[11px] text-sm font-semibold text-[#57575f] transition hover:bg-[#f2f2f4] disabled:cursor-not-allowed disabled:opacity-60"

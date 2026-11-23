@@ -32,52 +32,51 @@ export function PipelineMapStep({
         <h3 className="text-[14px] font-bold text-[#201f24]">{IMPORT_COPY.mapPipelinesTitle}</h3>
         <p className="mt-1 text-[13.5px] text-[#8b8b92]">{IMPORT_COPY.mapPipelinesText}</p>
       </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-left text-[13.5px]">
-          <thead>
-            <tr className="text-[12px] font-semibold uppercase text-[#8b8b92]">
-              <th className="py-2 pr-3">{IMPORT_COPY.mapPipelinesSheetColumn}</th>
-              <th className="px-3 py-2 text-right">{IMPORT_COPY.mapStagesLeadsColumn}</th>
-              <th className="py-2 pl-3">{IMPORT_COPY.mapPipelinesTargetColumn}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {pipelines.map((pipeline) => {
-              const choice = choices[normalizeFunil(pipeline.name)];
-              const unresolved = choice === undefined;
-              return (
-                <tr
-                  className="border-t border-[#e8e8ec] align-top"
-                  data-map-pipeline-row={pipeline.name}
-                  data-unresolved={unresolved ? '' : undefined}
-                  key={normalizeFunil(pipeline.name)}
-                >
-                  <td className="break-words py-2 pr-3 font-semibold text-[#201f24]">
-                    {pipeline.name}
-                  </td>
-                  <td className="px-3 py-2 text-right tabular-nums">{pipeline.leads}</td>
-                  <td className="min-w-[180px] py-2 pl-3">
-                    <Combobox
-                      aria-label={`${IMPORT_COPY.mapPipelinesAriaLabel}: ${pipeline.name}`}
-                      className={
-                        unresolved
-                          ? `${formSelectClass} border-[#f1c9c4] bg-[#fdf2f1]`
-                          : formSelectClass
-                      }
-                      disabled={disabled}
-                      onChange={(value) => onChange(pipeline, value)}
-                      options={options}
-                      placeholder={IMPORT_COPY.mapPipelinesPlaceholder}
-                      searchPlaceholder={IMPORT_COPY.mapPipelinesSearch}
-                      value={choice ?? null}
-                    />
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+      {/* No overflow wrapper: the Combobox panel is inline and would be clipped by it. */}
+      <table className="w-full text-left text-[13.5px]">
+        <thead>
+          <tr className="text-[12px] font-semibold uppercase text-[#8b8b92]">
+            <th className="py-2 pr-3">{IMPORT_COPY.mapPipelinesSheetColumn}</th>
+            <th className="px-3 py-2 text-right">{IMPORT_COPY.mapStagesLeadsColumn}</th>
+            <th className="py-2 pl-3">{IMPORT_COPY.mapPipelinesTargetColumn}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {pipelines.map((pipeline) => {
+            const choice = choices[normalizeFunil(pipeline.name)];
+            const unresolved = choice === undefined;
+            return (
+              <tr
+                className="border-t border-[#e8e8ec] align-top"
+                data-map-pipeline-row={pipeline.name}
+                data-unresolved={unresolved ? '' : undefined}
+                key={normalizeFunil(pipeline.name)}
+              >
+                <td className="[overflow-wrap:anywhere] py-2 pr-3 font-semibold text-[#201f24]">
+                  {pipeline.name}
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums">{pipeline.leads}</td>
+                <td className="w-[55%] min-w-[150px] py-2 pl-3">
+                  <Combobox
+                    aria-label={`${IMPORT_COPY.mapPipelinesAriaLabel}: ${pipeline.name}`}
+                    className={
+                      unresolved
+                        ? `${formSelectClass} border-[#f1c9c4] bg-[#fdf2f1]`
+                        : formSelectClass
+                    }
+                    disabled={disabled}
+                    onChange={(value) => onChange(pipeline, value)}
+                    options={options}
+                    placeholder={IMPORT_COPY.mapPipelinesPlaceholder}
+                    searchPlaceholder={IMPORT_COPY.mapPipelinesSearch}
+                    value={choice ?? null}
+                  />
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
       {showRevalidate ? (
         <div>
           <button
