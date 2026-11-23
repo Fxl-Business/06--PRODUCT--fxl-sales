@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "current_milestone_id": "v4.8.0",
+  "current_milestone_id": "v4.15.0",
   "delivery": {
     "mode": "promotion",
     "trunk": "main",
@@ -200,5 +200,13 @@
     "decision": "skipped-autopilot",
     "decided_at": "2026-10-21",
     "note": "Owner prompt .nexo/tmp/vendas-crm-prompt-v1.md invoked /nexo-feature --autopilot. Phases 0-3 landed on local master (73a009a, c15a0ca, 60c57fd, 3dc3739) after a separate Sonnet Verify per slice and a Codex gpt-6-astra high review per phase; slice 13 parked after a failed Verify with the 64-dispatch budget spent; slice 14 parked (budget). No push, no staging, no production; Gate 3 untouched."
+  },
+  "gate3_v4_14_0": {
+    "release": "v4.14.0",
+    "commit": "f75f10b5",
+    "flow": "ship-prod-ready",
+    "decision": "approved-production",
+    "decided_at": "2026-11-23",
+    "note": "The owner invoked /nexo-ship-prod-ready right after being told that staging and production awaited their approval; the invocation is the approval of the cut and of both promotions. MINOR over v4.13.0: spreadsheet import with the Funil column, the Funis e etapas tab and the Mapear funis step. No migration, env, dependency or lockfile change. Release-verify PASS by a separate Sonnet agent at f75f10b5."
   }
 }
