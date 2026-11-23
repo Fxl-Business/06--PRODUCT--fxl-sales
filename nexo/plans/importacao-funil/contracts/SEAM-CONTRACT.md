@@ -46,7 +46,7 @@ A row with a failed Funil gets no Etapa issue (its etapa cannot be judged) but e
 - `{ stageId }` must be an active, non-conversion etapa OF THE ROW'S funil, else `invalid_stage_target`.
 - `{ create: true }` is one creation per (resolved pipeline, normalized etapa name), also when two sheet funis map to the same pipeline; plan key stays `stageMap:<n>`. It never duplicates an Etapas tab row of the same funil.
 - `no_open_stage` is judged per funil used by the Leads tab: one file-level error per funil with no open etapa, naming the funil. An Etapas tab row of that funil counts as open.
-- `possible_duplicate` of leads compares contato + empresa + funil.
+- `possible_duplicate` of leads compares contato + empresa + the RESOLVED `pipelineId` (a blank cell and the name of the only funil are the same funil); a row whose Funil failed is skipped.
 - Vendedor access: for a resolved vendedor and a resolved funil, `accessiblePipelineIds(catalog.pipelines, funções held)` (from `@fxl-sales/shared-utils/crm-model`, the one rule) must include the funil; otherwise row error `seller_without_pipeline_access` on the Vendedor column. Held = every catalog função for which `refs.personHasFuncao(person, função)` (existing or workbook pessoa).
 - The reason rule stays `kind === 'lost'`.
 
@@ -73,4 +73,4 @@ pipelineTargets: Array<{ id: string; name: string; isDefault: boolean }>; // act
 - Dropdowns: `Funil` lists active funis. `Etapa` (Leads): with ONE active funil, the plain static list as today; with several, a formula list that depends on the row's Funil cell (exact, case-insensitive, no wildcard semantics), nothing offered for a blank or unknown Funil.
 - With several active funis the Funil header of both tabs is styled and noted as required, and the Leia-me column lines say `obrigatória`.
 - The example dataset writes the default funil's name in Funil of Leads and Etapas.
-- Export fills `funil` with the lead's pipeline name.
+- Export fills `funil` with the lead's pipeline name ALWAYS, an archived funil included: leaving it blank would put the lead silently in another funil, while an unknown or archived name is asked on the screen (`Mapear funis`). A vendedor is exported as it is today. The comment in `export.ts` that promises no refusable row is reworded accordingly.

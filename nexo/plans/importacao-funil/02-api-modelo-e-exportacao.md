@@ -21,3 +21,6 @@ Goal: the contract's "Template and export" section.
 Tests: `__tests__/funis-sheet.test.ts`, additions to `template.test.ts`, `export-roundtrip.integration.test.ts` (two funis, same etapa name in both, back into the same names).
 Never weaken an assertion; never edit `tests/acceptance/`.
 Oracle: `apps/api/src/domains/import/__tests__/funis-sheet.test.ts`, `template.test.ts`, `export-roundtrip.integration.test.ts`.
+
+The dropdown FORMULA is unit-tested as text; its evaluation is checked by the orchestrator in a real spreadsheet program, not by this slice.
+An export test covers a lead in an archived funil (the name is written).
