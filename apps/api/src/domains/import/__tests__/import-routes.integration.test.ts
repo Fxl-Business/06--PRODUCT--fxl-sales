@@ -26,6 +26,7 @@ import {
   salesOpsFuncoes,
   salesOpsCrmLeadFieldValues,
   salesOpsPipelineStages,
+  salesOpsPipelines,
   salesOpsCrmLeads,
   salesOpsPayables,
   salesOpsPeople,
@@ -41,7 +42,9 @@ import {
 } from '../../../db/schema.js';
 import { registerProducerFlowGate } from '../../integration/producer-gate.js';
 import { DEFAULT_PIPELINE_STAGES } from '@fxl-sales/shared-utils/default-pipeline';
-import { AreaSchema, ClientSchema, createArea, createClient } from '../../sales-ops/service.js';
+import { AreaSchema, ClientSchema, createArea, createClient, withTenant } from '../../sales-ops/service.js';
+import { createPipelineWithDefaultStages } from '../../crm/defaults.js';
+import { DEFAULT_PIPELINE_NAME } from '@fxl-sales/shared-utils/default-pipeline';
 
 // The router transitively resolves the Hub contract at module scope; this file drives an
 // already-verified context, so the ambient Hub configuration is made unambiguously absent.
@@ -698,5 +701,231 @@ describe('import routes (real router, real database)', () => {
     expect(response.status).toBe(413);
     expect(await response.json()).toEqual(FILE_TOO_LARGE_BODY);
     await expectNothingWritten(orgId);
+  });
+});
+
+describe('import by funil (real router, two funis)', () => {
+  const SECOND = 'Pós-venda';
+  const FIRST = DEFAULT_PIPELINE_NAME;
+
+  type Preview = {
+    ok: boolean;
+    counts: ImportCounts;
+    issues: ImportIssue[];
+    leadStages: Array<{ name: string; leads: number; funil: string | null; resolution: { kind: string; stageId?: string | null } }>;
+    stageTargets: Array<{ id: string; name: string; kind: string; pipelineId: string }>;
+    leadPipelines: Array<{ name: string; leads: number; resolution: { kind: string; pipelineId?: string } }>;
+    pipelineTargets: Array<{ id: string; name: string; isDefault: boolean }>;
+  };
+
+  /** The org with its default funil seeded and a second funil with the seven default etapas. */
+  async function orgWithTwoFunis(tag: string): Promise<{ orgId: string; first: string; second: string }> {
+    const orgId = newOrg(tag);
+    const created = await withTenant(getDb(), orgId, (tx) => createPipelineWithDefaultStages(tx, orgId, SECOND));
+    if (created === 'duplicate') throw new Error('unexpected duplicate funil');
+    const [first] = await getAdminDb()
+      .select({ id: salesOpsPipelines.id })
+      .from(salesOpsPipelines)
+      .where(and(eq(salesOpsPipelines.orgId, orgId), eq(salesOpsPipelines.name, FIRST)));
+    return { orgId, first: must(first).id, second: created.id };
+  }
+
+  async function send(
+    path: '/import/preview' | '/import/commit',
+    bytes: Uint8Array,
+    maps: { stageMap?: unknown; pipelineMap?: unknown } = {},
+  ): Promise<Response> {
+    const form = formWith(bytes);
+    if (maps.stageMap !== undefined) form.set('stageMap', JSON.stringify(maps.stageMap));
+    if (maps.pipelineMap !== undefined) form.set('pipelineMap', typeof maps.pipelineMap === 'string' ? maps.pipelineMap : JSON.stringify(maps.pipelineMap));
+    return await createTestApp().request(path, { method: 'POST', body: form });
+  }
+
+  async function leadsByContact(orgId: string): Promise<Record<string, { pipelineId: string; stageId: string }>> {
+    const rows = await getAdminDb().select().from(salesOpsCrmLeads).where(eq(salesOpsCrmLeads.orgId, orgId));
+    return Object.fromEntries(rows.map((l) => [l.contactName, { pipelineId: l.pipelineId, stageId: l.stageId }]));
+  }
+
+  async function stageId(orgId: string, pipelineId: string, name: string): Promise<string> {
+    const [row] = await getAdminDb()
+      .select({ id: salesOpsPipelineStages.id })
+      .from(salesOpsPipelineStages)
+      .where(
+        and(
+          eq(salesOpsPipelineStages.orgId, orgId),
+          eq(salesOpsPipelineStages.pipelineId, pipelineId),
+          eq(salesOpsPipelineStages.name, name),
+        ),
+      );
+    return must(row).id;
+  }
+
+  it('commits rows of both funis with the same etapa name, each in its own funil', async () => {
+    const { orgId, first, second } = await orgWithTwoFunis('both');
+    const bytes = await buildXlsx([
+      sheetTab('leads', [
+        { Contato: 'Ana', Empresa: 'A', Funil: FIRST, Etapa: 'Novo' },
+        { Contato: 'Beto', Empresa: 'B', Funil: SECOND, Etapa: 'Novo' },
+        { Contato: 'Caio', Empresa: 'C', Funil: SECOND, Etapa: 'Em negociação' },
+      ]),
+    ]);
+    const preview = await send('/import/preview', bytes);
+    const body = (await preview.json()) as Preview;
+    expect(body.ok).toBe(true);
+    expect(body.leadStages.map((s) => [s.funil, s.name, s.leads])).toEqual([
+      [FIRST, 'Novo', 1],
+      [SECOND, 'Novo', 1],
+      [SECOND, 'Em negociação', 1],
+    ]);
+    expect(body.pipelineTargets.map((p) => [p.name, p.isDefault])).toEqual([[FIRST, true], [SECOND, false]]);
+    expect(new Set(body.stageTargets.map((t) => t.pipelineId))).toEqual(new Set([first, second]));
+    expect(body.stageTargets.some((t) => t.name === 'Proposta')).toBe(false);
+    expect(body.leadPipelines.map((p) => [p.name, p.leads, p.resolution.kind])).toEqual([[FIRST, 1, 'existing'], [SECOND, 2, 'existing']]);
+
+    const commit = await send('/import/commit', bytes);
+    expect(commit.status).toBe(201);
+    expect(await leadsByContact(orgId)).toEqual({
+      Ana: { pipelineId: first, stageId: await stageId(orgId, first, 'Novo') },
+      Beto: { pipelineId: second, stageId: await stageId(orgId, second, 'Novo') },
+      Caio: { pipelineId: second, stageId: await stageId(orgId, second, 'Em negociação') },
+    });
+  });
+
+  it('refuses a blank Funil with several active funis and writes nothing', async () => {
+    const { orgId } = await orgWithTwoFunis('blank');
+    const bytes = await buildXlsx([sheetTab('leads', [{ Contato: 'Ana', Empresa: 'A', Etapa: 'Novo' }])]);
+    const preview = (await (await send('/import/preview', bytes)).json()) as Preview;
+    expect(preview.ok).toBe(false);
+    expect(errorsOf(preview.issues).map((i) => [i.code, i.column, i.sheet])).toEqual([['funil_required', 'Funil', 'leads']]);
+    const commit = await send('/import/commit', bytes);
+    expect(commit.status).toBe(422);
+    expect(await leadsByContact(orgId)).toEqual({});
+  });
+
+  it('asks for an unknown funil, then commits once the pipelineMap names its target', async () => {
+    const { orgId, second } = await orgWithTwoFunis('mapped');
+    const bytes = await buildXlsx([
+      sheetTab('leads', [
+        { Contato: 'Ana', Empresa: 'A', Funil: 'Pos venda antigo', Etapa: 'Em negociação' },
+        { Contato: 'Beto', Empresa: 'B', Funil: 'pos venda antigo', Etapa: 'Contato' },
+      ]),
+    ]);
+    const asked = (await (await send('/import/preview', bytes)).json()) as Preview;
+    expect(asked.ok).toBe(false);
+    expect(errorsOf(asked.issues).map((i) => i.code)).toEqual(['unknown_ref', 'unknown_ref']);
+    expect(asked.leadPipelines).toEqual([{ name: 'Pos venda antigo', leads: 2, resolution: { kind: 'not_found' } }]);
+    expect(asked.leadStages).toEqual([]);
+
+    const pipelineMap = { 'Pos venda antigo': { pipelineId: second, stages: { Contato: { stageId: await stageId(orgId, second, 'Qualificação') } } } };
+    const answered = (await (await send('/import/preview', bytes, { pipelineMap })).json()) as Preview;
+    expect(answered.ok).toBe(true);
+    expect(answered.leadPipelines[0]?.resolution).toEqual({ kind: 'not_found' });
+    expect(answered.leadStages.map((s) => [s.name, s.resolution.kind])).toEqual([
+      ['Em negociação', 'existing'],
+      ['Contato', 'not_found'],
+    ]);
+
+    expect((await send('/import/commit', bytes, { pipelineMap })).status).toBe(201);
+    expect(await leadsByContact(orgId)).toEqual({
+      Ana: { pipelineId: second, stageId: await stageId(orgId, second, 'Em negociação') },
+      Beto: { pipelineId: second, stageId: await stageId(orgId, second, 'Qualificação') },
+    });
+  });
+
+  it('refuses a pipeline or an etapa id of another org and a malformed pipelineMap', async () => {
+    const mine = await orgWithTwoFunis('mine');
+    const other = await orgWithTwoFunis('other');
+    const bytes = await buildXlsx([sheetTab('leads', [{ Contato: 'Ana', Empresa: 'A', Funil: 'Fantasma', Etapa: 'Novo' }])]);
+    currentOrgId = mine.orgId;
+    const foreignPipeline = (await (await send('/import/preview', bytes, { pipelineMap: { Fantasma: { pipelineId: other.second } } })).json()) as Preview;
+    expect(errorsOf(foreignPipeline.issues).map((i) => i.code)).toEqual(['invalid_pipeline_target']);
+
+    const foreignStage = await stageId(other.orgId, other.second, 'Novo');
+    const stageBytes = await buildXlsx([sheetTab('leads', [{ Contato: 'Ana', Empresa: 'A', Funil: SECOND, Etapa: 'Contato' }])]);
+    const refused = await send('/import/commit', stageBytes, { pipelineMap: { [SECOND]: { stages: { Contato: { stageId: foreignStage } } } } });
+    expect(refused.status).toBe(422);
+    expect(errorsOf(((await refused.json()) as Preview).issues).map((i) => i.code)).toEqual(['invalid_stage_target']);
+    expect(await leadsByContact(mine.orgId)).toEqual({});
+
+    for (const bad of ['not json', JSON.stringify({ A: { pipelineId: '' } }), JSON.stringify({ A: { other: 1 } }), JSON.stringify([])]) {
+      expect((await send('/import/preview', bytes, { pipelineMap: bad })).status).toBe(400);
+    }
+    expect((await send('/import/preview', bytes, { pipelineMap: '  ' })).status).toBe(200);
+  });
+
+  it('refuses a vendedor who does not reach the funil of the row', async () => {
+    const { orgId, second } = await orgWithTwoFunis('seller');
+    const bytes = await buildXlsx([
+      sheetTab('pessoas', [{ Nome: 'Ana Souza', Funções: 'Vendedor' }]),
+      sheetTab('leads', [
+        { Contato: 'Dora', Empresa: 'A', Funil: FIRST, Vendedor: 'Ana Souza' },
+        { Contato: 'Eli', Empresa: 'B', Funil: SECOND, Vendedor: 'Ana Souza' },
+      ]),
+    ]);
+    const body = (await (await send('/import/preview', bytes)).json()) as Preview;
+    expect(errorsOf(body.issues).map((i) => [i.code, i.column])).toEqual([['seller_without_pipeline_access', 'Vendedor']]);
+    expect(errorsOf(body.issues)[0]?.message).toContain(SECOND);
+    expect((await send('/import/commit', bytes)).status).toBe(422);
+    expect(await leadsByContact(orgId)).toEqual({});
+    expect(second).toBeTruthy();
+  });
+
+  it('creates an etapa of the Etapas tab in the second funil and lets its leads use it', async () => {
+    const { orgId, first, second } = await orgWithTwoFunis('etapas');
+    const bytes = await buildXlsx([
+      sheetTab('etapas', [
+        { Nome: 'Diagnóstico', Funil: SECOND },
+        { Nome: 'Diagnóstico', Funil: FIRST },
+      ]),
+      sheetTab('leads', [
+        { Contato: 'Ana', Empresa: 'A', Funil: SECOND, Etapa: 'Diagnóstico' },
+        { Contato: 'Beto', Empresa: 'B', Funil: FIRST, Etapa: 'Diagnóstico' },
+      ]),
+    ]);
+    const preview = (await (await send('/import/preview', bytes)).json()) as Preview;
+    expect(preview.ok).toBe(true);
+    expect(preview.counts).toEqual({ etapas: 2, leads: 2 });
+    const commit = await send('/import/commit', bytes);
+    expect(commit.status).toBe(201);
+    const leads = await leadsByContact(orgId);
+    expect(leads['Ana']).toEqual({ pipelineId: second, stageId: await stageId(orgId, second, 'Diagnóstico') });
+    expect(leads['Beto']).toEqual({ pipelineId: first, stageId: await stageId(orgId, first, 'Diagnóstico') });
+  });
+
+  it('creates ONE etapa when two sheet funis map to the same funil with a create entry', async () => {
+    const { orgId, second } = await orgWithTwoFunis('create');
+    const bytes = await buildXlsx([
+      sheetTab('leads', [
+        { Contato: 'Ana', Empresa: 'A', Funil: 'X', Etapa: 'Triagem' },
+        { Contato: 'Beto', Empresa: 'B', Funil: 'Y', Etapa: 'triagem' },
+      ]),
+    ]);
+    const pipelineMap = {
+      X: { pipelineId: second, stages: { Triagem: { create: true } } },
+      Y: { pipelineId: second, stages: { Triagem: { create: true } } },
+    };
+    expect((await send('/import/commit', bytes, { pipelineMap })).status).toBe(201);
+    const created = await getAdminDb()
+      .select()
+      .from(salesOpsPipelineStages)
+      .where(and(eq(salesOpsPipelineStages.orgId, orgId), eq(salesOpsPipelineStages.name, 'Triagem')));
+    expect(created.map((s) => s.pipelineId)).toEqual([second]);
+    const leads = await leadsByContact(orgId);
+    expect(Object.values(leads).map((l) => l.stageId)).toEqual([must(created[0]).id, must(created[0]).id]);
+  });
+
+  it('keeps an old sheet without the Funil column working in a one-funil org', async () => {
+    const orgId = newOrg('oldsheet');
+    const tab: FixtureTab = {
+      name: 'Leads',
+      rows: [['Contato', 'Empresa', 'Etapa'], ['Ana', 'A', 'Novo']],
+    };
+    const bytes = await buildXlsx([tab]);
+    const preview = (await (await send('/import/preview', bytes)).json()) as Preview;
+    expect(preview.ok).toBe(true);
+    expect(preview.pipelineTargets).toHaveLength(1);
+    expect((await send('/import/commit', bytes)).status).toBe(201);
+    const [pipeline] = await getAdminDb().select().from(salesOpsPipelines).where(eq(salesOpsPipelines.orgId, orgId));
+    expect((await leadsByContact(orgId))['Ana']?.pipelineId).toBe(must(pipeline).id);
   });
 });
