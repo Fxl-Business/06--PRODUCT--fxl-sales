@@ -16,7 +16,7 @@ import {
   salesOpsSettings,
 } from '../../../apps/api/src/db/schema.js';
 import { buildXlsx, headerRow } from '../../../apps/api/src/domains/import/__tests__/xlsx-fixture.js';
-import { WORKBOOK_SHEETS } from '../../../apps/api/src/domains/import/workbook-schema.js';
+import { WORKBOOK_SHEETS, getSheetDef } from '../../../apps/api/src/domains/import/workbook-schema.js';
 import { salesOpsRouter } from '../../../apps/api/src/domains/sales-ops/routes.js';
 
 const seededOrgIds: string[] = [];
@@ -77,7 +77,10 @@ export async function leadStages(orgId: string): Promise<Record<string, string>>
 export async function leadsWorkbook(rows: Array<[string, string | null, string | null?]>): Promise<Uint8Array> {
   const leads = [
     headerRow('leads'),
-    ...rows.map(([contato, etapa, motivo]) => [contato, `Empresa ${contato}`, null, null, null, null, etapa, motivo ?? null]),
+    ...rows.map(([contato, etapa, motivo]) => {
+      const cells: Record<string, string | null> = { contato, empresa: `Empresa ${contato}`, etapa, motivoPerda: motivo ?? null };
+      return getSheetDef('leads').columns.map((c) => cells[c.key] ?? null);
+    }),
   ];
   const tabs = WORKBOOK_SHEETS.map((def) => ({ name: def.tab, rows: def.key === 'leads' ? leads : [headerRow(def.key)] }));
   return new Uint8Array(await buildXlsx(tabs));
