@@ -14,11 +14,24 @@ import { MUTATION_ERROR_COPY } from '../mutation-error-copy';
 import { exportErrorMessage, IMPORT_COPY, importErrorMessage } from './import-copy';
 import { ImportCountsTable } from './ImportCountsTable';
 import { ImportIssueList } from './ImportIssueList';
+import { PipelineMapStep } from './PipelineMapStep';
+import {
+  adoptPipelineChoices,
+  allPipelinesResolved,
+  buildMaps,
+  mapsKey,
+  shouldShowPipelineStep,
+  targetsForFunil,
+  type ImportMaps,
+  type PipelineChoices,
+} from './pipeline-map';
 import { StageMapStep } from './StageMapStep';
 import {
   allStagesResolved,
   defaultChoice,
-  toStageMap,
+  dropFunilChoices,
+  normalizeFunil,
+  stageKey,
   type StageChoice,
   type StageChoices,
 } from './stage-map';
@@ -26,8 +39,14 @@ import { groupImportIssues, recognizedClientCount, totalCount } from './issues';
 import {
   isImportPreviewBody,
   MAX_IMPORT_UPLOAD_BYTES,
+  readLeadPipelines,
   readLeadStages,
+  readPipelineTargets,
+  readStageTargets,
   XLSX_ACCEPT,
+  type ImportLeadPipeline,
+  type ImportLeadStage,
+  type PipelineMap,
   type ImportCommitBody,
   type ImportPreviewBody,
   type StageMap,
@@ -51,8 +70,16 @@ type Busy = 'export' | 'download-blank' | 'download-example' | 'preview' | 'comm
 type ImportViewProps = {
   onDownload: (example: boolean) => Promise<void>;
   onExportLeads: () => Promise<void>;
-  onPreview: (file: File, stageMap?: StageMap) => Promise<ImportPreviewBody>;
-  onCommit: (file: File, stageMap?: StageMap) => Promise<ImportCommitBody>;
+  onPreview: (
+    file: File,
+    stageMap?: StageMap,
+    pipelineMap?: PipelineMap,
+  ) => Promise<ImportPreviewBody>;
+  onCommit: (
+    file: File,
+    stageMap?: StageMap,
+    pipelineMap?: PipelineMap,
+  ) => Promise<ImportCommitBody>;
 };
 
 function StepPanel({
@@ -87,10 +114,17 @@ export function ImportView({ onCommit, onDownload, onExportLeads, onPreview }: I
   const [busy, setBusy] = useState<Busy>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [choices, setChoices] = useState<StageChoices>({});
-  // The stageMap the shown preview was validated with; a different choice makes it stale.
+  const [pipelineChoices, setPipelineChoices] = useState<PipelineChoices>({});
+  // Sheet funis whose destination changed since the shown preview: their etapa rows were resolved
+  // in another funil, so they stay hidden until the next validation.
+  const [staleFunis, setStaleFunis] = useState<string[]>([]);
+  // The maps the shown preview was validated with; a different choice makes it stale.
   const [validatedMapKey, setValidatedMapKey] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const leadStages = useMemo(() => readLeadStages(preview), [preview]);
+  const leadPipelines = useMemo(() => readLeadPipelines(preview), [preview]);
+  const pipelineTargets = useMemo(() => readPipelineTargets(preview), [preview]);
+  const stageTargets = useMemo(() => readStageTargets(preview), [preview]);
 
   function clearErrors() {
     setError(null);
@@ -105,6 +139,8 @@ export function ImportView({ onCommit, onDownload, onExportLeads, onPreview }: I
     clearErrors();
     setConfirmOpen(false);
     setChoices({});
+    setPipelineChoices({});
+    setStaleFunis([]);
     setValidatedMapKey('');
     if (inputRef.current) inputRef.current.value = '';
   }
@@ -112,18 +148,31 @@ export function ImportView({ onCommit, onDownload, onExportLeads, onPreview }: I
   /** Keeps what the operator chose by sheet name and only seeds the names that have no choice yet. */
   function adoptPreview(body: ImportPreviewBody) {
     const stages = readLeadStages(body);
+    const pipelines = readLeadPipelines(body);
+    const nextPipelines = adoptPipelineChoices(pipelines, pipelineChoices);
     const next: StageChoices = {};
     for (const stage of stages) {
-      const chosen = choices[stage.name] ?? defaultChoice(stage);
-      if (chosen) next[stage.name] = chosen;
+      const chosen = choices[stageKey(stage)] ?? defaultChoice(stage);
+      if (chosen) next[stageKey(stage)] = chosen;
     }
     setChoices(next);
-    setValidatedMapKey(JSON.stringify(toStageMap(stages, next)));
+    setPipelineChoices(nextPipelines);
+    setStaleFunis([]);
+    setValidatedMapKey(mapsKey(buildMaps(stages, pipelines, nextPipelines, next)));
     setPreview(body);
   }
 
-  function changeChoice(name: string, choice: StageChoice) {
-    setChoices((current) => ({ ...current, [name]: choice }));
+  function changeChoice(stage: ImportLeadStage, choice: StageChoice) {
+    setChoices((current) => ({ ...current, [stageKey(stage)]: choice }));
+  }
+
+  /** A new destination invalidates the etapa choices of that sheet funil: they pointed into another funil. */
+  function changePipeline(pipeline: ImportLeadPipeline, pipelineId: string) {
+    const key = normalizeFunil(pipeline.name);
+    if (pipelineChoices[key] === pipelineId) return;
+    setPipelineChoices((current) => ({ ...current, [key]: pipelineId }));
+    setChoices((current) => dropFunilChoices(current, key));
+    setStaleFunis((current) => (current.includes(key) ? current : [...current, key]));
   }
 
   async function runDownload(example: boolean) {
@@ -157,6 +206,8 @@ export function ImportView({ onCommit, onDownload, onExportLeads, onPreview }: I
     // file other than the one the preview validated.
     setPreview(null);
     setChoices({});
+    setPipelineChoices({});
+    setStaleFunis([]);
     setValidatedMapKey('');
     clearErrors();
     if (next && !next.name.toLowerCase().endsWith('.xlsx')) {
@@ -175,7 +226,7 @@ export function ImportView({ onCommit, onDownload, onExportLeads, onPreview }: I
     setBusy('preview');
     clearErrors();
     try {
-      adoptPreview(await onPreview(file, toStageMap(leadStages, choices)));
+      adoptPreview(await onPreview(file, maps.stageMap, maps.pipelineMap));
     } catch (e) {
       setError(e);
     } finally {
@@ -189,14 +240,20 @@ export function ImportView({ onCommit, onDownload, onExportLeads, onPreview }: I
     setBusy('commit');
     clearErrors();
     try {
-      setResult(await onCommit(file, toStageMap(leadStages, choices)));
+      setResult(await onCommit(file, maps.stageMap, maps.pipelineMap));
       setPreview(null);
     } catch (e) {
       setError(e);
       const body = (e as { body?: unknown } | null)?.body;
       if ((e as { status?: unknown } | null)?.status === 422 && isImportPreviewBody(body)) {
-        // The 422 body carries no etapa summary: keep the one the operator is working on.
-        setPreview({ ...body, leadStages: preview?.leadStages, stageTargets: preview?.stageTargets });
+        // The 422 body carries none of the four summaries: keep the ones the operator is working on.
+        setPreview({
+          ...body,
+          leadStages: preview?.leadStages,
+          stageTargets: preview?.stageTargets,
+          leadPipelines: preview?.leadPipelines,
+          pipelineTargets: preview?.pipelineTargets,
+        });
       }
     } finally {
       setBusy(null);
@@ -204,14 +261,21 @@ export function ImportView({ onCommit, onDownload, onExportLeads, onPreview }: I
   }
 
   const hasError = error !== null || localError !== null;
-  const stagesResolved = allStagesResolved(leadStages, choices);
-  const mapIsCurrent = JSON.stringify(toStageMap(leadStages, choices)) === validatedMapKey;
+  const visibleStages = leadStages.filter((s) => !staleFunis.includes(normalizeFunil(s.funil)));
+  const maps: ImportMaps = buildMaps(leadStages, leadPipelines, pipelineChoices, choices);
+  const stagesResolved = allStagesResolved(visibleStages, choices);
+  const pipelinesResolved = allPipelinesResolved(leadPipelines, pipelineChoices);
+  const mapIsCurrent = mapsKey(maps) === validatedMapKey && staleFunis.length === 0;
+  const showPipelineStep = shouldShowPipelineStep(leadPipelines, pipelineTargets);
+  const showStageStep = visibleStages.length > 0;
+  const hasMapRows = leadStages.length > 0 || leadPipelines.length > 0;
   const canImport =
     preview !== null &&
     preview.ok &&
     totalCount(preview.counts) > 0 &&
     file !== null &&
     stagesResolved &&
+    pipelinesResolved &&
     mapIsCurrent;
   const previewRecognized = preview !== null ? recognizedClientCount(preview) : 0;
   const resultRecognized = result !== null ? recognizedClientCount(result) : 0;
@@ -353,14 +417,25 @@ export function ImportView({ onCommit, onDownload, onExportLeads, onPreview }: I
                   {IMPORT_COPY.recognizedClients(previewRecognized)}
                 </p>
               ) : null}
-              {leadStages.length > 0 ? (
+              {showPipelineStep ? (
+                <PipelineMapStep
+                  choices={pipelineChoices}
+                  disabled={busy !== null}
+                  onChange={changePipeline}
+                  onRevalidate={() => void validate()}
+                  pipelines={leadPipelines}
+                  showRevalidate={!showStageStep}
+                  targets={pipelineTargets}
+                />
+              ) : null}
+              {showStageStep ? (
                 <StageMapStep
                   choices={choices}
                   disabled={busy !== null}
                   onChange={changeChoice}
                   onRevalidate={() => void validate()}
-                  stages={leadStages}
-                  targets={preview.stageTargets ?? []}
+                  stages={visibleStages}
+                  targetsFor={(funil) => targetsForFunil(stageTargets, funil, pipelineChoices)}
                 />
               ) : null}
               <ImportIssueList issues={preview.issues} truncated={preview.truncated} />
@@ -371,9 +446,13 @@ export function ImportView({ onCommit, onDownload, onExportLeads, onPreview }: I
                     ? IMPORT_COPY.readyOk
                     : IMPORT_COPY.readyClean}
               </p>
-              {leadStages.length > 0 && preview.ok && (!stagesResolved || !mapIsCurrent) ? (
+              {hasMapRows &&
+              preview.ok &&
+              (!stagesResolved || !pipelinesResolved || !mapIsCurrent) ? (
                 <p className="text-[13px] font-semibold text-[#c93d32]" data-import-map-pending>
-                  {IMPORT_COPY.mapStagesPending}
+                  {leadPipelines.length > 0
+                    ? IMPORT_COPY.mapPipelinesPending
+                    : IMPORT_COPY.mapStagesPending}
                 </p>
               ) : null}
               <p className="text-[13px] text-[#8b8b92]">{IMPORT_COPY.allOrNothing}</p>
